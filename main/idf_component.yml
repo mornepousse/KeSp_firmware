@@ -1,0 +1,6 @@
+## IDF Component Manager Manifest File
+dependencies:
+  espressif/esp_tinyusb: ^1.7.2
+  idf: ^5.0
+  lvgl/lvgl: ^8.4.0
+  espressif/esp_lcd_gc9a01: ^2.0.2

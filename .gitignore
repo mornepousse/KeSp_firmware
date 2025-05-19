@@ -4,3 +4,9 @@
 /project-name/build
 /project/build
 /project/managed_components
+/project-name/.cache
+/project-name/managed_components
+/.cache
+/build.clang
+/build
+/managed_components
