@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-//#include "graphic_manager.h"
+// #include "graphic_manager.h"
 
 static const char *KM_TAG = "Keyboard_manager";
 
@@ -51,21 +51,19 @@ void run_internal_funct() {
       current_layout = 0;
       last_layer = current_layout;
       ESP_LOGI(KM_TAG, "layer: 0");
-      // gpio_set_level(CURSOR_LED_WHT_PIN, 0);
+
     } else {
       current_layout = 2;
       last_layer = current_layout;
       ESP_LOGI(KM_TAG, "layer: 2");
-      // gpio_set_level(CURSOR_LED_WHT_PIN, 1);
     }
     break;
   case K_INT3:
     if (usb_bl_state == 0) {
       usb_bl_state = 1;
-      // gpio_set_level(CURSOR_LED_BLU_PIN, 1);
+
     } else {
       usb_bl_state = 0;
-      // gpio_set_level(CURSOR_LED_BLU_PIN, 0);
     }
     break;
   default:
@@ -105,16 +103,14 @@ void is_toggle_layer(uint16_t keycodeTMP) {
       current_layout = 0;
       last_layer = current_layout;
       ESP_LOGI(KM_TAG, "layer: 0 %d %d %d", new_layer, keycodeTMP, TO_L1);
-      //write_txt("Layer %d", n), 0, -30);
-      // gpio_set_level(CURSOR_LED_WHT_PIN, 0);
+      // write_txt("Layer %d", n), 0, -30);
+      //  gpio_set_level(CURSOR_LED_WHT_PIN, 0);
     } else {
       current_layout = new_layer;
       last_layer = current_layout;
       ESP_LOGI(KM_TAG, "layer: pp %d %d %d", new_layer, keycodeTMP, TO_L1);
-      
-      //write_txt("Layer %d", n), 0, -30);
 
-
+      // write_txt("Layer %d", n), 0, -30);
 
       // gpio_set_level(CURSOR_LED_WHT_PIN, 1);
     }
@@ -227,6 +223,5 @@ void keyboard_manager_init() {
   // init graphic parts
   // graphic_init();
 
-  //gtext_create(0, 30, 0xff0000, 0xffffff, "Layer 0");
-
+  // gtext_create(0, 30, 0xff0000, 0xffffff, "Layer 0");
 }

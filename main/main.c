@@ -2,7 +2,7 @@
  * KaSe keyboard.
  *
  */
-#include "ICSH044A.h"
+
 #include "class/hid/hid_device.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -14,12 +14,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-// #include "GC9A01.h"
-// #include "display_manager.h"
-// #include "lvgl.h"
-// #include "core/lv_obj.h"
-
-// static void lvgl_time_task(void*param);
+#include "ICSH044A.h"
 
 #define TEST_DELAY_TIME_MS (3000)
 static bool send_hid_data = true;
