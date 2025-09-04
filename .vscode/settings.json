@@ -1,0 +1,10 @@
+{
+    "idf.flashType": "UART",
+    "idf.port": "/dev/ttyUSB0",
+    "idf.espIdfPath": "/home/mae/esp/v5.5/esp-idf",
+    "idf.toolsPath": "/home/mae/.espressif",
+    "idf.pythonInstallPath": "/usr/bin/python",
+    "files.associations": {
+        "valarray": "c"
+    }
+}

@@ -22,18 +22,14 @@ uint8_t current_col_layer_changer = 255;
 
 uint16_t extra_keycodes[6] = {0, 0, 0, 0, 0, 0};
 
-// Structure d'une macro (liste de touches + longueur)
-typedef struct {
-  uint8_t keys[6]; // Jusqu'à 6 touches simultanées (HID limit)
-  uint16_t key_definition;
-} macro_t;
+
 
 // Liste des macros prédéfinies
-const macro_t macros[] = {
+macro_t macros_list[] = {
     {{K_LCTRL, K_C}, MACRO_1}, // Macro 1 = Ctrl + C (Copier)
     {{K_LCTRL, K_V}, MACRO_2}, // Macro 2 = Ctrl + V (Coller)
 };
-size_t macros_count = sizeof(macros) / sizeof(macros[0]);
+size_t macros_count = sizeof(macros_list) / sizeof(macros_list[0]);
 void send_hid_key() {
   if (usb_bl_state == 0) {
     if (tud_mounted())
@@ -49,11 +45,13 @@ void run_internal_funct() {
   case TO_L3:
     if (current_layout == 2) {
       current_layout = 0;
+      layer_changed();
       last_layer = current_layout;
       ESP_LOGI(KM_TAG, "layer: 0");
 
     } else {
       current_layout = 2;
+      layer_changed();
       last_layer = current_layout;
       ESP_LOGI(KM_TAG, "layer: 2");
     }
@@ -87,6 +85,7 @@ void is_momentary_layer(int16_t keycodeTMP, uint8_t i) {
 
     last_layer = current_layout;
     current_layout = (keycodeTMP - MO_L1) / 256;
+    layer_changed();
     ESP_LOGI(KM_TAG, "last_layer: %d current : %d\n", last_layer,
              current_layout);
     current_row_layer_changer = current_press_row[i];
@@ -102,12 +101,14 @@ void is_toggle_layer(uint16_t keycodeTMP) {
     if (current_layout == new_layer) {
       current_layout = 0;
       last_layer = current_layout;
+      layer_changed();
       ESP_LOGI(KM_TAG, "layer: 0 %d %d %d", new_layer, keycodeTMP, TO_L1);
       // write_txt("Layer %d", n), 0, -30);
       //  gpio_set_level(CURSOR_LED_WHT_PIN, 0);
     } else {
       current_layout = new_layer;
       last_layer = current_layout;
+      layer_changed();
       ESP_LOGI(KM_TAG, "layer: pp %d %d %d", new_layer, keycodeTMP, TO_L1);
 
       // write_txt("Layer %d", n), 0, -30);
@@ -125,7 +126,7 @@ void is_macro(uint16_t keycodeTMP) {
       uint8_t j = 0;
       for (uint8_t i = 0; i < 6; i++) {
         if (keycodes[i] == 0) {
-          keycodes[i] = macros[macro_i].keys[j];
+          keycodes[i] = macros_list[macro_i].keys[j];
           j++;
         }
       }
@@ -182,6 +183,7 @@ void vTaskKeyboard(void *pvParameters) {
       if (changer == 0) {
         // ESP_LOGI(KM_TAG, "change 0\n");
         current_layout = last_layer;
+        layer_changed();
         current_col_layer_changer = 255;
         current_row_layer_changer = 255;
       }

@@ -15,26 +15,25 @@
  * GPIO34-39 can only be set as input mode and do not have software pullup or pulldown functions.
  * GPIOS 0,2,4,12-15,25-27,32-39 Can be used as RTC GPIOS as well (please read about power management in ReadMe)
  */
-//const gpio_num_t MATRIX_ROWS_PINS[] = { GPIO_NUM_37, GPIO_NUM_40, GPIO_NUM_39, GPIO_NUM_36, GPIO_NUM_3 };
-const gpio_num_t MATRIX_ROWS_PINS[] = { GPIO_NUM_3, 
-										GPIO_NUM_36, 
-										GPIO_NUM_39, 
-										GPIO_NUM_40, 
-										GPIO_NUM_37 };
-const gpio_num_t MATRIX_COLS_PINS[] = { GPIO_NUM_21, //0
-										GPIO_NUM_47, //1
-										GPIO_NUM_48, //2
-										GPIO_NUM_45, //3
-										GPIO_NUM_35, //4
-                                        GPIO_NUM_38, //5
+const gpio_num_t MATRIX_ROWS_PINS[] = { ROWS0, 
+										ROWS1, 
+										ROWS2, 
+										ROWS3, 
+										ROWS4 };
+const gpio_num_t MATRIX_COLS_PINS[] = { COLS0, //0
+										COLS1, //1
+										COLS2, //2
+										COLS3, //3
+										COLS4, //4
+                                        COLS5, //5
 										
-										GPIO_NUM_9,  //7
-										GPIO_NUM_10, //8
-										GPIO_NUM_11, //9
-                                        GPIO_NUM_12, //10
-                                        GPIO_NUM_13, //11
-										GPIO_NUM_14,//12
-										GPIO_NUM_46, };//6
+										COLS6,  //6
+										COLS7, //7
+										COLS8, //8
+                                        COLS9, //9
+                                        COLS10, //10
+										COLS11,//11
+										COLS12, };//12
 
 // matrix states
 uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS] = { 0 };
@@ -42,6 +41,8 @@ uint8_t PREV_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS] = { 0 };
 uint8_t SLAVE_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS] = { 0 };
 uint8_t keycodes[6] = { 0,0,0,0,0,0 };
 uint8_t last_layer = 0;
+uint8_t current_layout = 0;
+uint8_t is_layer_changed = 0;
 uint32_t lastDebounceTime = 0;
 
 uint8_t (*matrix_states[])[MATRIX_ROWS][MATRIX_COLS] = { &MATRIX_STATE,
@@ -195,12 +196,12 @@ void scan_matrix(void) {
 					
     				
 
-					//ESP_LOGI(GPIO_TAG, " 0: %d - %d, 1: %d - %d, 2: %d - %d, 3: %d - %d, 4: %d- %d, 5: %d - %d", 
+					//ESP_LOGI(TAG_MATRIX, " 0: %d - %d, 1: %d - %d, 2: %d - %d, 3: %d - %d, 4: %d- %d, 5: %d - %d", 
 					//current_press_row[0], current_press_col[0], current_press_row[1], current_press_col[1], current_press_row[2], current_press_col[2], 
 					//current_press_row[3], current_press_col[3], current_press_row[4], current_press_col[4], current_press_row[5], current_press_col[5]);
 					//tud_hid_keyboard_report(1, 0, keycodes);
 					stat_matrix_changed = 1;
-					//ESP_LOGI(GPIO_TAG, "Row: %d, Col: %d, State: %d, K : %d %d %d %d %d %d ", row, col, curState, keycodes[0], keycodes[1], keycodes[2], keycodes[3], keycodes[4], keycodes[5]);
+					ESP_LOGI(TAG_MATRIX, "Row: %d, Col: %d, State: %d, K : %d %d %d %d %d %d ", row, col, curState, keycodes[0], keycodes[1], keycodes[2], keycodes[3], keycodes[4], keycodes[5]);
 				}
 
 			}
@@ -234,4 +235,8 @@ void scan_matrix(void) {
 	}
 #endif
 
+}
+void layer_changed(void)
+{
+    is_layer_changed = 1;
 }

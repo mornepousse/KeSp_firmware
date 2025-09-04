@@ -17,6 +17,8 @@ extern uint8_t current_press_col[6];
 extern uint8_t current_press_stat[6];
 extern uint8_t stat_matrix_changed;
 extern uint8_t last_layer;
+extern uint8_t current_layout;
+extern uint8_t is_layer_changed;
 //extern
 /*
  * @brief deinitialize rtc pins
@@ -37,3 +39,8 @@ void matrix_setup(void);
  * @brief scan matrix
  */
 void scan_matrix(void);
+
+
+void layer_changed(void);
+
+

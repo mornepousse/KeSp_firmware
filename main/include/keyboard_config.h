@@ -10,8 +10,15 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 
+//#define VERSION_1
+#define VERSION_2
+
+#define MANUFACTURER_NAME "MornePousse"                // 1: Manufacturer
+#define PRODUCT_NAME "KaSeV2"               // 2: Product
+#define SERIAL_NUMBER "1994"               // 3: Serials, should use chip ID
+
 #define MODULE_ID "MORNEPOUSSE"
-#define GATTS_TAG "MAE V1.0A" // The device's name
+#define GATTS_TAG "MAE V2.0" // The device's name
 #define MAX_BT_DEVICENAME_LENGTH 40
 
 #define MASTER  // undefine if you are not flashing the main controller
@@ -60,3 +67,52 @@ extern uint8_t current_layout;
 extern char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH];
 
 extern TaskHandle_t xKeyreportTask;
+
+
+#ifdef VERSION_2 
+#define ROWS0 GPIO_NUM_10
+#define ROWS1 GPIO_NUM_11
+#define ROWS2 GPIO_NUM_12
+#define ROWS3 GPIO_NUM_13
+#define ROWS4 GPIO_NUM_14
+
+
+#define COLS0 GPIO_NUM_9
+#define COLS1 GPIO_NUM_46
+#define COLS2 GPIO_NUM_3
+#define COLS3 GPIO_NUM_8
+#define COLS4 GPIO_NUM_18
+#define COLS5 GPIO_NUM_17
+#define COLS6 GPIO_NUM_16
+#define COLS7 GPIO_NUM_43
+#define COLS8 GPIO_NUM_44
+#define COLS9 GPIO_NUM_1
+#define COLS10 GPIO_NUM_2
+#define COLS11 GPIO_NUM_42
+#define COLS12 GPIO_NUM_41
+#endif
+
+#ifdef VERSION_1
+
+#define ROWS0 GPIO_NUM_3
+#define ROWS1 GPIO_NUM_36
+#define ROWS2 GPIO_NUM_39
+#define ROWS3 GPIO_NUM_40
+#define ROWS4 GPIO_NUM_37
+
+
+#define COLS0 GPIO_NUM_21
+#define COLS1 GPIO_NUM_47
+#define COLS2 GPIO_NUM_48
+#define COLS3 GPIO_NUM_45
+#define COLS4 GPIO_NUM_35
+#define COLS5 GPIO_NUM_38
+#define COLS6 GPIO_NUM_9
+#define COLS7 GPIO_NUM_10
+#define COLS8 GPIO_NUM_11
+#define COLS9 GPIO_NUM_12
+#define COLS10 GPIO_NUM_13
+#define COLS11 GPIO_NUM_14
+#define COLS12 GPIO_NUM_46
+
+#endif
