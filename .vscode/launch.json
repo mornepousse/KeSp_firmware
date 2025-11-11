@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ESP32-S3 USB Debug",
+      "type": "espidf",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/${workspaceFolderBasename}.elf",
+      "cwd": "${workspaceFolder}",
+      "toolchainPrefix": "xtensa-esp32s3-elf-",
+      "debugAdapter": "openocd",
+      "openOcdConfigs": [
+        "board/esp32s3-builtin.cfg"
+      ],
+      "svdFile": "${env:IDF_PATH}/tools/svd/esp32s3.svd"
+    }
+  ]
+}

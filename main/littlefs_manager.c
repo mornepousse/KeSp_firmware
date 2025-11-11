@@ -57,6 +57,12 @@ void littlefs_init(void)
     if (f == NULL)
     {
         ESP_LOGE(TAG_LittleFS, "Failed to open file for writing");
+        //create file
+        //write_file_content("/littlefs/config", );
+    }
+    if (f == NULL)
+    {
+        ESP_LOGE(TAG_LittleFS, "Failed to open file for writing");
         return;
     }
 }

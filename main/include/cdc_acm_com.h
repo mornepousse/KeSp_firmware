@@ -29,4 +29,7 @@ void cdc_process_commands_task(void *arg);
 
 void init_cdc_commands(void);
 
-void send_data(const char *data, uint16_t len);
+void cdc_send_layer(uint8_t layer);
+void cdc_ping(void);
+
+//void send_data(const char *data, uint16_t len);

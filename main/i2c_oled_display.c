@@ -279,3 +279,21 @@ void write_text_to_display(const char *text, int x, int y)
         ESP_LOGE(TAG_DISP, "Failed to lock LVGL port");
     }
 }
+
+void draw_rectangle(int x, int y, int w, int h)
+{
+    if(display_available == false) return;
+    ESP_LOGI(TAG_DISP, "Drawing rectangle at (%d,%d) size %dx%d", x, y, w, h);
+    if (lvgl_port_lock(0))
+    {
+        lv_obj_t *rect = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(rect, w, h);
+        lv_obj_set_pos(rect, x, y);
+        lv_obj_set_style_bg_color(rect, lv_color_white(), 0); // Black background 
+        lvgl_port_unlock();
+    }
+    else
+    {
+        ESP_LOGE(TAG_DISP, "Failed to lock LVGL port");
+    }
+}

@@ -284,28 +284,28 @@
 // le dernier : HID_KEY_GUI_RIGHT  0xE7
 
 // Momentary layer
-static const uint16_t MO_L1  = 0x0100;
-static const uint16_t MO_L2  = 0x0200;
-static const uint16_t MO_L3  = 0x0300;
-static const uint16_t MO_L4  = 0x0400;
-static const uint16_t MO_L5  = 0x0500;
-static const uint16_t MO_L6  = 0x0600;
-static const uint16_t MO_L7  = 0x0700;
-static const uint16_t MO_L8  = 0x0800;
-static const uint16_t MO_L9  = 0x0900;
-static const uint16_t MO_L10 = 0x0A00;
+static const uint16_t MO_L0  = 0x0100;
+static const uint16_t MO_L1  = 0x0200;
+static const uint16_t MO_L2  = 0x0300;
+static const uint16_t MO_L3  = 0x0400;
+static const uint16_t MO_L4  = 0x0500;
+static const uint16_t MO_L5  = 0x0600;
+static const uint16_t MO_L6  = 0x0700;
+static const uint16_t MO_L7  = 0x0800;
+static const uint16_t MO_L8  = 0x0900;
+static const uint16_t MO_L9 = 0x0A00;
 
 // Toggle layer
-static const uint16_t TO_L1  = 0x0B00;
-static const uint16_t TO_L2  = 0x0C00;
-static const uint16_t TO_L3  = 0x0D00;
-static const uint16_t TO_L4  = 0x0E00;
-static const uint16_t TO_L5  = 0x0F00;
-static const uint16_t TO_L6  = 0x1000;
-static const uint16_t TO_L7  = 0x1100;
-static const uint16_t TO_L8  = 0x1200;
-static const uint16_t TO_L9  = 0x1300;
-static const uint16_t TO_L10 = 0x1400;
+static const uint16_t TO_L0  = 0x0B00;
+static const uint16_t TO_L1  = 0x0C00;
+static const uint16_t TO_L2  = 0x0D00;
+static const uint16_t TO_L3  = 0x0E00;
+static const uint16_t TO_L4  = 0x0F00;
+static const uint16_t TO_L5  = 0x1000;
+static const uint16_t TO_L6  = 0x1100;
+static const uint16_t TO_L7  = 0x1200;
+static const uint16_t TO_L8  = 0x1300;
+static const uint16_t TO_L9 = 0x1400;
 
 
 // simple macro ex : CTRL +V

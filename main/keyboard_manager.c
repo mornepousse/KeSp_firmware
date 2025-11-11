@@ -70,7 +70,7 @@ void run_internal_funct() {
 }
 
 bool is_internal_function(int16_t keycodeTMP) {
-  if (keycodeTMP >= TO_L1) {
+  if (keycodeTMP >= TO_L0) {
     ESP_LOGI(KM_TAG, "%d.", keycodeTMP);
     if (keypress_internal_function == 0) {
       keypress_internal_function = keycodeTMP;
@@ -81,10 +81,10 @@ bool is_internal_function(int16_t keycodeTMP) {
 }
 
 void is_momentary_layer(int16_t keycodeTMP, uint8_t i) {
-  if ((keycodeTMP >= MO_L1) && (keycodeTMP <= MO_L10)) {
+  if ((keycodeTMP >= MO_L0) && (keycodeTMP <= MO_L9)) {
 
     last_layer = current_layout;
-    current_layout = (keycodeTMP - MO_L1) / 256;
+    current_layout = (keycodeTMP - MO_L0) / 256;
     layer_changed();
     ESP_LOGI(KM_TAG, "last_layer: %d current : %d\n", last_layer,
              current_layout);
@@ -94,22 +94,22 @@ void is_momentary_layer(int16_t keycodeTMP, uint8_t i) {
 }
 
 void is_toggle_layer(uint16_t keycodeTMP) {
-  if ((keycodeTMP >= TO_L1) && (keycodeTMP <= TO_L10)) {
+  if ((keycodeTMP >= TO_L0) && (keycodeTMP <= TO_L9)) {
 
-    int16_t new_layer = (keycodeTMP - TO_L1) / 256;
+    int16_t new_layer = (keycodeTMP - TO_L0) / 256;
 
     if (current_layout == new_layer) {
       current_layout = 0;
       last_layer = current_layout;
       layer_changed();
-      ESP_LOGI(KM_TAG, "layer: 0 %d %d %d", new_layer, keycodeTMP, TO_L1);
+      ESP_LOGI(KM_TAG, "layer: 0 %d %d %d", new_layer, keycodeTMP, TO_L0);
       // write_txt("Layer %d", n), 0, -30);
       //  gpio_set_level(CURSOR_LED_WHT_PIN, 0);
     } else {
       current_layout = new_layer;
       last_layer = current_layout;
       layer_changed();
-      ESP_LOGI(KM_TAG, "layer: pp %d %d %d", new_layer, keycodeTMP, TO_L1);
+      ESP_LOGI(KM_TAG, "layer: pp %d %d %d", new_layer, keycodeTMP, TO_L0);
 
       // write_txt("Layer %d", n), 0, -30);
 

@@ -33,7 +33,7 @@
 #define MATRIX_COLS 13 // For split keyboards, define columns for one side only.
 
 #define NKRO // does not work on Android and iOS!,  we can get 18KRO on those
-#define LAYERS 3 // number of layers defined
+#define LAYERS 10 // number of layers defined
 
 //deep sleep parameters, mind that reconnecting after deep sleep might take a minute or two
 #define SLEEP_MINS 45 // undefine if you do not need deep sleep, otherwise define number of minutes for deepsleep
