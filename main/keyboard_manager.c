@@ -39,24 +39,12 @@ void send_hid_key() {
   }
 }
 
+// code degueu....
+
 void run_internal_funct() {
 
   switch (keypress_internal_function) {
-  case TO_L3:
-    if (current_layout == 2) {
-      current_layout = 0;
-      layer_changed();
-      last_layer = current_layout;
-      ESP_LOGI(KM_TAG, "layer: 0");
-
-    } else {
-      current_layout = 2;
-      layer_changed();
-      last_layer = current_layout;
-      ESP_LOGI(KM_TAG, "layer: 2");
-    }
-    break;
-  case K_INT3:
+  case BT_SWITCH_DEVICE:
     if (usb_bl_state == 0) {
       usb_bl_state = 1;
 
@@ -64,6 +52,7 @@ void run_internal_funct() {
       usb_bl_state = 0;
     }
     break;
+
   default:
     break;
   }
@@ -204,7 +193,7 @@ void vTaskKeyboard(void *pvParameters) {
         if (Key_is_up == 0) {
           ESP_LOGI(KM_TAG, "asdf: %d : ", keypress_internal_function);
 
-          // run_internal_funct();
+          run_internal_funct();
           is_toggle_layer(keypress_internal_function);
           keypress_internal_function = 0;
         }
