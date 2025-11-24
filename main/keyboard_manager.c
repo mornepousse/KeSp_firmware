@@ -32,8 +32,9 @@ macro_t macros_list[] = {
 size_t macros_count = sizeof(macros_list) / sizeof(macros_list[0]);
 void send_hid_key() {
   if (usb_bl_state == 0) {
-    if (tud_mounted())
-      tud_hid_keyboard_report(1, 0, keycodes);
+    if (tud_hid_ready()) {
+      tud_hid_keyboard_report(0, 0, keycodes);
+    }
   } else {
     send_hid_bl_key(keycodes);
   }

@@ -8,34 +8,72 @@
 
 static const char *TAG_UD = "USB_DESCRIPTORS";
 
-#define EPNUM_CDC_NOTIF 1
-#define EPNUM_CDC_IN 2
-#define EPNUM_CDC_OUT 2
-#define EPNUM_VENDOR_IN 5
-#define EPNUM_VENDOR_OUT 5
-#define EPNUM_KEYBOARD 4
-#define EPNUM_MOUSE 6
+// -----------------------------------------------------------------------------
+// Descripteurs TinyUSB pour combo CDC ACM + HID clavier
+// Configuration standard compatible Windows (évite STATUS_DEVICE_DATA_ERROR)
+// -----------------------------------------------------------------------------
 
-#define TUSB_DESC_TOTAL_LEN \
-  (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN)
- 
-const uint8_t hid_report_descriptor[] = {
-    TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(HID_ITF_PROTOCOL_KEYBOARD))
+// Index d'interfaces : on réutilise ceux définis dans usb_descriptors.h
+// (ITF_NUM_CDC, ITF_NUM_CDC_DATA, ITF_NUM_HID, ITF_NUM_TOTAL)
+
+// Endpoints (valeurs USB complètes, 0x8x = IN, 0x0x = OUT)
+#define EPNUM_CDC_NOTIF   0x81  // EP1 IN (interrupt)
+#define EPNUM_CDC_OUT     0x02  // EP2 OUT (bulk)
+#define EPNUM_CDC_IN      0x82  // EP2 IN  (bulk)
+#define EPNUM_HID         0x83  // EP3 IN  (interrupt)
+
+// Descripteur de device explicite (évite le device par défaut de TinyUSB)
+static const tusb_desc_device_t device_descriptor = {
+    .bLength            = sizeof(tusb_desc_device_t),
+    .bDescriptorType    = TUSB_DESC_DEVICE,
+    .bcdUSB             = 0x0200,
+
+    .bDeviceClass       = TUSB_CLASS_MISC,
+    .bDeviceSubClass    = MISC_SUBCLASS_COMMON,
+    .bDeviceProtocol    = MISC_PROTOCOL_IAD,
+    .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
+
+    .idVendor           = 0xCafe,
+    .idProduct          = 0x4001,
+    .bcdDevice          = 0x0100,
+
+    .iManufacturer      = 0x01,
+    .iProduct           = 0x02,
+    .iSerialNumber      = 0x03,
+
+    .bNumConfigurations = 0x01
 };
 
-static const uint8_t hid_cdc_configuration_descriptor[] = {
-    TUD_CONFIG_DESCRIPTOR(1, 2, 0, TUSB_DESC_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 2, 0x80 | EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, 0x80 | EPNUM_CDC_IN, 64), // CDC: interface 0
-    TUD_HID_DESCRIPTOR(ITF_NUM_TOTAL, 1, 0, sizeof(hid_report_descriptor), 0x80 | EPNUM_KEYBOARD, 16, 10), // HID: interface 1
-}; 
+#define TUSB_DESC_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN)
+ 
+// Report descriptor clavier SANS report ID (Windows est plus tolérant)
+const uint8_t hid_report_descriptor[] = {
+    TUD_HID_REPORT_DESC_KEYBOARD()
+};
 
-const char *hid_string_descriptor[5] = {
-    // array of pointer to string descriptors
-    (char[]){0x09, 0x04}, // 0: is supported language is English (0x0409)
-    MANUFACTURER_NAME,              // 1: Manufacturer
-    PRODUCT_NAME,               // 2: Product
-    SERIAL_NUMBER,               // 3: Serials, should use chip ID
-    "Keyboard",           // 4: HID
+// Descripteur de configuration : CDC (2 interfaces) + HID clavier
+static const uint8_t hid_cdc_configuration_descriptor[] = {
+    // Config 1, ITF = 3 interfaces au total (0,1,2), power 100 mA
+    TUD_CONFIG_DESCRIPTOR(1, 3, 0, TUSB_DESC_TOTAL_LEN,
+                          TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+
+    // CDC (Communication + Data) : interfaces 0 et 1
+    TUD_CDC_DESCRIPTOR(0, 4, EPNUM_CDC_NOTIF, 8,
+                       0x02, 0x82, 64),
+
+    // HID clavier boot : interface 2
+    TUD_HID_DESCRIPTOR(2, 5, HID_ITF_PROTOCOL_KEYBOARD,
+                       sizeof(hid_report_descriptor), EPNUM_HID, 16, 10),
+};
+
+// Tableau de chaînes (langue + fabricant + produit + série + usage HID)
+const char *hid_string_descriptor[] = {
+    (const char[]){ 0x09, 0x04 }, // 0: Langue = Anglais (US) 0x0409
+    MANUFACTURER_NAME,            // 1: Manufacturer
+    PRODUCT_NAME,                 // 2: Product
+    SERIAL_NUMBER,                // 3: Serial
+    "KaSe CDC",                  // 4: Interface string pour le port série
+    "KaSe Keyboard",             // 5: Interface string pour le clavier HID
 };
 
 /**
@@ -147,9 +185,9 @@ void tinyusb_hid_init(void)
 {
     ESP_LOGI(TAG_UD, "USB initialization");
    const tinyusb_config_t tusb_cfg = {
-       .device_descriptor = NULL,
+       .device_descriptor = &device_descriptor,
        .string_descriptor = hid_string_descriptor,
-       .string_descriptor_count = 5,
+       .string_descriptor_count = sizeof(hid_string_descriptor) / sizeof(hid_string_descriptor[0]),
        .external_phy = false,
        .configuration_descriptor = hid_cdc_configuration_descriptor,
    };
