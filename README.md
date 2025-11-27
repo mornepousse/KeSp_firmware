@@ -6,6 +6,10 @@ Custom firmware for the KaSe mechanical keyboard, built on an ESP32‑S3 with US
 
 ---
 
+### Roadmap (short)
+
+- 🚧 Bluetooth Screen mark
+
 ## Overview
 
 This repository contains the **embedded firmware** for the KaSe custom keyboard:
