@@ -11,6 +11,7 @@
 #include "tusb_cdc_acm.h"	  // tinyusb_cdcacm_write_queue
 #include "keyboard_manager.h" // macros
 #include "keymap.h"			  // default_layout_names
+#include "key_definitions.h"
 
 // Interface CDC utilisée (0 par défaut)
 #ifndef CDC_ITF
@@ -259,6 +260,174 @@ static void cmd_set_key(const char *arg)
 	// send_data("OK\r\n", 5);
 }
 
+static void cdc_send_line(const char *text)
+{
+	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)text, strlen(text));
+	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)"\r\n", 2);
+	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
+}
+
+static void trim_spaces(char *str)
+{
+	if (str == NULL)
+		return;
+	char *start = str;
+	while (*start && isspace((unsigned char)*start))
+		start++;
+	char *end = start + strlen(start);
+	while (end > start && isspace((unsigned char)*(end - 1)))
+		end--;
+	size_t len = (size_t)(end - start);
+	if (start != str)
+		memmove(str, start, len);
+	str[len] = '\0';
+}
+
+static uint16_t macro_keycode_from_index(size_t idx)
+{
+	return (uint16_t)(MACRO_1 + (idx * 0x0100));
+}
+
+static void cmd_list_macros(void)
+{
+	char line[160];
+	bool any = false;
+	for (size_t i = 0; i < MAX_MACROS; ++i)
+	{
+		if (macros_list[i].name[0] == '\0')
+			continue;
+		any = true;
+		int len = snprintf(line, sizeof(line), "[%02u] %s (0x%04X) keys:", (unsigned)i,
+				   macros_list[i].name, macro_keycode_from_index(i));
+		for (int k = 0; k < 6 && len < (int)sizeof(line); ++k)
+		{
+			if (macros_list[i].keys[k] == 0)
+				continue;
+			len += snprintf(line + len, sizeof(line) - len, " 0x%02X", macros_list[i].keys[k]);
+		}
+		cdc_send_line(line);
+	}
+	if (!any)
+	{
+		cdc_send_line("Aucune macro definie");
+	}
+}
+
+static void cmd_macro_add(const char *arg)
+{
+	if (arg == NULL)
+	{
+		cdc_send_line("ERR MACROADD: arguments manquants");
+		return;
+	}
+	char buffer[CDC_CMD_MAX_LEN];
+	strncpy(buffer, arg, sizeof(buffer));
+	buffer[sizeof(buffer) - 1] = '\0';
+	char *saveptr = NULL;
+	char *slot_str = strtok_r(buffer, ";", &saveptr);
+	char *name_str = strtok_r(NULL, ";", &saveptr);
+	char *keys_str = strtok_r(NULL, ";", &saveptr);
+	if (!slot_str || !name_str || !keys_str)
+	{
+		cdc_send_line("ERR MACROADD format: MACROADD slot;nom;hex1,hex2,...");
+		return;
+	}
+	trim_spaces(slot_str);
+	trim_spaces(name_str);
+	trim_spaces(keys_str);
+	if (*slot_str == '\0' || *name_str == '\0' || *keys_str == '\0')
+	{
+		cdc_send_line("ERR MACROADD: parametre vide");
+		return;
+	}
+	int slot = atoi(slot_str);
+	if (slot < 0 || slot >= MAX_MACROS)
+	{
+		cdc_send_line("ERR MACROADD: slot invalide");
+		return;
+	}
+	uint8_t parsed_keys[6] = {0};
+	char *keys_save = NULL;
+	char *token = strtok_r(keys_str, ",", &keys_save);
+	int key_index = 0;
+	while (token && key_index < 6)
+	{
+		trim_spaces(token);
+		if (*token == '\0')
+		{
+			token = strtok_r(NULL, ",", &keys_save);
+			continue;
+		}
+		char *endptr = NULL;
+		unsigned long value = strtoul(token, &endptr, 0);
+		if (endptr == token || value > 0xFF)
+		{
+			cdc_send_line("ERR MACROADD: code touche invalide");
+			return;
+		}
+		parsed_keys[key_index++] = (uint8_t)value;
+		token = strtok_r(NULL, ",", &keys_save);
+	}
+	if (key_index == 0)
+	{
+		cdc_send_line("ERR MACROADD: aucune touche fournie");
+		return;
+	}
+	while (key_index < 6)
+	{
+		parsed_keys[key_index++] = 0;
+	}
+	strncpy(macros_list[slot].name, name_str, MAX_MACRO_NAME_LENGTH - 1);
+	macros_list[slot].name[MAX_MACRO_NAME_LENGTH - 1] = '\0';
+	memcpy(macros_list[slot].keys, parsed_keys, sizeof(parsed_keys));
+	macros_list[slot].key_definition = macro_keycode_from_index((size_t)slot);
+	if ((size_t)(slot + 1) > macros_count)
+	{
+		macros_count = slot + 1;
+	}
+	save_macros(macros_list, macros_count);
+	char msg[64];
+	snprintf(msg, sizeof(msg), "MACRO %d enregistree", slot);
+	cdc_send_line(msg);
+}
+
+static void cmd_macro_delete(const char *arg)
+{
+	if (arg == NULL)
+	{
+		cdc_send_line("ERR MACRODEL: arguments manquants");
+		return;
+	}
+	char buffer[CDC_CMD_MAX_LEN];
+	strncpy(buffer, arg, sizeof(buffer));
+	buffer[sizeof(buffer) - 1] = '\0';
+	trim_spaces(buffer);
+	if (*buffer == '\0')
+	{
+		cdc_send_line("ERR MACRODEL: slot manquant");
+		return;
+	}
+	int slot = atoi(buffer);
+	if (slot < 0 || slot >= MAX_MACROS)
+	{
+		cdc_send_line("ERR MACRODEL: slot invalide");
+		return;
+	}
+	if (macros_list[slot].name[0] == '\0')
+	{
+		cdc_send_line("MACRODEL: slot deja vide");
+		return;
+	}
+	macros_list[slot].name[0] = '\0';
+	memset(macros_list[slot].keys, 0, sizeof(macros_list[slot].keys));
+	macros_list[slot].key_definition = macro_keycode_from_index((size_t)slot);
+	recalc_macros_count();
+	save_macros(macros_list, macros_count);
+	char msg[64];
+	snprintf(msg, sizeof(msg), "MACRO %d supprimee", slot);
+	cdc_send_line(msg);
+}
+
 static void parse_and_execute(const char *line)
 {
 	//cdc_debug("RX:");
@@ -341,6 +510,21 @@ static void parse_and_execute(const char *line)
 	if (strncasecmp(line, "SETKEY", 6) == 0)
 	{
 		cmd_set_key(line + 6);
+		return;
+	}
+	if (strncasecmp(line, "MACROS?", 7) == 0)
+	{
+		cmd_list_macros();
+		return;
+	}
+	if (strncasecmp(line, "MACROADD", 8) == 0)
+	{
+		cmd_macro_add(line + 8);
+		return;
+	}
+	if (strncasecmp(line, "MACRODEL", 8) == 0)
+	{
+		cmd_macro_delete(line + 8);
 		return;
 	}
 	ESP_LOGW(TAG_CDC, "Commande inconnue: %s", line);
