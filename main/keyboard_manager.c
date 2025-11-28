@@ -7,6 +7,7 @@
 #include "keymap.h"
 #include "matrix.h"
 #include "tinyusb.h"
+#include "status_display.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,12 +25,7 @@ uint16_t extra_keycodes[6] = {0, 0, 0, 0, 0, 0};
 
 
 
-// Liste des macros prédéfinies
-macro_t macros_list[] = {
-    {{K_LCTRL, K_C}, MACRO_1}, // Macro 1 = Ctrl + C (Copier)
-    {{K_LCTRL, K_V}, MACRO_2}, // Macro 2 = Ctrl + V (Coller)
-};
-size_t macros_count = sizeof(macros_list) / sizeof(macros_list[0]);
+
 void send_hid_key() {
   if (usb_bl_state == 0) {
     if (tud_hid_ready()) {
@@ -40,20 +36,32 @@ void send_hid_key() {
   }
 }
 
+uint8_t keyboard_get_usb_bl_state(void) {
+  return usb_bl_state;
+}
+
 // code degueu....
 
 void run_internal_funct() {
 
   switch (keypress_internal_function) {
   case BT_SWITCH_DEVICE:
-    if (usb_bl_state == 0) {
+    if (usb_bl_state == 0 && hid_bluetooth_is_initialized() && hid_bluetooth_is_connected()) {
       usb_bl_state = 1;
-
     } else {
       usb_bl_state = 0;
     }
+    status_display_update();
     break;
-
+    case BT_TOGGLE:
+    if (usb_bl_state == 0 && hid_bluetooth_is_initialized() ) {
+      deinit_hid_bluetooth();
+    } 
+    else {
+      init_hid_bluetooth();
+    }
+    status_display_update();
+    break;
   default:
     break;
   }
@@ -112,7 +120,7 @@ void is_macro(uint16_t keycodeTMP) {
   if ((keycodeTMP >= MACRO_1) && (keycodeTMP <= MACRO_20)) {
     int16_t macro_i = (keycodeTMP - MACRO_1) / 256;
     ESP_LOGI(KM_TAG, "macro: %d ", macro_i);
-    if (macro_i < macros_count) {
+    if (macro_i >= 0 && macro_i < MAX_MACROS && macros_list[macro_i].name[0] != '\0') {
       uint8_t j = 0;
       for (uint8_t i = 0; i < 6; i++) {
         if (keycodes[i] == 0) {

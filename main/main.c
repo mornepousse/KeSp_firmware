@@ -17,6 +17,7 @@
 #include "littlefs_manager.h"
 #include "matrix.h"
 #include "usb_descriptors.h"
+#include "status_display.h"
 
 
 #define TEST_DELAY_TIME_MS (3000)
@@ -51,6 +52,8 @@ void app_main(void) {
   init_hid_bluetooth();
 
   write_text_to_display(default_layout_names[current_layout], 0, 0);
+  status_display_update();
+
   int t = 1000;
   for (;;) {
     if (is_layer_changed) {
@@ -59,15 +62,13 @@ void app_main(void) {
       write_text_to_display(default_layout_names[current_layout], 0, 0);
       cdc_send_layer(current_layout);
     }
+
     ESP_LOGI(TAG, "boucle main");
-vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(200));
     t--;
-    if(t<=0)
-    {
+    if (t <= 0) {
       ESP_LOGI(TAG, "coucou");
       t = 1000;
     }
-
-    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }

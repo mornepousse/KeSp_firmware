@@ -27,6 +27,8 @@
 
 uint16_t hid_conn_id = 0;
 bool sec_conn = false;
+static bool bt_initialized = false;
+#define HID_BT_TAG HID_DEMO_TAG
 #define CHAR_DECLARATION_SIZE   (sizeof(uint8_t))
 
 #define HIDD_DEVICE_NAME            "MAE_KEYBOARD"
@@ -228,7 +230,59 @@ esp_err_t ret;
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(uint8_t));
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
 
+    bt_initialized = true;
+
     //xTaskCreate(&hid_demo_task, "hid_task", 2048, NULL, 5, NULL);
+}
+
+void deinit_hid_bluetooth(void)
+{
+    esp_err_t ret;
+
+    ESP_LOGI(HID_BT_TAG, "Disabling BLE HID");
+
+    // Stop advertising
+    esp_ble_gap_stop_advertising();
+
+    // Deinit HID profile
+    ret = esp_hidd_profile_deinit();
+    if (ret != ESP_OK) {
+        ESP_LOGW(HID_BT_TAG, "esp_hidd_profile_deinit failed: %d", ret);
+    }
+
+    // Disable and deinit Bluedroid
+    ret = esp_bluedroid_disable();
+    if (ret != ESP_OK) {
+        ESP_LOGW(HID_BT_TAG, "esp_bluedroid_disable failed: %d", ret);
+    }
+    ret = esp_bluedroid_deinit();
+    if (ret != ESP_OK) {
+        ESP_LOGW(HID_BT_TAG, "esp_bluedroid_deinit failed: %d", ret);
+    }
+
+    // Disable and deinit BT controller
+    ret = esp_bt_controller_disable();
+    if (ret != ESP_OK) {
+        ESP_LOGW(HID_BT_TAG, "esp_bt_controller_disable failed: %d", ret);
+    }
+    ret = esp_bt_controller_deinit();
+    if (ret != ESP_OK) {
+        ESP_LOGW(HID_BT_TAG, "esp_bt_controller_deinit failed: %d", ret);
+    }
+
+    bt_initialized = false;
+
+    ESP_LOGI(HID_BT_TAG, "BLE HID disabled");
+}
+
+bool hid_bluetooth_is_initialized(void)
+{
+    return bt_initialized;
+}
+
+bool hid_bluetooth_is_connected(void)
+{
+    return sec_conn;
 }
 
 void send_hid_bl_key(uint8_t keycodes[6])
