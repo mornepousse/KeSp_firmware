@@ -1,6 +1,7 @@
 #pragma once
 #include "keyboard_config.h"
 extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
+extern char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH];
 
 // Structure d'une macro (liste de touches + longueur)
 #define MAX_MACRO_NAME_LENGTH 16

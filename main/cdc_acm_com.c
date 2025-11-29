@@ -44,6 +44,8 @@ enum cdc_command_type
 	c_get_layer_t,
 	c_get_current_layer_index_t,
 	c_get_name_layer_t,
+	c_get_macros_t,
+	c_get_all_layout_names_t,
 	c_ping_t,
 	c_debug_t,
 
@@ -197,10 +199,49 @@ static void cmd_display_text(const char *txt)
 
 static void cmd_get_name_layer(uint8_t layer)
 {
-	// Envoie la liste des noms de layers, séparés par des \n 
-	size_t total_size = strlen(default_layout_names[layer]);
+	// Réponse binaire: [index (1 octet)] [nom (len octets, sans '\0')]
+	const char *name = default_layout_names[layer];
+	size_t name_len = strlen(name);
+	size_t total_size = 1 + name_len;
 	start_command_queue(c_get_name_layer_t, total_size);
-	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)default_layout_names[layer], total_size); 
+	uint8_t idx = (uint8_t)layer;
+	tinyusb_cdcacm_write_queue(CDC_ITF, &idx, 1);
+	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)name, name_len);
+	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
+}
+
+// Liste tous les noms de layouts dans une seule trame binaire
+static void cmd_list_layout_names(void)
+{
+	// Format payload:
+	// [LAYERS (1 octet)] puis pour chaque layout:
+	//   [index (1 octet)] [nom (N octets, sans '\0')] [';' (1 octet separateur)]
+
+	// Calcul longueur totale
+	size_t total_size = 1; // nombre de layers
+	for (int i = 0; i < LAYERS; ++i)
+	{
+		total_size += 1 + strlen(default_layout_names[i]) + 1; // index + nom + separateur
+	}
+
+	start_command_queue(c_get_all_layout_names_t, total_size);
+
+	uint8_t layers_count = (uint8_t)LAYERS;
+	tinyusb_cdcacm_write_queue(CDC_ITF, &layers_count, 1);
+
+	for (int i = 0; i < LAYERS; ++i)
+	{
+		uint8_t idx = (uint8_t)i;
+		const char *name = default_layout_names[i];
+		size_t name_len = strlen(name);
+
+		tinyusb_cdcacm_write_queue(CDC_ITF, &idx, 1);//index
+		tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)name, name_len);
+		// Ajout d'un caractere de separation entre les noms
+		uint8_t sep = ';';
+		tinyusb_cdcacm_write_queue(CDC_ITF, &sep, 1);
+	}
+
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
@@ -283,6 +324,72 @@ static void trim_spaces(char *str)
 	str[len] = '\0';
 }
 
+// Commande: LAYOUTNAME<layer>:<nouveau_nom>
+// Exemple: LAYOUTNAME0:AZERTY_FR
+static void  cmd_set_layout_name(const char *arg)
+{
+	if (arg == NULL)
+	{
+		cdc_send_line("ERR LAYOUTNAME: arguments manquants");
+		return;
+	}
+
+	char buffer[CDC_CMD_MAX_LEN];
+	strncpy(buffer, arg, sizeof(buffer));
+	buffer[sizeof(buffer) - 1] = '\0';
+
+	char *sep = strchr(buffer, ':');
+	if (!sep)
+	{
+		cdc_send_line("ERR LAYOUTNAME: format LAYOUTNAME<idx>:<nom>");
+		return;
+	}
+
+	*sep = '\0';
+	char *idx_str = buffer;
+	char *name_str = sep + 1;
+
+	trim_spaces(idx_str);
+	trim_spaces(name_str);
+
+	if (*idx_str == '\0' || *name_str == '\0')
+	{
+		cdc_send_line("ERR LAYOUTNAME: index ou nom vide");
+		return;
+	}
+
+	int idx = atoi(idx_str);
+	if (idx < 0 || idx >= LAYERS)
+	{
+		cdc_send_line("ERR LAYOUTNAME: index invalide");
+		return;
+	}
+
+	strncpy(default_layout_names[idx], name_str, MAX_LAYOUT_NAME_LENGTH - 1);
+	default_layout_names[idx][MAX_LAYOUT_NAME_LENGTH - 1] = '\0';
+
+	// Sauvegarde en NVS via keymap.c
+	save_layout_names(default_layout_names, LAYERS);
+
+	// Si c'est le layout courant, rafraîchir l'affichage OLED
+	extern uint8_t current_layout;
+	void status_display_update_layer_name(void);
+	if ((uint8_t)idx == current_layout)
+	{
+		status_display_update_layer_name();
+	}
+
+	// Réponse binaire: même format que cmd_get_name_layer
+	const char *name = default_layout_names[idx];
+	size_t name_len = strlen(name);
+	size_t total_size = 1 + name_len;
+	start_command_queue(c_get_name_layer_t, total_size);
+	uint8_t uidx = (uint8_t)idx;
+	tinyusb_cdcacm_write_queue(CDC_ITF, &uidx, 1);
+	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)name, name_len);
+	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
+}
+
 static uint16_t macro_keycode_from_index(size_t idx)
 {
 	return (uint16_t)(MACRO_1 + (idx * 0x0100));
@@ -290,27 +397,89 @@ static uint16_t macro_keycode_from_index(size_t idx)
 
 static void cmd_list_macros(void)
 {
-	char line[160];
-	bool any = false;
+	// Format binaire via start_command_queue, pour MACROS?
+	// Payload:
+	//   [count (1 octet)]
+	//   pour chaque macro définie:
+	//     [index (1 octet)]
+	//     [keycode (2 octets, little-endian)]
+	//     [nameLen (1 octet)]
+	//     [name (nameLen octets, sans '\0')]
+	//     [keysLen (1 octet)]
+	//     [keys (keysLen octets)]
+
+	// 1) Calculer la taille totale
+	size_t count = 0;
+	size_t total_size = 1; // count
 	for (size_t i = 0; i < MAX_MACROS; ++i)
 	{
 		if (macros_list[i].name[0] == '\0')
 			continue;
-		any = true;
-		int len = snprintf(line, sizeof(line), "[%02u] %s (0x%04X) keys:", (unsigned)i,
-				   macros_list[i].name, macro_keycode_from_index(i));
-		for (int k = 0; k < 6 && len < (int)sizeof(line); ++k)
+		++count;
+		size_t name_len = strlen(macros_list[i].name);
+		if (name_len > 255)
+			name_len = 255; // borne par 1 octet
+		uint8_t keys_len = 0;
+		for (int k = 0; k < 6; ++k)
 		{
-			if (macros_list[i].keys[k] == 0)
-				continue;
-			len += snprintf(line + len, sizeof(line) - len, " 0x%02X", macros_list[i].keys[k]);
+			if (macros_list[i].keys[k] != 0)
+				++keys_len;
 		}
-		cdc_send_line(line);
+		total_size += 1 + 2 + 1 + name_len + 1 + keys_len;
 	}
-	if (!any)
+
+	start_command_queue(c_get_macros_t, total_size);
+	uint8_t ucount = (uint8_t)count;
+	tinyusb_cdcacm_write_queue(CDC_ITF, &ucount, 1);
+
+	// 2) Envoyer chaque macro définie
+	for (size_t i = 0; i < MAX_MACROS; ++i)
 	{
-		cdc_send_line("Aucune macro definie");
+		if (macros_list[i].name[0] == '\0')
+			continue;
+
+		uint8_t idx = (uint8_t)i;
+		uint16_t kc = macro_keycode_from_index(i);
+		uint8_t kc_bytes[2] = {
+			(uint8_t)(kc & 0xFF),
+			(uint8_t)((kc >> 8) & 0xFF)
+		};
+		size_t name_len = strlen(macros_list[i].name);
+		if (name_len > 255)
+			name_len = 255;
+		uint8_t name_len_u8 = (uint8_t)name_len;
+		uint8_t keys_len = 0;
+		for (int k = 0; k < 6; ++k)
+		{
+			if (macros_list[i].keys[k] != 0)
+				++keys_len;
+		}
+
+		tinyusb_cdcacm_write_queue(CDC_ITF, &idx, 1);
+		tinyusb_cdcacm_write_queue(CDC_ITF, kc_bytes, 2);
+		tinyusb_cdcacm_write_queue(CDC_ITF, &name_len_u8, 1);
+		tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)macros_list[i].name, name_len);
+		tinyusb_cdcacm_write_queue(CDC_ITF, &keys_len, 1);
+		if (keys_len > 0)
+		{
+			uint8_t tmp_keys[6];
+			uint8_t pos = 0;
+			for (int k = 0; k < 6; ++k)
+			{
+				if (macros_list[i].keys[k] != 0)
+				{
+					if (pos < sizeof(tmp_keys))
+						tmp_keys[pos++] = macros_list[i].keys[k];
+				}
+			}
+			if (pos > 0)
+			{
+				tinyusb_cdcacm_write_queue(CDC_ITF, tmp_keys, pos);
+			}
+		}
 	}
+
+	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
 static void cmd_macro_add(const char *arg)
@@ -428,52 +597,10 @@ static void cmd_macro_delete(const char *arg)
 	cdc_send_line(msg);
 }
 
+
+
 static void parse_and_execute(const char *line)
 {
-	//cdc_debug("RX:");
-	// ESP_LOGI(TAG_CDC, "Parsing command: %s", line); 
-	// size_t line_length = strlen(line);
-	// uint8_t next = 0;
-	// size_t i = 0;
-	// uint8_t previousRxByte = 0;
-	// for (; i < line_length; i++)
-	// {
-	// 	if (i > 0 && line[i] == '>' && previousRxByte == 'C')
-	// 	{
-	// 		next = 1;
-	// 		break;
-	// 	}
-	// 	previousRxByte = line[i];
-	// }
-	// if (next == 0)
-	// 	return;
-	// next = 0;
-
-	// enum cdc_command_type type_command = (enum cdc_command_type)line[i];
-	// i++;
-	// uint16_t data_size = (line[i] | (line[i + 1] << 8));
-	// i += 2;
-	// const char *data = line + i;
-	
-	// switch (type_command)
-	// {
-	// 	case c_nope_t:
-	// 	/* code */
-	// 	break;
-	// 	case c_get_layer_t:
-	// 		cmd_get_keymap_by_layer((uint8_t)data[0]);
-	// 	break;
-	// 	case c_get_current_layer_index_t:
-	// 		cmd_get_current_layer_index();
-	// 		break;
-	// 	case c_get_name_layer_t:
-	// 		cmd_get_name_layer((uint8_t)data[0]);
-	// 		break;
-	// 	default:
-	// 	break;
-	// }
-
-	
 	// Trim espaces
 	while (*line == ' ' || *line == '\t')
 		line++;
@@ -525,6 +652,16 @@ static void parse_and_execute(const char *line)
 	if (strncasecmp(line, "MACRODEL", 8) == 0)
 	{
 		cmd_macro_delete(line + 8);
+		return;
+	}
+	if (strncasecmp(line, "LAYOUTS?", 8) == 0)
+	{
+		cmd_list_layout_names();
+		return;
+	}
+	if (strncasecmp(line, "LAYOUTNAME", 10) == 0)
+	{
+		cmd_set_layout_name(line + 10);
 		return;
 	}
 	ESP_LOGW(TAG_CDC, "Commande inconnue: %s", line);
