@@ -51,24 +51,17 @@ void app_main(void) {
   ESP_LOGI(TAG, "bluetooth init");
   init_hid_bluetooth();
 
-  write_text_to_display(default_layout_names[current_layout], 0, 0);
+  status_display_update_layer_name();
   status_display_update();
-
-  int t = 1000;
+  draw_separator_line();
   for (;;) {
     if (is_layer_changed) {
       is_layer_changed = 0;
-      draw_rectangle(0, 0, 128, 16);
-      write_text_to_display(default_layout_names[current_layout], 0, 0);
+      status_display_update_layer_name();
       cdc_send_layer(current_layout);
     }
 
-    ESP_LOGI(TAG, "boucle main");
-    vTaskDelay(pdMS_TO_TICKS(200));
-    t--;
-    if (t <= 0) {
-      ESP_LOGI(TAG, "coucou");
-      t = 1000;
-    }
+    //ESP_LOGI(TAG, "boucle main");
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
