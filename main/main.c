@@ -36,6 +36,9 @@ void app_main(void) {
   init_cdc_commands();
   keymap_init_nvs();
   load_keymaps((uint16_t *)keymaps, LAYERS * MATRIX_ROWS * MATRIX_COLS);
+  load_layout_names(default_layout_names, LAYERS);
+  load_macros(macros_list, MAX_MACROS);
+
   ESP_LOGI(TAG, "display init");
   init_display();
   // Reset the rtc GPIOS
