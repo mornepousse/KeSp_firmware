@@ -1,4 +1,6 @@
 #pragma once
+#include <stdbool.h>
+static bool display_available = false;
 
 void init_display(void);
 void display_test_text(char* text);

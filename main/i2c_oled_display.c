@@ -12,8 +12,7 @@
 #include "esp_lcd_panel_vendor.h"
 #include "driver/i2c.h"
 
-static const char *TAG_DISP = "DISPL";
-static bool display_available = true;
+static const char *TAG_DISP = "DISPL"; 
 // Déclaration préalable
 bool test_oled_presence(void);
 
@@ -178,6 +177,7 @@ void init_display(void)
 // ------------------------------------------------------------------------------------
 bool test_oled_presence(void)
 {
+    //if(display_available == false) return false;
     esp_err_t err;
     i2c_master_bus_handle_t bus = NULL;
     i2c_master_bus_config_t bus_config = (i2c_master_bus_config_t){

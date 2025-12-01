@@ -17,11 +17,13 @@ static lv_obj_t *icon_path = NULL;
 
 void draw_separator_line(void)
 {
+    if(display_available == false) return;
     draw_rectangle_White(0, 37, 128, 2);
 }
 
 void status_display_update_layer_name(void)
 { 
+    if(display_available == false) return;
      // Efface une bande autour de la zone du texte
      draw_separator_line();
     draw_rectangle(38, 40, 128-38, 24);
@@ -31,6 +33,7 @@ void status_display_update_layer_name(void)
 
 static void status_display_init_icons(void)
 {
+    if(display_available == false) return;
     if (icon_bt != NULL || icon_path != NULL) return;
 
     lv_obj_t *scr = lv_scr_act();
@@ -44,6 +47,7 @@ static void status_display_init_icons(void)
 
 void status_display_update(void)
 {
+    if(display_available == false) return;
     int bt_state;
     if (!hid_bluetooth_is_initialized()) {
         bt_state = 0;
