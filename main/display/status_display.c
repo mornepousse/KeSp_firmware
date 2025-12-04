@@ -9,6 +9,8 @@
 #include "lvgl.h"
 #include "keymap.h"
 #include "matrix.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static int last_bt_state = -1;   // -1 = inconnu, 0 = OFF, 1 = ON, 2 = JUSTE BT
 static int last_path_state = -1; // 0 = USB, 1 = BLE
@@ -17,10 +19,12 @@ static lv_obj_t *icon_bt = NULL;
 static lv_obj_t *icon_path = NULL;
 static bool status_display_initialized = false;
 static bool status_display_sleeping = false;
+static const char *status_display_version_text = GATTS_TAG;
 
 static void status_display_prepare_ui(bool clear_screen);
 static void status_display_update_connection_icons(bool force);
 static void status_display_init_icons(void);
+static void status_display_show_version_splash(void);
 
 void draw_separator_line(void)
 {
@@ -64,6 +68,7 @@ void status_display_start(void)
     }
 
     status_display_sleeping = false;
+    status_display_show_version_splash();
     status_display_refresh_all();
 }
 
@@ -178,4 +183,16 @@ static void status_display_prepare_ui(bool clear_screen)
 
     status_display_init_icons();
     status_display_initialized = true;
+}
+
+static void status_display_show_version_splash(void)
+{
+    if (display_available == false)
+        return;
+
+    display_clear_screen();
+    write_text_to_display_centre(status_display_version_text, 0, 0);
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    display_clear_screen();
+    status_display_initialized = false;
 }
