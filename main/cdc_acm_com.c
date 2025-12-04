@@ -12,6 +12,7 @@
 #include "keyboard_manager.h" // macros
 #include "keymap.h"			  // default_layout_names
 #include "key_definitions.h"
+#include "dfu_manager.h"      // reboot_to_dfu
 
 // Interface CDC utilisée (0 par défaut)
 #ifndef CDC_ITF
@@ -598,6 +599,13 @@ static void cmd_macro_delete(const char *arg)
 }
 
 
+static void cmd_reboot_to_dfu(void)
+{
+	cdc_send_line("Rebooting to DFU...");
+	reboot_to_dfu();
+}
+
+
 
 static void parse_and_execute(const char *line)
 {
@@ -662,6 +670,11 @@ static void parse_and_execute(const char *line)
 	if (strncasecmp(line, "LAYOUTNAME", 10) == 0)
 	{
 		cmd_set_layout_name(line + 10);
+		return;
+	}
+	if (strncasecmp(line, "DFU", 3) == 0)
+	{
+		cmd_reboot_to_dfu();
 		return;
 	}
 	ESP_LOGW(TAG_CDC, "Commande inconnue: %s", line);
