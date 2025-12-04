@@ -53,30 +53,30 @@ This firmware repo focuses on the code running on the ESP32‑S3.
 From the current codebase (still evolving, but already functional):
 
 - **ESP32‑S3 keyboard core**
-	- Key matrix scanning (`matrix.c`).
-	- Keyboard logic and key handling (`keyboard_manager.c`, `keymap.c`).
+	- Key matrix scanning (`input/matrix.c`).
+	- Keyboard logic and key handling (`input/keyboard_manager.c`, `input/keymap.c`).
 	- Multiple layers with per‑key mapping stored in NVS / LittleFS.
 
 - **USB support (TinyUSB)**
-	- USB HID keyboard implementation (`usb_descriptors.c`, TinyUSB HID class).
+	- USB HID keyboard implementation (`comm/usb_descriptors.c`, TinyUSB HID class).
 	- USB CDC ACM channel for:
 		- Debug and logging.
-		- Command and configuration interface (`cdc_acm_com.c`).
+		- Command and configuration interface (`comm/cdc_acm_com.c`).
 
 - **Bluetooth HID**
-	- BLE HID device (`hid_bluetooth_manager.c`, `esp_hidd_prf_api.c`).
+	- BLE HID device (`comm/hid_bluetooth_manager.c`, `comm/esp_hidd_prf_api.c`).
 	- Wireless keyboard mode in addition to USB.
 
 - **OLED display**
-	- I²C OLED driver (`i2c_oled_display.c`).
-	- Shows current layer name and status text.
+	- I²C OLED driver and UI layer (`display/i2c_oled_display.c`, `display/status_display.c`).
+	- Shows current layer name, transport icons and a boot splash with version info.
 
 - **Storage**
-	- LittleFS manager (`littlefs_manager.c`) for persistent storage.
+	- LittleFS manager (`app/littlefs_manager.c`) for persistent storage.
 	- Keymaps loaded at boot (`keymap_init_nvs()`, `load_keymaps()`).
 
 - **Command interface over CDC ACM**
-	- Parses simple text commands (`cdc_acm_com.c`), for example:
+	- Parses simple text commands (`comm/cdc_acm_com.c`), for example:
 		- Set current layer.
 		- Change a single key in a specific layer/row/column.
 		- Display custom text on the OLED.
@@ -100,7 +100,17 @@ For precise BOM, schematics, mechanical parts and connector details, always refe
 
 ---
 
-## Development environment
+## Project layout & development environment
+
+```
+main/
+├── app/        # high-level tasks (main, filesystem, dfu)
+├── input/      # matrix scan, keyboard manager, keymaps
+├── display/    # OLED drivers, status UI and assets
+├── comm/       # USB/BLE stacks, CDC commands
+├── include/    # shared headers (display types, configs)
+└── CMakeLists.txt / idf_component.yml
+```
 
 The project uses:
 
@@ -132,6 +142,12 @@ Make sure ESP‑IDF is correctly installed and `IDF_PATH` is set before building
 - Current layer is:
 	- Sent over CDC (`cdc_send_layer()`).
 	- Displayed on the OLED using the text functions in `i2c_oled_display.c`.
+
+### OLED splash and status
+
+- On boot the OLED shows the firmware name + version (from `PRODUCT_NAME` / `GATTS_TAG`) for roughly two seconds before the UI transitions to real-time status.
+- The steady-state screen exposes the active layer, USB/BLE transport icon, and Bluetooth link status so users can quickly confirm connectivity.
+- After ~60 seconds of inactivity the display sleeps automatically and wakes on the next key press to avoid burn-in while staying responsive.
 
 ### CDC ACM command interface
 
@@ -184,65 +200,3 @@ Short non‑legal explanation:
 
 ---
 
-## 🇫🇷 Résumé en français
-
-### Présentation
-
-KaSe Keyboard Firmware est le firmware du clavier mécanique custom **KaSe**, basé sur un **ESP32‑S3**, avec support **USB HID**, **Bluetooth HID**, **écran OLED** et **couches de keymaps configurables**.
-
-Ce dépôt contient uniquement le code embarqué.  
-Les autres parties du projet sont dans :
-
-- Matériel / PCB / mécanique : **KaSe_PCB**  
-	https://github.com/mornepousse/KaSe_PCB
-- Logiciel de remapping et gestion : **KaSe_soft**  
-	https://github.com/mornepousse/KaSe_soft
-
-Projet en cours de développement, ouvert aux contributions et aux idées.
-
-### Fonctionnalités
-
-- Scan de matrice de touches, gestion des couches et keymaps persistants.
-- USB HID clavier via TinyUSB + interface **CDC ACM** (commandes / debug).
-- **Bluetooth HID** pour un mode clavier sans fil.
-- Écran **OLED I²C** pour afficher le layer courant et des infos.
-- Stockage persistant (**NVS / LittleFS**) pour conserver la configuration.
-
-### Matériel
-
-- Basé sur un **ESP32‑S3**.  
-	Les détails précis (référence MCU, brochage, schémas, mécanique) sont décrits dans `KaSe_PCB` :  
-	https://github.com/mornepousse/KaSe_PCB
-
-### Développement
-
-- Environnement : **VS Code** + extension **ESP‑IDF**.
-- Build avec ESP‑IDF (`idf.py`), CMake + Ninja.
-
-Exemple de commandes :
-
-```bash
-idf.py set-target esp32s3
-idf.py build
-idf.py flash
-idf.py monitor
-```
-
-### Configuration & remapping
-
-- Les keymaps et couches sont stockées dans la mémoire du clavier (NVS / LittleFS).
-- Une interface **CDC ACM** permet d’envoyer des commandes texte :
-	- changement de layer,
-	- remap d’une touche,
-	- affichage sur l’OLED, etc.
-- Pour une configuration plus confortable (outil PC), utiliser **KaSe_soft** :  
-	https://github.com/mornepousse/KaSe_soft
-
-### Licence & contributions
-
-- Licence prévue : **GPL‑3.0** (copyleft) :
-	- Utilisation et modification libres.
-	- Les dérivés distribués doivent rester sous GPL et publier leurs sources.
-- Projet orienté maker et communautaire : issues, idées et PR sont les bienvenues pour améliorer le firmware, la doc et l’écosystème KaSe.
-
- 
