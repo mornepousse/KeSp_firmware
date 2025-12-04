@@ -8,7 +8,7 @@
 #include "matrix.h"			  // current_layout, layer_changed
 #include "keyboard_config.h"  // MAX_LAYER
 #include "i2c_oled_display.h" // write_text_to_display
-#include "tusb_cdc_acm.h"	  // tinyusb_cdcacm_write_queue
+#include "tinyusb_cdc_acm.h"	  // tinyusb_cdcacm_write_queue
 #include "keyboard_manager.h" // macros
 #include "keymap.h"			  // default_layout_names
 #include "key_definitions.h"

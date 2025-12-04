@@ -1,5 +1,6 @@
 #include "tinyusb.h"
-#include "tusb_cdc_acm.h"
+#include "tinyusb_cdc_acm.h"
+#include "tinyusb_default_config.h"
 #include "usb_descriptors.h"
 #include "esp_log.h"
 #include "i2c_oled_display.h"
@@ -166,34 +167,31 @@ void tinyusb_cdc_line_state_changed_callback(int itf, cdcacm_event_t *event)
 
 void tinyusb_cdc_acm_init(void)
 {
-    
-  tinyusb_config_cdcacm_t amc_cfg = {
-        .usb_dev = TINYUSB_USBDEV_0,
+
+    tinyusb_config_cdcacm_t amc_cfg = {
         .cdc_port = TINYUSB_CDC_ACM_0,
-        .rx_unread_buf_sz = 64,
-        .callback_rx = &tinyusb_cdc_rx_callback, // the first way to register a callback
+        .callback_rx = &tinyusb_cdc_rx_callback,
         .callback_rx_wanted_char = NULL,
         .callback_line_state_changed = NULL,
         .callback_line_coding_changed = NULL,
     };
 
-    ESP_ERROR_CHECK(tusb_cdc_acm_init(&amc_cfg));
+    ESP_ERROR_CHECK(tinyusb_cdcacm_init(&amc_cfg));
     ESP_LOGI(TAG_UD, "CDC ACM initialization DONE");
 }
 
 void tinyusb_hid_init(void)
 {
     ESP_LOGI(TAG_UD, "USB initialization");
-   const tinyusb_config_t tusb_cfg = {
-       .device_descriptor = &device_descriptor,
-       .string_descriptor = hid_string_descriptor,
-       .string_descriptor_count = sizeof(hid_string_descriptor) / sizeof(hid_string_descriptor[0]),
-       .external_phy = false,
-       .configuration_descriptor = hid_cdc_configuration_descriptor,
-   };
 
-  ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
-  ESP_LOGI(TAG_UD, "USB initialization DONE");
+    tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
+    tusb_cfg.descriptor.device = &device_descriptor;
+    tusb_cfg.descriptor.string = hid_string_descriptor;
+    tusb_cfg.descriptor.string_count = sizeof(hid_string_descriptor) / sizeof(hid_string_descriptor[0]);
+    tusb_cfg.descriptor.full_speed_config = hid_cdc_configuration_descriptor;
+
+    ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
+    ESP_LOGI(TAG_UD, "USB initialization DONE");
 }
 
 void kase_tinyusb_init(void)
