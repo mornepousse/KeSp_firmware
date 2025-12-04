@@ -44,6 +44,7 @@ uint8_t last_layer = 0;
 uint8_t current_layout = 0;
 uint8_t is_layer_changed = 0;
 uint32_t lastDebounceTime = 0;
+uint32_t last_activity_time_ms = 0;
 
 uint8_t (*matrix_states[])[MATRIX_ROWS][MATRIX_COLS] = { &MATRIX_STATE,
 		&SLAVE_MATRIX_STATE, };
@@ -201,6 +202,7 @@ void scan_matrix(void) {
 					//current_press_row[3], current_press_col[3], current_press_row[4], current_press_col[4], current_press_row[5], current_press_col[5]);
 					//tud_hid_keyboard_report(1, 0, keycodes);
 					stat_matrix_changed = 1;
+					last_activity_time_ms = millis();
 					ESP_LOGI(TAG_MATRIX, "Row: %d, Col: %d, State: %d, K : %d %d %d %d %d %d ", row, col, curState, keycodes[0], keycodes[1], keycodes[2], keycodes[3], keycodes[4], keycodes[5]);
 				}
 
@@ -239,4 +241,9 @@ void scan_matrix(void) {
 void layer_changed(void)
 {
     is_layer_changed = 1;
+}
+
+uint32_t get_last_activity_time_ms(void)
+{
+	return last_activity_time_ms;
 }

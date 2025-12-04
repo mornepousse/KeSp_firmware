@@ -11,27 +11,40 @@
 #include "esp_lvgl_port.h"
 #include "esp_lcd_panel_vendor.h"
 #include "driver/i2c.h"
+#include "driver/gpio.h"
 
 static const char *TAG_DISP = "DISPL"; 
 // Déclaration préalable
 bool test_oled_presence(void);
 
 lv_disp_t *disp;
+bool display_available = true;
+static display_hw_config_t current_cfg = {
+    .bus_type = DISPLAY_BUS_I2C,
+    .width = 128,
+    .height = 64,
+    .pixel_clock_hz = 400 * 1000,
+    .reset_pin = GPIO_NUM_NC,
+    .i2c = {
+        .host = I2C_NUM_0,
+        .sda = GPIO_NUM_15,
+        .scl = GPIO_NUM_7,
+        .address = 0x3C,
+        .enable_internal_pullups = true,
+    },
+};
 
-#define I2C_HOST 0
+void display_set_hw_config(const display_hw_config_t *config)
+{
+    if (config == NULL)
+        return;
+    current_cfg = *config;
+}
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//////////////////// Please update the following configuration according to your LCD spec //////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define DISPL_LCD_PIXEL_CLOCK_HZ (400 * 1000)
-#define DISPL_PIN_NUM_SDA GPIO_NUM_15
-#define DISPL_PIN_NUM_SCL GPIO_NUM_7
-#define DISPL_PIN_NUM_RST -1
-#define DISPL_I2C_HW_ADDR 0x3C
-
-#define DISPL_LCD_H_RES 128
-#define DISPL_LCD_V_RES 64
-
+const display_hw_config_t *display_get_hw_config(void)
+{
+    return &current_cfg;
+}
 // Bit number used to represent command and parameter
 #define DISPL_LCD_CMD_BITS 8
 #define DISPL_LCD_PARAM_BITS 8
@@ -87,6 +100,13 @@ void display_clear_screen(void)
 
 void init_display(void)
 {
+    const display_hw_config_t *cfg = &current_cfg;
+    if (cfg->bus_type != DISPLAY_BUS_I2C)
+    {
+        ESP_LOGE(TAG_DISP, "Unsupported display bus type: %d", cfg->bus_type);
+        display_available = false;
+        return;
+    }
     // Tester d'abord si l'écran répond sur le bus I2C
     if (!test_oled_presence())
     {
@@ -100,17 +120,17 @@ void init_display(void)
     i2c_master_bus_config_t bus_config = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
-        .i2c_port = I2C_HOST,
-        .sda_io_num = DISPL_PIN_NUM_SDA,
-        .scl_io_num = DISPL_PIN_NUM_SCL,
-        .flags.enable_internal_pullup = true,
+        .i2c_port = cfg->i2c.host,
+        .sda_io_num = cfg->i2c.sda,
+        .scl_io_num = cfg->i2c.scl,
+        .flags.enable_internal_pullup = cfg->i2c.enable_internal_pullups,
     };
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &i2c_bus));
     ESP_LOGI(TAG_DISP, "Install panel IO");
     esp_lcd_panel_io_handle_t io_handle = NULL;
     esp_lcd_panel_io_i2c_config_t io_config = {
-        .dev_addr = DISPL_I2C_HW_ADDR,
-        .scl_speed_hz = DISPL_LCD_PIXEL_CLOCK_HZ,
+        .dev_addr = cfg->i2c.address,
+        .scl_speed_hz = cfg->pixel_clock_hz,
         .control_phase_bytes = 1,               // According to SSD1306 datasheet
         .lcd_cmd_bits = DISPL_LCD_CMD_BITS,     // According to SSD1306 datasheet
         .lcd_param_bits = DISPL_LCD_PARAM_BITS, // According to SSD1306 datasheet
@@ -122,11 +142,11 @@ void init_display(void)
     esp_lcd_panel_handle_t panel_handle = NULL;
     esp_lcd_panel_dev_config_t panel_config = {
         .bits_per_pixel = 1,
-        .reset_gpio_num = DISPL_PIN_NUM_RST,
+        .reset_gpio_num = cfg->reset_pin,
         .color_space = ESP_LCD_COLOR_SPACE_MONOCHROME,
     };
     esp_lcd_panel_ssd1306_config_t ssd1306_config = {
-        .height = DISPL_LCD_V_RES,
+        .height = cfg->height,
     };
 
     panel_config.vendor_config = &ssd1306_config;
@@ -146,10 +166,10 @@ void init_display(void)
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = io_handle,
         .panel_handle = panel_handle,
-        .buffer_size = DISPL_LCD_H_RES * DISPL_LCD_V_RES,
+        .buffer_size = cfg->width * cfg->height,
         .double_buffer = true,
-        .hres = DISPL_LCD_H_RES,
-        .vres = DISPL_LCD_V_RES,
+        .hres = cfg->width,
+        .vres = cfg->height,
         .monochrome = true,
 
         .rotation = {
@@ -180,13 +200,16 @@ bool test_oled_presence(void)
     //if(display_available == false) return false;
     esp_err_t err;
     i2c_master_bus_handle_t bus = NULL;
+    const display_hw_config_t *cfg = &current_cfg;
+    if (cfg->bus_type != DISPLAY_BUS_I2C)
+        return false;
     i2c_master_bus_config_t bus_config = (i2c_master_bus_config_t){
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
-        .i2c_port = I2C_HOST,
-        .sda_io_num = DISPL_PIN_NUM_SDA,
-        .scl_io_num = DISPL_PIN_NUM_SCL,
-        .flags.enable_internal_pullup = true,
+        .i2c_port = cfg->i2c.host,
+        .sda_io_num = cfg->i2c.sda,
+        .scl_io_num = cfg->i2c.scl,
+        .flags.enable_internal_pullup = cfg->i2c.enable_internal_pullups,
     };
     err = i2c_new_master_bus(&bus_config, &bus);
     if (err != ESP_OK)
@@ -199,13 +222,13 @@ bool test_oled_presence(void)
     i2c_master_dev_handle_t dev = NULL;
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = DISPL_I2C_HW_ADDR,
-        .scl_speed_hz = DISPL_LCD_PIXEL_CLOCK_HZ,
+        .device_address = cfg->i2c.address,
+        .scl_speed_hz = cfg->pixel_clock_hz,
     };
     err = i2c_master_bus_add_device(bus, &dev_cfg, &dev);
     if (err != ESP_OK)
     {
-        ESP_LOGW(TAG_DISP, "Ajout device OLED (0x%02X) échec: %s", DISPL_I2C_HW_ADDR, esp_err_to_name(err));
+        ESP_LOGW(TAG_DISP, "Ajout device OLED (0x%02X) échec: %s", cfg->i2c.address, esp_err_to_name(err));
         i2c_del_master_bus(bus);
         display_available = false;
         return false;
@@ -217,11 +240,11 @@ bool test_oled_presence(void)
     bool ok = (err == ESP_OK);
     if (!ok)
     {
-        ESP_LOGW(TAG_DISP, "Aucun ACK OLED @0x%02X (%s)", DISPL_I2C_HW_ADDR, esp_err_to_name(err));
+        ESP_LOGW(TAG_DISP, "Aucun ACK OLED @0x%02X (%s)", cfg->i2c.address, esp_err_to_name(err));
     }
     else
     {
-        ESP_LOGI(TAG_DISP, "OLED détecté @0x%02X", DISPL_I2C_HW_ADDR);
+        ESP_LOGI(TAG_DISP, "OLED détecté @0x%02X", cfg->i2c.address);
     }
 
     // Nettoyage (on recréera le bus dans init_display si présent)

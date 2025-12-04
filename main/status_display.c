@@ -2,6 +2,7 @@
 #include "hid_bluetooth_manager.h"
 #include "keyboard_manager.h"
 #include "i2c_oled_display.h"
+#include "keyboard_config.h"
 #include "img_bluetooth.c"
 #include "img_usb.c"
 #include "img_signal.c"
@@ -14,6 +15,12 @@ static int last_path_state = -1; // 0 = USB, 1 = BLE
 
 static lv_obj_t *icon_bt = NULL;
 static lv_obj_t *icon_path = NULL;
+static bool status_display_initialized = false;
+static bool status_display_sleeping = false;
+
+static void status_display_prepare_ui(bool clear_screen);
+static void status_display_update_connection_icons(bool force);
+static void status_display_init_icons(void);
 
 void draw_separator_line(void)
 {
@@ -23,31 +30,84 @@ void draw_separator_line(void)
 
 void status_display_update_layer_name(void)
 { 
-    if(display_available == false) return;
-     // Efface une bande autour de la zone du texte
-     draw_separator_line();
+    if(display_available == false || status_display_sleeping) return;
+    if (!status_display_initialized)
+    {
+        status_display_prepare_ui(true);
+    }
+    else
+    {
+        status_display_prepare_ui(false);
+    }
+    // Efface une bande autour de la zone du texte
+    draw_separator_line();
     draw_rectangle(38, 40, 128-38, 24);
     // Réécrit le nom du layout à la même position qu'avant
     write_text_to_display(default_layout_names[current_layout], 38, 48);
 }
 
-static void status_display_init_icons(void)
-{
-    if(display_available == false) return;
-    if (icon_bt != NULL || icon_path != NULL) return;
-
-    lv_obj_t *scr = lv_scr_act();
-
-    icon_bt = lv_img_create(scr);
-    lv_obj_set_pos(icon_bt, 20, 48);   // bas droite (16x16)
-
-    icon_path = lv_img_create(scr);
-    lv_obj_set_pos(icon_path, 0, 48);  // bas gauche (16x16)
-}
-
 void status_display_update(void)
 {
-    if(display_available == false) return;
+    if(display_available == false || status_display_sleeping) return;
+    status_display_update_connection_icons(false);
+}
+
+void status_display_start(void)
+{
+    display_hw_config_t cfg = keyboard_get_display_config();
+    display_set_hw_config(&cfg);
+    init_display();
+    if (!display_available)
+    {
+        status_display_initialized = false;
+        return;
+    }
+
+    status_display_sleeping = false;
+    status_display_refresh_all();
+}
+
+void status_display_refresh_all(void)
+{
+    if (display_available == false)
+        return;
+
+    status_display_sleeping = false;
+    status_display_prepare_ui(true);
+    status_display_update_layer_name();
+    status_display_update_connection_icons(true);
+}
+
+void status_display_sleep(void)
+{
+    if (display_available == false || status_display_sleeping)
+        return;
+
+    display_clear_screen();
+    status_display_sleeping = true;
+    icon_bt = NULL;
+    icon_path = NULL;
+    last_bt_state = -1;
+    last_path_state = -1;
+    status_display_initialized = false;
+}
+
+void status_display_wake(void)
+{
+    if (display_available == false)
+        return;
+
+    if (!status_display_sleeping)
+        return;
+
+    status_display_refresh_all();
+}
+
+static void status_display_update_connection_icons(bool force)
+{
+    if (display_available == false || status_display_sleeping)
+        return;
+
     int bt_state;
     if (!hid_bluetooth_is_initialized()) {
         bt_state = 0;
@@ -59,7 +119,7 @@ void status_display_update(void)
 
     int path_state = (keyboard_get_usb_bl_state() == 0) ? 0 : 1;
 
-    if (bt_state == last_bt_state && path_state == last_path_state) {
+    if (!force && bt_state == last_bt_state && path_state == last_path_state) {
         return;
     }
 
@@ -85,4 +145,37 @@ void status_display_update(void)
 
     last_bt_state = bt_state;
     last_path_state = path_state;
+}
+
+static void status_display_init_icons(void)
+{
+    if(display_available == false) return;
+    if (icon_bt != NULL || icon_path != NULL) return;
+
+    lv_obj_t *scr = lv_scr_act();
+
+    icon_bt = lv_img_create(scr);
+    lv_obj_set_pos(icon_bt, 20, 48);   // bas droite (16x16)
+
+    icon_path = lv_img_create(scr);
+    lv_obj_set_pos(icon_path, 0, 48);  // bas gauche (16x16)
+}
+
+static void status_display_prepare_ui(bool clear_screen)
+{
+    if (display_available == false)
+        return;
+
+    if (clear_screen)
+    {
+        display_clear_screen();
+        draw_separator_line();
+        icon_bt = NULL;
+        icon_path = NULL;
+        last_bt_state = -1;
+        last_path_state = -1;
+    }
+
+    status_display_init_icons();
+    status_display_initialized = true;
 }

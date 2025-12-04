@@ -19,6 +19,7 @@ extern uint8_t stat_matrix_changed;
 extern uint8_t last_layer;
 extern uint8_t current_layout;
 extern uint8_t is_layer_changed;
+extern uint32_t last_activity_time_ms;
 //extern
 /*
  * @brief deinitialize rtc pins
@@ -42,5 +43,7 @@ void scan_matrix(void);
 
 
 void layer_changed(void);
+
+uint32_t get_last_activity_time_ms(void);
 
 

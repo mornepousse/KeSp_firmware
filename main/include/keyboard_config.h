@@ -6,9 +6,11 @@
 #include <string.h>
 #include <inttypes.h>
 #include "driver/gpio.h"
+#include "driver/i2c.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "display_types.h"
 
 //#define VERSION_1
 #define VERSION_2
@@ -116,3 +118,22 @@ extern TaskHandle_t xKeyreportTask;
 #define COLS12 GPIO_NUM_46
 
 #endif
+
+static inline display_hw_config_t keyboard_get_display_config(void)
+{
+	display_hw_config_t cfg = {
+		.bus_type = DISPLAY_BUS_I2C,
+		.width = 128,
+		.height = 64,
+		.pixel_clock_hz = 400 * 1000,
+		.reset_pin = GPIO_NUM_NC,
+		.i2c = {
+			.host = I2C_NUM_0,
+			.sda = GPIO_NUM_15,
+			.scl = GPIO_NUM_7,
+			.address = 0x3C,
+			.enable_internal_pullups = true,
+		},
+	};
+	return cfg;
+}

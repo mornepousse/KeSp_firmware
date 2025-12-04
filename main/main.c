@@ -11,13 +11,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hid_bluetooth_manager.h"
-#include "i2c_oled_display.h"
 #include "keyboard_manager.h"
 #include "keymap.h"
 #include "littlefs_manager.h"
 #include "matrix.h"
 #include "usb_descriptors.h"
 #include "status_display.h"
+#include "esp_timer.h"
 
 
 #define TEST_DELAY_TIME_MS (3000)
@@ -27,6 +27,8 @@
 /************* BL ****************/
 
 static const char *TAG = "Main";
+
+static int display_sleep = 0; // 0 = on, 1 = off
 
 /************* TinyUSB descriptors ****************/
 
@@ -40,7 +42,7 @@ void app_main(void) {
   load_macros(macros_list, MAX_MACROS);
 
   ESP_LOGI(TAG, "display init");
-  init_display();
+  status_display_start();
   // Reset the rtc GPIOS
   rtc_matrix_deinit();
   ESP_LOGI(TAG, "Matrix setup init");
@@ -54,14 +56,29 @@ void app_main(void) {
   ESP_LOGI(TAG, "bluetooth init");
   init_hid_bluetooth();
 
-  status_display_update_layer_name();
-  status_display_update();
-  draw_separator_line();
+  status_display_refresh_all();
   for (;;) {
     if (is_layer_changed) {
       is_layer_changed = 0;
       status_display_update_layer_name();
       cdc_send_layer(current_layout);
+    }
+
+    // Gestion veille écran : efface après 1 minute d'inactivité clavier,
+    // puis rallume et réaffiche les infos à la prochaine activité.
+    uint32_t now = esp_timer_get_time() / 1000;
+    uint32_t last = get_last_activity_time_ms();
+
+    // Si aucune activité depuis 60s et écran encore allumé
+    if (!display_sleep && last != 0 && (now - last) > 60000) {
+      status_display_sleep();
+      display_sleep = 1;
+    }
+
+    // Si une activité récente et écran en veille, on réaffiche
+    if (display_sleep && last != 0 && (now - last) <= 500) {
+      status_display_wake();
+      display_sleep = 0;
     }
 
     //ESP_LOGI(TAG, "boucle main");
