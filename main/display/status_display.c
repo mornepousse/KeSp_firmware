@@ -20,11 +20,18 @@ static lv_obj_t *icon_path = NULL;
 static bool status_display_initialized = false;
 static bool status_display_sleeping = false;
 static const char *status_display_version_text = GATTS_TAG;
+static bool bt_blink_visible = true;
+static TickType_t bt_blink_last_tick = 0;
+static const TickType_t bt_blink_interval_ticks = pdMS_TO_TICKS(500);
+
+static bool is_showing_splash = false;
+static TickType_t splash_start_tick = 0;
 
 static void status_display_prepare_ui(bool clear_screen);
 static void status_display_update_connection_icons(bool force);
 static void status_display_init_icons(void);
 static void status_display_show_version_splash(void);
+void status_display_show_DFU_prog(void);
 
 void draw_separator_line(void)
 {
@@ -35,6 +42,9 @@ void draw_separator_line(void)
 void status_display_update_layer_name(void)
 { 
     if(display_available == false || status_display_sleeping) return;
+    
+    is_showing_splash = false;
+
     if (!status_display_initialized)
     {
         status_display_prepare_ui(true);
@@ -53,6 +63,16 @@ void status_display_update_layer_name(void)
 void status_display_update(void)
 {
     if(display_available == false || status_display_sleeping) return;
+
+    if (is_showing_splash) {
+        if ((xTaskGetTickCount() - splash_start_tick) > pdMS_TO_TICKS(3000)) {
+            is_showing_splash = false;
+            status_display_refresh_all();
+        } else {
+            return;
+        }
+    }
+
     status_display_update_connection_icons(false);
 }
 
@@ -69,7 +89,7 @@ void status_display_start(void)
 
     status_display_sleeping = false;
     status_display_show_version_splash();
-    status_display_refresh_all();
+    // status_display_refresh_all();
 }
 
 void status_display_refresh_all(void)
@@ -77,6 +97,7 @@ void status_display_refresh_all(void)
     if (display_available == false)
         return;
 
+    is_showing_splash = false;
     status_display_sleeping = false;
     status_display_prepare_ui(true);
     status_display_update_layer_name();
@@ -94,6 +115,8 @@ void status_display_sleep(void)
     icon_path = NULL;
     last_bt_state = -1;
     last_path_state = -1;
+    bt_blink_visible = true;
+    bt_blink_last_tick = xTaskGetTickCount();
     status_display_initialized = false;
 }
 
@@ -124,7 +147,7 @@ static void status_display_update_connection_icons(bool force)
 
     int path_state = (keyboard_get_usb_bl_state() == 0) ? 0 : 1;
 
-    if (!force && bt_state == last_bt_state && path_state == last_path_state) {
+    if (!force && bt_state == last_bt_state && path_state == last_path_state && bt_state != 2) {
         return;
     }
 
@@ -133,11 +156,35 @@ static void status_display_update_connection_icons(bool force)
 
     // Gestion de l'icône BT : visible uniquement si le Bluetooth est initialisé
     if (bt_state == 0) {
-        if (icon_bt) lv_obj_add_flag(icon_bt, LV_OBJ_FLAG_HIDDEN);
-    } else {
+        bt_blink_visible = false;
+        bt_blink_last_tick = xTaskGetTickCount();
+        if (icon_bt) {
+            lv_obj_add_flag(icon_bt, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else if (bt_state == 1) {
+        bt_blink_visible = true;
+        bt_blink_last_tick = xTaskGetTickCount();
         if (icon_bt) {
             lv_obj_clear_flag(icon_bt, LV_OBJ_FLAG_HIDDEN);
-            lv_img_set_src(icon_bt, &wifi); // même icône pour BT actif/BT connecté
+            lv_img_set_src(icon_bt, &wifi);
+        }
+    } else {
+        TickType_t now = xTaskGetTickCount();
+        if (force) {
+            bt_blink_visible = true;
+            bt_blink_last_tick = now;
+        } else if ((now - bt_blink_last_tick) >= bt_blink_interval_ticks) {
+            bt_blink_visible = !bt_blink_visible;
+            bt_blink_last_tick = now;
+        }
+
+        if (icon_bt) {
+            if (bt_blink_visible) {
+                lv_obj_clear_flag(icon_bt, LV_OBJ_FLAG_HIDDEN);
+                lv_img_set_src(icon_bt, &wifi);
+            } else {
+                lv_obj_add_flag(icon_bt, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     }
 
@@ -179,6 +226,8 @@ static void status_display_prepare_ui(bool clear_screen)
         icon_path = NULL;
         last_bt_state = -1;
         last_path_state = -1;
+        bt_blink_visible = true;
+        bt_blink_last_tick = xTaskGetTickCount();
     }
 
     status_display_init_icons();
@@ -192,7 +241,17 @@ static void status_display_show_version_splash(void)
 
     display_clear_screen();
     write_text_to_display_centre(status_display_version_text, 0, 0);
-    vTaskDelay(pdMS_TO_TICKS(3000));
-    display_clear_screen();
+    
+    is_showing_splash = true;
+    splash_start_tick = xTaskGetTickCount();
     status_display_initialized = false;
+}
+
+
+void status_display_show_DFU_prog(void)
+{
+    if (display_available == false)
+        return;
+    display_clear_screen();
+    write_text_to_display_centre("DFU Mode", 0, 0); 
 }

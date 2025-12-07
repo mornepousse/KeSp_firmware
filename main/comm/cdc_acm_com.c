@@ -13,6 +13,8 @@
 #include "keymap.h"			  // default_layout_names
 #include "key_definitions.h"
 #include "dfu_manager.h"      // reboot_to_dfu
+#include "status_display.h" // status_display_show_DFU_prog
+#include "tusb.h"           // tud_cdc_n_connected
 
 // Interface CDC utilisée (0 par défaut)
 #ifndef CDC_ITF
@@ -20,6 +22,38 @@
 #endif
 
 static const char *TAG_CDC = "CDC_CMD";
+
+// Forward declarations used by handlers defined above
+static void cdc_send_line(const char *text);
+static void trim_spaces(char *str);
+
+// Custom log handler to redirect ESP_LOG to CDC
+static vprintf_like_t original_log_vprintf = NULL;
+
+static int cdc_log_vprintf(const char *fmt, va_list args) {
+    // 1. Call original log handler (UART/JTAG) if it exists
+    int ret = 0;
+    if (original_log_vprintf) {
+        ret = original_log_vprintf(fmt, args);
+    }
+
+    // 2. Send to CDC if connected
+    // Use a small stack buffer; truncate if too long
+    char buf[256];
+    int len = vsnprintf(buf, sizeof(buf), fmt, args);
+    if (len > 0) {
+        if (len > sizeof(buf) - 1) len = sizeof(buf) - 1;
+        
+        // Check connection to avoid blocking/filling buffer when no host
+        if (tud_cdc_n_connected(CDC_ITF)) {
+            // Write to CDC; this puts data in the TinyUSB FIFO
+            tinyusb_cdcacm_write_queue(CDC_ITF, (uint8_t*)buf, len);
+            // Flush immediately so logs appear in real-time
+            tinyusb_cdcacm_write_flush(CDC_ITF, 0);
+        }
+    }
+    return ret;
+}
 
 // ----------------------------------------------------------------------------------
 // FIFO circulaire de lignes de commandes
@@ -37,6 +71,117 @@ void cdc_cmd_fifo_init(void)
 {
 	fifo_w = fifo_r = fifo_count = 0;
 	assemble_len = 0;
+}
+
+// Commande: SETLAYER<layer>:<val1>,<val2>,...,<valN>
+// Exemple: SETLAYER0:0x0004,0x0005,0x0006,... (N must be MATRIX_ROWS*MATRIX_COLS)
+static void cmd_setlayer_command(const char *arg)
+{
+	if (arg == NULL)
+	{
+		cdc_send_line("ERR SETLAYER: arguments manquants");
+		return;
+	}
+
+	// Copy into a static scratch buffer to keep stack usage small when CDC_CMD_MAX_LEN is large
+	static char buffer[CDC_CMD_MAX_LEN];
+	strncpy(buffer, arg, sizeof(buffer));
+	buffer[sizeof(buffer) - 1] = '\0';
+
+	char *sep = strchr(buffer, ':'); 
+	if (!sep)
+	{
+		cdc_send_line("ERR SETLAYER: format SETLAYER<idx>:v1,v2,...");
+		return;
+	}
+
+	*sep = '\0';
+	char *idx_str = buffer;
+	char *list_str = sep + 1;
+	trim_spaces(idx_str);
+	trim_spaces(list_str);
+	if (*idx_str == '\0' || *list_str == '\0')
+	{
+		cdc_send_line("ERR SETLAYER: index ou liste vide");
+		return;
+	}
+
+	int idx = atoi(idx_str);
+	if (idx < 0 || idx >= LAYERS)
+	{
+		cdc_send_line("ERR SETLAYER: index invalide");
+		return;
+	}
+
+	char dbg_msg[96];
+	snprintf(dbg_msg, sizeof(dbg_msg), "DBG SETLAYER idx=%d", idx);
+	cdc_send_line(dbg_msg);
+
+	// Parse comma separated values
+	size_t expected = MATRIX_ROWS * MATRIX_COLS;
+	uint16_t parsed[ expected ];
+	size_t count = 0;
+	char *saveptr = NULL;
+	char *tok = strtok_r(list_str, ",", &saveptr);
+	while (tok && count < expected)
+	{
+		trim_spaces(tok);
+		long v = strtol(tok, NULL, 0); // support 0x.. or decimal
+		if (v < 0 || v > 0xFFFF)
+		{
+			cdc_send_line("ERR SETLAYER: valeur hors plage");
+			return;
+		}
+		parsed[count++] = (uint16_t)v;
+		tok = strtok_r(NULL, ",", &saveptr);
+	}
+
+	if (count != expected)
+	{
+		char msg[64];
+		snprintf(msg, sizeof(msg), "ERR SETLAYER: attendu %u valeurs, recu %u", (unsigned)expected, (unsigned)count);
+		cdc_send_line(msg);
+		return;
+	}
+
+	// Write into keymaps (row-major)
+	extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
+	size_t pos = 0;
+	for (size_t r = 0; r < MATRIX_ROWS; ++r)
+	{
+		for (size_t c = 0; c < MATRIX_COLS; ++c)
+		{
+			keymaps[idx][r][c] = parsed[pos++];
+		}
+	}
+
+	// Persist all keymaps (size in BYTES)
+	size_t total_elements = (size_t)LAYERS * MATRIX_ROWS * MATRIX_COLS;
+	size_t total_bytes = total_elements * sizeof(uint16_t);
+	save_keymaps((uint16_t *)keymaps, total_bytes);
+
+	// Small readback preview of first 6 entries of this layer for host-side verification
+	uint16_t preview[6] = {0};
+	for (size_t i = 0; i < 6 && i < expected; ++i)
+	{
+		preview[i] = parsed[i];
+	}
+
+	// Split debug across two lines to avoid truncation
+	snprintf(dbg_msg, sizeof(dbg_msg), "DBG SETLAYER persisted %u bytes", (unsigned)total_bytes);
+	cdc_send_line(dbg_msg);
+	snprintf(dbg_msg, sizeof(dbg_msg), "DBG SETLAYER preview:%04X,%04X,%04X,%04X,%04X,%04X",
+			 preview[0], preview[1], preview[2], preview[3], preview[4], preview[5]);
+	cdc_send_line(dbg_msg);
+
+	// If this is the current layer, refresh display
+	extern uint8_t current_layout;
+	if ((uint8_t)idx == current_layout)
+	{
+		status_display_update_layer_name();
+	}
+
+	cdc_send_line("OK");
 }
 
 enum cdc_command_type
@@ -72,6 +217,7 @@ bool cdc_cmd_push(const char *line, uint16_t len)
 	slot->len = len;
 	fifo_w = (fifo_w + 1) % CDC_CMD_FIFO_DEPTH;
 	fifo_count++;
+	ESP_LOGI(TAG_CDC, "CDC RX line len=%u", (unsigned)len);
 	return true;
 }
 
@@ -153,7 +299,7 @@ void cdc_debug(const char *msg)
 // (Extension future: MACRO:<id>, etc.)
 // ----------------------------------------------------------------------------------
 
-static void cmd_set_layer(const char *arg)
+__attribute__((unused)) static void cmd_set_layer(const char *arg)
 {
 	if (!isdigit((unsigned char)arg[0]))
 	{
@@ -182,7 +328,7 @@ static void cmd_get_current_layer_index(void)
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
-static void cmd_display_text(const char *txt)
+__attribute__((unused)) static void cmd_display_text(const char *txt)
 {
 	if (txt == NULL || *txt == '\0')
 	{
@@ -298,7 +444,8 @@ static void cmd_set_key(const char *arg)
 	keymaps[layer][row][col] = (uint16_t)value;
 	//cdc_debug($"SETKEY OK %d,%d,%d", layer, row, col, value);
 	ESP_LOGI(TAG_CDC, "SETKEY: [%d][%d][%d] = 0x%04X", layer, row, col, value);
-	save_keymaps((uint16_t *)keymaps, LAYERS * MATRIX_ROWS * MATRIX_COLS);
+	size_t total_elements = (size_t)LAYERS * MATRIX_ROWS * MATRIX_COLS;
+	save_keymaps((uint16_t *)keymaps, total_elements * sizeof(uint16_t));
 	// send_data("OK\r\n", 5);
 }
 
@@ -602,6 +749,8 @@ static void cmd_macro_delete(const char *arg)
 static void cmd_reboot_to_dfu(void)
 {
 	cdc_send_line("Rebooting to DFU...");
+	status_display_show_DFU_prog();
+	vTaskDelay(pdMS_TO_TICKS(300));
 	reboot_to_dfu();
 }
 
@@ -647,6 +796,11 @@ static void parse_and_execute(const char *line)
 		cmd_set_key(line + 6);
 		return;
 	}
+	if (strncasecmp(line, "SETLAYER", 8) == 0)
+	{
+		cmd_setlayer_command(line + 8);
+		return;
+	}
 	if (strncasecmp(line, "MACROS?", 7) == 0)
 	{
 		cmd_list_macros();
@@ -688,17 +842,19 @@ static void parse_and_execute(const char *line)
 void receive_data(const char *data, uint16_t len)
 {
 	static bool last_was_cr = false; // pour gérer CRLF
+	static bool overflowed = false;  // si une ligne dépasse CDC_CMD_MAX_LEN, on drop jusqu'à prochain \r/\n
 	for (size_t i = 0; i < len; ++i)
 	{
 		char c = data[i];
 		if (c == '\r')
 		{
 			// Fin de ligne sur CR
-			if (assemble_len > 0)
+			if (!overflowed && assemble_len > 0)
 			{
 				cdc_cmd_push(assemble_buf, assemble_len);
 				assemble_len = 0;
 			}
+			overflowed = false;
 			last_was_cr = true;
 			continue;
 		}
@@ -710,23 +866,24 @@ void receive_data(const char *data, uint16_t len)
 				last_was_cr = false;
 				continue;
 			}
-			if (assemble_len > 0)
+			if (!overflowed && assemble_len > 0)
 			{
 				cdc_cmd_push(assemble_buf, assemble_len);
 				assemble_len = 0;
 			}
+			overflowed = false;
 			continue;
 		}
 		last_was_cr = false;
-		if (assemble_len < (CDC_CMD_MAX_LEN - 1))
+		if (!overflowed && assemble_len < (CDC_CMD_MAX_LEN - 1))
 		{
 			assemble_buf[assemble_len++] = c;
 		}
 		else
 		{
-			// overflow - flush implicite
-			cdc_cmd_push(assemble_buf, assemble_len);
-			assemble_len = 0;
+			// overflow - drop remainder until end-of-line
+			overflowed = true;
+			ESP_LOGW(TAG_CDC, "CDC RX overflow (len>=%u)", (unsigned)CDC_CMD_MAX_LEN);
 		}
 	}
 }
@@ -754,5 +911,11 @@ void cdc_process_commands_task(void *arg)
 void init_cdc_commands(void)
 {
 	cdc_cmd_fifo_init();
-	xTaskCreate(cdc_process_commands_task, "cdc_cmd", 3072, NULL, 4, NULL);
+	
+	// Register our custom log vprintf to redirect logs to CDC
+	// Save original to chain calls
+	original_log_vprintf = esp_log_set_vprintf(cdc_log_vprintf);
+
+	// Increase stack depth to cope with larger CDC_CMD_MAX_LEN buffers
+	xTaskCreate(cdc_process_commands_task, "cdc_cmd", 4096, NULL, 4, NULL);
 }

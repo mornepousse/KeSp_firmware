@@ -6,4 +6,5 @@ void status_display_sleep(void);
 void status_display_wake(void);
 void status_display_update(void);
 void status_display_update_layer_name(void);
-void draw_separator_line(void);
+void draw_separator_line(void); 
+void status_display_show_DFU_prog(void);

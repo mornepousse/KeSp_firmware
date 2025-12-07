@@ -37,7 +37,7 @@ void app_main(void) {
   kase_tinyusb_init();
   init_cdc_commands();
   keymap_init_nvs();
-  load_keymaps((uint16_t *)keymaps, LAYERS * MATRIX_ROWS * MATRIX_COLS);
+  load_keymaps((uint16_t *)keymaps, LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
   load_layout_names(default_layout_names, LAYERS);
   load_macros(macros_list, MAX_MACROS);
 
@@ -56,7 +56,7 @@ void app_main(void) {
   ESP_LOGI(TAG, "bluetooth init");
   init_hid_bluetooth();
 
-  status_display_refresh_all();
+  // status_display_refresh_all();
   for (;;) {
     if (is_layer_changed) {
       is_layer_changed = 0;
@@ -81,6 +81,7 @@ void app_main(void) {
       display_sleep = 0;
     }
 
+    status_display_update();
     //ESP_LOGI(TAG, "boucle main");
     vTaskDelay(pdMS_TO_TICKS(100));
   }

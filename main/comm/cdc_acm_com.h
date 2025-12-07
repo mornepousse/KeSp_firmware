@@ -5,9 +5,9 @@
 
 // Taille du buffer ligne (commande texte)
 
-#define CDC_CMD_MAX_LEN 64
+#define CDC_CMD_MAX_LEN 1024
 // Nombre de lignes stockables
-#define CDC_CMD_FIFO_DEPTH 8
+#define CDC_CMD_FIFO_DEPTH 4
 
 typedef struct {
 	char line[CDC_CMD_MAX_LEN];
