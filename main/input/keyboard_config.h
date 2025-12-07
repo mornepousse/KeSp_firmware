@@ -20,7 +20,7 @@
 #define SERIAL_NUMBER "1994"               // 3: Serials, should use chip ID
 
 #define MODULE_ID "MORNEPOUSSE"
-#define GATTS_TAG "KaSe V2.1.1" // The device's name
+#define GATTS_TAG "KaSe v1.2-a" // The device's name
 #define MAX_BT_DEVICENAME_LENGTH 40
 
 #define MASTER  // undefine if you are not flashing the main controller
