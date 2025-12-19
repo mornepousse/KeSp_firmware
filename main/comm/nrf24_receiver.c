@@ -1,0 +1,303 @@
+#include "nrf24_receiver.h"
+#include "driver/spi_master.h"
+#include "driver/gpio.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_task_wdt.h"
+#include "keyboard_manager.h"
+#include "status_display.h"
+#include <string.h>
+
+#define TAG "NRF24"
+
+// Pinout
+#define PIN_MOSI 5
+#define PIN_MISO 4
+#define PIN_SCK  6
+#define PIN_CSN  48
+#define PIN_CE   47
+#define PIN_PWR  36
+#define PIN_IRQ  45
+
+// NRF24 Commands
+#define R_REGISTER    0x00
+#define W_REGISTER    0x20
+#define R_RX_PAYLOAD  0x61
+#define W_TX_PAYLOAD  0xA0
+#define FLUSH_TX      0xE1
+#define FLUSH_RX      0xE2
+#define NOP           0xFF
+
+// Registers
+#define CONFIG      0x00
+#define EN_AA       0x01
+#define EN_RXADDR   0x02
+#define SETUP_AW    0x03
+#define SETUP_RETR  0x04
+#define RF_CH       0x05
+#define RF_SETUP    0x06
+#define STATUS      0x07
+#define RX_ADDR_P0  0x0A
+#define RX_PW_P0    0x11
+#define FIFO_STATUS 0x17
+#define DYNPD       0x1C
+#define FEATURE     0x1D
+#define RPD         0x09
+
+static spi_device_handle_t spi;
+
+static void nrf_write_reg(uint8_t reg, uint8_t value) {
+    uint8_t tx_data[2] = {W_REGISTER | (reg & 0x1F), value};
+    spi_transaction_t t = {
+        .length = 16,
+        .tx_buffer = tx_data,
+    };
+    spi_device_polling_transmit(spi, &t);
+}
+
+static void nrf_write_buf(uint8_t reg, const uint8_t *data, uint8_t len) {
+    uint8_t *tx_buf = heap_caps_malloc(len + 1, MALLOC_CAP_DMA);
+    if (!tx_buf) return;
+
+    tx_buf[0] = W_REGISTER | (reg & 0x1F);
+    memcpy(&tx_buf[1], data, len);
+
+    spi_transaction_t t = {
+        .length = (len + 1) * 8,
+        .tx_buffer = tx_buf,
+    };
+    spi_device_polling_transmit(spi, &t);
+    free(tx_buf);
+}
+
+static void nrf_read_buf(uint8_t reg, uint8_t *data, uint8_t len) {
+    uint8_t *tx_buf = heap_caps_malloc(len + 1, MALLOC_CAP_DMA);
+    uint8_t *rx_buf = heap_caps_malloc(len + 1, MALLOC_CAP_DMA);
+    if (!tx_buf || !rx_buf) {
+        free(tx_buf);
+        free(rx_buf);
+        return;
+    }
+
+    memset(tx_buf, 0xFF, len + 1);
+    tx_buf[0] = R_REGISTER | (reg & 0x1F);
+
+    spi_transaction_t t = {
+        .length = (len + 1) * 8,
+        .tx_buffer = tx_buf,
+        .rx_buffer = rx_buf,
+    };
+    spi_device_polling_transmit(spi, &t);
+    
+    memcpy(data, &rx_buf[1], len);
+    
+    free(tx_buf);
+    free(rx_buf);
+}
+
+static uint8_t nrf_read_reg(uint8_t reg) {
+    uint8_t tx[2] = {R_REGISTER | (reg & 0x1F), 0xFF};
+    uint8_t rx[2] = {0};
+    
+    spi_transaction_t t = {
+        .length = 16,
+        .tx_buffer = tx,
+        .rx_buffer = rx,
+    };
+    
+    spi_device_polling_transmit(spi, &t);
+    return rx[1];
+}
+
+static void nrf_read_payload(uint8_t *data, uint8_t len) {
+    uint8_t *tx_buf = heap_caps_malloc(len + 1, MALLOC_CAP_DMA);
+    uint8_t *rx_buf = heap_caps_malloc(len + 1, MALLOC_CAP_DMA);
+    if (!tx_buf || !rx_buf) {
+        free(tx_buf);
+        free(rx_buf);
+        return;
+    }
+
+    memset(tx_buf, 0, len + 1);
+    tx_buf[0] = R_RX_PAYLOAD;
+
+    spi_transaction_t t = {
+        .length = (len + 1) * 8,
+        .tx_buffer = tx_buf,
+        .rx_buffer = rx_buf,
+    };
+    spi_device_polling_transmit(spi, &t);
+
+    memcpy(data, &rx_buf[1], len);
+
+    free(tx_buf);
+    free(rx_buf);
+}
+
+static void nrf_flush_rx() {
+    uint8_t cmd = FLUSH_RX;
+    spi_transaction_t t = {
+        .length = 8,
+        .tx_buffer = &cmd,
+        .flags = SPI_TRANS_USE_TXDATA,
+    };
+    spi_device_polling_transmit(spi, &t);
+}
+
+static uint8_t nrf_get_status() {
+    uint8_t cmd = NOP;
+    uint8_t status = 0;
+    spi_transaction_t t = {
+        .length = 8,
+        .tx_buffer = &cmd,
+        .rx_buffer = &status,
+        .flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA,
+    };
+    spi_device_polling_transmit(spi, &t);
+    return status;
+}
+
+void nrf24_init(void) {
+    // Power ON
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << PIN_PWR) | (1ULL << PIN_CE),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io_conf);
+    
+    // IRQ Pin Config
+    gpio_config_t irq_conf = {
+        .pin_bit_mask = (1ULL << PIN_IRQ),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&irq_conf);
+
+    gpio_set_level(PIN_PWR, 0); // Low to turn ON P-channel (Active Low)
+    gpio_set_level(PIN_CE, 0);
+
+    vTaskDelay(pdMS_TO_TICKS(100)); // Wait for power up
+
+    // SPI Init
+    spi_bus_config_t buscfg = {
+        .miso_io_num = PIN_MISO,
+        .mosi_io_num = PIN_MOSI,
+        .sclk_io_num = PIN_SCK,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 32,
+    };
+    
+    // Use SPI2_HOST
+    esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SPI Init Failed: %d", ret);
+        return;
+    }
+
+    spi_device_interface_config_t devcfg = {
+        .clock_speed_hz = 4000000, // 4 MHz
+        .mode = 0,
+        .spics_io_num = PIN_CSN,
+        .queue_size = 7,
+    };
+    ret = spi_bus_add_device(SPI2_HOST, &devcfg, &spi);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SPI Device Add Failed: %d", ret);
+        return;
+    }
+
+    // NRF Config
+    nrf_write_reg(CONFIG, 0x00); // Power Down first
+    nrf_write_reg(EN_AA, 0x00);  // No Auto Ack
+    nrf_write_reg(EN_RXADDR, 0x01); // Enable Pipe 0
+    nrf_write_reg(SETUP_AW, 0x03); // 5 bytes address
+    nrf_write_reg(SETUP_RETR, 0x00); // Retransmit disabled
+    nrf_write_reg(RF_CH, 76); // Channel 76
+    nrf_write_reg(RF_SETUP, 0x06); // 1Mbps, 0dBm
+    
+    uint8_t addr[5] = {0xCE, 0xCE, 0xCE, 0xCE, 0xCE};
+    nrf_write_buf(RX_ADDR_P0, addr, 5);
+    
+    nrf_write_reg(RX_PW_P0, 5); // 5 bytes payload
+    
+    nrf_write_reg(DYNPD, 0x00); // No dynamic payload
+    nrf_write_reg(FEATURE, 0x00); // No features
+
+    // Verify configuration
+    uint8_t check_ch = nrf_read_reg(RF_CH);
+    uint8_t check_setup = nrf_read_reg(RF_SETUP);
+    uint8_t check_addr[5];
+    nrf_read_buf(RX_ADDR_P0, check_addr, 5);
+
+    ESP_LOGI(TAG, "NRF Check: CH=%d (Exp 76), SETUP=0x%02X (Exp 0x06), ADDR=%02X:%02X:%02X:%02X:%02X", 
+             check_ch, check_setup, 
+             check_addr[0], check_addr[1], check_addr[2], check_addr[3], check_addr[4]);
+
+    nrf_flush_rx();
+    
+    // Power Up and RX Mode
+    // CONFIG: PRIM_RX=1, PWR_UP=1, CRC=1 (16-bit)
+    // EN_CRC (bit 3) = 1
+    // CRCO (bit 2) = 1 (2 bytes)
+    // PWR_UP (bit 1) = 1
+    // PRIM_RX (bit 0) = 1
+    // Total: 0000 1111 = 0x0F
+    nrf_write_reg(CONFIG, 0x0F);
+    
+    // CE High to start listening
+    gpio_set_level(PIN_CE, 1);
+    
+    ESP_LOGI(TAG, "NRF24 Initialized (Fixed Config: CH76, 1Mbps, CRC16)");
+}
+
+bool nrf24_check_spi(void) {
+    uint8_t check_ch = nrf_read_reg(RF_CH);
+    return (check_ch == 76);
+}
+
+void nrf24_task(void *arg) {
+    nrf24_init();
+    
+    uint8_t payload[32];
+    uint32_t packet_count = 0;
+    TickType_t last_log_time = xTaskGetTickCount();
+    
+    // Force Channel 76
+    nrf_write_reg(RF_CH, 76);
+    ESP_LOGI(TAG, "NRF24 Receiver ready on CH 76");
+
+    while (1) {
+        // 1. Read FIFO Status
+        uint8_t fifo = nrf_read_reg(FIFO_STATUS);
+
+        // 2. Check for Data - FIFO bit 0 = RX_EMPTY
+        while (!(fifo & 0x01)) {
+            nrf_read_payload(payload, 5);
+            nrf_write_reg(STATUS, 0x70); // Clear all IRQ flags
+            
+            if (payload[0] == 0x01) {
+                send_mouse_report(payload[1], (int8_t)payload[2], (int8_t)payload[3], (int8_t)payload[4]);
+                packet_count++;
+            }
+            
+            fifo = nrf_read_reg(FIFO_STATUS);
+        }
+        
+        // 3. Debug Log every 10 seconds (reduced to avoid blocking)
+        if ((xTaskGetTickCount() - last_log_time) >= pdMS_TO_TICKS(10000)) {
+            ESP_LOGI(TAG, "NRF24 | Packets: %lu", packet_count);
+            packet_count = 0;
+            last_log_time = xTaskGetTickCount();
+        }
+        
+        // 4. 2ms delay = 500Hz polling rate (good for mouse)
+        vTaskDelay(pdMS_TO_TICKS(2)); 
+    }
+}

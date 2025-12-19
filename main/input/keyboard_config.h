@@ -86,8 +86,8 @@ extern TaskHandle_t xKeyreportTask;
 #define COLS4 GPIO_NUM_18
 #define COLS5 GPIO_NUM_17
 #define COLS6 GPIO_NUM_16
-#define COLS7 GPIO_NUM_43
-#define COLS8 GPIO_NUM_44
+#define COLS7 GPIO_NUM_21 //GPIO_NUM_43 
+#define COLS8 GPIO_NUM_37 //GPIO_NUM_44
 #define COLS9 GPIO_NUM_1
 #define COLS10 GPIO_NUM_2
 #define COLS11 GPIO_NUM_42

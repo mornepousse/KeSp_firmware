@@ -17,6 +17,10 @@ static int last_path_state = -1; // 0 = USB, 1 = BLE
 
 static lv_obj_t *icon_bt = NULL;
 static lv_obj_t *icon_path = NULL;
+static lv_obj_t *indicator_mouse = NULL;
+static lv_obj_t *label_nrf_debug = NULL;
+static TickType_t last_mouse_activity = 0;
+
 static bool status_display_initialized = false;
 static bool status_display_sleeping = false;
 static const char *status_display_version_text = GATTS_TAG;
@@ -74,6 +78,14 @@ void status_display_update(void)
     }
 
     status_display_update_connection_icons(false);
+
+    if (indicator_mouse) {
+        if ((xTaskGetTickCount() - last_mouse_activity) < pdMS_TO_TICKS(200)) {
+            lv_obj_clear_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
 }
 
 void status_display_start(void)
@@ -211,6 +223,15 @@ static void status_display_init_icons(void)
 
     icon_path = lv_img_create(scr);
     lv_obj_set_pos(icon_path, 0, 48);  // bas gauche (16x16)
+
+    indicator_mouse = lv_label_create(scr);
+    lv_label_set_text(indicator_mouse, "M");
+    lv_obj_set_pos(indicator_mouse, 118, 48);
+    lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
+
+    label_nrf_debug = lv_label_create(scr);
+    lv_label_set_text(label_nrf_debug, "");
+    lv_obj_set_pos(label_nrf_debug, 0, 0);
 }
 
 static void status_display_prepare_ui(bool clear_screen)
@@ -224,6 +245,8 @@ static void status_display_prepare_ui(bool clear_screen)
         draw_separator_line();
         icon_bt = NULL;
         icon_path = NULL;
+        indicator_mouse = NULL;
+        label_nrf_debug = NULL;
         last_bt_state = -1;
         last_path_state = -1;
         bt_blink_visible = true;
@@ -254,4 +277,34 @@ void status_display_show_DFU_prog(void)
         return;
     display_clear_screen();
     write_text_to_display_centre("DFU Mode", 0, 0); 
+}
+
+void status_display_notify_mouse_activity(void)
+{
+    last_mouse_activity = xTaskGetTickCount();
+}
+
+void status_display_update_nrf_debug(uint32_t pps, uint8_t status, bool spi_ok, uint8_t rpd, uint8_t last_byte, uint8_t mode)
+{
+    if (display_available == false || status_display_sleeping) return;
+    
+    if (!status_display_initialized) {
+        status_display_prepare_ui(false);
+    }
+
+    if (label_nrf_debug) {
+        if (spi_ok) {
+            if (mode == 99) {
+                lv_label_set_text(label_nrf_debug, "Scanning...");
+            } else if (mode > 0 && mode < 99) {
+                lv_label_set_text_fmt(label_nrf_debug, "Found CH:%d", mode);
+            } else {
+                // Normal Mode
+                // Shortened to fit on screen: RX count, Status hex, RPD (Carrier)
+                lv_label_set_text_fmt(label_nrf_debug, "RX:%lu S:%02X R:%d", (unsigned long)pps, status, rpd);
+            }
+        } else {
+            lv_label_set_text(label_nrf_debug, "SPI ERROR");
+        }
+    }
 }

@@ -155,14 +155,15 @@ void scan_matrix(void) {
 
 	for (uint8_t col = 0; col < MATRIX_COLS; col++) {
 		gpio_set_level(MATRIX_COLS_PINS[col], 1);
+		uint32_t now_col = millis();
 		for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
 
 			curState = gpio_get_level(MATRIX_ROWS_PINS[row]);
 			if (PREV_MATRIX_STATE[row][col] != curState) {
-				DEBOUNCE_MATRIX[row][col] = millis();
+				DEBOUNCE_MATRIX[row][col] = now_col;
 			}
 			PREV_MATRIX_STATE[row][col] = curState;
-			if ((millis() - DEBOUNCE_MATRIX[row][col]) > DEBOUNCE) {
+			if ((now_col - DEBOUNCE_MATRIX[row][col]) > DEBOUNCE) {
 
 				if (MATRIX_STATE[row][col] != curState) {
 					MATRIX_STATE[row][col] = curState;
@@ -202,7 +203,7 @@ void scan_matrix(void) {
 					//current_press_row[3], current_press_col[3], current_press_row[4], current_press_col[4], current_press_row[5], current_press_col[5]);
 					//tud_hid_keyboard_report(1, 0, keycodes);
 					stat_matrix_changed = 1;
-					last_activity_time_ms = millis();
+					last_activity_time_ms = now_col;
 					ESP_LOGI(TAG_MATRIX, "Row: %d, Col: %d, State: %d, K : %d %d %d %d %d %d ", row, col, curState, keycodes[0], keycodes[1], keycodes[2], keycodes[3], keycodes[4], keycodes[5]);
 				}
 

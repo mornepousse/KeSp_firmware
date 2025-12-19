@@ -18,6 +18,8 @@
 #include "usb_descriptors.h"
 #include "status_display.h"
 #include "esp_timer.h"
+#include "nrf24_receiver.h"
+#include "cpu_time.h"
 
 
 #define TEST_DELAY_TIME_MS (3000)
@@ -29,6 +31,49 @@
 static const char *TAG = "Main";
 
 static int display_sleep = 0; // 0 = on, 1 = off
+
+static void cpu_time_logger_task(void *arg) {
+  (void)arg;
+  char buf[512];
+  for (;;) {
+    if (cpu_time_measure_period(1000, buf, sizeof(buf)) == 0) {
+      ESP_LOGI(TAG, "CPU usage:\n%s", buf);
+    } else {
+      ESP_LOGW(TAG, "cpu_time_measure_period failed");
+    }
+    vTaskDelay(pdMS_TO_TICKS(5000));
+  }
+}
+
+// Task handling status display updates, sleep/wake and layer change handling.
+static void status_display_task(void *arg) {
+  (void)arg;
+  for (;;) {
+    if (is_layer_changed) {
+      is_layer_changed = 0;
+      status_display_update_layer_name();
+      cdc_send_layer(current_layout);
+    }
+
+    // Gestion veille écran : efface après 1 minute d'inactivité clavier,
+    // puis rallume et réaffiche les infos à la prochaine activité.
+    uint32_t now = esp_timer_get_time() / 1000;
+    uint32_t last = get_last_activity_time_ms();
+
+    if (!display_sleep && last != 0 && (now - last) > 60000) {
+      status_display_sleep();
+      display_sleep = 1;
+    }
+
+    if (display_sleep && last != 0 && (now - last) <= 500) {
+      status_display_wake();
+      display_sleep = 0;
+    }
+
+    status_display_update();
+    vTaskDelay(pdMS_TO_TICKS(400));
+  }
+}
 
 /************* TinyUSB descriptors ****************/
 
@@ -43,6 +88,8 @@ void app_main(void) {
 
   ESP_LOGI(TAG, "display init");
   status_display_start();
+  // Start status display task on core 0 to isolate display work from keyboard
+  xTaskCreatePinnedToCore(status_display_task, "status_disp", 4096, NULL, 10, NULL, 1);
   // Reset the rtc GPIOS
   rtc_matrix_deinit();
   ESP_LOGI(TAG, "Matrix setup init");
@@ -51,38 +98,22 @@ void app_main(void) {
   ESP_LOGI(TAG, "Task Matrix init");
   TaskHandle_t xHandleMatrix_Keybord = NULL;
   static uint8_t ucParameterToPass;
-  xTaskCreate(vTaskKeyboard, "Matrix_Keyboard", 4096, &ucParameterToPass,
-              tskIDLE_PRIORITY, &xHandleMatrix_Keybord);
+  // Keyboard on CPU 0, priority 3 (below LVGL=4)
+  xTaskCreatePinnedToCore(vTaskKeyboard, "Matrix_Keyboard", 4096, &ucParameterToPass,
+              3, &xHandleMatrix_Keybord, 1);
   ESP_LOGI(TAG, "bluetooth init");
   init_hid_bluetooth();
 
+  ESP_LOGI(TAG, "NRF24 init");
+  // NRF24 on CPU 1, priority 3 (won't block IDLE on CPU 1)
+  xTaskCreatePinnedToCore(nrf24_task, "nrf24_task", 4096, NULL, 3, NULL, 1);
+
+  // Start periodic CPU usage logger on core 1 (avoid interfering with keyboard task on core 0)
+  //xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL, 1);
+
   // status_display_refresh_all();
   for (;;) {
-    if (is_layer_changed) {
-      is_layer_changed = 0;
-      status_display_update_layer_name();
-      cdc_send_layer(current_layout);
-    }
-
-    // Gestion veille écran : efface après 1 minute d'inactivité clavier,
-    // puis rallume et réaffiche les infos à la prochaine activité.
-    uint32_t now = esp_timer_get_time() / 1000;
-    uint32_t last = get_last_activity_time_ms();
-
-    // Si aucune activité depuis 60s et écran encore allumé
-    if (!display_sleep && last != 0 && (now - last) > 60000) {
-      status_display_sleep();
-      display_sleep = 1;
-    }
-
-    // Si une activité récente et écran en veille, on réaffiche
-    if (display_sleep && last != 0 && (now - last) <= 500) {
-      status_display_wake();
-      display_sleep = 0;
-    }
-
-    status_display_update();
-    //ESP_LOGI(TAG, "boucle main");
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // keep main light; display handled in its own task
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }

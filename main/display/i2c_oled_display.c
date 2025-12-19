@@ -159,7 +159,14 @@ void init_display(void)
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 
     ESP_LOGI(TAG_DISP, "Initialize LVGL");
-    const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    // LVGL on CPU 0, lower priority to not block keyboard
+    const lvgl_port_cfg_t lvgl_cfg = {
+        .task_priority = 2,       // Lower than keyboard (3)
+        .task_stack = 6144,
+        .task_affinity = 0,       // Pin to CPU 0
+        .task_max_sleep_ms = 100, // Sleep more to yield CPU
+        .timer_period_ms = 10,    // 100Hz refresh is enough for OLED
+    };
     lvgl_port_init(&lvgl_cfg);
 
     ESP_LOGI(TAG_DISP, "Initialized LVGL");
