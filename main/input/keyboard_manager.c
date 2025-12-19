@@ -15,6 +15,10 @@
 
 static const char *KM_TAG = "Keyboard_manager";
 
+// Report IDs - must match usb_descriptors.c
+#define REPORT_ID_KEYBOARD 1
+#define REPORT_ID_MOUSE 2
+
 uint8_t bl_state = 0;
 uint8_t usb_bl_state = 0; // 0: USB, 1: BL
 uint16_t keypress_internal_function = 0;
@@ -29,10 +33,20 @@ uint16_t extra_keycodes[6] = {0, 0, 0, 0, 0, 0};
 void send_hid_key() {
   if (usb_bl_state == 0) {
     if (tud_hid_ready()) {
-      tud_hid_keyboard_report(0, 0, keycodes);
+      tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, keycodes);
     }
   } else {
     send_hid_bl_key(keycodes);
+  }
+}
+
+void send_mouse_report(uint8_t buttons, int8_t x, int8_t y, int8_t wheel) {
+  if (usb_bl_state == 0) {
+    if (tud_hid_ready()) {
+      tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
+    }
+  } else {
+    send_hid_bl_mouse(buttons, x, y, wheel);
   }
 }
 
@@ -208,9 +222,10 @@ void vTaskKeyboard(void *pvParameters) {
         }
       }
 
-      ESP_LOGI(KM_TAG, "layer: %d : %d %d %d %d %d %d ", current_layout,
-               keycodes[0], keycodes[1], keycodes[2], keycodes[3], keycodes[4],
-               keycodes[5]);
+      // Removed verbose logging - was blocking and causing watchdog issues
+      // ESP_LOGI(KM_TAG, "layer: %d : %d %d %d %d %d %d ", current_layout,
+      //          keycodes[0], keycodes[1], keycodes[2], keycodes[3], keycodes[4],
+      //          keycodes[5]);
       send_hid_key();
     }
 

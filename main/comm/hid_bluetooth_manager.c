@@ -290,4 +290,9 @@ void send_hid_bl_key(uint8_t keycodes[6])
     esp_hidd_send_keyboard_value(hid_conn_id, 0, keycodes, 6);
 }
 
+void send_hid_bl_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
+{
+    esp_hidd_send_mouse_value(hid_conn_id, buttons, x, y, wheel);
+}
+
 #endif

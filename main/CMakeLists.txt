@@ -14,10 +14,12 @@ idf_component_register(
         "comm/hid_dev.c"
         "comm/hid_device_le_prf.c"
         "comm/hid_bluetooth_manager.c"
+        "comm/nrf24_receiver.c"
         "input/keyboard_manager.c"
         "input/keymap.c"
         "input/matrix.c"
         "input/ICSH044A.c"
+        "cpu_time.c"
     INCLUDE_DIRS "app" "display" "input" "comm" "include"
     PRIV_REQUIRES esp_wifi esp_driver_gpio esp_timer bt esp_hid nvs_flash esp_lcd unity esp_driver_i2c )
 littlefs_create_partition_image(storage ../flash_data FLASH_IN_PROJECT)
