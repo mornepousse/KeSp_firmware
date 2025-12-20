@@ -27,7 +27,7 @@
 
 #define COL2ROW //COL2ROW ROW2COL
 
-#define DEBOUNCE 4 //debounce time in ms
+#define DEBOUNCE 1 //debounce time in ms
 
 //Define matrix
 #define KEYPADS 1 // intended in order to create a Multiple keypad split boards

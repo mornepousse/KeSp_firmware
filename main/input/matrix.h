@@ -7,6 +7,10 @@
 #include <inttypes.h>
 #include "keyboard_config.h"
 
+#ifndef MATRIX_IRQ_ENABLED
+#define MATRIX_IRQ_ENABLED 1
+#endif
+
 
 extern uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
 extern uint8_t SLAVE_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
@@ -40,7 +44,10 @@ void matrix_setup(void);
  * @brief scan matrix
  */
 void scan_matrix(void);
+void scan_matrix_full_once(void);
 
+void matrix_irq_setup(void);
+void matrix_irq_deinit(void);
 
 void layer_changed(void);
 
