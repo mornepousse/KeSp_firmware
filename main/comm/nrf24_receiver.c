@@ -47,6 +47,19 @@
 
 static spi_device_handle_t spi;
 
+/* Task handle to notify nrf task from IRQ ISR */
+TaskHandle_t nrf24_task_handle = NULL;
+
+/* ISR: notify the nrf24 task to process FIFO */
+static void IRAM_ATTR nrf_irq_isr(void* arg)
+{
+    BaseType_t woke = pdFALSE;
+    if (nrf24_task_handle != NULL) {
+        vTaskNotifyGiveFromISR(nrf24_task_handle, &woke);
+        portYIELD_FROM_ISR(woke);
+    }
+}
+
 static void nrf_write_reg(uint8_t reg, uint8_t value) {
     uint8_t tx_data[2] = {W_REGISTER | (reg & 0x1F), value};
     spi_transaction_t t = {
@@ -169,15 +182,24 @@ void nrf24_init(void) {
     };
     gpio_config(&io_conf);
     
-    // IRQ Pin Config
+    // IRQ Pin Config (enable falling edge IRQ)
     gpio_config_t irq_conf = {
         .pin_bit_mask = (1ULL << PIN_IRQ),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
+        .intr_type = GPIO_INTR_NEGEDGE,
     };
     gpio_config(&irq_conf);
+
+    // Install ISR service and attach handler
+    esp_err_t ret = gpio_install_isr_service(0);
+    if (ret == ESP_ERR_INVALID_STATE) {
+        ESP_LOGI(TAG, "GPIO ISR service already installed");
+    } else if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "gpio_install_isr_service failed: %d", ret);
+    }
+    gpio_isr_handler_add(PIN_IRQ, nrf_irq_isr, NULL);
 
     gpio_set_level(PIN_PWR, 0); // Low to turn ON P-channel (Active Low)
     gpio_set_level(PIN_CE, 0);
@@ -195,7 +217,7 @@ void nrf24_init(void) {
     };
     
     // Use SPI2_HOST
-    esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "SPI Init Failed: %d", ret);
         return;
@@ -264,40 +286,49 @@ bool nrf24_check_spi(void) {
 
 void nrf24_task(void *arg) {
     nrf24_init();
-    
+
     uint8_t payload[32];
     uint32_t packet_count = 0;
     TickType_t last_log_time = xTaskGetTickCount();
-    
+
     // Force Channel 76
     nrf_write_reg(RF_CH, 76);
-    ESP_LOGI(TAG, "NRF24 Receiver ready on CH 76");
+    ESP_LOGI(TAG, "NRF24 Receiver ready on CH 76 (IRQ-driven)");
+
+    /* Save our task handle so ISR can notify us */
+    nrf24_task_handle = xTaskGetCurrentTaskHandle();
 
     while (1) {
-        // 1. Read FIFO Status
-        uint8_t fifo = nrf_read_reg(FIFO_STATUS);
+        /* Wait for IRQ notification (or timeout for periodic logging) */
+        uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10000));
 
-        // 2. Check for Data - FIFO bit 0 = RX_EMPTY
-        while (!(fifo & 0x01)) {
-            nrf_read_payload(payload, 5);
-            nrf_write_reg(STATUS, 0x70); // Clear all IRQ flags
-            
-            if (payload[0] == 0x01) {
-                send_mouse_report(payload[1], (int8_t)payload[2], (int8_t)payload[3], (int8_t)payload[4]);
-                packet_count++;
+        if (notified) {
+            /* Process all packets in FIFO */
+            uint8_t fifo = nrf_read_reg(FIFO_STATUS);
+            while (!(fifo & 0x01)) {
+                nrf_read_payload(payload, 5);
+                nrf_write_reg(STATUS, 0x70); // Clear all IRQ flags
+
+                if (payload[0] == 0x01) {
+                    send_mouse_report(payload[1], (int8_t)payload[2], (int8_t)payload[3], (int8_t)payload[4]);
+                    packet_count++;
+                }
+
+                fifo = nrf_read_reg(FIFO_STATUS);
+
+                /* Yield occasionally when processing bursts to allow other tasks/idle to run */
+                taskYIELD();
             }
-            
-            fifo = nrf_read_reg(FIFO_STATUS);
         }
-        
-        // 3. Debug Log every 10 seconds (reduced to avoid blocking)
+
+        /* Periodic log */
         if ((xTaskGetTickCount() - last_log_time) >= pdMS_TO_TICKS(10000)) {
             ESP_LOGI(TAG, "NRF24 | Packets: %lu", packet_count);
             packet_count = 0;
             last_log_time = xTaskGetTickCount();
         }
-        
-        // 4. 2ms delay = 500Hz polling rate (good for mouse)
-        vTaskDelay(pdMS_TO_TICKS(2)); 
+
+        /* Small delay to avoid tight loop on spurious notifications */
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }

@@ -18,6 +18,7 @@
 #include "usb_descriptors.h"
 #include "status_display.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "nrf24_receiver.h"
 #include "cpu_time.h"
 
@@ -45,6 +46,28 @@ static void cpu_time_logger_task(void *arg) {
   }
 }
 
+/* Small diagnostic task: regularly checks heap integrity and logs free sizes so we can catch corruption early */
+static void heap_diag_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
+            size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+            size_t free32 = heap_caps_get_free_size(MALLOC_CAP_32BIT);
+            size_t largest8 = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+            ESP_LOGE(TAG, "HEAP_DIAG: integrity FAILED - free8=%u free32=%u largest8=%u", (unsigned)free8, (unsigned)free32, (unsigned)largest8);
+        } else {
+            static int cnt = 0;
+            if ((cnt++ & 31) == 0) {
+                size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+                size_t free32 = heap_caps_get_free_size(MALLOC_CAP_32BIT);
+                ESP_LOGI(TAG, "HEAP_DIAG: free8=%u free32=%u", (unsigned)free8, (unsigned)free32);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
 // Task handling status display updates, sleep/wake and layer change handling.
 static void status_display_task(void *arg) {
   (void)arg;
@@ -68,6 +91,21 @@ static void status_display_task(void *arg) {
     if (display_sleep && last != 0 && (now - last) <= 500) {
       status_display_wake();
       display_sleep = 0;
+    }
+
+    /* Quick heap sanity check to avoid calling LVGL if heap is corrupt */
+    if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
+      ESP_LOGE(TAG, "Heap integrity FAILED in status_display_task loop - disabling display to avoid crash");
+      status_display_force_disable();
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+
+    /* Handle deferred wake requests in display task context */
+    extern bool request_wake_request;
+    if (request_wake_request) {
+      request_wake_request = false;
+      status_display_refresh_all();
     }
 
     status_display_update();
@@ -94,6 +132,9 @@ void app_main(void) {
   rtc_matrix_deinit();
   ESP_LOGI(TAG, "Matrix setup init");
   matrix_setup();
+#if MATRIX_IRQ_ENABLED
+  matrix_irq_setup();
+#endif
 
   ESP_LOGI(TAG, "Task Matrix init");
   TaskHandle_t xHandleMatrix_Keybord = NULL;
@@ -112,6 +153,10 @@ void app_main(void) {
   //xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL, 1);
 
   // status_display_refresh_all();
+
+  /* Start heap diagnostic task to catch heap corruption early */
+  xTaskCreatePinnedToCore(heap_diag_task, "heap_diag", 2048, NULL, 1, NULL, 1);
+
   for (;;) {
     // keep main light; display handled in its own task
     vTaskDelay(pdMS_TO_TICKS(1000));

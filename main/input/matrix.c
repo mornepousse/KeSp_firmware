@@ -208,12 +208,6 @@ void scan_matrix(void) {
 						current_press_stat[index] = curState;
 					}
 					
-    				
-
-					//ESP_LOGI(TAG_MATRIX, " 0: %d - %d, 1: %d - %d, 2: %d - %d, 3: %d - %d, 4: %d- %d, 5: %d - %d", 
-					//current_press_row[0], current_press_col[0], current_press_row[1], current_press_col[1], current_press_row[2], current_press_col[2], 
-					//current_press_row[3], current_press_col[3], current_press_row[4], current_press_col[4], current_press_row[5], current_press_col[5]);
-					//tud_hid_keyboard_report(1, 0, keycodes);
 					stat_matrix_changed = 1;
 					last_activity_time_ms = now_col;
 					/* Reduced log level to avoid blocking serial output -- enable DEBUG for verbose traces */
@@ -231,7 +225,7 @@ void scan_matrix(void) {
 		}
 
 		/* Give other tasks a chance to run; avoids hogging CPU in case of slow column reads or heavy logging */
-		vTaskDelay(0);
+		//vTaskDelay(0);
 	}
 
 	/* advance the next column index for next invocation */
@@ -278,3 +272,148 @@ uint32_t get_last_activity_time_ms(void)
 {
 	return last_activity_time_ms;
 }
+
+
+#if MATRIX_IRQ_ENABLED
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+/* Task handle exported from keyboard manager -- used to notify keyboard task from ISR */
+extern TaskHandle_t keyboard_task_handle;
+
+/* last interrupt time (ms) for debounce in ISR */
+volatile uint32_t last_row_int_time = 0;
+
+/* Full scan: scan all columns immediately (used on IRQ wake) */
+void scan_matrix_full_once(void)
+{
+    uint64_t t_scan_start = esp_timer_get_time();
+#ifdef COL2ROW
+    for (uint8_t col = 0; col < MATRIX_COLS; col++) {
+        uint64_t tcol_start = esp_timer_get_time();
+
+        gpio_set_level(MATRIX_COLS_PINS[col], 1);
+        uint32_t now_col = millis();
+        for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+
+            curState = gpio_get_level(MATRIX_ROWS_PINS[row]);
+            if (PREV_MATRIX_STATE[row][col] != curState) {
+                DEBOUNCE_MATRIX[row][col] = now_col;
+            }
+            PREV_MATRIX_STATE[row][col] = curState;
+            if ((now_col - DEBOUNCE_MATRIX[row][col]) > DEBOUNCE) {
+
+                if (MATRIX_STATE[row][col] != curState) {
+                    MATRIX_STATE[row][col] = curState;
+                    uint8_t index = 0;
+
+                    for (uint8_t i = 0; i < 6; i++)
+                    {
+                        if (current_press_col[i] == 255)
+                        {
+                            index = i;
+                            break;
+                        }
+                    }
+
+                    for (uint8_t i = 0; i < 6; i++)
+                    {
+                        if (curState == 0 && current_press_col[i] == col && current_press_row[i] == row)
+                        {
+                            current_press_col[i] = 255;
+                            current_press_row[i] = 255;
+                            break;
+                        }
+                    }
+                    if (curState == 1)
+                    {
+                        current_press_col[index] = col;
+                        current_press_row[index] = row;
+                        current_press_stat[index] = curState;
+                    }
+
+                    stat_matrix_changed = 1;
+                    last_activity_time_ms = now_col;
+                    ESP_LOGD(TAG_MATRIX, "Row: %d, Col: %d, State: %d", row, col, curState);
+                }
+
+            }
+        }
+        gpio_set_level(MATRIX_COLS_PINS[col], 0);
+
+        uint64_t tcol_end = esp_timer_get_time();
+        uint64_t tcol_dur = tcol_end - tcol_start;
+        if (tcol_dur > 2000) {
+            ESP_LOGW(TAG_MATRIX, "col %d took %llu us", col, (unsigned long long)tcol_dur);
+        }
+    }
+#endif
+
+#ifdef ROW2COL
+    for(uint8_t row=0; row < MATRIX_ROWS; row++) {
+        gpio_set_level(MATRIX_ROWS_PINS[row], 1);
+
+        for(uint8_t col=0; col <MATRIX_COLS; col++) {
+
+            curState = gpio_get_level(MATRIX_COLS_PINS[col]);
+            if( PREV_MATRIX_STATE[row][col] != curState) {
+                DEBOUNCE_MATRIX[row][col] = millis();
+            }
+            PREV_MATRIX_STATE[row][col] = curState;
+            if( (millis() - DEBOUNCE_MATRIX[row][col]) > DEBOUNCE) {
+
+                if( MATRIX_STATE[row][col] != curState) {
+                    MATRIX_STATE[row][col] = curState;
+                    ESP_LOGI(TAG_MATRIX, "Row: %d, Col: %d, State: %d", row, col, curState);
+                }
+
+            }
+        }
+        gpio_set_level(MATRIX_ROWS_PINS[row], 0);
+    }
+#endif
+
+    uint64_t t_scan_end = esp_timer_get_time();
+    uint64_t t_scan_dur = t_scan_end - t_scan_start;
+    if (t_scan_dur > 2000) {
+        ESP_LOGW(TAG_MATRIX, "scan_matrix_full_once duration %llu us", (unsigned long long)t_scan_dur);
+    }
+}
+
+/* Lightweight ISR handler: only debounce using RTOS tick and notify keyboard task */
+void IRAM_ATTR row_isr(void* arg)
+{
+    BaseType_t woke = pdFALSE;
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    if ((now_ms - last_row_int_time) < DEBOUNCE) {
+        return;
+    }
+    last_row_int_time = now_ms;
+    if (keyboard_task_handle != NULL) {
+        vTaskNotifyGiveFromISR(keyboard_task_handle, &woke);
+        portYIELD_FROM_ISR(woke);
+    }
+}
+
+/* Setup GPIO ISR for matrix rows */
+void matrix_irq_setup(void)
+{
+    ESP_LOGI(TAG_MATRIX, "Matrix IRQ setup");
+    gpio_install_isr_service(0);
+    for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+        gpio_set_intr_type(MATRIX_ROWS_PINS[row], GPIO_INTR_ANYEDGE);
+        gpio_isr_handler_add(MATRIX_ROWS_PINS[row], row_isr, (void*)(uintptr_t)row);
+    }
+}
+
+/* Teardown ISR handlers */
+void matrix_irq_deinit(void)
+{
+    ESP_LOGI(TAG_MATRIX, "Matrix IRQ deinit");
+    for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+        gpio_isr_handler_remove(MATRIX_ROWS_PINS[row]);
+        gpio_set_intr_type(MATRIX_ROWS_PINS[row], GPIO_INTR_DISABLE);
+    }
+    gpio_uninstall_isr_service();
+}
+#endif // MATRIX_IRQ_ENABLED

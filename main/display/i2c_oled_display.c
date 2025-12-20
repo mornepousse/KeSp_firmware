@@ -23,7 +23,7 @@ static display_hw_config_t current_cfg = {
     .bus_type = DISPLAY_BUS_I2C,
     .width = 128,
     .height = 64,
-    .pixel_clock_hz = 400 * 1000,
+    .pixel_clock_hz = 100 * 1000, /* increased from 400kHz to 800kHz to reduce transfer times if HW supports it */
     .reset_pin = GPIO_NUM_NC,
     .i2c = {
         .host = I2C_NUM_0,
@@ -64,7 +64,7 @@ void example_lvgl_demo_ui(lv_disp_t *disp)
 void display_test_text(char *text)
 {
     if(display_available == false) return;
-    ESP_LOGI(TAG_DISP, "Displaying test text on OLED");
+    ESP_LOGD(TAG_DISP, "Displaying test text on OLED");
 
     // Lock the mutex due to the LVGL APIs are not thread-safe
     if (lvgl_port_lock(0))
@@ -85,7 +85,7 @@ void display_test_text(char *text)
 void display_clear_screen(void)
 {
     if(display_available == false) return;
-    ESP_LOGI(TAG_DISP, "Clearing OLED display");
+    ESP_LOGD(TAG_DISP, "Clearing OLED display");
     if (lvgl_port_lock(0))
     {
         lv_obj_t *scr = lv_scr_act();
@@ -165,7 +165,7 @@ void init_display(void)
         .task_stack = 6144,
         .task_affinity = 0,       // Pin to CPU 0
         .task_max_sleep_ms = 100, // Sleep more to yield CPU
-        .timer_period_ms = 10,    // 100Hz refresh is enough for OLED
+        .timer_period_ms = 20,    // 50Hz refresh reduces UI pressure for OLED
     };
     lvgl_port_init(&lvgl_cfg);
 
@@ -173,6 +173,7 @@ void init_display(void)
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = io_handle,
         .panel_handle = panel_handle,
+        /* Monochrome displays require a full buffer in LVGL */
         .buffer_size = cfg->width * cfg->height,
         .double_buffer = true,
         .hres = cfg->width,
@@ -188,6 +189,11 @@ void init_display(void)
             .sw_rotate = false,
         }};
     disp = lvgl_port_add_disp(&disp_cfg);
+    if (!disp) {
+        ESP_LOGE(TAG_DISP, "lvgl_port_add_disp failed (monochrome requires full buffer?) - disabling display");
+        display_available = false;
+        return;
+    }
 
     ESP_LOGI(TAG_DISP, "Display LVGL Scroll Text");
     if (display_available)
