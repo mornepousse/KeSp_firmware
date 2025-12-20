@@ -11,6 +11,8 @@
 #include "matrix.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
+#include "esp_log.h"
 
 static int last_bt_state = -1;   // -1 = inconnu, 0 = OFF, 1 = ON, 2 = JUSTE BT
 static int last_path_state = -1; // 0 = USB, 1 = BLE
@@ -67,12 +69,18 @@ void status_display_update_layer_name(void)
 void status_display_update(void)
 {
     if(display_available == false || status_display_sleeping) return;
+    uint64_t _t0 = esp_timer_get_time();
 
     if (is_showing_splash) {
         if ((xTaskGetTickCount() - splash_start_tick) > pdMS_TO_TICKS(3000)) {
             is_showing_splash = false;
             status_display_refresh_all();
         } else {
+            uint64_t _t1 = esp_timer_get_time();
+            uint64_t _dur = _t1 - _t0;
+            if (_dur > 5000) {
+                ESP_LOGW("STATUS_DISP", "status_display_update early returned after %llu us", (unsigned long long)_dur);
+            }
             return;
         }
     }
@@ -86,7 +94,13 @@ void status_display_update(void)
             lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
         }
     }
-}
+
+    uint64_t _t1 = esp_timer_get_time();
+    uint64_t _dur = _t1 - _t0;
+    if (_dur > 5000) {
+        ESP_LOGW("STATUS_DISP", "status_display_update took %llu us", (unsigned long long)_dur);
+    }
+} 
 
 void status_display_start(void)
 {
@@ -147,6 +161,7 @@ static void status_display_update_connection_icons(bool force)
 {
     if (display_available == false || status_display_sleeping)
         return;
+    uint64_t _t0 = esp_timer_get_time();
 
     int bt_state;
     if (!hid_bluetooth_is_initialized()) {
@@ -160,11 +175,23 @@ static void status_display_update_connection_icons(bool force)
     int path_state = (keyboard_get_usb_bl_state() == 0) ? 0 : 1;
 
     if (!force && bt_state == last_bt_state && path_state == last_path_state && bt_state != 2) {
+        uint64_t _t1 = esp_timer_get_time();
+        uint64_t _dur = _t1 - _t0;
+        if (_dur > 5000) {
+            ESP_LOGW("STATUS_DISP", "status_display_update_connection_icons short-circuit took %llu us", (unsigned long long)_dur);
+        }
         return;
     }
 
     status_display_init_icons();
-    if (!icon_path) return;
+    if (!icon_path) {
+        uint64_t _t1 = esp_timer_get_time();
+        uint64_t _dur = _t1 - _t0;
+        if (_dur > 5000) {
+            ESP_LOGW("STATUS_DISP", "status_display_update_connection_icons early exit (no icon) took %llu us", (unsigned long long)_dur);
+        }
+        return;
+    }
 
     // Gestion de l'icône BT : visible uniquement si le Bluetooth est initialisé
     if (bt_state == 0) {
@@ -209,7 +236,12 @@ static void status_display_update_connection_icons(bool force)
 
     last_bt_state = bt_state;
     last_path_state = path_state;
-}
+    uint64_t _t1 = esp_timer_get_time();
+    uint64_t _dur = _t1 - _t0;
+    if (_dur > 5000) {
+        ESP_LOGW("STATUS_DISP", "status_display_update_connection_icons took %llu us", (unsigned long long)_dur);
+    }
+} 
 
 static void status_display_init_icons(void)
 {

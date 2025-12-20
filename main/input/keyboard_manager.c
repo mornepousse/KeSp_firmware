@@ -1,6 +1,7 @@
 #include "keyboard_manager.h"
 #include "esp_gap_ble_api.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "hid_bluetooth_manager.h"
 #include "key_definitions.h"
 #include "keyboard_config.h"
@@ -8,6 +9,7 @@
 #include "matrix.h"
 #include "tinyusb.h"
 #include "status_display.h"
+#include "keyboard_worker.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,16 +67,10 @@ void run_internal_funct() {
     } else {
       usb_bl_state = 0;
     }
-    status_display_update();
+    km_post_display_update();
     break;
     case BT_TOGGLE:
-    if (usb_bl_state == 0 && hid_bluetooth_is_initialized() ) {
-      deinit_hid_bluetooth();
-    } 
-    else {
-      init_hid_bluetooth();
-    }
-    status_display_update();
+    km_post_bt_toggle();
     break;
   default:
     break;
@@ -150,7 +146,15 @@ void is_macro(uint16_t keycodeTMP) {
 void vTaskKeyboard(void *pvParameters) {
   for (;;) {
     // Task code goes here.
-    scan_matrix();
+    {
+      uint64_t scan_start = esp_timer_get_time();
+      scan_matrix();
+      uint64_t scan_end = esp_timer_get_time();
+      uint64_t scan_dur = scan_end - scan_start;
+      if (scan_dur > 2000) {
+        ESP_LOGW(KM_TAG, "scan_matrix took %llu us", (unsigned long long)scan_dur);
+      }
+    }
     uint16_t keycodeTMP = 0;
     for (uint8_t i = 0; i < 6; i++) {
       if (current_press_col[i] != 255) {
@@ -229,12 +233,16 @@ void vTaskKeyboard(void *pvParameters) {
       send_hid_key();
     }
 
-    vTaskDelay(pdMS_TO_TICKS(1));
+    vTaskDelay(pdMS_TO_TICKS(2));
   }
 }
 
 void keyboard_manager_init() {
   ESP_LOGI(KM_TAG, "Keyboard manager initialized");
+
+  /* Start keyboard worker to handle display / BT operations off-task */
+  keyboard_worker_init();
+
   // init graphic parts
   // graphic_init();
 

@@ -13,7 +13,7 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_bt.h"
-
+#include "esp_timer.h"
 #include "esp_hidd_prf_api.h"
 #include "esp_bt_defs.h"
 #include "esp_gap_ble_api.h"
@@ -169,7 +169,8 @@ void hid_demo_task(void *pvParameters)
 */
 void init_hid_bluetooth(void)
 {
-esp_err_t ret;
+    uint64_t _t0 = esp_timer_get_time();
+    esp_err_t ret;
 
     // Initialize NVS.
     ret = nvs_flash_init();
@@ -185,24 +186,28 @@ esp_err_t ret;
     ret = esp_bt_controller_init(&bt_cfg);
     if (ret) {
         ESP_LOGE(HID_DEMO_TAG, "%s initialize controller failed", __func__);
+        ESP_LOGW(HID_DEMO_TAG, "init_hid_bluetooth aborted after %llu ms", (unsigned long long)((esp_timer_get_time()-_t0)/1000));
         return;
     }
 
     ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
     if (ret) {
         ESP_LOGE(HID_DEMO_TAG, "%s enable controller failed", __func__);
+        ESP_LOGW(HID_DEMO_TAG, "init_hid_bluetooth aborted after %llu ms", (unsigned long long)((esp_timer_get_time()-_t0)/1000));
         return;
     }
 
     ret = esp_bluedroid_init();
     if (ret) {
         ESP_LOGE(HID_DEMO_TAG, "%s init bluedroid failed", __func__);
+        ESP_LOGW(HID_DEMO_TAG, "init_hid_bluetooth aborted after %llu ms", (unsigned long long)((esp_timer_get_time()-_t0)/1000));
         return;
     }
 
     ret = esp_bluedroid_enable();
     if (ret) {
         ESP_LOGE(HID_DEMO_TAG, "%s init bluedroid failed", __func__);
+        ESP_LOGW(HID_DEMO_TAG, "init_hid_bluetooth aborted after %llu ms", (unsigned long long)((esp_timer_get_time()-_t0)/1000));
         return;
     }
 
@@ -232,11 +237,15 @@ esp_err_t ret;
 
     bt_initialized = true;
 
+    uint64_t _t1 = esp_timer_get_time();
+    ESP_LOGW(HID_DEMO_TAG, "init_hid_bluetooth finished in %llu ms", (unsigned long long)((_t1-_t0)/1000));
+
     //xTaskCreate(&hid_demo_task, "hid_task", 2048, NULL, 5, NULL);
-}
+} 
 
 void deinit_hid_bluetooth(void)
 {
+    uint64_t _t0 = esp_timer_get_time();
     esp_err_t ret;
 
     ESP_LOGI(HID_BT_TAG, "Disabling BLE HID");
@@ -273,6 +282,8 @@ void deinit_hid_bluetooth(void)
     bt_initialized = false;
 
     ESP_LOGI(HID_BT_TAG, "BLE HID disabled");
+    uint64_t _t1 = esp_timer_get_time();
+    ESP_LOGW(HID_BT_TAG, "deinit_hid_bluetooth finished in %llu ms", (unsigned long long)((_t1-_t0)/1000));
 }
 
 bool hid_bluetooth_is_initialized(void)
