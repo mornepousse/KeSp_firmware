@@ -9,6 +9,7 @@
 #include "esp_sleep.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/task.h"
 #define TAG_MATRIX "MATRIX"
 /* Define pins, notice that:
  * GPIO6-11 are usually used for SPI flash
@@ -148,12 +149,23 @@ uint8_t current_press_row[6] = { 255, 255, 255, 255, 255, 255 };
 uint8_t current_press_col[6] = { 255, 255, 255, 255, 255, 255 };
 uint8_t current_press_stat[6] = { 0, 0, 0, 0, 0, 0 };
 uint8_t stat_matrix_changed = 0; // 1: matrix changed, 0: matrix not changed
+
+// Number of columns to scan per invocation of scan_matrix()
+#ifndef SCAN_COLS_PER_ITER
+#define SCAN_COLS_PER_ITER 3
+#endif
+static uint8_t scan_col_index = 0;
+
 // Scanning the matrix for input
 void scan_matrix(void) {
+    uint64_t t_scan_start = esp_timer_get_time();
 #ifdef COL2ROW
 	// Setting column pin as low, and checking if the input of a row pin changes.
 
-	for (uint8_t col = 0; col < MATRIX_COLS; col++) {
+	for (uint8_t sc = 0; sc < SCAN_COLS_PER_ITER; sc++) {
+		uint8_t col = (scan_col_index + sc) % MATRIX_COLS;
+		uint64_t tcol_start = esp_timer_get_time();
+
 		gpio_set_level(MATRIX_COLS_PINS[col], 1);
 		uint32_t now_col = millis();
 		for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
@@ -204,13 +216,26 @@ void scan_matrix(void) {
 					//tud_hid_keyboard_report(1, 0, keycodes);
 					stat_matrix_changed = 1;
 					last_activity_time_ms = now_col;
-					ESP_LOGI(TAG_MATRIX, "Row: %d, Col: %d, State: %d, K : %d %d %d %d %d %d ", row, col, curState, keycodes[0], keycodes[1], keycodes[2], keycodes[3], keycodes[4], keycodes[5]);
+					/* Reduced log level to avoid blocking serial output -- enable DEBUG for verbose traces */
+					ESP_LOGD(TAG_MATRIX, "Row: %d, Col: %d, State: %d", row, col, curState);
 				}
 
 			}
 		}
 		gpio_set_level(MATRIX_COLS_PINS[col], 0);
+
+		uint64_t tcol_end = esp_timer_get_time();
+		uint64_t tcol_dur = tcol_end - tcol_start;
+		if (tcol_dur > 2000) {
+			ESP_LOGW(TAG_MATRIX, "col %d took %llu us", col, (unsigned long long)tcol_dur);
+		}
+
+		/* Give other tasks a chance to run; avoids hogging CPU in case of slow column reads or heavy logging */
+		vTaskDelay(0);
 	}
+
+	/* advance the next column index for next invocation */
+	scan_col_index = (scan_col_index + SCAN_COLS_PER_ITER) % MATRIX_COLS;
 
 #endif
 #ifdef ROW2COL
@@ -238,6 +263,11 @@ void scan_matrix(void) {
 	}
 #endif
 
+    uint64_t t_scan_end = esp_timer_get_time();
+    uint64_t t_scan_dur = t_scan_end - t_scan_start;
+    if (t_scan_dur > 2000) {
+        ESP_LOGW(TAG_MATRIX, "scan_matrix duration %llu us", (unsigned long long)t_scan_dur);
+    }
 }
 void layer_changed(void)
 {
