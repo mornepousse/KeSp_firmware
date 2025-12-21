@@ -12,6 +12,8 @@
 #include "keyboard_worker.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "freertos/queue.h"
 #include "esp_heap_caps.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -20,6 +22,7 @@
 
 /* Exported task handle so matrix ISR can notify keyboard task */
 TaskHandle_t keyboard_task_handle = NULL;
+
 
 static const char *KM_TAG = "Keyboard_manager";
 
@@ -31,6 +34,69 @@ static const char *KM_TAG = "Keyboard_manager";
 // Report IDs - must match usb_descriptors.c
 #define REPORT_ID_KEYBOARD 1
 #define REPORT_ID_MOUSE 2
+
+/* extern state used by HID sender (defined below) */
+extern uint8_t usb_bl_state;
+
+/* HID send queue and sender task to serialize TinyUSB calls and avoid contention
+ * We enqueue keyboard and mouse reports and let a single HID sender task perform
+ * the actual tud_hid_* calls. Mouse reports are queued to the front for priority. */
+
+typedef enum { HID_MSG_KEYBOARD = 1, HID_MSG_MOUSE = 2 } hid_msg_type_t;
+
+typedef struct {
+  hid_msg_type_t type;
+  union {
+    uint8_t keycodes[6];
+    struct {
+      uint8_t buttons;
+      int8_t x;
+      int8_t y;
+      int8_t wheel;
+    } mouse;
+  } payload;
+} hid_msg_t;
+
+static QueueHandle_t hid_queue = NULL;
+static SemaphoreHandle_t hid_report_mutex = NULL;
+static TaskHandle_t hid_sender_task_handle = NULL;
+
+static void hid_sender_task(void *pvParameters) {
+  (void)pvParameters;
+  hid_msg_t msg;
+  for (;;) {
+    if (xQueueReceive(hid_queue, &msg, portMAX_DELAY) == pdTRUE) {
+      /* Defensive mutex to protect TinyUSB calls, block up to 100 ms */
+      if (xSemaphoreTake(hid_report_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (msg.type == HID_MSG_KEYBOARD) {
+          if (usb_bl_state == 0) {
+            if (tud_hid_ready()) {
+              tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, msg.payload.keycodes);
+            }
+          } else {
+            send_hid_bl_key(msg.payload.keycodes);
+          }
+        } else if (msg.type == HID_MSG_MOUSE) {
+          if (usb_bl_state == 0) {
+            if (tud_hid_ready()) {
+              tud_hid_mouse_report(REPORT_ID_MOUSE, msg.payload.mouse.buttons,
+                                   msg.payload.mouse.x, msg.payload.mouse.y,
+                                   msg.payload.mouse.wheel, 0);
+            }
+          } else {
+            send_hid_bl_mouse(msg.payload.mouse.buttons,
+                              msg.payload.mouse.x,
+                              msg.payload.mouse.y,
+                              msg.payload.mouse.wheel);
+          }
+        }
+        xSemaphoreGive(hid_report_mutex);
+      } else {
+        ESP_LOGW(KM_TAG, "hid_sender: mutex busy, dropping HID message of type %d", msg.type);
+      }
+    }
+  }
+}
 
 /* Forward declarations for helpers used by process_matrix_changes */
 void run_internal_funct(void);
@@ -53,7 +119,7 @@ static uint32_t full_scan_count = 0;
 static uint64_t total_partial_scan_us = 0;
 static uint32_t partial_scan_count = 0;
 static uint32_t last_scan_report_ms = 0;
-static const uint32_t SCAN_REPORT_INTERVAL_MS = 5000; // report every 5s
+static const uint32_t SCAN_REPORT_INTERVAL_MS = 60000; // report every 60s to reduce log noise
 
 /* Follow-up / burst scan config to better detect quick presses when mashing */
 #ifndef FOLLOW_UP_SCANS
@@ -144,23 +210,81 @@ static void build_keycode_report(void)
 
 
 
+#ifndef KEY_ENQUEUE_MIN_MS
+#define KEY_ENQUEUE_MIN_MS 8
+#endif
+
 void send_hid_key() {
-  if (usb_bl_state == 0) {
-    if (tud_hid_ready()) {
-      tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, keycodes);
+  static uint8_t last_enqueued_keycodes[6] = {0};
+  static TickType_t last_key_enqueue_tick = 0;
+
+  /* Coalesce identical key reports to avoid saturating HID queue during bursts */
+  if (memcmp(keycodes, last_enqueued_keycodes, sizeof(keycodes)) == 0) {
+    TickType_t ticks_now = xTaskGetTickCount();
+    TickType_t elapsed = ticks_now - last_key_enqueue_tick;
+    if (elapsed < pdMS_TO_TICKS(KEY_ENQUEUE_MIN_MS)) {
+      /* Too soon and identical — drop to avoid queue flood */
+      return;
     }
+  }
+
+  hid_msg_t msg;
+  msg.type = HID_MSG_KEYBOARD;
+  memcpy(msg.payload.keycodes, keycodes, sizeof(msg.payload.keycodes));
+
+  if (hid_queue != NULL) {
+    if (xQueueSend(hid_queue, &msg, pdMS_TO_TICKS(5)) != pdTRUE) {
+      ESP_LOGW(KM_TAG, "send_hid_key: hid_queue full, dropping keyboard report");
+      return;
+    }
+    memcpy(last_enqueued_keycodes, keycodes, sizeof(keycodes));
+    last_key_enqueue_tick = xTaskGetTickCount();
   } else {
-    send_hid_bl_key(keycodes);
+    /* fallback: direct send if queue not initialized yet */
+    if (usb_bl_state == 0) {
+      if (tud_hid_ready()) {
+        tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, keycodes);
+      }
+    } else {
+      send_hid_bl_key(keycodes);
+    }
+    memcpy(last_enqueued_keycodes, keycodes, sizeof(keycodes));
+    last_key_enqueue_tick = xTaskGetTickCount();
   }
 }
 
 void send_mouse_report(uint8_t buttons, int8_t x, int8_t y, int8_t wheel) {
-  if (usb_bl_state == 0) {
-    if (tud_hid_ready()) {
-      tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
+  /* Throttle logs: only log every Nth silent sample, or always log when buttons pressed or large movement */
+  static uint32_t mouse_report_cnt = 0;
+  bool heavy = (buttons != 0) || (abs(x) > 8) || (abs(y) > 8);
+  if (heavy || ((mouse_report_cnt++ & 0x3F) == 0)) { /* log 1/64th of normal reports */
+      ESP_LOGI(KM_TAG, "send_mouse_report: btn=0x%02X x=%d y=%d w=%d usb_bl_state=%d", buttons, x, y, wheel, usb_bl_state);
+  }
+
+  hid_msg_t msg;
+  msg.type = HID_MSG_MOUSE;
+  msg.payload.mouse.buttons = buttons;
+  msg.payload.mouse.x = x;
+  msg.payload.mouse.y = y;
+  msg.payload.mouse.wheel = wheel;
+
+  if (hid_queue != NULL) {
+    /* Mouse has priority: send to front if possible. Short wait to avoid blocking */
+    if (xQueueSendToFront(hid_queue, &msg, pdMS_TO_TICKS(5)) != pdTRUE) {
+      /* If queue full, attempt a short-block send (we prefer mouse) */
+      if (xQueueSendToFront(hid_queue, &msg, pdMS_TO_TICKS(50)) != pdTRUE) {
+        ESP_LOGW(KM_TAG, "send_mouse_report: hid_queue full, dropping mouse report");
+      }
     }
   } else {
-    send_hid_bl_mouse(buttons, x, y, wheel);
+    /* fallback: direct send if queue not initialized yet */
+    if (usb_bl_state == 0) {
+      if (tud_hid_ready()) {
+        tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
+      }
+    } else {
+      send_hid_bl_mouse(buttons, x, y, wheel);
+    }
   }
 }
 
@@ -317,6 +441,7 @@ void vTaskKeyboard(void *pvParameters) {
 
         /* Send HID only when keycodes changed to reduce redundant reports */
         send_hid_key();
+        taskYIELD(); /* give NRF task a chance to run if it was contending */
 
         vTaskDelay(pdMS_TO_TICKS(BURST_SCAN_INTERVAL_MS));
         now_ms = esp_timer_get_time() / 1000;
@@ -329,6 +454,7 @@ void vTaskKeyboard(void *pvParameters) {
       uint64_t scan_dur = scan_end - scan_start;
       total_full_scan_us += scan_dur;
       full_scan_count++;
+      taskYIELD(); /* hint to scheduler that others can run */
 
     } else {
       uint64_t scan_start = esp_timer_get_time();
@@ -400,16 +526,12 @@ void vTaskKeyboard(void *pvParameters) {
       if ((now_ms - last_scan_report_ms) >= SCAN_REPORT_INTERVAL_MS) {
         if (full_scan_count > 0) {
           uint64_t avg_full = total_full_scan_us / full_scan_count;
-          ESP_LOGI(KM_TAG, "Scan avg FULL: %llu us over %u samples", (unsigned long long)avg_full, full_scan_count);
-        } else {
-          ESP_LOGI(KM_TAG, "Scan avg FULL: no samples");
+          ESP_LOGD(KM_TAG, "Scan avg FULL: %llu us over %u samples", (unsigned long long)avg_full, full_scan_count);
         }
 
         if (partial_scan_count > 0) {
           uint64_t avg_partial = total_partial_scan_us / partial_scan_count;
-          ESP_LOGI(KM_TAG, "Scan avg PARTIAL: %llu us over %u samples", (unsigned long long)avg_partial, partial_scan_count);
-        } else {
-          ESP_LOGI(KM_TAG, "Scan avg PARTIAL: no samples");
+          ESP_LOGD(KM_TAG, "Scan avg PARTIAL: %llu us over %u samples", (unsigned long long)avg_partial, partial_scan_count);
         }
 
         /* reset counters */
@@ -426,6 +548,23 @@ void vTaskKeyboard(void *pvParameters) {
 
 void keyboard_manager_init() {
   ESP_LOGI(KM_TAG, "Keyboard manager initialized");
+
+  /* Create hid queue + mutex + hid sender task to serialize TinyUSB calls */
+  if (hid_queue == NULL) {
+    hid_queue = xQueueCreate(32, sizeof(hid_msg_t));
+    if (hid_queue == NULL) {
+      ESP_LOGW(KM_TAG, "Failed to create hid_queue");
+    }
+  }
+  if (hid_report_mutex == NULL) {
+    hid_report_mutex = xSemaphoreCreateMutex();
+    if (hid_report_mutex == NULL) {
+      ESP_LOGW(KM_TAG, "Failed to create hid_report_mutex");
+    }
+  }
+  if (hid_sender_task_handle == NULL) {
+    xTaskCreatePinnedToCore(hid_sender_task, "hid_sender", 4096, NULL, 4, &hid_sender_task_handle, 0);
+  }
 
   /* Start keyboard worker to handle display / BT operations off-task */
   keyboard_worker_init();

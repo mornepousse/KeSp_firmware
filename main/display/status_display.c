@@ -178,8 +178,8 @@ void status_display_start(void)
         return;
     }
 
-    /* Ensure verbose logs for display during debugging */
-    esp_log_level_set("STATUS_DISP", ESP_LOG_DEBUG);
+    /* Silence STATUS_DISP informational logs in normal runs to reduce log noise */
+    esp_log_level_set("STATUS_DISP", ESP_LOG_WARN);
 
     /* LVGL port provides a lock; ensure it's initialized (lvgl_port_init was called in init_display) */
 
@@ -210,6 +210,8 @@ void status_display_sleep(void)
         status_display_sleeping = true;
         icon_bt = NULL;
         icon_path = NULL;
+        /* persistent label can be freed by display_clear_screen; reset it to avoid dangling pointer */
+        label_layer_name = NULL;
         last_bt_state = -1;
         last_path_state = -1;
         bt_blink_visible = true;
@@ -222,6 +224,8 @@ void status_display_sleep(void)
         status_display_sleeping = true;
         icon_bt = NULL;
         icon_path = NULL;
+        /* persistent label can be freed by display_clear_screen; reset it to avoid dangling pointer */
+        label_layer_name = NULL;
         last_bt_state = -1;
         last_path_state = -1;
         bt_blink_visible = true;
@@ -403,8 +407,14 @@ static void status_display_init_icons(void)
 
     ESP_LOGI("STATUS_DISP", "init_icons: setting pos icon_path");
     status_display_log_heap_info("before_set_pos_icon_path");
-    lv_obj_set_pos(icon_path, 0, 48);  // bas gauche (16x16)
+    status_display_log_lv_mem("before_set_pos_icon_path_lv_mem");
+    if (icon_path) {
+        lv_obj_set_pos(icon_path, 0, 48);  // bas gauche (16x16)
+    } else {
+        ESP_LOGW("STATUS_DISP", "init_icons: icon_path is NULL (STATUS_DISPLAY_MINIMAL?), skipping set_pos");
+    }
     status_display_log_heap_info("after_set_pos_icon_path");
+    status_display_log_lv_mem("after_set_pos_icon_path_lv_mem");
 
     if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
         ESP_LOGE("STATUS_DISP", "Heap integrity failed before creating indicator_mouse - aborting");
@@ -423,13 +433,19 @@ static void status_display_init_icons(void)
 #endif
 
     ESP_LOGI("STATUS_DISP", "init_icons: setting label/text for indicator_mouse");
-    lv_label_set_text(indicator_mouse, "M");
-    status_display_log_heap_info("after_indicator_mouse_settext");
-    ESP_LOGI("STATUS_DISP", "init_icons: setting pos indicator_mouse");
-    status_display_log_heap_info("before_set_pos_indicator_mouse");
-    lv_obj_set_pos(indicator_mouse, 118, 48);
-    status_display_log_heap_info("after_set_pos_indicator_mouse");
-    lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
+    if (indicator_mouse) {
+        lv_label_set_text(indicator_mouse, "M");
+        status_display_log_heap_info("after_indicator_mouse_settext");
+        ESP_LOGI("STATUS_DISP", "init_icons: setting pos indicator_mouse");
+        status_display_log_heap_info("before_set_pos_indicator_mouse");
+        status_display_log_lv_mem("before_set_pos_indicator_mouse_lv_mem");
+        lv_obj_set_pos(indicator_mouse, 118, 48);
+        status_display_log_heap_info("after_set_pos_indicator_mouse");
+        status_display_log_lv_mem("after_set_pos_indicator_mouse_lv_mem");
+        lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        ESP_LOGW("STATUS_DISP", "init_icons: indicator_mouse is NULL (STATUS_DISPLAY_MINIMAL?), skipping settext/pos");
+    }
 
     if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
         ESP_LOGE("STATUS_DISP", "Heap integrity failed before creating label_nrf_debug - aborting");
@@ -445,10 +461,29 @@ static void status_display_init_icons(void)
     ESP_LOGI("STATUS_DISP", "init_icons: created label_nrf_debug=%p", (void*)label_nrf_debug);
     status_display_log_heap_info("after_label_nrf_debug");
     status_display_log_lv_mem("after_label_nrf_debug_lv_mem");
+
+    /* Double-check LVGL memory integrity before mutating the label */
+    if (lv_mem_test() != LV_RES_OK) {
+        ESP_LOGE("STATUS_DISP", "lv_mem_test failed before label_nrf_debug settext - aborting");
+        status_display_log_lv_mem("lv_mem_test_before_label_nrf_debug");
+        display_available = false;
+        return;
+    }
+
     lv_label_set_text(label_nrf_debug, "");
     status_display_log_heap_info("after_label_nrf_debug_settext");
+    status_display_log_lv_mem("after_label_nrf_debug_settext_lv_mem");
+
+    if (lv_mem_test() != LV_RES_OK) {
+        ESP_LOGE("STATUS_DISP", "lv_mem_test failed before label_nrf_debug set_pos - aborting");
+        status_display_log_lv_mem("lv_mem_test_before_set_pos_label_nrf_debug");
+        display_available = false;
+        return;
+    }
+
     lv_obj_set_pos(label_nrf_debug, 0, 0);
     status_display_log_heap_info("after_set_pos_label_nrf_debug");
+    status_display_log_lv_mem("after_set_pos_label_nrf_debug_lv_mem");
 #endif
 
     /* persistent label for layer name (created once) */
@@ -466,15 +501,58 @@ static void status_display_init_icons(void)
         ESP_LOGI("STATUS_DISP", "init_icons: created label_layer_name=%p", (void*)label_layer_name);
         status_display_log_heap_info("after_label_layer_name");
         status_display_log_lv_mem("after_label_layer_name_lv_mem");
+
+        if (lv_mem_test() != LV_RES_OK) {
+            ESP_LOGE("STATUS_DISP", "lv_mem_test failed before label_layer_name settext - aborting");
+            status_display_log_lv_mem("lv_mem_test_before_label_layer_name");
+            display_available = false;
+            return;
+        }
+
         lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
         status_display_log_heap_info("after_label_layer_name_settext");
         status_display_log_lv_mem("after_label_layer_name_settext_lv_mem");
+
+        if (lv_mem_test() != LV_RES_OK) {
+            ESP_LOGE("STATUS_DISP", "lv_mem_test failed before label_layer_name set_pos - aborting");
+            status_display_log_lv_mem("lv_mem_test_before_set_pos_label_layer_name");
+            display_available = false;
+            return;
+        }
+
         lv_obj_set_pos(label_layer_name, 38, 48);
         status_display_log_heap_info("after_set_pos_label_layer_name");
         status_display_log_lv_mem("after_set_pos_label_layer_name_lv_mem");
     } else {
+        status_display_log_heap_info("before_update_label_layer_name");
+        status_display_log_lv_mem("before_update_label_layer_name_lv_mem");
+        if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
+            ESP_LOGE("STATUS_DISP", "Heap integrity FAILED before updating label_layer_name - disabling display");
+            status_display_log_heap_info("label_layer_name_update_fail");
+            display_available = false;
+            return;
+        }
+        if (lv_mem_test() != LV_RES_OK) {
+            ESP_LOGE("STATUS_DISP", "lv_mem_test FAILED before updating label_layer_name - disabling display");
+            status_display_log_lv_mem("lv_mem_test_before_label_layer_name_update");
+            display_available = false;
+            return;
+        }
+
         lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
+        status_display_log_heap_info("after_label_layer_name_settext_existing");
+        status_display_log_lv_mem("after_label_layer_name_settext_existing_lv_mem");
+
+        if (lv_mem_test() != LV_RES_OK) {
+            ESP_LOGE("STATUS_DISP", "lv_mem_test FAILED after settext - disabling display");
+            status_display_log_lv_mem("lv_mem_test_after_settext_label_layer_name");
+            display_available = false;
+            return;
+        }
+
         lv_obj_set_pos(label_layer_name, 38, 48);
+        status_display_log_heap_info("after_set_pos_label_layer_name_existing");
+        status_display_log_lv_mem("after_set_pos_label_layer_name_existing_lv_mem");
     }
 }
 
@@ -496,6 +574,8 @@ static void status_display_prepare_ui(bool clear_screen)
         icon_path = NULL;
         indicator_mouse = NULL;
         label_nrf_debug = NULL;
+        /* persistent label can be freed by display_clear_screen; reset it to avoid dangling pointer */
+        label_layer_name = NULL;
         last_bt_state = -1;
         last_path_state = -1;
         bt_blink_visible = true;
