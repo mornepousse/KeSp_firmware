@@ -71,7 +71,7 @@ static const uint8_t hid_cdc_configuration_descriptor[] = {
 
     // HID clavier boot : interface 2
     TUD_HID_DESCRIPTOR(2, 5, HID_ITF_PROTOCOL_KEYBOARD,
-                       sizeof(hid_report_descriptor), EPNUM_HID, 16, 10),
+                       sizeof(hid_report_descriptor), EPNUM_HID, 16, 1),
 };
 
 // Tableau de chaînes (langue + fabricant + produit + série + usage HID)
@@ -93,7 +93,7 @@ const char *hid_string_descriptor[] = {
 // static const uint8_t hid_configuration_descriptor[] = { 
 //     TUD_CONFIG_DESCRIPTOR(1, 1, 0, TUSB_DESC_TOTAL_LEN,
 //                           TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100), 
-//     TUD_HID_DESCRIPTOR(0, 4, false, sizeof(hid_report_descriptor), 0x81, 16, 10),
+//     TUD_HID_DESCRIPTOR(0, 4, false, sizeof(hid_report_descriptor), 0x81, 16, 1),
 // };
 
 /********* TinyUSB HID callbacks ***************/
