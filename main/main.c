@@ -33,6 +33,9 @@ static const char *TAG = "Main";
 
 static int display_sleep = 0; // 0 = on, 1 = off
 
+/* Task handle exported for diagnostics: status display task */
+TaskHandle_t status_display_task_handle = NULL;
+
 static void cpu_time_logger_task(void *arg) {
   (void)arg;
   char buf[512];
@@ -50,6 +53,11 @@ static void cpu_time_logger_task(void *arg) {
 static void heap_diag_task(void *arg)
 {
     (void)arg;
+    /* External task handles (keyboard and nrf task provide their own exported handles) */
+    extern TaskHandle_t keyboard_task_handle;
+    extern TaskHandle_t nrf24_task_handle;
+    extern TaskHandle_t status_display_task_handle; /* defined in this file when creating the task */
+
     for (;;) {
         if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
             size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
@@ -64,6 +72,25 @@ static void heap_diag_task(void *arg)
                 ESP_LOGI(TAG, "HEAP_DIAG: free8=%u free32=%u", (unsigned)free8, (unsigned)free32);
             }
         }
+
+        /* Log stack high-water marks for critical tasks at a reduced frequency to avoid log noise */
+        static int stack_diag_cnt = 0;
+        if ((stack_diag_cnt++ & 7) == 0) { /* every 8 loops (~4s) */
+            TaskHandle_t handles[] = { keyboard_task_handle, nrf24_task_handle, status_display_task_handle };
+            const char *names[] = { "keyboard", "nrf24", "status_display" };
+            for (int i = 0; i < sizeof(handles)/sizeof(handles[0]); i++) {
+                if (handles[i] != NULL) {
+                    UBaseType_t words_left = uxTaskGetStackHighWaterMark(handles[i]);
+                    size_t bytes_left = words_left * sizeof(StackType_t);
+                    ESP_LOGI(TAG, "STACK_DIAG: %s stack free ~= %u bytes", names[i], (unsigned)bytes_left);
+                    /* Warn if stack remaining too low (e.g. < 256 bytes) */
+                    if (bytes_left < 256) {
+                        ESP_LOGW(TAG, "STACK_DIAG: %s stack low (%u bytes left)", names[i], (unsigned)bytes_left);
+                    }
+                }
+            }
+        }
+
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
@@ -127,7 +154,7 @@ void app_main(void) {
   ESP_LOGI(TAG, "display init");
   status_display_start();
   // Start status display task on core 0 to isolate display work from keyboard
-  xTaskCreatePinnedToCore(status_display_task, "status_disp", 4096, NULL, 10, NULL, 1);
+  xTaskCreatePinnedToCore(status_display_task, "status_disp", 6144, NULL, 10, &status_display_task_handle, 1);
   // Reset the rtc GPIOS
   rtc_matrix_deinit();
   ESP_LOGI(TAG, "Matrix setup init");
@@ -140,14 +167,16 @@ void app_main(void) {
   TaskHandle_t xHandleMatrix_Keybord = NULL;
   static uint8_t ucParameterToPass;
   // Keyboard on CPU 0, priority 3 (below LVGL=4)
-  xTaskCreatePinnedToCore(vTaskKeyboard, "Matrix_Keyboard", 4096, &ucParameterToPass,
+  /* Increase keyboard task stack to reduce stack pressure (was 4096) */
+  xTaskCreatePinnedToCore(vTaskKeyboard, "Matrix_Keyboard", 6144, &ucParameterToPass,
               3, &xHandleMatrix_Keybord, 1);
   ESP_LOGI(TAG, "bluetooth init");
   init_hid_bluetooth();
 
   ESP_LOGI(TAG, "NRF24 init");
   // NRF24 on CPU 1, priority 3 (won't block IDLE on CPU 1)
-  xTaskCreatePinnedToCore(nrf24_task, "nrf24_task", 4096, NULL, 3, NULL, 1);
+  /* Increase nrf24 task stack to reduce stack pressure (was 4096) */
+  xTaskCreatePinnedToCore(nrf24_task, "nrf24_task", 6144, NULL, 3, NULL, 1);
 
   // Start periodic CPU usage logger on core 1 (avoid interfering with keyboard task on core 0)
   //xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL, 1);
@@ -155,7 +184,8 @@ void app_main(void) {
   // status_display_refresh_all();
 
   /* Start heap diagnostic task to catch heap corruption early */
-  xTaskCreatePinnedToCore(heap_diag_task, "heap_diag", 2048, NULL, 1, NULL, 1);
+  /* Increase stack to avoid overflow (logs and system calls can use significant stack) */
+  xTaskCreatePinnedToCore(heap_diag_task, "heap_diag", 4096, NULL, 1, NULL, 1);
 
   for (;;) {
     // keep main light; display handled in its own task

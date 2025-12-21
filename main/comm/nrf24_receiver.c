@@ -50,10 +50,46 @@ static spi_device_handle_t spi;
 /* Task handle to notify nrf task from IRQ ISR */
 TaskHandle_t nrf24_task_handle = NULL;
 
+/* Diagnostics: enable verbose NRF24 debug logging (default OFF to reduce log noise) */
+#ifndef NRF24_DEBUG_VERBOSE
+//#define NRF24_DEBUG_VERBOSE 0
+#endif
+
+/* Control how often to log payloads when verbose is enabled */
+#ifndef NRF24_PAYLOAD_LOG_EVERY
+#define NRF24_PAYLOAD_LOG_EVERY 25
+#endif
+
+/* Watchdog / recovery configuration */
+#ifndef NRF24_RECOVER_TIMEOUT_MS
+#define NRF24_RECOVER_TIMEOUT_MS 1500 /* more aggressive: 1.5s */
+#endif
+#ifndef NRF24_RECOVER_COOLDOWN_MS
+#define NRF24_RECOVER_COOLDOWN_MS 10000
+#endif
+
+/* Static address used for reconfiguration on recover */
+static const uint8_t NRF24_ADDR[5] = {0xCE, 0xCE, 0xCE, 0xCE, 0xCE};
+
+/* Throttle periodic status logs to reduce noise */
+#ifndef NRF24_STATUS_LOG_INTERVAL_MS
+#define NRF24_STATUS_LOG_INTERVAL_MS 20000
+#endif
+
 /* ISR: notify the nrf24 task to process FIFO */
+static volatile uint32_t nrf_isr_count = 0;    // increments in ISR
+static volatile uint32_t nrf_notify_count = 0; // increments in task when processing notification
+static volatile TickType_t nrf_last_packet_tick = 0; // last time we processed a valid payload
+static uint32_t nrf_recover_count = 0; // number of recovery attempts
+static TickType_t nrf_last_recover_tick = 0;
+static uint32_t nrf_payload_seen = 0; // total payloads seen (for throttled logging)
+
 static void IRAM_ATTR nrf_irq_isr(void* arg)
 {
     BaseType_t woke = pdFALSE;
+#ifdef NRF24_DEBUG_VERBOSE
+    nrf_isr_count++;
+#endif
     if (nrf24_task_handle != NULL) {
         vTaskNotifyGiveFromISR(nrf24_task_handle, &woke);
         portYIELD_FROM_ISR(woke);
@@ -299,17 +335,66 @@ void nrf24_task(void *arg) {
     nrf24_task_handle = xTaskGetCurrentTaskHandle();
 
     while (1) {
-        /* Wait for IRQ notification (or timeout for periodic logging) */
-        uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10000));
+        /* Quick check: if IRQ pin is asserted (active-low), drain FIFO immediately without waiting */
+        if (gpio_get_level(PIN_IRQ) == 0) {
+            uint8_t fifo = nrf_read_reg(FIFO_STATUS);
+            while (!(fifo & 0x01)) {
+                nrf_read_payload(payload, 5);
+                nrf_write_reg(STATUS, 0x70);
+
+                nrf_payload_seen++;
+#ifdef NRF24_DEBUG_VERBOSE
+                if ((nrf_payload_seen % NRF24_PAYLOAD_LOG_EVERY) == 0) {
+                    ESP_LOGI(TAG, "NRF RX payload raw (sampled, immediate): %02X %02X %02X %02X %02X",
+                             payload[0], payload[1], payload[2], payload[3], payload[4]);
+                }
+#endif
+
+                if (payload[0] == 0x01) {
+                    nrf_last_packet_tick = xTaskGetTickCount();
+                    send_mouse_report(payload[1], (int8_t)payload[2], (int8_t)payload[3], (int8_t)payload[4]);
+                    packet_count++;
+                }
+
+                fifo = nrf_read_reg(FIFO_STATUS);
+                taskYIELD();
+            }
+
+            /* After immediate drain, continue to next loop iteration */
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
+
+        /* Wait for IRQ notification (short timeout so we can detect missed IRQ quickly) */
+        uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
 
         if (notified) {
-            /* Process all packets in FIFO */
+#ifdef NRF24_DEBUG_VERBOSE
+            nrf_notify_count++;
+            uint8_t status_reg = nrf_get_status();
             uint8_t fifo = nrf_read_reg(FIFO_STATUS);
+            ESP_LOGI(TAG, "NRF IRQ: isr_count=%lu notify_count=%lu status=0x%02X fifo=0x%02X",
+                     (unsigned long)nrf_isr_count, (unsigned long)nrf_notify_count, status_reg, fifo);
+#else
+            uint8_t fifo = nrf_read_reg(FIFO_STATUS);
+#endif
+
+            /* Process all packets in FIFO */
             while (!(fifo & 0x01)) {
                 nrf_read_payload(payload, 5);
                 nrf_write_reg(STATUS, 0x70); // Clear all IRQ flags
 
+                nrf_payload_seen++;
+#ifdef NRF24_DEBUG_VERBOSE
+                if ((nrf_payload_seen % NRF24_PAYLOAD_LOG_EVERY) == 0) {
+                    ESP_LOGI(TAG, "NRF RX payload raw (sampled): %02X %02X %02X %02X %02X",
+                             payload[0], payload[1], payload[2], payload[3], payload[4]);
+                }
+#endif
+
                 if (payload[0] == 0x01) {
+                    /* mark last packet tick for watchdog */
+                    nrf_last_packet_tick = xTaskGetTickCount();
                     send_mouse_report(payload[1], (int8_t)payload[2], (int8_t)payload[3], (int8_t)payload[4]);
                     packet_count++;
                 }
@@ -322,10 +407,143 @@ void nrf24_task(void *arg) {
         }
 
         /* Periodic log */
-        if ((xTaskGetTickCount() - last_log_time) >= pdMS_TO_TICKS(10000)) {
-            ESP_LOGI(TAG, "NRF24 | Packets: %lu", packet_count);
+        if ((xTaskGetTickCount() - last_log_time) >= pdMS_TO_TICKS(NRF24_STATUS_LOG_INTERVAL_MS)) {
+#ifdef NRF24_DEBUG_VERBOSE
+            uint8_t status_reg = nrf_get_status();
+            uint8_t fifo = nrf_read_reg(FIFO_STATUS);
+            uint8_t rpd = nrf_read_reg(RPD);
+            ESP_LOGI(TAG, "NRF24 | Packets: %lu isr_count=%lu notify_count=%lu status=0x%02X fifo=0x%02X RPD=%d last_pkt_age_ms=%lu recover_count=%lu",
+                     packet_count, (unsigned long)nrf_isr_count, (unsigned long)nrf_notify_count, status_reg, fifo, rpd,
+                     (unsigned long)((xTaskGetTickCount() - nrf_last_packet_tick) * portTICK_PERIOD_MS), (unsigned long)nrf_recover_count);
+#else
+            ESP_LOGI(TAG, "NRF24 | Packets: %lu last_pkt_age_ms=%lu recover_count=%lu",
+                     packet_count, (unsigned long)((xTaskGetTickCount() - nrf_last_packet_tick) * portTICK_PERIOD_MS), (unsigned long)nrf_recover_count);
+#endif
             packet_count = 0;
             last_log_time = xTaskGetTickCount();
+
+            /* Watchdog: if no packet recently, attempt recovery */
+            if (nrf_last_packet_tick != 0 && (xTaskGetTickCount() - nrf_last_packet_tick) > pdMS_TO_TICKS(NRF24_RECOVER_TIMEOUT_MS)) {
+                /* avoid hammering recovery; apply cooldown */
+                if ((xTaskGetTickCount() - nrf_last_recover_tick) > pdMS_TO_TICKS(NRF24_RECOVER_COOLDOWN_MS)) {
+                    nrf_recover_count++;
+                    nrf_last_recover_tick = xTaskGetTickCount();
+                    ESP_LOGW(TAG, "NRF24: No packets for %lu ms - attempting recovery #%lu",
+                             (unsigned long)((xTaskGetTickCount() - nrf_last_packet_tick) * portTICK_PERIOD_MS), (unsigned long)nrf_recover_count);
+
+                    /* quick recovery: toggle CE and reflush registers and re-install ISR */
+                    int irq_level_before = gpio_get_level(PIN_IRQ);
+                    ESP_LOGI(TAG, "NRF24: PIN_IRQ level before recovery = %d", irq_level_before);
+
+                    gpio_set_level(PIN_CE, 0);
+                    vTaskDelay(pdMS_TO_TICKS(10));
+                    nrf_flush_rx();
+                    nrf_write_reg(STATUS, 0x70);
+                    nrf_write_reg(RF_CH, 76);
+
+                    /* Reinstall ISR handler as an extra mitigation */
+                    gpio_isr_handler_remove(PIN_IRQ);
+                    gpio_isr_handler_add(PIN_IRQ, nrf_irq_isr, NULL);
+
+                    /* Aggressive mitigation every 3 recoveries: power-cycle module */
+                    if ((nrf_recover_count % 3) == 0) {
+                        ESP_LOGW(TAG, "NRF24: performing POWER-CYCLE as aggressive mitigation (recover #%lu)", (unsigned long)nrf_recover_count);
+                        gpio_set_level(PIN_CE, 0);
+                        /* power off (active-low P-channel) */
+                        gpio_set_level(PIN_PWR, 1);
+                        vTaskDelay(pdMS_TO_TICKS(100));
+                        /* power on */
+                        gpio_set_level(PIN_PWR, 0);
+                        vTaskDelay(pdMS_TO_TICKS(200));
+
+                        /* reapply essential registers */
+                        nrf_flush_rx();
+                        nrf_write_reg(STATUS, 0x70);
+                        nrf_write_reg(RF_CH, 76);
+                        nrf_write_reg(RF_SETUP, 0x06);
+                        nrf_write_reg(RX_PW_P0, 5);
+                        nrf_write_buf(RX_ADDR_P0, NRF24_ADDR, 5);
+                    }
+
+                    gpio_set_level(PIN_CE, 1);
+                    vTaskDelay(pdMS_TO_TICKS(5));
+
+                    uint8_t rpd_after = nrf_read_reg(RPD);
+                    uint8_t fifo_after = nrf_read_reg(FIFO_STATUS);
+                    int irq_level_after = gpio_get_level(PIN_IRQ);
+                    ESP_LOGW(TAG, "NRF24: recovery done RPD=%d fifo=0x%02X PIN_IRQ after=%d", rpd_after, fifo_after, irq_level_after);
+                } else {
+                    ESP_LOGI(TAG, "NRF24: recent recovery performed, skipping additional recovery");
+                }
+            }
+        }
+
+        /* Quick diagnostic: if FIFO has data but PIN_IRQ is not asserted, log and reinstall handler */
+        {
+            uint8_t fifo_stat = nrf_read_reg(FIFO_STATUS);
+            int irq_level = gpio_get_level(PIN_IRQ);
+            if (!(fifo_stat & 0x01) && irq_level == 1) {
+                ESP_LOGW(TAG, "NRF24: FIFO has data but PIN_IRQ not asserted (fifo=0x%02X). PIN_IRQ level=%d. Reinstalling IRQ handler.",
+                         fifo_stat, irq_level);
+                /* attempt a mitigation: reinstall ISR and allow the next loop to drain if pin asserts */
+                gpio_isr_handler_remove(PIN_IRQ);
+                gpio_isr_handler_add(PIN_IRQ, nrf_irq_isr, NULL);
+            }
+        }
+
+        /* Immediate watchdog: if no packet recently, attempt recovery (independent of periodic logs) */
+        if (nrf_last_packet_tick != 0 && (xTaskGetTickCount() - nrf_last_packet_tick) > pdMS_TO_TICKS(NRF24_RECOVER_TIMEOUT_MS)) {
+            /* avoid hammering recovery; apply cooldown */
+            if ((xTaskGetTickCount() - nrf_last_recover_tick) > pdMS_TO_TICKS(NRF24_RECOVER_COOLDOWN_MS)) {
+                nrf_recover_count++;
+                nrf_last_recover_tick = xTaskGetTickCount();
+                ESP_LOGW(TAG, "NRF24: No packets for %lu ms - attempting recovery #%lu",
+                         (unsigned long)((xTaskGetTickCount() - nrf_last_packet_tick) * portTICK_PERIOD_MS), (unsigned long)nrf_recover_count);
+
+                /* quick recovery: toggle CE and reflush registers and re-install ISR */
+                int irq_level_before = gpio_get_level(PIN_IRQ);
+                ESP_LOGI(TAG, "NRF24: PIN_IRQ level before recovery = %d", irq_level_before);
+
+                gpio_set_level(PIN_CE, 0);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                nrf_flush_rx();
+                nrf_write_reg(STATUS, 0x70);
+                nrf_write_reg(RF_CH, 76);
+
+                /* Reinstall ISR handler as an extra mitigation */
+                gpio_isr_handler_remove(PIN_IRQ);
+                gpio_isr_handler_add(PIN_IRQ, nrf_irq_isr, NULL);
+
+                /* Aggressive mitigation every 3 recoveries: power-cycle module */
+                if ((nrf_recover_count % 3) == 0) {
+                    ESP_LOGW(TAG, "NRF24: performing POWER-CYCLE as aggressive mitigation (recover #%lu)", (unsigned long)nrf_recover_count);
+                    gpio_set_level(PIN_CE, 0);
+                    /* power off (active-low P-channel) */
+                    gpio_set_level(PIN_PWR, 1);
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                    /* power on */
+                    gpio_set_level(PIN_PWR, 0);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+
+                    /* reapply essential registers */
+                    nrf_flush_rx();
+                    nrf_write_reg(STATUS, 0x70);
+                    nrf_write_reg(RF_CH, 76);
+                    nrf_write_reg(RF_SETUP, 0x06);
+                    nrf_write_reg(RX_PW_P0, 5);
+                    nrf_write_buf(RX_ADDR_P0, NRF24_ADDR, 5);
+                }
+
+                gpio_set_level(PIN_CE, 1);
+                vTaskDelay(pdMS_TO_TICKS(5));
+
+                uint8_t rpd_after = nrf_read_reg(RPD);
+                uint8_t fifo_after = nrf_read_reg(FIFO_STATUS);
+                int irq_level_after = gpio_get_level(PIN_IRQ);
+                ESP_LOGW(TAG, "NRF24: recovery done RPD=%d fifo=0x%02X PIN_IRQ after=%d", rpd_after, fifo_after, irq_level_after);
+            } else {
+                ESP_LOGI(TAG, "NRF24: recent recovery performed, skipping additional recovery");
+            }
         }
 
         /* Small delay to avoid tight loop on spurious notifications */
