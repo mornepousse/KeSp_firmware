@@ -471,9 +471,9 @@ void nrf24_task(void *arg) {
                     uint8_t rpd_after = nrf_read_reg(RPD);
                     uint8_t fifo_after = nrf_read_reg(FIFO_STATUS);
                     int irq_level_after = gpio_get_level(PIN_IRQ);
-                    ESP_LOGW(TAG, "NRF24: recovery done RPD=%d fifo=0x%02X PIN_IRQ after=%d", rpd_after, fifo_after, irq_level_after);
+                    //ESP_LOGW(TAG, "NRF24: recovery done RPD=%d fifo=0x%02X PIN_IRQ after=%d", rpd_after, fifo_after, irq_level_after);
                 } else {
-                    ESP_LOGI(TAG, "NRF24: recent recovery performed, skipping additional recovery");
+                    //ESP_LOGI(TAG, "NRF24: recent recovery performed, skipping additional recovery");
                 }
             }
         }
@@ -542,7 +542,7 @@ void nrf24_task(void *arg) {
                 int irq_level_after = gpio_get_level(PIN_IRQ);
                 ESP_LOGW(TAG, "NRF24: recovery done RPD=%d fifo=0x%02X PIN_IRQ after=%d", rpd_after, fifo_after, irq_level_after);
             } else {
-                ESP_LOGI(TAG, "NRF24: recent recovery performed, skipping additional recovery");
+                //ESP_LOGI(TAG, "NRF24: recent recovery performed, skipping additional recovery");
             }
         }
 

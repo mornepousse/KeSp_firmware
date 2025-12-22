@@ -185,7 +185,7 @@ void app_main(void) {
 
   /* Start heap diagnostic task to catch heap corruption early */
   /* Increase stack to avoid overflow (logs and system calls can use significant stack) */
-  xTaskCreatePinnedToCore(heap_diag_task, "heap_diag", 4096, NULL, 1, NULL, 1);
+  //xTaskCreatePinnedToCore(heap_diag_task, "heap_diag", 4096, NULL, 1, NULL, 1);
 
   for (;;) {
     // keep main light; display handled in its own task
