@@ -13,14 +13,14 @@
 #include "display_types.h"
 
 //#define VERSION_1
-#define VERSION_1
+#define VERSION_2
 
 #define MANUFACTURER_NAME "MornePousse"                // 1: Manufacturer
 #define PRODUCT_NAME "KaSeV2"               // 2: Product
 #define SERIAL_NUMBER "1994"               // 3: Serials, should use chip ID
 
 #define MODULE_ID "MORNEPOUSSE"
-#define GATTS_TAG "KaSe v1.2-a" // The device's name
+#define GATTS_TAG "KaSe v2.9-a" // The device's name
 #define MAX_BT_DEVICENAME_LENGTH 40
 
 #define MASTER  // undefine if you are not flashing the main controller

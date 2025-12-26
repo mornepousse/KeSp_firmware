@@ -1,4 +1,14 @@
 dependencies:
+  espressif/cmake_utilities:
+    component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.1'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 0.5.3
   espressif/esp_lvgl_port:
     component_hash: f872401524cb645ee6ff1c9242d44fb4ddcfd4d37d7be8b9ed3f4e85a404efcd
     dependencies:
@@ -32,6 +42,20 @@ dependencies:
     - esp32p4
     - esp32h4
     version: 2.0.1~1
+  espressif/keyboard_button:
+    component_hash: 66e3953901b2a1489a50b0c8df8a86eedc442139e6de5695263b724b1e24fd42
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: 0.*
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.0.0
   espressif/tinyusb:
     component_hash: 5ea9d3b6d6b0734a0a0b3491967aa0e1bece2974132294dbda5dd2839b247bfa
     dependencies:
@@ -71,9 +95,10 @@ dependencies:
 direct_dependencies:
 - espressif/esp_lvgl_port
 - espressif/esp_tinyusb
+- espressif/keyboard_button
 - idf
 - joltwallet/littlefs
 - lvgl/lvgl
-manifest_hash: 46fc980d8ac858b4d5f9ee85e0c93aaa7dc2f0f482aa5bae022971f99c9079f6
+manifest_hash: 3a9a0da820c43409e129e6b1661d2a3beaa894c505dbfee1c0777d83dfbeadc1
 target: esp32s3
 version: 2.0.0
