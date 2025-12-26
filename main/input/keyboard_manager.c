@@ -573,18 +573,15 @@ void vTaskKeyboard(void *pvParameters) {
     /* Increased from 10ms to reduce idle CPU when using event-driven keyboard_button */
     const TickType_t wait_ticks = pdMS_TO_TICKS(50);
     uint32_t notified = ulTaskNotifyTake(pdTRUE, wait_ticks);
+
     if (notified) {
       /* ISR triggered: enter burst-scan mode */
       uint32_t burst_start_ms = esp_timer_get_time() / 1000;
       uint32_t now_ms = burst_start_ms;
 
       while ((now_ms - burst_start_ms) < BURST_MS) {
-        /* start and mark as full scan */
         __scan_start_us = esp_timer_get_time();
         __did_full_scan = true;
-
-        /* keyboard_button reports asynchronously via callback; no full scan */
-        /* capture if callback already set the change flag (will be processed below) */
         __scan_detected_change = (stat_matrix_changed == 1);
 
 #if KEYBOARD_SCAN_DEBUG
@@ -621,71 +618,33 @@ void vTaskKeyboard(void *pvParameters) {
         now_ms = esp_timer_get_time() / 1000;
       }
 
-      /* final scan to ensure states are stable */
+      /* Final pass after burst to ensure stable state */
       __scan_start_us = esp_timer_get_time();
       __did_full_scan = true;
-      /* final scan omitted: keyboard_button will deliver state via callback */
       __scan_detected_change = __scan_detected_change || (stat_matrix_changed == 1);
+      
+      build_keycode_report();
+      if (stat_matrix_changed == 1) {
+          stat_matrix_changed = 0;
+          process_matrix_changes();
+      }
+      send_hid_key();
       taskYIELD(); /* hint to scheduler that others can run */
 
     } else {
-      /* mark partial scan start and capture initial change detection */
+      /* Timeout / Idle */
       __scan_start_us = esp_timer_get_time();
       __did_partial_scan = true;
-      /* partial scan omitted: rely on keyboard_button callback */
-      __scan_detected_change = __scan_detected_change || (stat_matrix_changed == 1);
-    }
-    uint16_t keycodeTMP = 0;
-    for (uint8_t i = 0; i < 6; i++) {
-      if (current_press_col[i] != 255) {
-        keycodeTMP =
-            keymaps[current_layout][current_press_row[i]][current_press_col[i]];
-
-        is_momentary_layer(keycodeTMP, i);
-
-        is_internal_function(keycodeTMP); // si c'est pas une touche special
-        is_macro(keycodeTMP);
-        if (current_row_layer_changer == current_press_row[i] &&
-            current_col_layer_changer == current_press_col[i]) {
-        } else {
-          if (keycodeTMP == K_NO) {
-            keycodeTMP =
-                keymaps[last_layer][current_press_row[i]][current_press_col[i]];
-          }
-          if (keycodeTMP > 255) {
-            extra_keycodes[i] = keycodeTMP;
-          } else
-            keycodes[i] = keycodeTMP;
-        }
-
-      } else {
-
-        extra_keycodes[i] = 0;
-        keycodes[i] = 0;
+      __scan_detected_change = (stat_matrix_changed == 1);
+      
+      /* Check state even if not notified */
+      build_keycode_report();
+      if (stat_matrix_changed == 1) {
+          stat_matrix_changed = 0;
+          process_matrix_changes();
       }
+      send_hid_key();
     }
-    if (current_layout != last_layer) {
-
-      uint8_t changer = 0;
-      for (uint8_t i = 0; i < 6; i++) {
-        if (current_press_col[i] == current_col_layer_changer &&
-            current_press_row[i] == current_row_layer_changer) {
-          // KM_LOGI("change 1\n");
-          changer = 1;
-          break;
-        }
-      }
-
-      if (changer == 0) {
-        // KM_LOGI("change 0\n");
-        current_layout = last_layer;
-        layer_changed();
-        current_col_layer_changer = 255;
-        current_row_layer_changer = 255;
-      }
-    }
-    /* Process any matrix changes that may have been set by scans above */
-    process_matrix_changes();
 
     /* If we performed a scan this iteration compute duration and only count it if it had activity */
     if (__did_full_scan || __did_partial_scan) {
