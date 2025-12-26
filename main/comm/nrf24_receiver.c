@@ -282,7 +282,7 @@ void nrf24_init(void) {
     }
 
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 2000000, // 4 MHz
+        .clock_speed_hz = 8000000, // 8 MHz
         .mode = 0,
         .spics_io_num = PIN_CSN,
         .queue_size = 7,

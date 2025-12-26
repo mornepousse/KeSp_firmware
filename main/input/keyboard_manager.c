@@ -575,75 +575,59 @@ void vTaskKeyboard(void *pvParameters) {
     uint32_t notified = ulTaskNotifyTake(pdTRUE, wait_ticks);
 
     if (notified) {
-      /* ISR triggered: enter burst-scan mode */
-      uint32_t burst_start_ms = esp_timer_get_time() / 1000;
-      uint32_t now_ms = burst_start_ms;
-
-      while ((now_ms - burst_start_ms) < BURST_MS) {
-        __scan_start_us = esp_timer_get_time();
-        __did_full_scan = true;
-        __scan_detected_change = (stat_matrix_changed == 1);
-
-#if KEYBOARD_SCAN_DEBUG
-        /* Debug: dump current presses and timestamp (safe, bounded) */
-        {
-          uint32_t now = esp_timer_get_time() / 1000;
-          char buf[128];
-          int off = snprintf(buf, sizeof(buf), "scan@%u ms:", now);
-          for (int k = 0; k < 6; k++) {
-            int rem = (int)sizeof(buf) - off;
-            if (rem <= 1) break; /* no space left */
-            int n = snprintf(buf + off, rem, " [%d,%d]", current_press_row[k], current_press_col[k]);
-            if (n < 0) break;
-            if (n >= rem) { off = (int)sizeof(buf) - 1; break; }
-            off += n;
-          }
-          buf[sizeof(buf) - 1] = '\0';
-          KM_LOGI("%s", buf);
-        }
-#endif
-
-        /* Build report and process internal funcs/releases */
-        build_keycode_report();
-        if (stat_matrix_changed == 1) {
-          stat_matrix_changed = 0;
-          process_matrix_changes();
-        }
-
-        /* Send HID only when keycodes changed to reduce redundant reports */
-        send_hid_key();
-        taskYIELD(); /* give NRF task a chance to run if it was contending */
-
-        vTaskDelay(pdMS_TO_TICKS(BURST_SCAN_INTERVAL_MS));
-        now_ms = esp_timer_get_time() / 1000;
-      }
-
-      /* Final pass after burst to ensure stable state */
+      /* ISR triggered: Matrix changed (debounced by keyboard_button) */
       __scan_start_us = esp_timer_get_time();
       __did_full_scan = true;
-      __scan_detected_change = __scan_detected_change || (stat_matrix_changed == 1);
       
-      build_keycode_report();
+      /* Process the change immediately */
       if (stat_matrix_changed == 1) {
+          __scan_detected_change = true;
+
+#if KEYBOARD_SCAN_DEBUG
+          /* Debug: dump current presses */
+          {
+            uint32_t now = esp_timer_get_time() / 1000;
+            char buf[128];
+            int off = snprintf(buf, sizeof(buf), "scan@%u ms:", now);
+            for (int k = 0; k < 6; k++) {
+              int rem = (int)sizeof(buf) - off;
+              if (rem <= 1) break;
+              int n = snprintf(buf + off, rem, " [%d,%d]", current_press_row[k], current_press_col[k]);
+              if (n < 0) break;
+              if (n >= rem) { off = (int)sizeof(buf) - 1; break; }
+              off += n;
+            }
+            buf[sizeof(buf) - 1] = '\0';
+            KM_LOGI("%s", buf);
+          }
+#endif
+
+          /* Build report and process internal funcs/releases */
+          build_keycode_report();
+          
+          /* Reset flag and process changes */
           stat_matrix_changed = 0;
           process_matrix_changes();
+
+          /* Send HID only when keycodes changed to reduce redundant reports */
+          send_hid_key();
       }
-      send_hid_key();
+      
       taskYIELD(); /* hint to scheduler that others can run */
 
     } else {
       /* Timeout / Idle */
       __scan_start_us = esp_timer_get_time();
       __did_partial_scan = true;
-      __scan_detected_change = (stat_matrix_changed == 1);
       
       /* Check state even if not notified */
-      build_keycode_report();
       if (stat_matrix_changed == 1) {
+          __scan_detected_change = true;
+          build_keycode_report();
           stat_matrix_changed = 0;
           process_matrix_changes();
+          send_hid_key();
       }
-      send_hid_key();
     }
 
     /* If we performed a scan this iteration compute duration and only count it if it had activity */
