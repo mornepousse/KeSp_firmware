@@ -2,6 +2,7 @@
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_task_wdt.h"
@@ -13,7 +14,7 @@
 
 // Pinout
 #define PIN_MOSI 5
-#define PIN_MISO 4
+#define PIN_MISO 37
 #define PIN_SCK  6
 #define PIN_CSN  48
 #define PIN_CE   47
@@ -46,6 +47,23 @@
 #define RPD         0x09
 
 static spi_device_handle_t spi;
+
+/* SPI timing diagnostics */
+static uint64_t nrf_total_spi_us = 0;
+static uint32_t nrf_spi_calls = 0;
+
+static inline esp_err_t nrf_spi_polling_transmit(spi_transaction_t *t) {
+    uint64_t t0 = esp_timer_get_time();
+    esp_err_t res = spi_device_polling_transmit(spi, t);
+    uint64_t t1 = esp_timer_get_time();
+    uint64_t d = (t1 > t0) ? (t1 - t0) : 0;
+    nrf_total_spi_us += d;
+    nrf_spi_calls++;
+    if (d > 2000) {
+        ESP_LOGW(TAG, "NRF SPI long transfer: %llu us", (unsigned long long)d);
+    }
+    return res;
+}
 
 /* Task handle to notify nrf task from IRQ ISR */
 TaskHandle_t nrf24_task_handle = NULL;
@@ -84,6 +102,10 @@ static uint32_t nrf_recover_count = 0; // number of recovery attempts
 static TickType_t nrf_last_recover_tick = 0;
 static uint32_t nrf_payload_seen = 0; // total payloads seen (for throttled logging)
 
+/* Timing aggregation for NRF events (only when packet triggers HID action, e.g., mouse) */
+static uint64_t nrf_total_event_us = 0;
+static uint32_t nrf_event_count = 0;
+
 static void IRAM_ATTR nrf_irq_isr(void* arg)
 {
     BaseType_t woke = pdFALSE;
@@ -102,7 +124,7 @@ static void nrf_write_reg(uint8_t reg, uint8_t value) {
         .length = 16,
         .tx_buffer = tx_data,
     };
-    spi_device_polling_transmit(spi, &t);
+    nrf_spi_polling_transmit(&t);
 }
 
 static void nrf_write_buf(uint8_t reg, const uint8_t *data, uint8_t len) {
@@ -116,7 +138,7 @@ static void nrf_write_buf(uint8_t reg, const uint8_t *data, uint8_t len) {
         .length = (len + 1) * 8,
         .tx_buffer = tx_buf,
     };
-    spi_device_polling_transmit(spi, &t);
+    nrf_spi_polling_transmit(&t);
     free(tx_buf);
 }
 
@@ -137,7 +159,7 @@ static void nrf_read_buf(uint8_t reg, uint8_t *data, uint8_t len) {
         .tx_buffer = tx_buf,
         .rx_buffer = rx_buf,
     };
-    spi_device_polling_transmit(spi, &t);
+    nrf_spi_polling_transmit(&t);
     
     memcpy(data, &rx_buf[1], len);
     
@@ -155,7 +177,7 @@ static uint8_t nrf_read_reg(uint8_t reg) {
         .rx_buffer = rx,
     };
     
-    spi_device_polling_transmit(spi, &t);
+    nrf_spi_polling_transmit(&t);
     return rx[1];
 }
 
@@ -176,7 +198,7 @@ static void nrf_read_payload(uint8_t *data, uint8_t len) {
         .tx_buffer = tx_buf,
         .rx_buffer = rx_buf,
     };
-    spi_device_polling_transmit(spi, &t);
+    nrf_spi_polling_transmit(&t);
 
     memcpy(data, &rx_buf[1], len);
 
@@ -191,7 +213,7 @@ static void nrf_flush_rx() {
         .tx_buffer = &cmd,
         .flags = SPI_TRANS_USE_TXDATA,
     };
-    spi_device_polling_transmit(spi, &t);
+    nrf_spi_polling_transmit(&t);
 }
 
 static uint8_t nrf_get_status() {
@@ -203,7 +225,7 @@ static uint8_t nrf_get_status() {
         .rx_buffer = &status,
         .flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA,
     };
-    spi_device_polling_transmit(spi, &t);
+    nrf_spi_polling_transmit(&t);
     return status;
 }
 
@@ -260,7 +282,7 @@ void nrf24_init(void) {
     }
 
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 4000000, // 4 MHz
+        .clock_speed_hz = 2000000, // 4 MHz
         .mode = 0,
         .spics_io_num = PIN_CSN,
         .queue_size = 7,
@@ -352,7 +374,11 @@ void nrf24_task(void *arg) {
 
                 if (payload[0] == 0x01) {
                     nrf_last_packet_tick = xTaskGetTickCount();
+                    uint64_t t0 = esp_timer_get_time();
                     send_mouse_report(payload[1], (int8_t)payload[2], (int8_t)payload[3], (int8_t)payload[4]);
+                    uint64_t t1 = esp_timer_get_time();
+                    nrf_total_event_us += (t1 - t0);
+                    nrf_event_count++;
                     packet_count++;
                 }
 
@@ -395,7 +421,11 @@ void nrf24_task(void *arg) {
                 if (payload[0] == 0x01) {
                     /* mark last packet tick for watchdog */
                     nrf_last_packet_tick = xTaskGetTickCount();
+                    uint64_t t0 = esp_timer_get_time();
                     send_mouse_report(payload[1], (int8_t)payload[2], (int8_t)payload[3], (int8_t)payload[4]);
+                    uint64_t t1 = esp_timer_get_time();
+                    nrf_total_event_us += (t1 - t0);
+                    nrf_event_count++;
                     packet_count++;
                 }
 
@@ -418,6 +448,19 @@ void nrf24_task(void *arg) {
 #else
             ESP_LOGI(TAG, "NRF24 | Packets: %lu last_pkt_age_ms=%lu recover_count=%lu",
                      packet_count, (unsigned long)((xTaskGetTickCount() - nrf_last_packet_tick) * portTICK_PERIOD_MS), (unsigned long)nrf_recover_count);
+            if (nrf_event_count > 0) {
+              uint64_t avg_nrf_us = nrf_total_event_us / nrf_event_count;
+              ESP_LOGI(TAG, "NRF24 | HID event avg: %llu us over %u events", (unsigned long long)avg_nrf_us, (unsigned)nrf_event_count);
+              /* reset counters for next interval */
+              nrf_total_event_us = 0;
+              nrf_event_count = 0;
+            }
+            if (nrf_spi_calls > 0) {
+              uint64_t avg_spi_us = nrf_total_spi_us / nrf_spi_calls;
+              ESP_LOGI(TAG, "NRF24 | SPI avg: %llu us over %u calls", (unsigned long long)avg_spi_us, (unsigned)nrf_spi_calls);
+              nrf_total_spi_us = 0;
+              nrf_spi_calls = 0;
+            }
 #endif
             packet_count = 0;
             last_log_time = xTaskGetTickCount();

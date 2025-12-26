@@ -10,12 +10,51 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/task.h"
+#include <stddef.h>
+/* Forward declaration to avoid depending on header include path during build */
+int cpu_time_measure_period(unsigned period_ms, char *out, size_t len);
+#include "esp_heap_caps.h"
 #define TAG_MATRIX "MATRIX"
 /* Define pins, notice that:
  * GPIO6-11 are usually used for SPI flash
  * GPIO34-39 can only be set as input mode and do not have software pullup or pulldown functions.
  * GPIOS 0,2,4,12-15,25-27,32-39 Can be used as RTC GPIOS as well (please read about power management in ReadMe)
  */
+
+/* Diagnostic: threshold for triggering a diagnostic dump (us). Lowered to 1 ms for aggressive capture */
+#ifndef MATRIX_COL_DUMP_THRESHOLD_US
+#define MATRIX_COL_DUMP_THRESHOLD_US 1000
+#endif
+
+/* Rate limit diagnostic dumps to at most once every DIAG_DUMP_INTERVAL_MS */
+#ifndef DIAG_DUMP_INTERVAL_MS
+#define DIAG_DUMP_INTERVAL_MS 5000
+#endif
+
+/* Per-pin profiling and summary interval */
+#ifndef ROW_SLOW_THRESHOLD_US
+#define ROW_SLOW_THRESHOLD_US 200 /* per-row read threshold for slow detection (200 us) */
+#endif
+#ifndef SLOW_SUMMARY_INTERVAL_MS
+#define SLOW_SUMMARY_INTERVAL_MS 10000 /* 10s summary for faster feedback */
+#endif
+
+/* Keep scan priority by default (no yields in column loop). Set to 1 to allow yielding between columns */
+#ifndef MATRIX_SCAN_ALLOW_YIELD
+#define MATRIX_SCAN_ALLOW_YIELD 0
+#endif
+
+/* Forward extern task handles for diagnostic reporting */
+extern TaskHandle_t keyboard_task_handle;
+extern TaskHandle_t nrf24_task_handle;
+extern TaskHandle_t status_display_task_handle;
+
+/* Profiling counters (accumulate over runtime) */
+static uint32_t col_slow_count[MATRIX_COLS];
+static uint32_t row_slow_count[MATRIX_ROWS];
+static uint64_t col_total_time_us[MATRIX_COLS];
+static uint32_t col_samples[MATRIX_COLS];
+static TickType_t last_slow_summary_tick = 0;
 const gpio_num_t MATRIX_ROWS_PINS[] = { ROWS0, 
 										ROWS1, 
 										ROWS2, 
@@ -50,9 +89,11 @@ uint32_t last_activity_time_ms = 0;
 uint8_t (*matrix_states[])[MATRIX_ROWS][MATRIX_COLS] = { &MATRIX_STATE,
 		&SLAVE_MATRIX_STATE, };
 
-//used for debouncing
-static uint32_t millis() {
-	return esp_timer_get_time() / 1000;
+//used for debouncing - avoid expensive 64-bit divide in hot path by using RTOS tick count
+static inline uint32_t millis() {
+    /* xTaskGetTickCount returns TickType_t; multiply by portTICK_PERIOD_MS to get ms.
+       This avoids doing a 64-bit division on esp_timer_get_time() inside scan loops. */
+    return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
 }
 
 // deinitializing rtc matrix pins on  deep sleep wake up
@@ -127,6 +168,11 @@ void matrix_setup(void) {
 		gpio_set_direction(MATRIX_COLS_PINS[col], GPIO_MODE_INPUT_OUTPUT);
 		gpio_set_level(MATRIX_COLS_PINS[col], 0);
 
+		/* Warn if column pin is a special/reserved pin (UART/Flash) which may cause issues */
+		if (MATRIX_COLS_PINS[col] == GPIO_NUM_1 || MATRIX_COLS_PINS[col] == GPIO_NUM_3 || (MATRIX_COLS_PINS[col] >= GPIO_NUM_6 && MATRIX_COLS_PINS[col] <= GPIO_NUM_11)) {
+			ESP_LOGW(TAG_MATRIX, "Column %u uses potentially shared pin %d - consider remapping", (unsigned)col, (int)MATRIX_COLS_PINS[col]);
+		}
+
 		ESP_LOGI(TAG_MATRIX,"%d is level %d", MATRIX_COLS_PINS[col], gpio_get_level(MATRIX_COLS_PINS[col]));
 	}
 
@@ -137,6 +183,8 @@ void matrix_setup(void) {
 		gpio_set_direction(MATRIX_ROWS_PINS[row], GPIO_MODE_INPUT_OUTPUT);
 		gpio_set_drive_capability(MATRIX_ROWS_PINS[row], GPIO_DRIVE_CAP_0);
 		gpio_set_level(MATRIX_ROWS_PINS[row], 0);
+		/* enable internal pull-down to avoid floating inputs when columns are not driven */
+		gpio_set_pull_mode(MATRIX_ROWS_PINS[row], GPIO_PULLDOWN_ONLY);
 
 		ESP_LOGI(TAG_MATRIX,"%d is level %d", MATRIX_ROWS_PINS[row], gpio_get_level(MATRIX_ROWS_PINS[row]));
 	}
@@ -224,8 +272,52 @@ void scan_matrix(void) {
 			ESP_LOGW(TAG_MATRIX, "col %d took %llu us", col, (unsigned long long)tcol_dur);
 		}
 
+		/* If a column read is very long, collect diagnostics (rate-limited) */
+		if (tcol_dur > MATRIX_COL_DUMP_THRESHOLD_US) {
+			static TickType_t last_diag_tick = 0;
+			TickType_t now_tick = xTaskGetTickCount();
+			if (last_diag_tick == 0 || (now_tick - last_diag_tick) > pdMS_TO_TICKS(DIAG_DUMP_INTERVAL_MS)) {
+				last_diag_tick = now_tick;
+				ESP_LOGW(TAG_MATRIX, "Long column read (col %d): %llu us - collecting diagnostics", col, (unsigned long long)tcol_dur);
+
+				/* Attempt runtime CPU usage snapshot (may fail if trace facility not enabled) */
+				char buf[512];
+				int r = cpu_time_measure_period(200, buf, sizeof(buf));
+				if (r == 0) {
+					ESP_LOGW(TAG_MATRIX, "CPU usage snapshot:\n%s", buf);
+				} else {
+					ESP_LOGW(TAG_MATRIX, "cpu_time_measure_period failed (enable FreeRTOS trace): %d", r);
+				}
+
+				/* Stack high-water marks for key tasks */
+				if (keyboard_task_handle) {
+					UBaseType_t words_left = uxTaskGetStackHighWaterMark(keyboard_task_handle);
+					size_t bytes_left = words_left * sizeof(StackType_t);
+					ESP_LOGW(TAG_MATRIX, "STACK: keyboard approx %u bytes free", (unsigned)bytes_left);
+				}
+				if (nrf24_task_handle) {
+					UBaseType_t words_left = uxTaskGetStackHighWaterMark(nrf24_task_handle);
+					size_t bytes_left = words_left * sizeof(StackType_t);
+					ESP_LOGW(TAG_MATRIX, "STACK: nrf24 approx %u bytes free", (unsigned)bytes_left);
+				}
+				if (status_display_task_handle) {
+					UBaseType_t words_left = uxTaskGetStackHighWaterMark(status_display_task_handle);
+					size_t bytes_left = words_left * sizeof(StackType_t);
+					ESP_LOGW(TAG_MATRIX, "STACK: status_display approx %u bytes free", (unsigned)bytes_left);
+				}
+
+				/* Heap diagnostics */
+				size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+				size_t largest8 = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+				ESP_LOGW(TAG_MATRIX, "HEAP: free8=%u largest8=%u", (unsigned)free8, (unsigned)largest8);
+			}
+		}
+
+		/* yield to let idle and other tasks run (prevents WDT if a column read takes long) */
+		vTaskDelay(0);
+
 		/* Give other tasks a chance to run; avoids hogging CPU in case of slow column reads or heavy logging */
-		//vTaskDelay(0);
+		vTaskDelay(0);
 	}
 
 	/* advance the next column index for next invocation */
@@ -345,6 +437,79 @@ void scan_matrix_full_once(void)
         uint64_t tcol_dur = tcol_end - tcol_start;
         if (tcol_dur > 2000) {
             ESP_LOGW(TAG_MATRIX, "col %d took %llu us", col, (unsigned long long)tcol_dur);
+        }
+
+        /* Always record per-column stats */
+        col_samples[col]++;
+        col_total_time_us[col] += tcol_dur;
+
+        /* If a column read exceeds threshold, collect diagnostics (rate-limited) and log stack/heap; also profile per-row reads */
+        if (tcol_dur > MATRIX_COL_DUMP_THRESHOLD_US) {
+            col_slow_count[col]++;
+            static TickType_t last_diag_tick = 0;
+            TickType_t now_tick = xTaskGetTickCount();
+            if (last_diag_tick == 0 || (now_tick - last_diag_tick) > pdMS_TO_TICKS(DIAG_DUMP_INTERVAL_MS)) {
+                last_diag_tick = now_tick;
+                ESP_LOGW(TAG_MATRIX, "Long column read (col %d): %llu us - collecting diagnostics", col, (unsigned long long)tcol_dur);
+
+                /* CPU snapshot */
+                char buf[512];
+                int r = cpu_time_measure_period(200, buf, sizeof(buf));
+                if (r == 0) {
+                    ESP_LOGW(TAG_MATRIX, "CPU usage snapshot:\n%s", buf);
+                } else {
+                    ESP_LOGW(TAG_MATRIX, "cpu_time_measure_period failed: %d", r);
+                }
+
+                /* Per-row profiling (run only during diagnostic) */
+                for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+                    uint64_t t0 = esp_timer_get_time();
+                    int level = gpio_get_level(MATRIX_ROWS_PINS[row]); (void)level;
+                    uint64_t t1 = esp_timer_get_time();
+                    uint64_t rdur = (t1 > t0) ? (t1 - t0) : 0;
+                    if (rdur > ROW_SLOW_THRESHOLD_US) {
+                        row_slow_count[row]++;
+                        ESP_LOGW(TAG_MATRIX, "Slow row read: row=%d pin=%d dur=%llu us", row, (int)MATRIX_ROWS_PINS[row], (unsigned long long)rdur);
+                    }
+                }
+
+                if (keyboard_task_handle) {
+                    UBaseType_t words_left = uxTaskGetStackHighWaterMark(keyboard_task_handle);
+                    ESP_LOGW(TAG_MATRIX, "STACK: keyboard approx %u bytes free", (unsigned)(words_left * sizeof(StackType_t)));
+                }
+                if (nrf24_task_handle) {
+                    UBaseType_t words_left = uxTaskGetStackHighWaterMark(nrf24_task_handle);
+                    ESP_LOGW(TAG_MATRIX, "STACK: nrf24 approx %u bytes free", (unsigned)(words_left * sizeof(StackType_t)));
+                }
+                if (status_display_task_handle) {
+                    UBaseType_t words_left = uxTaskGetStackHighWaterMark(status_display_task_handle);
+                    ESP_LOGW(TAG_MATRIX, "STACK: status_display approx %u bytes free", (unsigned)(words_left * sizeof(StackType_t)));
+                }
+
+                size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+                size_t largest8 = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+                ESP_LOGW(TAG_MATRIX, "HEAP: free8=%u largest8=%u", (unsigned)free8, (unsigned)largest8);
+            }
+        }
+
+        /* Optionally yield between columns to let other tasks run; disabled by default to preserve scan priority */
+#if MATRIX_SCAN_ALLOW_YIELD
+        vTaskDelay(0);
+#endif
+
+        /* Periodic slow-summary log (rate-limited) */
+        if (last_slow_summary_tick == 0 || (xTaskGetTickCount() - last_slow_summary_tick) > pdMS_TO_TICKS(SLOW_SUMMARY_INTERVAL_MS)) {
+            last_slow_summary_tick = xTaskGetTickCount();
+            /* compute top slow columns and rows */
+            uint8_t best_col = 0; uint32_t best_col_count = 0;
+            for (uint8_t c = 0; c < MATRIX_COLS; c++) {
+                if (col_slow_count[c] > best_col_count) { best_col_count = col_slow_count[c]; best_col = c; }
+            }
+            uint8_t best_row = 0; uint32_t best_row_count = 0;
+            for (uint8_t r = 0; r < MATRIX_ROWS; r++) {
+                if (row_slow_count[r] > best_row_count) { best_row_count = row_slow_count[r]; best_row = r; }
+            }
+// `            ESP_LOGI(TAG_MATRIX, "Slow summary: top_col=%u pin=%d count=%u top_row=%u pin=%d count=%u avg_col_us=%llu", best_col, (int)MATRIX_COLS_PINS[best_col], (unsigned)best_col_count, best_row, (int)MATRIX_ROWS_PINS[best_row], (unsigned)best_row_count, (unsigned long long)(col_samples[best_col]?col_total_time_us[best_col]/col_samples[best_col]:0));
         }
     }
 #endif
