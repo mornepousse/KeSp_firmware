@@ -1,0 +1,12 @@
+dependencies:
+  cmake_utilities: 0.*
+  idf: '>=5.0'
+description: Keyboard button driver
+documentation: https://docs.espressif.com/projects/esp-iot-solution/en/latest/input_device/keyboard_button.html
+issues: https://github.com/espressif/esp-iot-solution/issues
+repository: git://github.com/espressif/esp-iot-solution.git
+repository_info:
+  commit_sha: a4fdf46f42e57aa20521159dab5146fc511142a4
+  path: components/keyboard_button
+url: https://github.com/espressif/esp-iot-solution/tree/master/components/keyboard_button
+version: 1.0.0
