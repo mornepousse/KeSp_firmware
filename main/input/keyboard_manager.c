@@ -26,6 +26,18 @@ TaskHandle_t keyboard_task_handle = NULL;
 
 static const char *KM_TAG = "Keyboard_manager";
 
+/* Keyboard manager logging macros: enable verbose logs by defining KEYBOARD_MANAGER_DEBUG */
+#ifdef KEYBOARD_MANAGER_DEBUG
+#define KM_LOGI(fmt, ...) ESP_LOGI(KM_TAG, fmt, ##__VA_ARGS__)
+#define KM_LOGW(fmt, ...) ESP_LOGW(KM_TAG, fmt, ##__VA_ARGS__)
+#define KM_LOGD(fmt, ...) ESP_LOGD(KM_TAG, fmt, ##__VA_ARGS__)
+#else
+#define KM_LOGI(fmt, ...) do {} while(0)
+#define KM_LOGW(fmt, ...) do {} while(0)
+#define KM_LOGD(fmt, ...) do {} while(0)
+#endif
+#define KM_LOGE(fmt, ...) ESP_LOGE(KM_TAG, fmt, ##__VA_ARGS__)
+
 /* Enable verbose debug traces for scanning (set to 1 to enable) */
 #ifndef KEYBOARD_SCAN_DEBUG
 #define KEYBOARD_SCAN_DEBUG 0
@@ -130,7 +142,7 @@ static void hid_sender_task(void *pvParameters) {
               // always send combined report even if parts are zero
               if (!tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE, 0, kb_buf,
                                            m_buttons, m_x, m_y, m_wheel, 0)) {
-                ESP_LOGW(KM_TAG, "tud_hid_kb_mouse_report failed (ready=%d q=%u)", (int)tud_hid_ready(), (unsigned)(hid_queue?uxQueueMessagesWaiting(hid_queue):0));
+                KM_LOGW("tud_hid_kb_mouse_report failed (ready=%d q=%u)", (int)tud_hid_ready(), (unsigned)(hid_queue?uxQueueMessagesWaiting(hid_queue):0));
               }
             }
           } else {
@@ -154,11 +166,11 @@ static void hid_sender_task(void *pvParameters) {
           else if (msg.type == HID_MSG_KB_MOUSE) kbmouse_count++;
 
           if ((send_count & 0xFF) == 0) {
-            ESP_LOGI(KM_TAG, "hid stats: total=%u kb=%u mouse=%u kbmouse=%u q=%u", (unsigned)send_count, (unsigned)kb_count, (unsigned)m_count, (unsigned)kbmouse_count, (unsigned)qdepth);
+            KM_LOGI("hid stats: total=%u kb=%u mouse=%u kbmouse=%u q=%u", (unsigned)send_count, (unsigned)kb_count, (unsigned)m_count, (unsigned)kbmouse_count, (unsigned)qdepth);
           }
 
           if (latency_ms > 5) {
-            ESP_LOGW(KM_TAG, "hid_sender: type=%d latency=%u ms qdepth=%u usb_bl=%u ready=%d",
+            KM_LOGW("hid_sender: type=%d latency=%u ms qdepth=%u usb_bl=%u ready=%d",
                      msg.type, (unsigned)latency_ms, (unsigned)qdepth, (unsigned)usb_bl_state, (int)tud_hid_ready());
           }
         }
@@ -285,7 +297,6 @@ static void build_keycode_report(void)
 
 
 
-
 #ifndef KEY_ENQUEUE_MIN_MS
 #define KEY_ENQUEUE_MIN_MS 8
 #endif
@@ -326,7 +337,7 @@ void send_hid_key() {
           combined.payload.kb_mouse.wheel = peek_msg.payload.mouse.wheel;
 
           if (xQueueSendToFront(hid_queue, &combined, pdMS_TO_TICKS(5)) != pdTRUE) {
-            ESP_LOGW(KM_TAG, "send_hid_key: failed to enqueue combined kb_mouse (q=%u)", (unsigned)uxQueueMessagesWaiting(hid_queue));
+            KM_LOGW("send_hid_key: failed to enqueue combined kb_mouse (q=%u)", (unsigned)uxQueueMessagesWaiting(hid_queue));
             // put the mouse back if combined enqueue failed
             if (xQueueSendToFront(hid_queue, &peek_msg, pdMS_TO_TICKS(5)) != pdTRUE) {
               // give up
@@ -347,7 +358,7 @@ void send_hid_key() {
     }
 
     if (xQueueSend(hid_queue, &msg, pdMS_TO_TICKS(5)) != pdTRUE) {
-      ESP_LOGW(KM_TAG, "send_hid_key: hid_queue full, dropping keyboard report (qdepth=%u)", (unsigned)uxQueueMessagesWaiting(hid_queue));
+      KM_LOGW("send_hid_key: hid_queue full, dropping keyboard report (qdepth=%u)", (unsigned)uxQueueMessagesWaiting(hid_queue));
       return;
     }
     //ESP_LOGD(KM_TAG, "send_hid_key: enqueued (qdepth=%u)", (unsigned)uxQueueMessagesWaiting(hid_queue));
@@ -391,7 +402,7 @@ void send_mouse_report(uint8_t buttons, int8_t x, int8_t y, int8_t wheel) {
     if (xQueueSendToFront(hid_queue, &msg, pdMS_TO_TICKS(5)) != pdTRUE) {
       /* If queue full, attempt a short-block send (we prefer mouse) */
       if (xQueueSendToFront(hid_queue, &msg, pdMS_TO_TICKS(50)) != pdTRUE) {
-        ESP_LOGW(KM_TAG, "send_mouse_report: hid_queue full, dropping mouse report (qdepth=%u)", (unsigned)uxQueueMessagesWaiting(hid_queue));
+        KM_LOGW("send_mouse_report: hid_queue full, dropping mouse report (qdepth=%u)", (unsigned)uxQueueMessagesWaiting(hid_queue));
       }
     } else {
       //ESP_LOGD(KM_TAG, "send_mouse_report: enqueued to front (qdepth=%u)", (unsigned)uxQueueMessagesWaiting(hid_queue));
@@ -472,7 +483,7 @@ void run_internal_funct() {
 bool is_internal_function(int16_t keycodeTMP) {
   if (keycodeTMP >= TO_L0) {
 #if KEYBOARD_SCAN_DEBUG
-    ESP_LOGI(KM_TAG, "%d.", keycodeTMP);
+    KM_LOGI("%d.", keycodeTMP);
 #endif
     if (keypress_internal_function == 0) {
       keypress_internal_function = keycodeTMP;
@@ -488,7 +499,7 @@ void is_momentary_layer(int16_t keycodeTMP, uint8_t i) {
     last_layer = current_layout;
     current_layout = (keycodeTMP - MO_L0) / 256;
     layer_changed();
-    ESP_LOGI(KM_TAG, "last_layer: %d current : %d\n", last_layer,
+    KM_LOGI("last_layer: %d current : %d\n", last_layer,
              current_layout);
     current_row_layer_changer = current_press_row[i];
     current_col_layer_changer = current_press_col[i];
@@ -504,14 +515,14 @@ void is_toggle_layer(uint16_t keycodeTMP) {
       current_layout = 0;
       last_layer = current_layout;
       layer_changed();
-      ESP_LOGI(KM_TAG, "layer: 0 %d %d %d", new_layer, keycodeTMP, TO_L0);
+      KM_LOGI("layer: 0 %d %d %d", new_layer, keycodeTMP, TO_L0);
       // write_txt("Layer %d", n), 0, -30);
       //  gpio_set_level(CURSOR_LED_WHT_PIN, 0);
     } else {
       current_layout = new_layer;
       last_layer = current_layout;
       layer_changed();
-      ESP_LOGI(KM_TAG, "layer: pp %d %d %d", new_layer, keycodeTMP, TO_L0);
+      KM_LOGI("layer: pp %d %d %d", new_layer, keycodeTMP, TO_L0);
 
       // write_txt("Layer %d", n), 0, -30);
 
@@ -523,7 +534,7 @@ void is_toggle_layer(uint16_t keycodeTMP) {
 void is_macro(uint16_t keycodeTMP) {
   if ((keycodeTMP >= MACRO_1) && (keycodeTMP <= MACRO_20)) {
     int16_t macro_i = (keycodeTMP - MACRO_1) / 256;
-    ESP_LOGI(KM_TAG, "macro: %d ", macro_i);
+    KM_LOGI("macro: %d ", macro_i);
     if (macro_i >= 0 && macro_i < MAX_MACROS && macros_list[macro_i].name[0] != '\0') {
       uint8_t j = 0;
       for (uint8_t i = 0; i < 6; i++) {
@@ -555,11 +566,12 @@ void vTaskKeyboard(void *pvParameters) {
       size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
       size_t free32 = heap_caps_get_free_size(MALLOC_CAP_32BIT);
       size_t largest8 = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-      ESP_LOGE(KM_TAG, "Heap integrity FAILED in vTaskKeyboard - free8=%u free32=%u largest8=%u", (unsigned)free8, (unsigned)free32, (unsigned)largest8);
+      KM_LOGE("Heap integrity FAILED in vTaskKeyboard - free8=%u free32=%u largest8=%u", (unsigned)free8, (unsigned)free32, (unsigned)largest8);
     }
 
     /* Wait for notification (from ISR) or timeout to do periodic/partial scan */
-    const TickType_t wait_ticks = pdMS_TO_TICKS(10);
+    /* Increased from 10ms to reduce idle CPU when using event-driven keyboard_button */
+    const TickType_t wait_ticks = pdMS_TO_TICKS(50);
     uint32_t notified = ulTaskNotifyTake(pdTRUE, wait_ticks);
     if (notified) {
       /* ISR triggered: enter burst-scan mode */
@@ -571,8 +583,8 @@ void vTaskKeyboard(void *pvParameters) {
         __scan_start_us = esp_timer_get_time();
         __did_full_scan = true;
 
-        scan_matrix_full_once();
-        /* capture if scan set the change flag (will be processed below) */
+        /* keyboard_button reports asynchronously via callback; no full scan */
+        /* capture if callback already set the change flag (will be processed below) */
         __scan_detected_change = (stat_matrix_changed == 1);
 
 #if KEYBOARD_SCAN_DEBUG
@@ -590,7 +602,7 @@ void vTaskKeyboard(void *pvParameters) {
             off += n;
           }
           buf[sizeof(buf) - 1] = '\0';
-          ESP_LOGI(KM_TAG, "%s", buf);
+          KM_LOGI("%s", buf);
         }
 #endif
 
@@ -612,7 +624,7 @@ void vTaskKeyboard(void *pvParameters) {
       /* final scan to ensure states are stable */
       __scan_start_us = esp_timer_get_time();
       __did_full_scan = true;
-      scan_matrix_full_once();
+      /* final scan omitted: keyboard_button will deliver state via callback */
       __scan_detected_change = __scan_detected_change || (stat_matrix_changed == 1);
       taskYIELD(); /* hint to scheduler that others can run */
 
@@ -620,7 +632,7 @@ void vTaskKeyboard(void *pvParameters) {
       /* mark partial scan start and capture initial change detection */
       __scan_start_us = esp_timer_get_time();
       __did_partial_scan = true;
-      scan_matrix();
+      /* partial scan omitted: rely on keyboard_button callback */
       __scan_detected_change = __scan_detected_change || (stat_matrix_changed == 1);
     }
     uint16_t keycodeTMP = 0;
@@ -658,14 +670,14 @@ void vTaskKeyboard(void *pvParameters) {
       for (uint8_t i = 0; i < 6; i++) {
         if (current_press_col[i] == current_col_layer_changer &&
             current_press_row[i] == current_row_layer_changer) {
-          // ESP_LOGI(KM_TAG, "change 1\n");
+          // KM_LOGI("change 1\n");
           changer = 1;
           break;
         }
       }
 
       if (changer == 0) {
-        // ESP_LOGI(KM_TAG, "change 0\n");
+        // KM_LOGI("change 0\n");
         current_layout = last_layer;
         layer_changed();
         current_col_layer_changer = 255;
@@ -680,7 +692,7 @@ void vTaskKeyboard(void *pvParameters) {
       uint64_t scan_end_us = esp_timer_get_time();
       uint64_t scan_dur = (scan_end_us > __scan_start_us) ? (scan_end_us - __scan_start_us) : 0;
       if (scan_dur > 2000) {
-        ESP_LOGW(KM_TAG, "scan took %llu us", (unsigned long long)scan_dur);
+        KM_LOGW("scan took %llu us", (unsigned long long)scan_dur);
       }
 
       bool scan_event = __scan_detected_change;
@@ -711,7 +723,7 @@ void vTaskKeyboard(void *pvParameters) {
         bool keycodes_nonzero = false;
         for (int k = 0; k < 6; k++) { if (keycodes[k] != 0) { keycodes_nonzero = true; break; } }
         if ((scan_event_log_count & 0xF) == 0 || scan_dur > 1000) { /* 1/16 events or long scan */
-          ESP_LOGI(KM_TAG, "SCAN EVENT: %s dur=%llu us keys=%d mouse_recent=%d change=%d",
+          KM_LOGI("SCAN EVENT: %s dur=%llu us keys=%d mouse_recent=%d change=%d",
                    (__did_full_scan ? "FULL" : "PARTIAL"), (unsigned long long)scan_dur, (int)keycodes_nonzero, (int)mouse_recent, (int)__scan_detected_change);
         }
       }
@@ -729,12 +741,12 @@ void vTaskKeyboard(void *pvParameters) {
       if ((now_ms - last_scan_report_ms) >= SCAN_REPORT_INTERVAL_MS) {
         if (full_scan_count > 0) {
           uint64_t avg_full = total_full_scan_us / full_scan_count;
-          ESP_LOGI(KM_TAG, "Scan avg FULL (events only): %llu us over %u samples", (unsigned long long)avg_full, full_scan_count);
+          KM_LOGI("Scan avg FULL (events only): %llu us over %u samples", (unsigned long long)avg_full, full_scan_count);
         }
 
         if (partial_scan_count > 0) {
           uint64_t avg_partial = total_partial_scan_us / partial_scan_count;
-          ESP_LOGI(KM_TAG, "Scan avg PARTIAL (events only): %llu us over %u samples", (unsigned long long)avg_partial, partial_scan_count);
+          KM_LOGI("Scan avg PARTIAL (events only): %llu us over %u samples", (unsigned long long)avg_partial, partial_scan_count);
         }
 
         /* reset counters */
@@ -750,19 +762,19 @@ void vTaskKeyboard(void *pvParameters) {
 }
 
 void keyboard_manager_init() {
-  ESP_LOGI(KM_TAG, "Keyboard manager initialized");
+  KM_LOGI("Keyboard manager initialized");
 
   /* Create hid queue + mutex + hid sender task to serialize TinyUSB calls */
   if (hid_queue == NULL) {
     hid_queue = xQueueCreate(32, sizeof(hid_msg_t));
     if (hid_queue == NULL) {
-      ESP_LOGW(KM_TAG, "Failed to create hid_queue");
+      KM_LOGW("Failed to create hid_queue");
     }
   }
   if (hid_report_mutex == NULL) {
     hid_report_mutex = xSemaphoreCreateMutex();
     if (hid_report_mutex == NULL) {
-      ESP_LOGW(KM_TAG, "Failed to create hid_report_mutex");
+      KM_LOGW("Failed to create hid_report_mutex");
     }
   }
   if (hid_sender_task_handle == NULL) {
@@ -777,3 +789,4 @@ void keyboard_manager_init() {
 
   // gtext_create(0, 30, 0xff0000, 0xffffff, "Layer 0");
 }
+

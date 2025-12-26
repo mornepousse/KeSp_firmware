@@ -27,10 +27,10 @@
 
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for isolation testing */
 #ifndef SKIP_NRF_TASK
-#define SKIP_NRF_TASK 1
+#define SKIP_NRF_TASK 0
 #endif
 #ifndef SKIP_STATUS_DISPLAY
-#define SKIP_STATUS_DISPLAY 1
+#define SKIP_STATUS_DISPLAY 0
 #endif
 /************* BL ****************/
 #define CONFIG_BT_HID_DEVICE_ENABLED 1
@@ -172,7 +172,7 @@ void app_main(void) {
   ESP_LOGI(TAG, "Matrix setup init");
   matrix_setup();
 #if MATRIX_IRQ_ENABLED
-  matrix_irq_setup();
+  /* IRQ setup is handled by the keyboard_button shim; no explicit call needed here. */
 #endif
 
   ESP_LOGI(TAG, "Task Matrix init");
