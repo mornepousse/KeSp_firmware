@@ -22,9 +22,6 @@
 #include "nrf24_receiver.h"
 #include "cpu_time.h"
 
-
-#define TEST_DELAY_TIME_MS (3000)
-
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for isolation testing */
 #ifndef SKIP_NRF_TASK
 #define SKIP_NRF_TASK 0
@@ -32,10 +29,6 @@
 #ifndef SKIP_STATUS_DISPLAY
 #define SKIP_STATUS_DISPLAY 0
 #endif
-/************* BL ****************/
-#define CONFIG_BT_HID_DEVICE_ENABLED 1
-
-/************* BL ****************/
 
 static const char *TAG = "Main";
 
@@ -55,52 +48,6 @@ static void cpu_time_logger_task(void *arg) {
     }
     vTaskDelay(pdMS_TO_TICKS(5000));
   }
-}
-
-/* Small diagnostic task: regularly checks heap integrity and logs free sizes so we can catch corruption early */
-static void heap_diag_task(void *arg)
-{
-    (void)arg;
-    /* External task handles (keyboard and nrf task provide their own exported handles) */
-    extern TaskHandle_t keyboard_task_handle;
-    extern TaskHandle_t nrf24_task_handle;
-    extern TaskHandle_t status_display_task_handle; /* defined in this file when creating the task */
-
-    for (;;) {
-        if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-            size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-            size_t free32 = heap_caps_get_free_size(MALLOC_CAP_32BIT);
-            size_t largest8 = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-            ESP_LOGE(TAG, "HEAP_DIAG: integrity FAILED - free8=%u free32=%u largest8=%u", (unsigned)free8, (unsigned)free32, (unsigned)largest8);
-        } else {
-            static int cnt = 0;
-            if ((cnt++ & 31) == 0) {
-                size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-                size_t free32 = heap_caps_get_free_size(MALLOC_CAP_32BIT);
-                ESP_LOGI(TAG, "HEAP_DIAG: free8=%u free32=%u", (unsigned)free8, (unsigned)free32);
-            }
-        }
-
-        /* Log stack high-water marks for critical tasks at a reduced frequency to avoid log noise */
-        static int stack_diag_cnt = 0;
-        if ((stack_diag_cnt++ & 7) == 0) { /* every 8 loops (~4s) */
-            TaskHandle_t handles[] = { keyboard_task_handle, nrf24_task_handle, status_display_task_handle };
-            const char *names[] = { "keyboard", "nrf24", "status_display" };
-            for (int i = 0; i < sizeof(handles)/sizeof(handles[0]); i++) {
-                if (handles[i] != NULL) {
-                    UBaseType_t words_left = uxTaskGetStackHighWaterMark(handles[i]);
-                    size_t bytes_left = words_left * sizeof(StackType_t);
-                    ESP_LOGI(TAG, "STACK_DIAG: %s stack free ~= %u bytes", names[i], (unsigned)bytes_left);
-                    /* Warn if stack remaining too low (e.g. < 256 bytes) */
-                    if (bytes_left < 256) {
-                        ESP_LOGW(TAG, "STACK_DIAG: %s stack low (%u bytes left)", names[i], (unsigned)bytes_left);
-                    }
-                }
-            }
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
 }
 
 // Task handling status display updates, sleep/wake and layer change handling.
@@ -148,8 +95,6 @@ static void status_display_task(void *arg) {
   }
 }
 
-/************* TinyUSB descriptors ****************/
-
 void app_main(void) {
   ESP_LOGI(TAG, "--------------- KaSe keyboard ----------------");
   kase_tinyusb_init();
@@ -171,9 +116,6 @@ void app_main(void) {
   rtc_matrix_deinit();
   ESP_LOGI(TAG, "Matrix setup init");
   matrix_setup();
-#if MATRIX_IRQ_ENABLED
-  /* IRQ setup is handled by the keyboard_button shim; no explicit call needed here. */
-#endif
 
   ESP_LOGI(TAG, "Task Matrix init");
   TaskHandle_t xHandleMatrix_Keybord = NULL;
@@ -196,12 +138,6 @@ void app_main(void) {
 
   // Start periodic CPU usage logger on core 1 (avoid interfering with keyboard task on core 0)
   xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL, 1);
-
-  // status_display_refresh_all();
-
-  /* Start heap diagnostic task to catch heap corruption early */
-  /* Increase stack to avoid overflow (logs and system calls can use significant stack) */
-  //xTaskCreatePinnedToCore(heap_diag_task, "heap_diag", 4096, NULL, 1, NULL, 1);
 
   for (;;) {
     // keep main light; display handled in its own task

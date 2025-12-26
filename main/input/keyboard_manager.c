@@ -18,7 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-// #include "graphic_manager.h"
 
 /* Exported task handle so matrix ISR can notify keyboard task */
 TaskHandle_t keyboard_task_handle = NULL;
@@ -157,6 +156,7 @@ static void hid_sender_task(void *pvParameters) {
           uint32_t latency_ticks = (now >= msg.enqueue_tick) ? (now - msg.enqueue_tick) : 0;
           uint32_t latency_ms = latency_ticks * portTICK_PERIOD_MS;
           uint32_t qdepth = (hid_queue ? uxQueueMessagesWaiting(hid_queue) : 0);
+          (void)qdepth; // suppress unused warning if logging disabled
 
           static uint32_t send_count = 0;
           static uint32_t kb_count = 0, m_count = 0, kbmouse_count = 0;
@@ -184,13 +184,12 @@ static void hid_sender_task(void *pvParameters) {
 }
 
 /* Forward declarations for helpers used by process_matrix_changes */
-void run_internal_funct(void);
-void is_toggle_layer(uint16_t keycodeTMP);
-void is_momentary_layer(int16_t keycodeTMP, uint8_t i);
-bool is_internal_function(int16_t keycodeTMP);
-void is_macro(uint16_t keycodeTMP);
+static void run_internal_funct(void);
+static void is_toggle_layer(uint16_t keycodeTMP);
+static void is_momentary_layer(int16_t keycodeTMP, uint8_t i);
+static bool is_internal_function(int16_t keycodeTMP);
+static void is_macro(uint16_t keycodeTMP);
 
-uint8_t bl_state = 0;
 uint8_t usb_bl_state = 0; // 0: USB, 1: BL
 uint16_t keypress_internal_function = 0;
 uint8_t current_row_layer_changer = 255;
@@ -208,21 +207,6 @@ static const uint32_t SCAN_REPORT_INTERVAL_MS = 60000; // report every 60s (redu
 /* track recent mouse events so scans can be measured when mouse movement occurs */
 static volatile TickType_t last_mouse_event_tick = 0;
 static const TickType_t MOUSE_EVENT_WINDOW = pdMS_TO_TICKS(100); // 100 ms window to attribute scan to mouse movement
-
-/* Follow-up / burst scan config to better detect quick presses when mashing */
-#ifndef FOLLOW_UP_SCANS
-#define FOLLOW_UP_SCANS 6
-#endif
-#ifndef FOLLOW_UP_INTERVAL_MS
-#define FOLLOW_UP_INTERVAL_MS 2
-#endif
-
-#ifndef BURST_MS
-#define BURST_MS 40
-#endif
-#ifndef BURST_SCAN_INTERVAL_MS
-#define BURST_SCAN_INTERVAL_MS 2
-#endif
 
 /* Helper to process matrix changes (internal functions and send) */
 static void process_matrix_changes(void)
@@ -309,7 +293,8 @@ void send_hid_key() {
   if (memcmp(keycodes, last_enqueued_keycodes, sizeof(keycodes)) == 0) {
     TickType_t ticks_now = xTaskGetTickCount();
     uint32_t elapsed = (uint32_t)(ticks_now - last_key_enqueue_tick);
-    if (elapsed < (uint32_t)pdMS_TO_TICKS(KEY_ENQUEUE_MIN_MS)) {
+    uint32_t min_ticks = (uint32_t)pdMS_TO_TICKS(KEY_ENQUEUE_MIN_MS);
+    if (min_ticks > 0 && elapsed < min_ticks) {
       /* Too soon and identical — drop to avoid queue flood */
       return;
     }
@@ -475,12 +460,10 @@ void run_internal_funct() {
     case BT_TOGGLE:
     km_post_bt_toggle();
     break;
-  default:
-    break;
   }
 }
 
-bool is_internal_function(int16_t keycodeTMP) {
+static bool is_internal_function(int16_t keycodeTMP) {
   if (keycodeTMP >= TO_L0) {
 #if KEYBOARD_SCAN_DEBUG
     KM_LOGI("%d.", keycodeTMP);
@@ -493,7 +476,7 @@ bool is_internal_function(int16_t keycodeTMP) {
   return false;
 }
 
-void is_momentary_layer(int16_t keycodeTMP, uint8_t i) {
+static void is_momentary_layer(int16_t keycodeTMP, uint8_t i) {
   if ((keycodeTMP >= MO_L0) && (keycodeTMP <= MO_L9)) {
 
     last_layer = current_layout;
@@ -506,7 +489,7 @@ void is_momentary_layer(int16_t keycodeTMP, uint8_t i) {
   }
 }
 
-void is_toggle_layer(uint16_t keycodeTMP) {
+static void is_toggle_layer(uint16_t keycodeTMP) {
   if ((keycodeTMP >= TO_L0) && (keycodeTMP <= TO_L9)) {
 
     int16_t new_layer = (keycodeTMP - TO_L0) / 256;
@@ -516,17 +499,11 @@ void is_toggle_layer(uint16_t keycodeTMP) {
       last_layer = current_layout;
       layer_changed();
       KM_LOGI("layer: 0 %d %d %d", new_layer, keycodeTMP, TO_L0);
-      // write_txt("Layer %d", n), 0, -30);
-      //  gpio_set_level(CURSOR_LED_WHT_PIN, 0);
     } else {
       current_layout = new_layer;
       last_layer = current_layout;
       layer_changed();
       KM_LOGI("layer: pp %d %d %d", new_layer, keycodeTMP, TO_L0);
-
-      // write_txt("Layer %d", n), 0, -30);
-
-      // gpio_set_level(CURSOR_LED_WHT_PIN, 1);
     }
   }
 }
@@ -535,7 +512,7 @@ void is_macro(uint16_t keycodeTMP) {
   if ((keycodeTMP >= MACRO_1) && (keycodeTMP <= MACRO_20)) {
     int16_t macro_i = (keycodeTMP - MACRO_1) / 256;
     KM_LOGI("macro: %d ", macro_i);
-    if (macro_i >= 0 && macro_i < MAX_MACROS && macros_list[macro_i].name[0] != '\0') {
+    if (macro_i < MAX_MACROS && macros_list[macro_i].name[0] != '\0') {
       uint8_t j = 0;
       for (uint8_t i = 0; i < 6; i++) {
         if (keycodes[i] == 0) {
@@ -664,6 +641,9 @@ void vTaskKeyboard(void *pvParameters) {
         scan_event_log_count++;
         bool mouse_recent = (last_mouse_event_tick != 0 && (xTaskGetTickCount() - last_mouse_event_tick) <= MOUSE_EVENT_WINDOW);
         bool keycodes_nonzero = false;
+        
+        (void)mouse_recent; (void)keycodes_nonzero; // suppress unused warnings
+
         for (int k = 0; k < 6; k++) { if (keycodes[k] != 0) { keycodes_nonzero = true; break; } }
         if ((scan_event_log_count & 0xF) == 0 || scan_dur > 1000) { /* 1/16 events or long scan */
           KM_LOGI("SCAN EVENT: %s dur=%llu us keys=%d mouse_recent=%d change=%d",
@@ -681,14 +661,18 @@ void vTaskKeyboard(void *pvParameters) {
     {
       uint32_t now_ms = esp_timer_get_time() / 1000;
       if (last_scan_report_ms == 0) last_scan_report_ms = now_ms;
-      if ((now_ms - last_scan_report_ms) >= SCAN_REPORT_INTERVAL_MS) {
+      if (now_ms - last_scan_report_ms > SCAN_REPORT_INTERVAL_MS) {
+        last_scan_report_ms = now_ms;
+
         if (full_scan_count > 0) {
           uint64_t avg_full = total_full_scan_us / full_scan_count;
+          (void)avg_full;
           KM_LOGI("Scan avg FULL (events only): %llu us over %u samples", (unsigned long long)avg_full, full_scan_count);
         }
 
         if (partial_scan_count > 0) {
           uint64_t avg_partial = total_partial_scan_us / partial_scan_count;
+          (void)avg_partial;
           KM_LOGI("Scan avg PARTIAL (events only): %llu us over %u samples", (unsigned long long)avg_partial, partial_scan_count);
         }
 
@@ -697,10 +681,8 @@ void vTaskKeyboard(void *pvParameters) {
         full_scan_count = 0;
         total_partial_scan_us = 0;
         partial_scan_count = 0;
-        last_scan_report_ms = now_ms;
       }
     }
-
   }
 }
 
@@ -726,10 +708,5 @@ void keyboard_manager_init() {
 
   /* Start keyboard worker to handle display / BT operations off-task */
   keyboard_worker_init();
-
-  // init graphic parts
-  // graphic_init();
-
-  // gtext_create(0, 30, 0xff0000, 0xffffff, "Layer 0");
 }
 
