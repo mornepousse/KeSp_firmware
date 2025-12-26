@@ -186,13 +186,16 @@ uint8_t current_col_layer_changer = 255;
 
 uint16_t extra_keycodes[6] = {0, 0, 0, 0, 0, 0};
 
-/* Scan timing aggregation for diagnostics */
+/* Scan timing aggregation for diagnostics (only when there is keyboard or mouse activity) */
 static uint64_t total_full_scan_us = 0;
 static uint32_t full_scan_count = 0;
 static uint64_t total_partial_scan_us = 0;
 static uint32_t partial_scan_count = 0;
 static uint32_t last_scan_report_ms = 0;
-static const uint32_t SCAN_REPORT_INTERVAL_MS = 60000; // report every 60s to reduce log noise
+static const uint32_t SCAN_REPORT_INTERVAL_MS = 60000; // report every 60s (reduce noise)
+/* track recent mouse events so scans can be measured when mouse movement occurs */
+static volatile TickType_t last_mouse_event_tick = 0;
+static const TickType_t MOUSE_EVENT_WINDOW = pdMS_TO_TICKS(100); // 100 ms window to attribute scan to mouse movement
 
 /* Follow-up / burst scan config to better detect quick presses when mashing */
 #ifndef FOLLOW_UP_SCANS
@@ -365,6 +368,9 @@ void send_hid_key() {
 }
 
 void send_mouse_report(uint8_t buttons, int8_t x, int8_t y, int8_t wheel) {
+  /* note the mouse activity time so scan timings can attribute scans to recent mouse movement */
+  last_mouse_event_tick = xTaskGetTickCount();
+
   /* Throttle logs: only log every Nth silent sample, or always log when buttons pressed or large movement */
   static uint32_t mouse_report_cnt = 0;
   bool heavy = (buttons != 0) || (abs(x) > 8) || (abs(y) > 8);
@@ -465,7 +471,9 @@ void run_internal_funct() {
 
 bool is_internal_function(int16_t keycodeTMP) {
   if (keycodeTMP >= TO_L0) {
+#if KEYBOARD_SCAN_DEBUG
     ESP_LOGI(KM_TAG, "%d.", keycodeTMP);
+#endif
     if (keypress_internal_function == 0) {
       keypress_internal_function = keycodeTMP;
       return true;
@@ -536,6 +544,12 @@ void vTaskKeyboard(void *pvParameters) {
       keyboard_task_handle = xTaskGetCurrentTaskHandle();
     }
 
+    /* Per-iteration scan timing state (used to attribute scan durations only when activity occurs) */
+    uint64_t __scan_start_us = 0;
+    bool __did_full_scan = false;
+    bool __did_partial_scan = false;
+    bool __scan_detected_change = false;  
+
     /* Quick heap sanity check to detect corruption early */
     if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
       size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
@@ -553,15 +567,13 @@ void vTaskKeyboard(void *pvParameters) {
       uint32_t now_ms = burst_start_ms;
 
       while ((now_ms - burst_start_ms) < BURST_MS) {
-        uint64_t scan_start = esp_timer_get_time();
+        /* start and mark as full scan */
+        __scan_start_us = esp_timer_get_time();
+        __did_full_scan = true;
+
         scan_matrix_full_once();
-        uint64_t scan_end = esp_timer_get_time();
-        uint64_t scan_dur = scan_end - scan_start;
-        if (scan_dur > 2000) {
-          ESP_LOGW(KM_TAG, "burst scan_matrix_full_once took %llu us", (unsigned long long)scan_dur);
-        }
-        total_full_scan_us += scan_dur;
-        full_scan_count++;
+        /* capture if scan set the change flag (will be processed below) */
+        __scan_detected_change = (stat_matrix_changed == 1);
 
 #if KEYBOARD_SCAN_DEBUG
         /* Debug: dump current presses and timestamp (safe, bounded) */
@@ -598,24 +610,18 @@ void vTaskKeyboard(void *pvParameters) {
       }
 
       /* final scan to ensure states are stable */
-      uint64_t scan_start = esp_timer_get_time();
+      __scan_start_us = esp_timer_get_time();
+      __did_full_scan = true;
       scan_matrix_full_once();
-      uint64_t scan_end = esp_timer_get_time();
-      uint64_t scan_dur = scan_end - scan_start;
-      total_full_scan_us += scan_dur;
-      full_scan_count++;
+      __scan_detected_change = __scan_detected_change || (stat_matrix_changed == 1);
       taskYIELD(); /* hint to scheduler that others can run */
 
     } else {
-      uint64_t scan_start = esp_timer_get_time();
+      /* mark partial scan start and capture initial change detection */
+      __scan_start_us = esp_timer_get_time();
+      __did_partial_scan = true;
       scan_matrix();
-      uint64_t scan_end = esp_timer_get_time();
-      uint64_t scan_dur = scan_end - scan_start;
-      if (scan_dur > 2000) {
-        ESP_LOGW(KM_TAG, "scan_matrix took %llu us", (unsigned long long)scan_dur);
-      }
-      total_partial_scan_us += scan_dur;
-      partial_scan_count++;
+      __scan_detected_change = __scan_detected_change || (stat_matrix_changed == 1);
     }
     uint16_t keycodeTMP = 0;
     for (uint8_t i = 0; i < 6; i++) {
@@ -669,6 +675,53 @@ void vTaskKeyboard(void *pvParameters) {
     /* Process any matrix changes that may have been set by scans above */
     process_matrix_changes();
 
+    /* If we performed a scan this iteration compute duration and only count it if it had activity */
+    if (__did_full_scan || __did_partial_scan) {
+      uint64_t scan_end_us = esp_timer_get_time();
+      uint64_t scan_dur = (scan_end_us > __scan_start_us) ? (scan_end_us - __scan_start_us) : 0;
+      if (scan_dur > 2000) {
+        ESP_LOGW(KM_TAG, "scan took %llu us", (unsigned long long)scan_dur);
+      }
+
+      bool scan_event = __scan_detected_change;
+      /* check for keycodes (non-zero) */
+      if (!scan_event) {
+        for (int k = 0; k < 6; k++) {
+          if (keycodes[k] != 0) { scan_event = true; break; }
+        }
+      }
+      /* check recent mouse activity */
+      if (!scan_event && last_mouse_event_tick != 0 && (xTaskGetTickCount() - last_mouse_event_tick) <= MOUSE_EVENT_WINDOW) {
+        scan_event = true;
+      }
+
+      if (scan_event) {
+        if (__did_full_scan) {
+          total_full_scan_us += scan_dur;
+          full_scan_count++;
+        } else {
+          total_partial_scan_us += scan_dur;
+          partial_scan_count++;
+        }
+
+        /* rate-limited visible log: log only 1/16 events to reduce noise, always log if scan longer than 1ms */
+        static uint32_t scan_event_log_count = 0;
+        scan_event_log_count++;
+        bool mouse_recent = (last_mouse_event_tick != 0 && (xTaskGetTickCount() - last_mouse_event_tick) <= MOUSE_EVENT_WINDOW);
+        bool keycodes_nonzero = false;
+        for (int k = 0; k < 6; k++) { if (keycodes[k] != 0) { keycodes_nonzero = true; break; } }
+        if ((scan_event_log_count & 0xF) == 0 || scan_dur > 1000) { /* 1/16 events or long scan */
+          ESP_LOGI(KM_TAG, "SCAN EVENT: %s dur=%llu us keys=%d mouse_recent=%d change=%d",
+                   (__did_full_scan ? "FULL" : "PARTIAL"), (unsigned long long)scan_dur, (int)keycodes_nonzero, (int)mouse_recent, (int)__scan_detected_change);
+        }
+      }
+
+      /* reset local flags */
+      __did_full_scan = __did_partial_scan = false;
+      __scan_detected_change = false;
+      __scan_start_us = 0;
+    }
+
     /* Periodic scan timing report */
     {
       uint32_t now_ms = esp_timer_get_time() / 1000;
@@ -676,12 +729,12 @@ void vTaskKeyboard(void *pvParameters) {
       if ((now_ms - last_scan_report_ms) >= SCAN_REPORT_INTERVAL_MS) {
         if (full_scan_count > 0) {
           uint64_t avg_full = total_full_scan_us / full_scan_count;
-          ESP_LOGD(KM_TAG, "Scan avg FULL: %llu us over %u samples", (unsigned long long)avg_full, full_scan_count);
+          ESP_LOGI(KM_TAG, "Scan avg FULL (events only): %llu us over %u samples", (unsigned long long)avg_full, full_scan_count);
         }
 
         if (partial_scan_count > 0) {
           uint64_t avg_partial = total_partial_scan_us / partial_scan_count;
-          ESP_LOGD(KM_TAG, "Scan avg PARTIAL: %llu us over %u samples", (unsigned long long)avg_partial, partial_scan_count);
+          ESP_LOGI(KM_TAG, "Scan avg PARTIAL (events only): %llu us over %u samples", (unsigned long long)avg_partial, partial_scan_count);
         }
 
         /* reset counters */

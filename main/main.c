@@ -24,6 +24,14 @@
 
 
 #define TEST_DELAY_TIME_MS (3000)
+
+/* Runtime debug/experimental flags: set to 1 to skip starting the component for isolation testing */
+#ifndef SKIP_NRF_TASK
+#define SKIP_NRF_TASK 1
+#endif
+#ifndef SKIP_STATUS_DISPLAY
+#define SKIP_STATUS_DISPLAY 1
+#endif
 /************* BL ****************/
 #define CONFIG_BT_HID_DEVICE_ENABLED 1
 
@@ -152,9 +160,13 @@ void app_main(void) {
   load_macros(macros_list, MAX_MACROS);
 
   ESP_LOGI(TAG, "display init");
+#if !SKIP_STATUS_DISPLAY
   status_display_start();
-  // Start status display task on core 0 to isolate display work from keyboard
-  xTaskCreatePinnedToCore(status_display_task, "status_disp", 6144, NULL, 10, &status_display_task_handle, 1);
+  // Start status display task on core 1 to avoid interfering with keyboard
+  xTaskCreatePinnedToCore(status_display_task, "status_disp", 6144, NULL, 4, &status_display_task_handle, 1);
+#else
+  ESP_LOGW(TAG, "SKIP_STATUS_DISPLAY enabled: display task not started");
+#endif
   // Reset the rtc GPIOS
   rtc_matrix_deinit();
   ESP_LOGI(TAG, "Matrix setup init");
@@ -169,17 +181,21 @@ void app_main(void) {
   // Keyboard on CPU 0, priority 3 (below LVGL=4)
   /* Increase keyboard task stack to reduce stack pressure (was 4096) */
   xTaskCreatePinnedToCore(vTaskKeyboard, "Matrix_Keyboard", 6144, &ucParameterToPass,
-              3, &xHandleMatrix_Keybord, 1);
+              3, &xHandleMatrix_Keybord, 0);
   ESP_LOGI(TAG, "bluetooth init");
   init_hid_bluetooth();
 
   ESP_LOGI(TAG, "NRF24 init");
+#if !SKIP_NRF_TASK
   // NRF24 on CPU 1, priority 3 (won't block IDLE on CPU 1)
   /* Increase nrf24 task stack to reduce stack pressure (was 4096) */
   xTaskCreatePinnedToCore(nrf24_task, "nrf24_task", 6144, NULL, 3, NULL, 1);
+#else
+  ESP_LOGW(TAG, "SKIP_NRF_TASK enabled: NRF24 task not started");
+#endif
 
   // Start periodic CPU usage logger on core 1 (avoid interfering with keyboard task on core 0)
-  //xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL, 1);
 
   // status_display_refresh_all();
 
