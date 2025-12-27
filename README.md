@@ -54,8 +54,14 @@ From the current codebase (still evolving, but already functional):
 
 - **ESP32‑S3 keyboard core**
 	- Key matrix scanning (`input/matrix.c`).
+	- **Event-driven architecture**: Optimized `vTaskKeyboard` using FreeRTOS notifications for low latency and reduced CPU usage.
 	- Keyboard logic and key handling (`input/keyboard_manager.c`, `input/keymap.c`).
 	- Multiple layers with per‑key mapping stored in NVS / LittleFS.
+	- **Macro support**: Up to 20 configurable macros (`input/keymap.c`).
+
+- **Wireless Communication**
+	- **Bluetooth HID**: BLE HID device (`comm/hid_bluetooth_manager.c`) for wireless connectivity.
+	- **NRF24L01 Receiver**: Support for NRF24L01 modules (`comm/nrf24_receiver.c`) for split keyboard communication or custom wireless links.
 
 - **USB support (TinyUSB)**
 	- USB HID keyboard implementation (`comm/usb_descriptors.c`, TinyUSB HID class).
@@ -66,6 +72,7 @@ From the current codebase (still evolving, but already functional):
 - **Bluetooth HID**
 	- BLE HID device (`comm/hid_bluetooth_manager.c`, `comm/esp_hidd_prf_api.c`).
 	- Wireless keyboard mode in addition to USB.
+	- Multi-host switching support.
 
 - **OLED display**
 	- I²C OLED driver and UI layer (`display/i2c_oled_display.c`, `display/status_display.c`).
