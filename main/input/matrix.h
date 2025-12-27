@@ -7,6 +7,10 @@
 #include <inttypes.h>
 #include "keyboard_config.h"
 
+#ifndef MATRIX_IRQ_ENABLED
+#define MATRIX_IRQ_ENABLED 1
+#endif
+
 
 extern uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
 extern uint8_t SLAVE_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
@@ -26,10 +30,9 @@ extern uint32_t last_activity_time_ms;
  */
 void rtc_matrix_deinit(void);
 
-/*
- * @brief initialize rtc pins
+/* Note: rtc_matrix_setup and IRQ setup/deinit were removed —
+ * matrix setup/deinit are handled by the keyboard_button shim.
  */
-void rtc_matrix_setup(void);
 
 /*
  * @brief initialize matrix
@@ -37,10 +40,11 @@ void rtc_matrix_setup(void);
 void matrix_setup(void);
 
 /*
- * @brief scan matrix
+ * Matrix scanning is handled asynchronously by the keyboard_button component.
+ * The legacy `scan_matrix` and `scan_matrix_full_once` functions were removed.
  */
-void scan_matrix(void);
 
+/* IRQ setup/deinit removed (handled by keyboard_button) */
 
 void layer_changed(void);
 

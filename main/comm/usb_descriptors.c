@@ -46,10 +46,17 @@ static const tusb_desc_device_t device_descriptor = {
 };
 
 #define TUSB_DESC_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN)
+
+// Report IDs pour différencier clavier et souris
+enum {
+    REPORT_ID_KEYBOARD = 1,
+    REPORT_ID_MOUSE = 2,
+};
  
-// Report descriptor clavier SANS report ID (Windows est plus tolérant)
+// Report descriptor : Clavier + Souris avec Report IDs
 const uint8_t hid_report_descriptor[] = {
-    TUD_HID_REPORT_DESC_KEYBOARD()
+    TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(REPORT_ID_KEYBOARD)),
+    TUD_HID_REPORT_DESC_MOUSE(HID_REPORT_ID(REPORT_ID_MOUSE)),
 };
 
 // Descripteur de configuration : CDC (2 interfaces) + HID clavier
@@ -64,7 +71,7 @@ static const uint8_t hid_cdc_configuration_descriptor[] = {
 
     // HID clavier boot : interface 2
     TUD_HID_DESCRIPTOR(2, 5, HID_ITF_PROTOCOL_KEYBOARD,
-                       sizeof(hid_report_descriptor), EPNUM_HID, 16, 10),
+                       sizeof(hid_report_descriptor), EPNUM_HID, 16, 1),
 };
 
 // Tableau de chaînes (langue + fabricant + produit + série + usage HID)
@@ -86,7 +93,7 @@ const char *hid_string_descriptor[] = {
 // static const uint8_t hid_configuration_descriptor[] = { 
 //     TUD_CONFIG_DESCRIPTOR(1, 1, 0, TUSB_DESC_TOTAL_LEN,
 //                           TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100), 
-//     TUD_HID_DESCRIPTOR(0, 4, false, sizeof(hid_report_descriptor), 0x81, 16, 10),
+//     TUD_HID_DESCRIPTOR(0, 4, false, sizeof(hid_report_descriptor), 0x81, 16, 1),
 // };
 
 /********* TinyUSB HID callbacks ***************/
