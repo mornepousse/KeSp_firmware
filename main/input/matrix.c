@@ -1,243 +1,141 @@
 #include "matrix.h"
-#include "esp_system.h"
-#include "driver/gpio.h"
-#include "driver/rtc_io.h"
-#include "keyboard_config.h"
-#include "keymap.h"
-#include "tinyusb.h"
-#include "class/hid/hid_device.h"
-#include "esp_sleep.h"
-#include "esp_log.h"
-#include "esp_timer.h"
-#define TAG_MATRIX "MATRIX"
-/* Define pins, notice that:
- * GPIO6-11 are usually used for SPI flash
- * GPIO34-39 can only be set as input mode and do not have software pullup or pulldown functions.
- * GPIOS 0,2,4,12-15,25-27,32-39 Can be used as RTC GPIOS as well (please read about power management in ReadMe)
- */
-const gpio_num_t MATRIX_ROWS_PINS[] = { ROWS0, 
-										ROWS1, 
-										ROWS2, 
-										ROWS3, 
-										ROWS4 };
-const gpio_num_t MATRIX_COLS_PINS[] = { COLS0, //0
-										COLS1, //1
-										COLS2, //2
-										COLS3, //3
-										COLS4, //4
-                                        COLS5, //5
-										
-										COLS6,  //6
-										COLS7, //7
-										COLS8, //8
-                                        COLS9, //9
-                                        COLS10, //10
-										COLS11,//11
-										COLS12, };//12
+#include <esp_log.h>
+#include <stdint.h>
+#include <string.h>
 
-// matrix states
-uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS] = { 0 };
-uint8_t PREV_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS] = { 0 };
-uint8_t SLAVE_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS] = { 0 };
-uint8_t keycodes[6] = { 0,0,0,0,0,0 };
+#define TAG "MATRIX_SHIM"
+
+// Define variables expected by other code
+uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
+#include "matrix.h"
+#include <esp_log.h>
+#include <stdint.h>
+#include <string.h>
+#include "keyboard_button.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#define TAG "MATRIX_SHIM"
+
+// Define variables expected by other code
+uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
+uint8_t SLAVE_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
+uint8_t (*matrix_states[])[MATRIX_ROWS][MATRIX_COLS] = { &MATRIX_STATE, &SLAVE_MATRIX_STATE };
+uint8_t keycodes[6];
+uint8_t current_press_row[6];
+uint8_t current_press_col[6];
+uint8_t current_press_stat[6];
+uint8_t stat_matrix_changed = 0;
 uint8_t last_layer = 0;
 uint8_t current_layout = 0;
 uint8_t is_layer_changed = 0;
-uint32_t lastDebounceTime = 0;
 uint32_t last_activity_time_ms = 0;
 
-uint8_t (*matrix_states[])[MATRIX_ROWS][MATRIX_COLS] = { &MATRIX_STATE,
-		&SLAVE_MATRIX_STATE, };
+static keyboard_btn_handle_t s_kbd = NULL;
 
-//used for debouncing
-static uint32_t millis() {
-	return esp_timer_get_time() / 1000;
+static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_report_t kbd_report, void *user_data)
+{
+    // Clear matrix state
+    memset(MATRIX_STATE, 0, sizeof(MATRIX_STATE));
+    // Reset current press arrays
+    for (int i = 0; i < 6; i++) {
+        current_press_row[i] = 255;
+        current_press_col[i] = 255;
+        current_press_stat[i] = 0;
+        keycodes[i] = 0;
+    }
+
+    // Fill from key_data (pressed keys)
+    uint8_t filled = 0;
+    if (kbd_report.key_pressed_num > 0 && kbd_report.key_data) {
+        for (uint32_t i = 0; i < kbd_report.key_pressed_num && filled < 6; i++) {
+            uint8_t out_idx = kbd_report.key_data[i].output_index;
+            uint8_t in_idx = kbd_report.key_data[i].input_index;
+            if (in_idx < MATRIX_ROWS && out_idx < MATRIX_COLS) {
+                MATRIX_STATE[in_idx][out_idx] = 1;
+                current_press_row[filled] = in_idx;
+                current_press_col[filled] = out_idx;
+                current_press_stat[filled] = 1;
+                filled++;
+            }
+        }
+    }
+
+    stat_matrix_changed = 1;
+    last_activity_time_ms = esp_timer_get_time() / 1000;
+
+    extern TaskHandle_t keyboard_task_handle; // defined in keyboard_manager.c
+    if (keyboard_task_handle != NULL) {
+        xTaskNotifyGive(keyboard_task_handle);
+    }
 }
 
-// deinitializing rtc matrix pins on  deep sleep wake up
-void rtc_matrix_deinit(void) {
-
-	// Deinitializing columns
-	for (uint8_t col = 0; col < MATRIX_COLS; col++) {
-
-		if (rtc_gpio_is_valid_gpio(MATRIX_COLS_PINS[col]) == 1) {
-			rtc_gpio_set_level(MATRIX_COLS_PINS[col], 0);
-			rtc_gpio_set_direction(MATRIX_COLS_PINS[col],
-					RTC_GPIO_MODE_DISABLED);
-			gpio_reset_pin(MATRIX_COLS_PINS[col]);
-		}
-	}
-
-	// Deinitializing rows
-	for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
-
-		if (rtc_gpio_is_valid_gpio(MATRIX_ROWS_PINS[row]) == 1) {
-			rtc_gpio_set_level(MATRIX_ROWS_PINS[row], 0);
-			rtc_gpio_set_direction(MATRIX_ROWS_PINS[row],
-					RTC_GPIO_MODE_DISABLED);
-			gpio_reset_pin(MATRIX_ROWS_PINS[row]);
-		}
-	}
+void rtc_matrix_deinit(void)
+{
+    ESP_LOGI(TAG, "rtc_matrix_deinit (shim)");
+    if (s_kbd) {
+        keyboard_button_delete(s_kbd);
+        s_kbd = NULL;
+    }
 }
 
-// Initializing rtc matrix pins for deep sleep wake up
-void rtc_matrix_setup(void) {
-	uint64_t rtc_mask = 0;
+void matrix_setup(void)
+{
+    ESP_LOGI(TAG, "matrix_setup (shim)");
+    memset(MATRIX_STATE, 0, sizeof(MATRIX_STATE));
+    memset(SLAVE_MATRIX_STATE, 0, sizeof(SLAVE_MATRIX_STATE));
 
-	// Initializing columns
-	for (uint8_t col = 0; col < MATRIX_COLS; col++) {
-
-		if (rtc_gpio_is_valid_gpio(MATRIX_COLS_PINS[col]) == 1) {
-			rtc_gpio_init((MATRIX_COLS_PINS[col]));
-			rtc_gpio_set_direction(MATRIX_COLS_PINS[col],
-					RTC_GPIO_MODE_INPUT_OUTPUT);
-			rtc_gpio_set_level(MATRIX_COLS_PINS[col], 1);
-
-			ESP_LOGI(TAG_MATRIX,"%d is level %d", MATRIX_COLS_PINS[col], gpio_get_level(MATRIX_COLS_PINS[col]));
-		}
-	}
-
-	// Initializing rows
-	for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
-
-		if (rtc_gpio_is_valid_gpio(MATRIX_ROWS_PINS[row]) == 1) {
-			rtc_gpio_init((MATRIX_ROWS_PINS[row]));
-			rtc_gpio_set_direction(MATRIX_ROWS_PINS[row],
-					RTC_GPIO_MODE_INPUT_OUTPUT);
-			rtc_gpio_set_drive_capability(MATRIX_ROWS_PINS[row],
-					GPIO_DRIVE_CAP_0);
-			rtc_gpio_set_level(MATRIX_ROWS_PINS[row], 0);
-			rtc_gpio_wakeup_enable(MATRIX_ROWS_PINS[row], GPIO_INTR_HIGH_LEVEL);
-			SET_BIT(rtc_mask, MATRIX_ROWS_PINS[row]);
-
-			ESP_LOGI(TAG_MATRIX,"%d is level %d", MATRIX_ROWS_PINS[row], gpio_get_level(MATRIX_ROWS_PINS[row]));
-		}
-		esp_sleep_enable_ext1_wakeup(rtc_mask, ESP_EXT1_WAKEUP_ANY_HIGH);
-	}
-}
-
-// Initializing matrix pins
-void matrix_setup(void) {
-	
-	// Initializing columns
-	for (uint8_t col = 0; col < MATRIX_COLS; col++) {
-
-		esp_rom_gpio_pad_select_gpio(MATRIX_COLS_PINS[col]);
-		gpio_set_direction(MATRIX_COLS_PINS[col], GPIO_MODE_INPUT_OUTPUT);
-		gpio_set_level(MATRIX_COLS_PINS[col], 0);
-
-		ESP_LOGI(TAG_MATRIX,"%d is level %d", MATRIX_COLS_PINS[col], gpio_get_level(MATRIX_COLS_PINS[col]));
-	}
-
-	// Initializing rows
-	for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
-
-		esp_rom_gpio_pad_select_gpio(MATRIX_ROWS_PINS[row]);
-		gpio_set_direction(MATRIX_ROWS_PINS[row], GPIO_MODE_INPUT_OUTPUT);
-		gpio_set_drive_capability(MATRIX_ROWS_PINS[row], GPIO_DRIVE_CAP_0);
-		gpio_set_level(MATRIX_ROWS_PINS[row], 0);
-
-		ESP_LOGI(TAG_MATRIX,"%d is level %d", MATRIX_ROWS_PINS[row], gpio_get_level(MATRIX_ROWS_PINS[row]));
-	}
-
-}
-
-uint8_t curState = 0;
-uint32_t DEBOUNCE_MATRIX[MATRIX_ROWS][MATRIX_COLS] = { 0 };
-uint8_t current_press_row[6] = { 255, 255, 255, 255, 255, 255 };
-uint8_t current_press_col[6] = { 255, 255, 255, 255, 255, 255 };
-uint8_t current_press_stat[6] = { 0, 0, 0, 0, 0, 0 };
-uint8_t stat_matrix_changed = 0; // 1: matrix changed, 0: matrix not changed
-// Scanning the matrix for input
-void scan_matrix(void) {
-#ifdef COL2ROW
-	// Setting column pin as low, and checking if the input of a row pin changes.
-
-	for (uint8_t col = 0; col < MATRIX_COLS; col++) {
-		gpio_set_level(MATRIX_COLS_PINS[col], 1);
-		for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
-
-			curState = gpio_get_level(MATRIX_ROWS_PINS[row]);
-			if (PREV_MATRIX_STATE[row][col] != curState) {
-				DEBOUNCE_MATRIX[row][col] = millis();
-			}
-			PREV_MATRIX_STATE[row][col] = curState;
-			if ((millis() - DEBOUNCE_MATRIX[row][col]) > DEBOUNCE) {
-
-				if (MATRIX_STATE[row][col] != curState) {
-					MATRIX_STATE[row][col] = curState;
-					uint8_t index = 0;
-					//uint8_t keycodeTMP = default_layouts[current_layout][row][col];
-					//uint8_t keycodeTMP = keymaps[current_layout][row][col];
-
-					for (uint8_t i = 0; i < 6; i++)
-					{
-						if (current_press_col[i] == 255)
-						{
-							index = i;
-							break;
-						}
-					}
-					
-					for (uint8_t i = 0; i < 6; i++)
-					{
-						if (curState == 0 && current_press_col[i] == col && current_press_row[i] == row)
-						{
-							current_press_col[i] = 255;
-							current_press_row[i] = 255;
-							break;
-						}
-					}
-					if (curState == 1)
-					{
-						current_press_col[index] = col;
-						current_press_row[index] = row;
-						current_press_stat[index] = curState;
-					}
-					
-    				
-
-					//ESP_LOGI(TAG_MATRIX, " 0: %d - %d, 1: %d - %d, 2: %d - %d, 3: %d - %d, 4: %d- %d, 5: %d - %d", 
-					//current_press_row[0], current_press_col[0], current_press_row[1], current_press_col[1], current_press_row[2], current_press_col[2], 
-					//current_press_row[3], current_press_col[3], current_press_row[4], current_press_col[4], current_press_row[5], current_press_col[5]);
-					//tud_hid_keyboard_report(1, 0, keycodes);
-					stat_matrix_changed = 1;
-					last_activity_time_ms = millis();
-					ESP_LOGI(TAG_MATRIX, "Row: %d, Col: %d, State: %d, K : %d %d %d %d %d %d ", row, col, curState, keycodes[0], keycodes[1], keycodes[2], keycodes[3], keycodes[4], keycodes[5]);
-				}
-
-			}
-		}
-		gpio_set_level(MATRIX_COLS_PINS[col], 0);
-	}
-
+    // Build gpio arrays from keyboard_config defines
+    static int output_gpios[MATRIX_COLS];
+    static int input_gpios[MATRIX_ROWS];
+#if defined(COL2ROW)
+    // outputs = cols, inputs = rows
+    const int cols_map[MATRIX_COLS] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
+    const int rows_map[MATRIX_ROWS] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+#else
+    const int cols_map[MATRIX_COLS] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
+    const int rows_map[MATRIX_ROWS] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
 #endif
-#ifdef ROW2COL
-	// Setting row pin as low, and checking if the input of a column pin changes.aaa============================================================
-	for(uint8_t row=0; row < MATRIX_ROWS; row++) {
-		gpio_set_level(MATRIX_ROWS_PINS[row], 1);
+    for (int i = 0; i < MATRIX_COLS; i++) output_gpios[i] = cols_map[i];
+    for (int i = 0; i < MATRIX_ROWS; i++) input_gpios[i] = rows_map[i];
 
-		for(uint8_t col=0; col <MATRIX_COLS; col++) {
+    keyboard_btn_config_t cfg = {0};
+    cfg.output_gpios = output_gpios;
+    cfg.input_gpios = input_gpios;
+    cfg.output_gpio_num = MATRIX_COLS;
+    cfg.input_gpio_num = MATRIX_ROWS;
+    cfg.active_level = 1; // common wiring: active high for inputs
+    cfg.debounce_ticks = 2; // small debounce
+    cfg.ticks_interval = 1000; // sampling interval in us -> 1 kHz
+    cfg.enable_power_save = false;
+    cfg.priority = 5;
+    cfg.core_id = 0;
 
-			curState = gpio_get_level(MATRIX_COLS_PINS[col]);
-			if( PREV_MATRIX_STATE[row][col] != curState) {
-				DEBOUNCE_MATRIX[row][col] = millis();
-			}
-			PREV_MATRIX_STATE[row][col] = curState;
-			if( (millis() - DEBOUNCE_MATRIX[row][col]) > DEBOUNCE) {
-
-				if( MATRIX_STATE[row][col] != curState) {
-					MATRIX_STATE[row][col] = curState;
-					ESP_LOGI(TAG_MATRIX, "Row: %d, Col: %d, State: %d", row, col, curState);
-				}
-
-			}
-		}
-		gpio_set_level(MATRIX_ROWS_PINS[row], 0);
-	}
-#endif
-
+    esp_err_t res = keyboard_button_create(&cfg, &s_kbd);
+    if (res == ESP_OK && s_kbd != NULL) {
+        ESP_LOGI(TAG, "keyboard_button created: handle=%p", s_kbd);
+        keyboard_btn_cb_config_t cb = {0};
+        cb.event = KBD_EVENT_PRESSED;
+        cb.callback = keyboard_btn_cb;
+        cb.user_data = NULL;
+        esp_err_t r2 = keyboard_button_register_cb(s_kbd, cb, NULL);
+        if (r2 == ESP_OK) {
+            ESP_LOGI(TAG, "keyboard_button callback registered");
+        } else {
+            ESP_LOGW(TAG, "keyboard_button_register_cb failed: %d", r2);
+        }
+    } else {
+        ESP_LOGW(TAG, "keyboard_button_create failed: %d", res);
+    }
 }
+
+/* legacy scan functions removed: keyboard_button delivers state via callback */
+
+/* rtc_matrix_setup, matrix_irq_setup and matrix_irq_deinit removed —
+ * keyboard_button manages RTC/IRQ behavior and callbacks.
+ */
+
 void layer_changed(void)
 {
     is_layer_changed = 1;
@@ -245,5 +143,5 @@ void layer_changed(void)
 
 uint32_t get_last_activity_time_ms(void)
 {
-	return last_activity_time_ms;
+    return last_activity_time_ms;
 }

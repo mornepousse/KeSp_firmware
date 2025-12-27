@@ -912,9 +912,8 @@ void init_cdc_commands(void)
 {
 	cdc_cmd_fifo_init();
 	
-	// Register our custom log vprintf to redirect logs to CDC
-	// Save original to chain calls
-	original_log_vprintf = esp_log_set_vprintf(cdc_log_vprintf);
+	// Disabled: log redirection to CDC causes watchdog issues
+	// original_log_vprintf = esp_log_set_vprintf(cdc_log_vprintf);
 
 	// Increase stack depth to cope with larger CDC_CMD_MAX_LEN buffers
 	xTaskCreate(cdc_process_commands_task, "cdc_cmd", 4096, NULL, 4, NULL);

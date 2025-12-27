@@ -86,7 +86,7 @@ uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
 #endif
 
-#ifdef VERSION_2
+#if defined(VERSION_2) || defined(VERSION_2_DEBUG)
 
 uint16_t keymaps[LAYERS][MATRIX_ROWS][MATRIX_COLS] = {
 
