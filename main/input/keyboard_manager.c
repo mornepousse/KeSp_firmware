@@ -59,7 +59,10 @@ typedef struct {
   hid_msg_type_t type;
   TickType_t enqueue_tick; // for latency measurement
   union {
-    uint8_t keycodes[6];
+    struct {
+        uint8_t keycodes[6];
+        uint8_t modifier;
+    } keyboard;
     struct {
       uint8_t buttons;
       int8_t x;
@@ -80,6 +83,17 @@ typedef struct {
 static QueueHandle_t hid_queue = NULL;
 static SemaphoreHandle_t hid_report_mutex = NULL;
 static TaskHandle_t hid_sender_task_handle = NULL;
+static uint8_t current_modifiers = 0;
+
+static void extract_modifiers(uint8_t *keycodes, uint8_t *modifier) {
+    *modifier = 0;
+    for (int i = 0; i < 6; i++) {
+        if (keycodes[i] >= HID_KEY_CONTROL_LEFT && keycodes[i] <= HID_KEY_GUI_RIGHT) {
+            *modifier |= (1 << (keycodes[i] - HID_KEY_CONTROL_LEFT));
+            keycodes[i] = 0;
+        }
+    }
+}
 
 static void hid_sender_task(void *pvParameters) {
   (void)pvParameters;
@@ -91,12 +105,14 @@ static void hid_sender_task(void *pvParameters) {
         // Simplified: always send combined keyboard+mouse for USB; always send both for BLE as well.
         {
           uint8_t kb_buf[6] = {0};
+          uint8_t kb_mod = 0;
           uint8_t m_buttons = 0;
           int8_t m_x = 0, m_y = 0, m_wheel = 0;
 
           switch (msg.type) {
             case HID_MSG_KEYBOARD:
-              memcpy(kb_buf, msg.payload.keycodes, sizeof(kb_buf));
+              memcpy(kb_buf, msg.payload.keyboard.keycodes, sizeof(kb_buf));
+              kb_mod = msg.payload.keyboard.modifier;
               // try to consume one mouse msg if immediately available
               {
                 hid_msg_t next_msg;
@@ -118,6 +134,7 @@ static void hid_sender_task(void *pvParameters) {
 
             case HID_MSG_MOUSE:
               memcpy(kb_buf, keycodes, sizeof(kb_buf)); // snapshot current keyboard state
+              kb_mod = current_modifiers;
               m_buttons = msg.payload.mouse.buttons;
               m_x = msg.payload.mouse.x;
               m_y = msg.payload.mouse.y;
@@ -126,6 +143,7 @@ static void hid_sender_task(void *pvParameters) {
 
             case HID_MSG_KB_MOUSE:
               memcpy(kb_buf, msg.payload.kb_mouse.keycodes, sizeof(kb_buf));
+              kb_mod = msg.payload.kb_mouse.modifier;
               m_buttons = msg.payload.kb_mouse.buttons;
               m_x = msg.payload.kb_mouse.x;
               m_y = msg.payload.kb_mouse.y;
@@ -139,14 +157,14 @@ static void hid_sender_task(void *pvParameters) {
           if (usb_bl_state == 0) {
             if (tud_hid_ready()) {
               // always send combined report even if parts are zero
-              if (!tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE, 0, kb_buf,
+              if (!tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE, kb_mod, kb_buf,
                                            m_buttons, m_x, m_y, m_wheel, 0)) {
                 KM_LOGW("tud_hid_kb_mouse_report failed (ready=%d q=%u)", (int)tud_hid_ready(), (unsigned)(hid_queue?uxQueueMessagesWaiting(hid_queue):0));
               }
             }
           } else {
             // BLE: send keyboard snapshot then mouse, always (even if zeros)
-            send_hid_bl_key(kb_buf);
+            send_hid_bl_key(kb_mod, kb_buf);
             send_hid_bl_mouse(m_buttons, m_x, m_y, m_wheel);
           }
         }
@@ -287,10 +305,16 @@ static void build_keycode_report(void)
 
 void send_hid_key() {
   static uint8_t last_enqueued_keycodes[6] = {0};
+  static uint8_t last_enqueued_modifier = 0;
   static TickType_t last_key_enqueue_tick = 0;
 
+  // Extract modifiers from global keycodes
+  uint8_t modifier = 0;
+  extract_modifiers(keycodes, &modifier);
+  current_modifiers = modifier;
+
   /* Coalesce identical key reports to avoid saturating HID queue during bursts */
-  if (memcmp(keycodes, last_enqueued_keycodes, sizeof(keycodes)) == 0) {
+  if (memcmp(keycodes, last_enqueued_keycodes, sizeof(keycodes)) == 0 && modifier == last_enqueued_modifier) {
     TickType_t ticks_now = xTaskGetTickCount();
     uint32_t elapsed = (uint32_t)(ticks_now - last_key_enqueue_tick);
     uint32_t min_ticks = (uint32_t)pdMS_TO_TICKS(KEY_ENQUEUE_MIN_MS);
@@ -303,7 +327,8 @@ void send_hid_key() {
   hid_msg_t msg;
   msg.type = HID_MSG_KEYBOARD;
   msg.enqueue_tick = xTaskGetTickCount();
-  memcpy(msg.payload.keycodes, keycodes, sizeof(msg.payload.keycodes));
+  memcpy(msg.payload.keyboard.keycodes, keycodes, sizeof(msg.payload.keyboard.keycodes));
+  msg.payload.keyboard.modifier = modifier;
 
   if (hid_queue != NULL) {
     // If there is a pending mouse msg, combine into a single KB+MOUSE message to avoid mouse starvation
@@ -316,6 +341,7 @@ void send_hid_key() {
           combined.type = HID_MSG_KB_MOUSE;
           combined.enqueue_tick = xTaskGetTickCount();
           memcpy(combined.payload.kb_mouse.keycodes, keycodes, sizeof(combined.payload.kb_mouse.keycodes));
+          combined.payload.kb_mouse.modifier = modifier;
           combined.payload.kb_mouse.buttons = peek_msg.payload.mouse.buttons;
           combined.payload.kb_mouse.x = peek_msg.payload.mouse.x;
           combined.payload.kb_mouse.y = peek_msg.payload.mouse.y;
@@ -331,6 +357,7 @@ void send_hid_key() {
           }
 
           memcpy(last_enqueued_keycodes, keycodes, sizeof(keycodes));
+          last_enqueued_modifier = modifier;
           last_key_enqueue_tick = xTaskGetTickCount();
           return;
         } else {
@@ -348,17 +375,19 @@ void send_hid_key() {
     }
     //ESP_LOGD(KM_TAG, "send_hid_key: enqueued (qdepth=%u)", (unsigned)uxQueueMessagesWaiting(hid_queue));
     memcpy(last_enqueued_keycodes, keycodes, sizeof(keycodes));
+    last_enqueued_modifier = modifier;
     last_key_enqueue_tick = xTaskGetTickCount();
   } else {
     /* fallback: direct send if queue not initialized yet */
     if (usb_bl_state == 0) {
       if (tud_hid_ready()) {
-        tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, keycodes);
+        tud_hid_keyboard_report(REPORT_ID_KEYBOARD, modifier, keycodes);
       }
     } else {
-      send_hid_bl_key(keycodes);
+      send_hid_bl_key(modifier, keycodes);
     }
     memcpy(last_enqueued_keycodes, keycodes, sizeof(keycodes));
+    last_enqueued_modifier = modifier;
     last_key_enqueue_tick = xTaskGetTickCount();
   }
 }
@@ -434,7 +463,7 @@ void send_hid_kb_mouse(uint8_t modifier, const uint8_t keycodes[6], uint8_t butt
       }
     } else {
       // fallback to separate BL sends
-      send_hid_bl_key(msg.payload.kb_mouse.keycodes);
+      send_hid_bl_key(modifier, msg.payload.kb_mouse.keycodes);
       send_hid_bl_mouse(msg.payload.kb_mouse.buttons, msg.payload.kb_mouse.x, msg.payload.kb_mouse.y, msg.payload.kb_mouse.wheel);
     }
   }
