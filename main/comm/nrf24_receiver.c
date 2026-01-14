@@ -182,15 +182,10 @@ static uint8_t nrf_read_reg(uint8_t reg) {
 }
 
 static void nrf_read_payload(uint8_t *data, uint8_t len) {
-    uint8_t *tx_buf = heap_caps_malloc(len + 1, MALLOC_CAP_DMA);
-    uint8_t *rx_buf = heap_caps_malloc(len + 1, MALLOC_CAP_DMA);
-    if (!tx_buf || !rx_buf) {
-        free(tx_buf);
-        free(rx_buf);
-        return;
-    }
+    if (len > 32) return; // Safety check
+    uint8_t tx_buf[33] = {0};
+    uint8_t rx_buf[33] = {0};
 
-    memset(tx_buf, 0, len + 1);
     tx_buf[0] = R_RX_PAYLOAD;
 
     spi_transaction_t t = {
@@ -201,9 +196,6 @@ static void nrf_read_payload(uint8_t *data, uint8_t len) {
     nrf_spi_polling_transmit(&t);
 
     memcpy(data, &rx_buf[1], len);
-
-    free(tx_buf);
-    free(rx_buf);
 }
 
 static void nrf_flush_rx() {

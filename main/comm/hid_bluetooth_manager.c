@@ -12,6 +12,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_bt.h"
 #include "esp_timer.h"
 #include "esp_hidd_prf_api.h"
@@ -28,6 +29,7 @@
 uint16_t hid_conn_id = 0;
 bool sec_conn = false;
 static bool bt_initialized = false;
+static bool mem_released = false;
 #define HID_BT_TAG HID_DEMO_TAG
 #define CHAR_DECLARATION_SIZE   (sizeof(uint8_t))
 
@@ -180,7 +182,10 @@ void init_hid_bluetooth(void)
     }
     ESP_ERROR_CHECK( ret );
 
-    ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
+    if (!mem_released) {
+        ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
+        mem_released = true;
+    }
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     ret = esp_bt_controller_init(&bt_cfg);
@@ -250,6 +255,13 @@ void deinit_hid_bluetooth(void)
 
     ESP_LOGI(HID_BT_TAG, "Disabling BLE HID");
 
+    // Force disconnect if connected
+    if (hid_bluetooth_is_connected()) {
+        ESP_LOGI(HID_BT_TAG, "Closing connection %d", hid_conn_id);
+        esp_ble_gatts_close(hid_conn_id, 0); 
+        vTaskDelay(pdMS_TO_TICKS(200)); 
+    }
+
     // Stop advertising
     esp_ble_gap_stop_advertising();
 
@@ -282,6 +294,7 @@ void deinit_hid_bluetooth(void)
     bt_initialized = false;
 
     ESP_LOGI(HID_BT_TAG, "BLE HID disabled");
+    sec_conn = false;
     uint64_t _t1 = esp_timer_get_time();
     ESP_LOGW(HID_BT_TAG, "deinit_hid_bluetooth finished in %llu ms", (unsigned long long)((_t1-_t0)/1000));
 }
@@ -304,6 +317,42 @@ void send_hid_bl_key(uint8_t modifier, uint8_t keycodes[6])
 void send_hid_bl_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
 {
     esp_hidd_send_mouse_value(hid_conn_id, buttons, x, y, wheel);
+}
+
+#define STORAGE_NAMESPACE "storage"
+
+void save_bt_state(bool enabled) {
+    nvs_handle_t my_handle;
+    esp_err_t err;
+    err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(HID_DEMO_TAG, "Error (%s) opening NVS handle!", esp_err_to_name(err));
+        return;
+    }
+    err = nvs_set_u8(my_handle, "bt_enabled", enabled ? 1 : 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(HID_DEMO_TAG, "Error (%s) writing bt_enabled!", esp_err_to_name(err));
+    }
+    err = nvs_commit(my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(HID_DEMO_TAG, "Error (%s) committing bt_enabled!", esp_err_to_name(err));
+    }
+    nvs_close(my_handle);
+}
+
+bool load_bt_state(void) {
+    nvs_handle_t my_handle;
+    esp_err_t err;
+    uint8_t enabled = 1; // Default to enabled
+
+    err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(HID_DEMO_TAG, "Error (%s) opening NVS handle! Using default (enabled)", esp_err_to_name(err));
+        return true; 
+    }
+    err = nvs_get_u8(my_handle, "bt_enabled", &enabled);
+    nvs_close(my_handle);
+    return (enabled != 0);
 }
 
 #endif

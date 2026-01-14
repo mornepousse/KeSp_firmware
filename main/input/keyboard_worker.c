@@ -27,10 +27,15 @@ static void km_worker_task(void *pvParameters) {
                     status_display_update();
                     break;
                 case KM_EVENT_BT_TOGGLE:
+                    ESP_LOGI(KW_TAG, "Processing KM_EVENT_BT_TOGGLE");
                     if (hid_bluetooth_is_initialized()) {
+                        ESP_LOGI(KW_TAG, "Deinitializing Bluetooth...");
                         deinit_hid_bluetooth();
+                        save_bt_state(false);
                     } else {
+                        ESP_LOGI(KW_TAG, "Initializing Bluetooth...");
                         init_hid_bluetooth();
+                        save_bt_state(true);
                     }
                     status_display_update();
                     break;
@@ -62,7 +67,14 @@ void km_post_display_update(void) {
 }
 
 void km_post_bt_toggle(void) {
-    if (!km_queue) return;
+    if (!km_queue) {
+        ESP_LOGE(KW_TAG, "km_queue is NULL, cannot post BT toggle event");
+        return;
+    }
     km_event_t ev = KM_EVENT_BT_TOGGLE;
-    xQueueSend(km_queue, &ev, 0);
+    if (xQueueSend(km_queue, &ev, 0) != pdTRUE) {
+        ESP_LOGW(KW_TAG, "Failed to post BT toggle event to queue (full?)");
+    } else {
+        ESP_LOGI(KW_TAG, "BT toggle event posted successfully");
+    }
 }

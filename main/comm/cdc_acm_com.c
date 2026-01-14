@@ -23,6 +23,72 @@
 
 static const char *TAG_CDC = "CDC_CMD";
 
+// VERSION_1 <-> VERSION_2 position mapping
+// V1 has a different physical layout than V2
+// V2 has a center column (col 6) that V1 doesn't have in the same place
+#ifdef VERSION_1
+
+// Mapping table: v1_to_v2[v1_row][v1_col] = v2_row * 16 + v2_col (packed)
+// If value is 0xFF, position doesn't exist in other version
+static const uint8_t v1_to_v2_map[5][13] = {
+    // V1 row0: ESC,ENT,2,3,4,5,6,7,8,9,TO_L2,INT3,LBRC -> V2 positions
+    // V2 row4: ESC,ENTER,LALT,LWIN,LSHIFT,SPACE,MO_L2,BSPACE,ENTER,BSLSH,RWIN,HELP,TO_L3
+    // V2 row0: DEL,1,2,3,4,5,LBRC,6,7,8,9,0,EQL
+    {4*16+0, 4*16+1, 0*16+2, 0*16+3, 0*16+4, 0*16+5, 0*16+7, 0*16+8, 0*16+9, 0*16+10, 4*16+12, 0xFF, 0*16+6},
+    // V1 row1: DEL,1,COMM,DOT,P,Y,F,G,C,R,0,EQUAL,MO_L1
+    // -> V2: DEL=r0c0, 1=r0c1, COMM=r1c2, DOT=r1c3, P=r1c4, Y=r1c5, F=r1c7, G=r1c8, C=r1c9, R=r1c10, 0=r0c11, EQL=r0c12, MO_L1=r1c6
+    {0*16+0, 0*16+1, 1*16+2, 1*16+3, 1*16+4, 1*16+5, 1*16+7, 1*16+8, 1*16+9, 1*16+10, 0*16+11, 0*16+12, 1*16+6},
+    // V1 row2: TAB,QUOT,O,E,U,I,D,H,T,N,L,SLSH,RBRC
+    // -> V2: TAB=r1c0, QUOT=r1c1, O=r2c2, E=r2c3, U=r2c4, I=r2c5, D=r2c7, H=r2c8, T=r2c9, N=r2c10, L=r1c11, SLSH=r1c12, RBRC=r2c6
+    {1*16+0, 1*16+1, 2*16+2, 2*16+3, 2*16+4, 2*16+5, 2*16+7, 2*16+8, 2*16+9, 2*16+10, 1*16+11, 1*16+12, 2*16+6},
+    // V1 row3: RALT,A,Q,J,K,X,B,M,W,V,S,MINUS,RSHIFT
+    // -> V2: RALT=r2c0, A=r2c1, Q=r3c2, J=r3c3, K=r3c4, X=r3c5, B=r3c7, M=r3c8, W=r3c9, V=r3c10, S=r2c11, MINUS=r2c12, (RSHIFT->?)
+    {2*16+0, 2*16+1, 3*16+2, 3*16+3, 3*16+4, 3*16+5, 3*16+7, 3*16+8, 3*16+9, 3*16+10, 2*16+11, 2*16+12, 0xFF},
+    // V1 row4: LCTRL,SCLN,LALT,LWIN,LSHIFT,SPACE,BSPACE,ENTER,BSLSH,Z,Z,GRV,NO
+    // -> V2: LCTRL=r3c0, SCLN=r3c1, LALT=r4c2, LWIN=r3c6/r4c3, LSHIFT=r4c4, SPACE=r4c5, BSPACE=r4c7, ENTER=r4c8, BSLSH=r4c9, Z=r3c11, GRV=r3c12
+    {3*16+0, 3*16+1, 4*16+2, 3*16+6, 4*16+4, 4*16+5, 4*16+7, 4*16+8, 4*16+9, 3*16+11, 3*16+11, 3*16+12, 0xFF}
+};
+
+// Reverse mapping: v2_to_v1[v2_row][v2_col] = v1_row * 16 + v1_col
+static const uint8_t v2_to_v1_map[5][13] = {
+    // V2 row0: DEL,1,2,3,4,5,LBRC,6,7,8,9,0,EQL
+    {1*16+0, 1*16+1, 0*16+2, 0*16+3, 0*16+4, 0*16+5, 0*16+12, 0*16+6, 0*16+7, 0*16+8, 0*16+9, 1*16+10, 1*16+11},
+    // V2 row1: TAB,QUOT,COMM,DOT,P,Y,MO_L2,F,G,C,R,L,SLSH
+    {2*16+0, 2*16+1, 1*16+2, 1*16+3, 1*16+4, 1*16+5, 1*16+12, 1*16+6, 1*16+7, 1*16+8, 1*16+9, 2*16+10, 2*16+11},
+    // V2 row2: RALT,A,O,E,U,I,RBRC,D,H,T,N,S,MINUS
+    {3*16+0, 3*16+1, 2*16+2, 2*16+3, 2*16+4, 2*16+5, 2*16+12, 2*16+6, 2*16+7, 2*16+8, 2*16+9, 3*16+10, 3*16+11},
+    // V2 row3: LCTRL,SCLN,Q,J,K,X,LWIN,B,M,W,V,Z,GRV
+    {4*16+0, 4*16+1, 3*16+2, 3*16+3, 3*16+4, 3*16+5, 4*16+3, 3*16+6, 3*16+7, 3*16+8, 3*16+9, 4*16+9, 4*16+11},
+    // V2 row4: ESC,ENTER,LALT,LWIN,LSHIFT,SPACE,MO_L2,BSPACE,ENTER,BSLSH,RWIN,HELP,TO_L3
+    {0*16+0, 0*16+1, 4*16+2, 4*16+3, 4*16+4, 4*16+5, 0xFF, 4*16+6, 4*16+7, 4*16+8, 0xFF, 0xFF, 0*16+10}
+};
+
+// Get V1 internal position from V2 CDC position
+static inline void v2_to_v1_pos(int v2_row, int v2_col, int *v1_row, int *v1_col) {
+    uint8_t packed = v2_to_v1_map[v2_row][v2_col];
+    if (packed == 0xFF) {
+        *v1_row = v2_row;
+        *v1_col = v2_col;
+    } else {
+        *v1_row = packed >> 4;
+        *v1_col = packed & 0x0F;
+    }
+}
+
+// Get V2 CDC position from V1 internal position
+static inline void v1_to_v2_pos(int v1_row, int v1_col, int *v2_row, int *v2_col) {
+    uint8_t packed = v1_to_v2_map[v1_row][v1_col];
+    if (packed == 0xFF) {
+        *v2_row = v1_row;
+        *v2_col = v1_col;
+    } else {
+        *v2_row = packed >> 4;
+        *v2_col = packed & 0x0F;
+    }
+}
+
+#endif
+
 // Forward declarations used by handlers defined above
 static void cdc_send_line(const char *text);
 static void trim_spaces(char *str);
@@ -144,14 +210,21 @@ static void cmd_setlayer_command(const char *arg)
 		return;
 	}
 
-	// Write into keymaps (row-major)
+	// Write into keymaps (with VERSION_1 position translation)
+	// Data from PC is in VERSION_2 format, translate to internal format
 	extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
-	size_t pos = 0;
-	for (size_t r = 0; r < MATRIX_ROWS; ++r)
+	for (size_t v2_row = 0; v2_row < MATRIX_ROWS; ++v2_row)
 	{
-		for (size_t c = 0; c < MATRIX_COLS; ++c)
+		for (size_t v2_col = 0; v2_col < MATRIX_COLS; ++v2_col)
 		{
-			keymaps[idx][r][c] = parsed[pos++];
+			size_t pos = v2_row * MATRIX_COLS + v2_col;
+#ifdef VERSION_1
+			int v1_row, v1_col;
+			v2_to_v1_pos(v2_row, v2_col, &v1_row, &v1_col);
+			keymaps[idx][v1_row][v1_col] = parsed[pos];
+#else
+			keymaps[idx][v2_row][v2_col] = parsed[pos];
+#endif
 		}
 	}
 
@@ -403,17 +476,22 @@ static void cmd_get_keymap_by_layer(uint8_t layer)
 	extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
 	size_t total_size = (MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t)) + 2; 
 	start_command_queue(c_get_layer_t, total_size);
-	//tinyusb_cdcacm_write_queue(CDC_ITF, layer, 2); 
 	unsigned char bytes[2];
 	bytes[0] = (unsigned char)(layer & 0xFF);
 	bytes[1] = (unsigned char)((layer >> 8) & 0xFF);
 	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)bytes, 2); 
-	// Envoi de la matrice
-	for (int r = 0; r < MATRIX_ROWS; r++)
+	// Envoi de la matrice (traduite en format VERSION_2 pour le PC)
+	for (int v2_row = 0; v2_row < MATRIX_ROWS; v2_row++)
 	{
-		for (int c = 0; c < MATRIX_COLS; c++)
+		for (int v2_col = 0; v2_col < MATRIX_COLS; v2_col++)
 		{
-			uint16_t code = keymaps[layer][r][c];
+#ifdef VERSION_1
+			int v1_row, v1_col;
+			v2_to_v1_pos(v2_row, v2_col, &v1_row, &v1_col);
+			uint16_t code = keymaps[layer][v1_row][v1_col];
+#else
+			uint16_t code = keymaps[layer][v2_row][v2_col];
+#endif
 			bytes[0] = (unsigned char)(code & 0xFF);
 			bytes[1] = (unsigned char)((code >> 8) & 0xFF);
 			tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)bytes, 2); 
@@ -437,13 +515,19 @@ static void cmd_set_key(const char *arg)
 	if (layer < 0 || layer >= LAYERS || row < 0 || row >= MATRIX_ROWS || col < 0 || col >= MATRIX_COLS)
 	{
 		ESP_LOGW(TAG_CDC, "SETKEY: index hors limites");
-		// send_data("ERR index\r\n", 12);
 		return;
 	}
+	// Translate (row,col) from CDC (VERSION_2 format) to internal format
+#ifdef VERSION_1
+	int internal_row, internal_col;
+	v2_to_v1_pos(row, col, &internal_row, &internal_col);
+#else
+	int internal_row = row;
+	int internal_col = col;
+#endif
 	extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
-	keymaps[layer][row][col] = (uint16_t)value;
-	//cdc_debug($"SETKEY OK %d,%d,%d", layer, row, col, value);
-	ESP_LOGI(TAG_CDC, "SETKEY: [%d][%d][%d] = 0x%04X", layer, row, col, value);
+	keymaps[layer][internal_row][internal_col] = (uint16_t)value;
+	ESP_LOGI(TAG_CDC, "SETKEY: [%d][%d][%d] = 0x%04X (v2: r%d,c%d)", layer, internal_row, internal_col, value, row, col);
 	size_t total_elements = (size_t)LAYERS * MATRIX_ROWS * MATRIX_COLS;
 	save_keymaps((uint16_t *)keymaps, total_elements * sizeof(uint16_t));
 	// send_data("OK\r\n", 5);

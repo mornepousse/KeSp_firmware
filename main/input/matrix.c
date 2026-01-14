@@ -2,19 +2,11 @@
 #include <esp_log.h>
 #include <stdint.h>
 #include <string.h>
-
-#define TAG "MATRIX_SHIM"
-
-// Define variables expected by other code
-uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
-#include "matrix.h"
-#include <esp_log.h>
-#include <stdint.h>
-#include <string.h>
 #include "keyboard_button.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "round_ui.h"
 
 #define TAG "MATRIX_SHIM"
 
@@ -33,6 +25,52 @@ uint8_t is_layer_changed = 0;
 uint32_t last_activity_time_ms = 0;
 
 static keyboard_btn_handle_t s_kbd = NULL;
+static uint8_t prev_matrix_state[MATRIX_ROWS][MATRIX_COLS];  /* For KPM: track new keypresses */
+
+// Anti-ghosting: detect and filter phantom keys
+// Ghost keys form a "rectangle" pattern - if 3 corners are pressed, the 4th is a ghost
+static bool is_ghost_key(keyboard_btn_report_t *report, uint8_t check_idx) {
+    if (report->key_pressed_num < 2) return false;
+    
+    uint8_t check_row = report->key_data[check_idx].input_index;
+    uint8_t check_col = report->key_data[check_idx].output_index;
+    
+    // For each other key, check if there's a potential ghost rectangle
+    for (uint32_t i = 0; i < report->key_pressed_num; i++) {
+        if (i == check_idx) continue;
+        uint8_t row_i = report->key_data[i].input_index;
+        uint8_t col_i = report->key_data[i].output_index;
+        
+        // Skip if same row or same column (no rectangle possible)
+        if (row_i == check_row || col_i == check_col) continue;
+        
+        // We have two keys that form diagonal corners of a rectangle
+        // Check if the other two corners are also pressed (ghost condition)
+        bool corner1 = false, corner2 = false;
+        for (uint32_t j = 0; j < report->key_pressed_num; j++) {
+            if (j == check_idx || j == i) continue;
+            uint8_t row_j = report->key_data[j].input_index;
+            uint8_t col_j = report->key_data[j].output_index;
+            
+            // Corner at (check_row, col_i)
+            if (row_j == check_row && col_j == col_i) corner1 = true;
+            // Corner at (row_i, check_col)
+            if (row_j == row_i && col_j == check_col) corner2 = true;
+        }
+        
+        // If both other corners exist, this forms a ghost rectangle
+        // The key with highest column index on the same row is likely the ghost
+        if (corner1 || corner2) {
+            // Simple heuristic: if this key appeared AFTER another key on same row, it's ghost
+            for (uint32_t k = 0; k < check_idx; k++) {
+                if (report->key_data[k].input_index == check_row) {
+                    return true; // This key came after another on same row = likely ghost
+                }
+            }
+        }
+    }
+    return false;
+}
 
 static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_report_t kbd_report, void *user_data)
 {
@@ -46,14 +84,29 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
         keycodes[i] = 0;
     }
 
-    // Fill from key_data (pressed keys)
+    // Fill from key_data (pressed keys), filtering ghosts
     uint8_t filled = 0;
+    uint8_t valid_count = 0;
+    uint8_t new_keypresses = 0;  /* Count new keys for KPM */
     if (kbd_report.key_pressed_num > 0 && kbd_report.key_data) {
         for (uint32_t i = 0; i < kbd_report.key_pressed_num && filled < 6; i++) {
             uint8_t out_idx = kbd_report.key_data[i].output_index;
             uint8_t in_idx = kbd_report.key_data[i].input_index;
+            
+            // Skip ghost keys
+            if (kbd_report.key_pressed_num > 1 && is_ghost_key(&kbd_report, i)) {
+                ESP_LOGW(TAG, "  GHOST filtered: row=%d col=%d", in_idx, out_idx);
+                continue;
+            }
+            
+            valid_count++;
+            ESP_LOGI(TAG, "  Key[%d]: row=%d col=%d", valid_count, in_idx, out_idx);
             if (in_idx < MATRIX_ROWS && out_idx < MATRIX_COLS) {
                 MATRIX_STATE[in_idx][out_idx] = 1;
+                /* Count NEW keypresses (wasn't pressed before) */
+                if (!prev_matrix_state[in_idx][out_idx]) {
+                    new_keypresses++;
+                }
                 current_press_row[filled] = in_idx;
                 current_press_col[filled] = out_idx;
                 current_press_stat[filled] = 1;
@@ -61,6 +114,14 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
             }
         }
     }
+    
+    /* Notify KPM tracker of new keypresses */
+    for (uint8_t k = 0; k < new_keypresses; k++) {
+        round_ui_notify_keypress();
+    }
+    
+    /* Save current state for next comparison */
+    memcpy(prev_matrix_state, MATRIX_STATE, sizeof(MATRIX_STATE));
 
     stat_matrix_changed = 1;
     last_activity_time_ms = esp_timer_get_time() / 1000;
@@ -97,17 +158,25 @@ void matrix_setup(void)
     const int cols_map[MATRIX_COLS] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
     const int rows_map[MATRIX_ROWS] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
 #endif
-    for (int i = 0; i < MATRIX_COLS; i++) output_gpios[i] = cols_map[i];
-    for (int i = 0; i < MATRIX_ROWS; i++) input_gpios[i] = rows_map[i];
+    ESP_LOGI(TAG, "Cols (outputs): ");
+    for (int i = 0; i < MATRIX_COLS; i++) {
+        output_gpios[i] = cols_map[i];
+        ESP_LOGI(TAG, "  COL%d = GPIO%d", i, output_gpios[i]);
+    }
+    ESP_LOGI(TAG, "Rows (inputs): ");
+    for (int i = 0; i < MATRIX_ROWS; i++) {
+        input_gpios[i] = rows_map[i];
+        ESP_LOGI(TAG, "  ROW%d = GPIO%d", i, input_gpios[i]);
+    }
 
     keyboard_btn_config_t cfg = {0};
     cfg.output_gpios = output_gpios;
     cfg.input_gpios = input_gpios;
     cfg.output_gpio_num = MATRIX_COLS;
     cfg.input_gpio_num = MATRIX_ROWS;
-    cfg.active_level = 1; // common wiring: active high for inputs
-    cfg.debounce_ticks = 2; // small debounce
-    cfg.ticks_interval = 1000; // sampling interval in us -> 1 kHz
+    cfg.active_level = 1; // Active HIGH
+    cfg.debounce_ticks = 2; // Higher debounce to filter ghost keys
+    cfg.ticks_interval = 2000; // 8ms scan interval (slower)
     cfg.enable_power_save = false;
     cfg.priority = 5;
     cfg.core_id = 0;
@@ -115,26 +184,23 @@ void matrix_setup(void)
     esp_err_t res = keyboard_button_create(&cfg, &s_kbd);
     if (res == ESP_OK && s_kbd != NULL) {
         ESP_LOGI(TAG, "keyboard_button created: handle=%p", s_kbd);
-        keyboard_btn_cb_config_t cb = {0};
-        cb.event = KBD_EVENT_PRESSED;
-        cb.callback = keyboard_btn_cb;
-        cb.user_data = NULL;
-        esp_err_t r2 = keyboard_button_register_cb(s_kbd, cb, NULL);
-        if (r2 == ESP_OK) {
+        
+        // KBD_EVENT_PRESSED is called for all changes (press AND release)
+        keyboard_btn_cb_config_t cb_pressed = {0};
+        cb_pressed.event = KBD_EVENT_PRESSED;
+        cb_pressed.callback = keyboard_btn_cb;
+        cb_pressed.user_data = NULL;
+        esp_err_t r1 = keyboard_button_register_cb(s_kbd, cb_pressed, NULL);
+        
+        if (r1 == ESP_OK) {
             ESP_LOGI(TAG, "keyboard_button callback registered");
         } else {
-            ESP_LOGW(TAG, "keyboard_button_register_cb failed: %d", r2);
+            ESP_LOGW(TAG, "keyboard_button_register_cb failed: %d", r1);
         }
     } else {
         ESP_LOGW(TAG, "keyboard_button_create failed: %d", res);
     }
 }
-
-/* legacy scan functions removed: keyboard_button delivers state via callback */
-
-/* rtc_matrix_setup, matrix_irq_setup and matrix_irq_deinit removed —
- * keyboard_button manages RTC/IRQ behavior and callbacks.
- */
 
 void layer_changed(void)
 {
