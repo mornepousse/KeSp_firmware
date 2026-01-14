@@ -11,9 +11,10 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "display_types.h"
+#include "driver/spi_master.h"
 
 //#define VERSION_1
-#define VERSION_2_DEBUG
+#define VERSION_1
 
 #define MANUFACTURER_NAME "MornePousse"                // 1: Manufacturer
 #define PRODUCT_NAME "KaSeV2"               // 2: Product
@@ -144,6 +145,23 @@ extern TaskHandle_t xKeyreportTask;
 
 static inline display_hw_config_t keyboard_get_display_config(void)
 {
+#ifdef VERSION_1
+    display_hw_config_t cfg = {
+        .bus_type = DISPLAY_BUS_SPI,
+        .width = 240,
+        .height = 240,
+        .pixel_clock_hz = 20 * 1000 * 1000,  /* 20MHz for stable signal */
+        .reset_pin = GPIO_NUM_44, 
+        .spi = {
+            .host = SPI2_HOST,
+            .sclk = GPIO_NUM_41,
+            .mosi = GPIO_NUM_42,
+            .cs = GPIO_NUM_1,
+            .dc = GPIO_NUM_2,
+            .backlight = GPIO_NUM_NC,
+        },
+    };
+#else
 	display_hw_config_t cfg = {
 		.bus_type = DISPLAY_BUS_I2C,
 		.width = 128,
@@ -158,5 +176,6 @@ static inline display_hw_config_t keyboard_get_display_config(void)
 			.enable_internal_pullups = true,
 		},
 	};
+#endif
 	return cfg;
 }

@@ -5,6 +5,8 @@ idf_component_register(
         "app/littlefs_manager.c"
         "display/status_display.c"
         "display/i2c_oled_display.c"
+        "display/spi_round_display.c"
+        "display/round_ui.c"
         "display/img_usb.c"
         "display/img_signal.c"
         "display/img_bluetooth.c"
@@ -19,7 +21,8 @@ idf_component_register(
         "input/keymap.c"
         "input/matrix.c" 
         "input/keyboard_worker.c"
+        "input/trackball.c"
         "cpu_time.c"
     INCLUDE_DIRS "app" "display" "input" "comm" "include"
-    PRIV_REQUIRES esp_driver_gpio esp_timer bt esp_hid nvs_flash esp_lcd unity esp_driver_i2c )
+    PRIV_REQUIRES esp_driver_gpio esp_timer bt esp_hid nvs_flash esp_lcd unity esp_driver_i2c esp_driver_ledc )
 littlefs_create_partition_image(storage ../flash_data FLASH_IN_PROJECT)

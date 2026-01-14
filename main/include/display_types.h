@@ -22,4 +22,12 @@ typedef struct {
         uint8_t address;
         bool enable_internal_pullups;
     } i2c;
+    struct {
+        int host;
+        gpio_num_t sclk;
+        gpio_num_t mosi;
+        gpio_num_t cs;
+        gpio_num_t dc; // Data/Command
+        gpio_num_t backlight; // Backlight control
+    } spi;
 } display_hw_config_t;

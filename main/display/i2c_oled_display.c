@@ -13,7 +13,7 @@
 #include "driver/i2c.h"
 #include "driver/gpio.h"
 
-static const char *TAG_DISP = "DISPL"; 
+static const char *TAG_DISP = "I2C_OLED"; 
 // Déclaration préalable
 bool test_oled_presence(void);
 
@@ -101,106 +101,108 @@ void display_clear_screen(void)
 void init_display(void)
 {
     const display_hw_config_t *cfg = &current_cfg;
-    if (cfg->bus_type != DISPLAY_BUS_I2C)
-    {
-        ESP_LOGE(TAG_DISP, "Unsupported display bus type: %d", cfg->bus_type);
-        display_available = false;
-        return;
-    }
-    // Tester d'abord si l'écran répond sur le bus I2C
-    if (!test_oled_presence())
-    {
-        ESP_LOGW(TAG_DISP, "OLED non détecté - on saute l'initialisation graphique");
-        display_available = false;
-        return;
-    }
-
-    ESP_LOGI(TAG_DISP, "Initialize I2C bus");
-    i2c_master_bus_handle_t i2c_bus = NULL;
-    i2c_master_bus_config_t bus_config = {
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .i2c_port = cfg->i2c.host,
-        .sda_io_num = cfg->i2c.sda,
-        .scl_io_num = cfg->i2c.scl,
-        .flags.enable_internal_pullup = cfg->i2c.enable_internal_pullups,
-    };
-    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &i2c_bus));
-    ESP_LOGI(TAG_DISP, "Install panel IO");
-    esp_lcd_panel_io_handle_t io_handle = NULL;
-    esp_lcd_panel_io_i2c_config_t io_config = {
-        .dev_addr = cfg->i2c.address,
-        .scl_speed_hz = cfg->pixel_clock_hz,
-        .control_phase_bytes = 1,               // According to SSD1306 datasheet
-        .lcd_cmd_bits = DISPL_LCD_CMD_BITS,     // According to SSD1306 datasheet
-        .lcd_param_bits = DISPL_LCD_PARAM_BITS, // According to SSD1306 datasheet
-        .dc_bit_offset = 6,                     // According to SSD1306 datasheet
-
-    };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &io_config, &io_handle));
-    ESP_LOGI(TAG_DISP, "esp_lcd_new_panel_io_i2c");
-    esp_lcd_panel_handle_t panel_handle = NULL;
-    esp_lcd_panel_dev_config_t panel_config = {
-        .bits_per_pixel = 1,
-        .reset_gpio_num = cfg->reset_pin,
-        .color_space = ESP_LCD_COLOR_SPACE_MONOCHROME,
-    };
-    esp_lcd_panel_ssd1306_config_t ssd1306_config = {
-        .height = cfg->height,
-    };
-
-    panel_config.vendor_config = &ssd1306_config;
-    ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(io_handle, &panel_config, &panel_handle));
-
     
+    esp_lcd_panel_io_handle_t io_handle = NULL;
+    esp_lcd_panel_handle_t panel_handle = NULL;
+
+    if (cfg->bus_type == DISPLAY_BUS_I2C)
+    {
+        if (!test_oled_presence())
+        {
+            ESP_LOGW(TAG_DISP, "OLED non détecté - on saute l'initialisation graphique");
+            display_available = false;
+            return;
+        }
+
+        ESP_LOGI(TAG_DISP, "Initialize I2C bus");
+        i2c_master_bus_handle_t i2c_bus = NULL;
+        i2c_master_bus_config_t bus_config = {
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .i2c_port = cfg->i2c.host,
+            .sda_io_num = cfg->i2c.sda,
+            .scl_io_num = cfg->i2c.scl,
+            .flags.enable_internal_pullup = cfg->i2c.enable_internal_pullups,
+        };
+        ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &i2c_bus));
+        ESP_LOGI(TAG_DISP, "Install panel IO");
+        
+        esp_lcd_panel_io_i2c_config_t io_config = {
+            .dev_addr = cfg->i2c.address,
+            .scl_speed_hz = cfg->pixel_clock_hz,
+            .control_phase_bytes = 1,               // According to SSD1306 datasheet
+            .lcd_cmd_bits = DISPL_LCD_CMD_BITS,     // According to SSD1306 datasheet
+            .lcd_param_bits = DISPL_LCD_PARAM_BITS, // According to SSD1306 datasheet
+            .dc_bit_offset = 6,                     // According to SSD1306 datasheet
+
+        };
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &io_config, &io_handle));
+        ESP_LOGI(TAG_DISP, "esp_lcd_new_panel_io_i2c");
+        
+        esp_lcd_panel_dev_config_t panel_config = {
+            .bits_per_pixel = 1,
+            .reset_gpio_num = cfg->reset_pin,
+            .color_space = ESP_LCD_COLOR_SPACE_MONOCHROME,
+        };
+        esp_lcd_panel_ssd1306_config_t ssd1306_config = {
+            .height = cfg->height,
+        };
+
+        panel_config.vendor_config = &ssd1306_config;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(io_handle, &panel_config, &panel_handle));
+    }
+    else
+    {
+        ESP_LOGE(TAG_DISP, "i2c_oled_display only supports I2C bus type");
+        display_available = false;
+        return;
+    }
 
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 
-    ESP_LOGI(TAG_DISP, "Initialize LVGL");
-    // LVGL on CPU 0, lower priority to not block keyboard
+    ESP_LOGI(TAG_DISP, "Initialize LVGL for I2C OLED");
     const lvgl_port_cfg_t lvgl_cfg = {
-        .task_priority = 2,       // Lower than keyboard (3)
+        .task_priority = 2,
         .task_stack = 6144,
-        .task_affinity = 0,       // Pin to CPU 0
-        .task_max_sleep_ms = 100, // Sleep more to yield CPU
-        .timer_period_ms = 20,    // 50Hz refresh reduces UI pressure for OLED
+        .task_affinity = 0,
+        .task_max_sleep_ms = 100,
+        .timer_period_ms = 20,
     };
     lvgl_port_init(&lvgl_cfg);
 
-    ESP_LOGI(TAG_DISP, "Initialized LVGL");
+    /* Full buffer for monochrome display */
+    uint32_t buf_size = cfg->width * cfg->height;
+
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = io_handle,
         .panel_handle = panel_handle,
-        /* Monochrome displays require a full buffer in LVGL */
-        .buffer_size = cfg->width * cfg->height,
+        .buffer_size = buf_size,
         .double_buffer = true,
         .hres = cfg->width,
         .vres = cfg->height,
         .monochrome = true,
-
         .rotation = {
             .swap_xy = false,
-            .mirror_x = false,
+            .mirror_x = true,
             .mirror_y = false,
         },
         .flags = {
+            .buff_dma = 1,
             .sw_rotate = false,
-        }};
+        }
+    };
     disp = lvgl_port_add_disp(&disp_cfg);
     if (!disp) {
-        ESP_LOGE(TAG_DISP, "lvgl_port_add_disp failed (monochrome requires full buffer?) - disabling display");
+        ESP_LOGE(TAG_DISP, "lvgl_port_add_disp failed");
         display_available = false;
         return;
     }
 
-    ESP_LOGI(TAG_DISP, "Display LVGL Scroll Text");
-    if (display_available)
-    {
-        display_available = true;
-        display_test_text("KaSe_V2");
-    }
+    ESP_LOGI(TAG_DISP, "I2C OLED display initialized");
+    display_available = true;
+    display_test_text("KaSe_V2");
 }
 
 // ------------------------------------------------------------------------------------

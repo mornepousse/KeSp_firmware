@@ -164,8 +164,18 @@ static void hid_sender_task(void *pvParameters) {
             }
           } else {
             // BLE: send keyboard snapshot then mouse, always (even if zeros)
-            send_hid_bl_key(kb_mod, kb_buf);
-            send_hid_bl_mouse(m_buttons, m_x, m_y, m_wheel);
+            if (hid_bluetooth_is_initialized()) {
+                send_hid_bl_key(kb_mod, kb_buf);
+                send_hid_bl_mouse(m_buttons, m_x, m_y, m_wheel);
+            } else {
+                usb_bl_state = 0;
+                if (tud_hid_ready()) {
+                  if (!tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE, kb_mod, kb_buf,
+                                              m_buttons, m_x, m_y, m_wheel, 0)) {
+                    KM_LOGW("tud_hid_kb_mouse_report failed (ready=%d q=%u)", (int)tud_hid_ready(), (unsigned)(hid_queue?uxQueueMessagesWaiting(hid_queue):0));
+                  }
+                }
+            }
           }
         }
         // measure latency and log occasionally
@@ -208,6 +218,9 @@ static void is_momentary_layer(int16_t keycodeTMP, uint8_t i);
 static bool is_internal_function(int16_t keycodeTMP);
 static void is_macro(uint16_t keycodeTMP);
 
+/* Enable verbose debug by default for troubleshooting */
+#define KEYBOARD_MANAGER_DEBUG 1
+
 uint8_t usb_bl_state = 0; // 0: USB, 1: BL
 uint16_t keypress_internal_function = 0;
 uint8_t current_row_layer_changer = 255;
@@ -239,7 +252,8 @@ static void process_matrix_changes(void)
       }
     }
     if (Key_is_up == 0) {
-      //ESP_LOGI(KM_TAG, "internal func: %d", keypress_internal_function);
+      // DEBUG: print what we found
+      ESP_LOGI(KM_TAG, "process_matrix_changes: executing internal func: 0x%04X", keypress_internal_function);
 
       run_internal_funct();
       is_toggle_layer(keypress_internal_function);
@@ -384,7 +398,14 @@ void send_hid_key() {
         tud_hid_keyboard_report(REPORT_ID_KEYBOARD, modifier, keycodes);
       }
     } else {
-      send_hid_bl_key(modifier, keycodes);
+        if (hid_bluetooth_is_initialized()) {
+            send_hid_bl_key(modifier, keycodes);
+        } else {
+            usb_bl_state = 0;
+            if (tud_hid_ready()) {
+                tud_hid_keyboard_report(REPORT_ID_KEYBOARD, modifier, keycodes);
+            }
+        }
     }
     memcpy(last_enqueued_keycodes, keycodes, sizeof(keycodes));
     last_enqueued_modifier = modifier;
@@ -428,7 +449,14 @@ void send_mouse_report(uint8_t buttons, int8_t x, int8_t y, int8_t wheel) {
         tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
       }
     } else {
-      send_hid_bl_mouse(buttons, x, y, wheel);
+        if (hid_bluetooth_is_initialized()) {
+            send_hid_bl_mouse(buttons, x, y, wheel);
+        } else {
+            usb_bl_state = 0;
+            if (tud_hid_ready()) {
+                tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
+            }
+        }
     }
   }
 }
@@ -463,8 +491,17 @@ void send_hid_kb_mouse(uint8_t modifier, const uint8_t keycodes[6], uint8_t butt
       }
     } else {
       // fallback to separate BL sends
-      send_hid_bl_key(modifier, msg.payload.kb_mouse.keycodes);
-      send_hid_bl_mouse(msg.payload.kb_mouse.buttons, msg.payload.kb_mouse.x, msg.payload.kb_mouse.y, msg.payload.kb_mouse.wheel);
+      if (hid_bluetooth_is_initialized()) {
+        send_hid_bl_key(modifier, msg.payload.kb_mouse.keycodes);
+        send_hid_bl_mouse(msg.payload.kb_mouse.buttons, msg.payload.kb_mouse.x, msg.payload.kb_mouse.y, msg.payload.kb_mouse.wheel);
+      } else {
+          usb_bl_state = 0;
+          if (tud_hid_ready()) {
+            tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE, modifier, msg.payload.kb_mouse.keycodes,
+                                    msg.payload.kb_mouse.buttons, msg.payload.kb_mouse.x, msg.payload.kb_mouse.y,
+                                    msg.payload.kb_mouse.wheel, 0);
+          }
+      }
     }
   }
 }
@@ -487,16 +524,22 @@ void run_internal_funct() {
     km_post_display_update();
     break;
     case BT_TOGGLE:
+    ESP_LOGI(KM_TAG, "run_internal_funct: BT_TOGGLE case reached. Posting to worker queue...");
     km_post_bt_toggle();
     break;
   }
 }
 
 static bool is_internal_function(int16_t keycodeTMP) {
-  if (keycodeTMP >= TO_L0) {
+  if (keycodeTMP >= TO_L0)  { 
 #if KEYBOARD_SCAN_DEBUG
     KM_LOGI("%d.", keycodeTMP);
 #endif
+    // Catch BT_TOGGLE explicitly to debug
+    if (keycodeTMP == BT_TOGGLE) {
+        ESP_LOGI(KM_TAG, "is_internal_function: BT_TOGGLE detected (0x%04X)", keycodeTMP);
+    }
+
     if (keypress_internal_function == 0) {
       keypress_internal_function = keycodeTMP;
       return true;

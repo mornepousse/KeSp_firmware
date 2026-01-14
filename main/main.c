@@ -24,7 +24,7 @@
 
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for isolation testing */
 #ifndef SKIP_NRF_TASK
-#define SKIP_NRF_TASK 0
+#define SKIP_NRF_TASK 1
 #endif
 #ifndef SKIP_STATUS_DISPLAY
 #define SKIP_STATUS_DISPLAY 0
@@ -51,11 +51,16 @@ static void cpu_time_logger_task(void *arg) {
 }
 
 // Task handling status display updates, sleep/wake and layer change handling.
+static uint8_t last_displayed_layer = 255;  // Track what layer is currently shown
+
 static void status_display_task(void *arg) {
   (void)arg;
   for (;;) {
-    if (is_layer_changed) {
+    // Check both the flag AND if the displayed layer matches current
+    // This catches rapid layer changes that might set/clear the flag quickly
+    if (is_layer_changed || (last_displayed_layer != current_layout)) {
       is_layer_changed = 0;
+      last_displayed_layer = current_layout;
       status_display_update_layer_name();
       cdc_send_layer(current_layout);
     }
@@ -91,7 +96,7 @@ static void status_display_task(void *arg) {
     }
 
     status_display_update();
-    vTaskDelay(pdMS_TO_TICKS(400));
+    vTaskDelay(pdMS_TO_TICKS(10));  // 10ms polling for responsive layer display
   }
 }
 
@@ -124,8 +129,13 @@ void app_main(void) {
   /* Increase keyboard task stack to reduce stack pressure (was 4096) */
   xTaskCreatePinnedToCore(vTaskKeyboard, "Matrix_Keyboard", 6144, &ucParameterToPass,
               3, &xHandleMatrix_Keybord, 0);
-  ESP_LOGI(TAG, "bluetooth init");
-  init_hid_bluetooth();
+  ESP_LOGI(TAG, "bluetooth init check");
+  if (load_bt_state()) {
+      ESP_LOGI(TAG, "Starting bluetooth (saved state: ON)");
+      init_hid_bluetooth();
+  } else {
+      ESP_LOGI(TAG, "Bluetooth disabled (saved state: OFF)");
+  }
 
   ESP_LOGI(TAG, "NRF24 init");
 #if !SKIP_NRF_TASK

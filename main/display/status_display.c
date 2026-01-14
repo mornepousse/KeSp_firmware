@@ -3,9 +3,14 @@
 #include "keyboard_manager.h"
 #include "i2c_oled_display.h"
 #include "keyboard_config.h"
+#ifdef VERSION_1
+#include "round_ui.h"
+#include "spi_round_display.h"
+#else
 #include "img_bluetooth.c"
 #include "img_usb.c"
 #include "img_signal.c"
+#endif
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
 #include "keymap.h"
@@ -15,6 +20,16 @@
 #define STATUS_DISPLAY_MINIMAL 0
 #endif
 
+#include "matrix.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_timer.h"
+#include "esp_log.h"
+#include "esp_heap_caps.h"
+
+LV_FONT_DECLARE(lv_font_montserrat_28);
+
+#ifndef VERSION_1
 /* Helper: log LVGL's dynamic memory state for diagnostics */
 static void status_display_log_lv_mem(const char *prefix)
 {
@@ -22,12 +37,6 @@ static void status_display_log_lv_mem(const char *prefix)
     lv_mem_monitor(&mon);
     ESP_LOGI("STATUS_DISP", "%s LV_MEM free=%u biggest=%u used_pct=%u frag_pct=%u", prefix, (unsigned)mon.free_size, (unsigned)mon.free_biggest_size, (unsigned)mon.used_pct, (unsigned)mon.frag_pct);
 }
-#include "matrix.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_timer.h"
-#include "esp_log.h"
-#include "esp_heap_caps.h"
 
 static void status_display_log_heap_info(const char *prefix)
 {
@@ -47,12 +56,14 @@ static lv_obj_t *label_nrf_debug = NULL;
 static lv_obj_t *label_layer_name = NULL; /* persistent label for layout name - avoid recreating each update */
 static TickType_t last_mouse_activity = 0;
 
-static bool status_display_initialized = false;
-static bool status_display_sleeping = false;
 static const char *status_display_version_text = GATTS_TAG;
 static bool bt_blink_visible = true;
 static TickType_t bt_blink_last_tick = 0;
 static const TickType_t bt_blink_interval_ticks = pdMS_TO_TICKS(500);
+#endif /* !VERSION_1 */
+
+static bool status_display_initialized = false;
+static bool status_display_sleeping = false;
 
 /* Expose a controlled way to disable the display from other modules */
 void status_display_force_disable(void)
@@ -73,22 +84,40 @@ static TickType_t splash_start_tick = 0;
 /* Extern visible flag for display task loop */
 volatile bool request_wake_request = false;
 
+#ifndef VERSION_1
 static void status_display_prepare_ui(bool clear_screen);
 static void status_display_update_connection_icons(bool force);
 static void status_display_init_icons(void);
 static void status_display_show_version_splash(void);
+#endif
 void status_display_show_DFU_prog(void);
+
+#ifdef VERSION_1
+    #define UI_SCALE 2
+    #define UI_FONT &lv_font_montserrat_28
+#else
+    #define UI_SCALE 1
+    #define UI_FONT &lv_font_montserrat_14
+#endif
 
 void draw_separator_line(void)
 {
+#ifdef VERSION_1
+    /* Not used for round display */
+    return;
+#else
     if(display_available == false) return;
-    draw_rectangle_White(0, 37, 128, 2);
+    draw_rectangle_White(0, 37 * UI_SCALE, 128 * UI_SCALE, 2 * UI_SCALE);
+#endif
 }
 
 void status_display_update_layer_name(void)
 { 
     if(display_available == false || status_display_sleeping) return;
     
+#ifdef VERSION_1
+    round_ui_update_layer();
+#else
     is_showing_splash = false;
 
     if (!status_display_initialized)
@@ -118,11 +147,23 @@ void status_display_update_layer_name(void)
         /* Fallback: ensure UI prepared */
         status_display_prepare_ui(false);
     }
+#endif
 }
 
 void status_display_update(void)
 {
     if(display_available == false || status_display_sleeping) return;
+
+#ifdef VERSION_1
+    if (is_showing_splash) {
+        if ((xTaskGetTickCount() - splash_start_tick) > pdMS_TO_TICKS(3000)) {
+            is_showing_splash = false;
+            round_ui_refresh_all();
+        }
+        return;
+    }
+    round_ui_update();
+#else
     uint64_t _t0 = esp_timer_get_time();
 
     if (is_showing_splash) {
@@ -165,11 +206,23 @@ void status_display_update(void)
     if (_dur > 5000) {
         ESP_LOGW("STATUS_DISP", "status_display_update took %llu us", (unsigned long long)_dur);
     }
+#endif
 } 
 
 void status_display_start(void)
 {
     display_hw_config_t cfg = keyboard_get_display_config();
+    
+#ifdef VERSION_1
+    /* Use dedicated SPI driver for round display */
+    if (!spi_display_init(&cfg)) {
+        status_display_initialized = false;
+        display_available = false;
+        return;
+    }
+    display_available = true;
+#else
+    /* Use I2C OLED driver */
     display_set_hw_config(&cfg);
     init_display();
     if (!display_available)
@@ -177,6 +230,7 @@ void status_display_start(void)
         status_display_initialized = false;
         return;
     }
+#endif
 
     /* Silence STATUS_DISP informational logs in normal runs to reduce log noise */
     esp_log_level_set("STATUS_DISP", ESP_LOG_WARN);
@@ -184,7 +238,13 @@ void status_display_start(void)
     /* LVGL port provides a lock; ensure it's initialized (lvgl_port_init was called in init_display) */
 
     status_display_sleeping = false;
+#ifdef VERSION_1
+    round_ui_show_splash(GATTS_TAG);
+    is_showing_splash = true;
+    splash_start_tick = xTaskGetTickCount();
+#else
     status_display_show_version_splash();
+#endif
     // status_display_refresh_all();
 }
 
@@ -195,9 +255,13 @@ void status_display_refresh_all(void)
 
     is_showing_splash = false;
     status_display_sleeping = false;
+#ifdef VERSION_1
+    round_ui_refresh_all();
+#else
     status_display_prepare_ui(true);
     status_display_update_layer_name();
     status_display_update_connection_icons(true);
+#endif
 }
 
 void status_display_sleep(void)
@@ -205,6 +269,11 @@ void status_display_sleep(void)
     if (display_available == false || status_display_sleeping)
         return;
 
+#ifdef VERSION_1
+    round_ui_sleep();
+    status_display_sleeping = true;
+    status_display_initialized = false;
+#else
     if (lvgl_port_lock(100)) {
         display_clear_screen();
         status_display_sleeping = true;
@@ -219,19 +288,9 @@ void status_display_sleep(void)
         status_display_initialized = false;
         lvgl_port_unlock();
     } else {
-        /* fallback without mutex */
-        display_clear_screen();
-        status_display_sleeping = true;
-        icon_bt = NULL;
-        icon_path = NULL;
-        /* persistent label can be freed by display_clear_screen; reset it to avoid dangling pointer */
-        label_layer_name = NULL;
-        last_bt_state = -1;
-        last_path_state = -1;
-        bt_blink_visible = true;
-        bt_blink_last_tick = xTaskGetTickCount();
-        status_display_initialized = false;
+        ESP_LOGE("STATUS_DISP", "Could not take LVGL port lock to enter sleep - aborting sleep");
     }
+#endif /* !VERSION_1 */
 }
 
 void status_display_wake(void)
@@ -242,9 +301,16 @@ void status_display_wake(void)
     if (!status_display_sleeping)
         return;
 
+#ifdef VERSION_1
+    round_ui_wake();
+    status_display_sleeping = false;
+#else
     /* Defer actual UI work to the display task to avoid calling LVGL from other contexts */
     request_wake_request = true;
+#endif
 }
+
+#ifndef VERSION_1
 static void status_display_update_connection_icons(bool force)
 {
     if (display_available == false || status_display_sleeping)
@@ -385,7 +451,10 @@ static void status_display_init_icons(void)
     ESP_LOGI("STATUS_DISP", "init_icons: setting pos icon_bt");
     status_display_log_heap_info("before_set_pos_icon_bt");
     status_display_log_lv_mem("before_set_pos_icon_bt_lv_mem");
-    lv_obj_set_pos(icon_bt, 20, 48);   // bas droite (16x16)
+    lv_obj_set_pos(icon_bt, 20 * UI_SCALE, 48 * UI_SCALE);   // bas droite (16x16)
+    #ifdef VERSION_1
+        lv_img_set_zoom(icon_bt, 512); // 2x zoom (256 is 1x)
+    #endif
     status_display_log_heap_info("after_set_pos_icon_bt");
     status_display_log_lv_mem("after_set_pos_icon_bt_lv_mem");
 
@@ -409,7 +478,10 @@ static void status_display_init_icons(void)
     status_display_log_heap_info("before_set_pos_icon_path");
     status_display_log_lv_mem("before_set_pos_icon_path_lv_mem");
     if (icon_path) {
-        lv_obj_set_pos(icon_path, 0, 48);  // bas gauche (16x16)
+        lv_obj_set_pos(icon_path, 0, 48 * UI_SCALE);  // bas gauche (16x16)
+        #ifdef VERSION_1
+            lv_img_set_zoom(icon_path, 512); // 2x zoom
+        #endif
     } else {
         ESP_LOGW("STATUS_DISP", "init_icons: icon_path is NULL (STATUS_DISPLAY_MINIMAL?), skipping set_pos");
     }
@@ -435,11 +507,12 @@ static void status_display_init_icons(void)
     ESP_LOGI("STATUS_DISP", "init_icons: setting label/text for indicator_mouse");
     if (indicator_mouse) {
         lv_label_set_text(indicator_mouse, "M");
+        lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0); // Apply bigger font if needed
         status_display_log_heap_info("after_indicator_mouse_settext");
         ESP_LOGI("STATUS_DISP", "init_icons: setting pos indicator_mouse");
         status_display_log_heap_info("before_set_pos_indicator_mouse");
         status_display_log_lv_mem("before_set_pos_indicator_mouse_lv_mem");
-        lv_obj_set_pos(indicator_mouse, 118, 48);
+        lv_obj_set_pos(indicator_mouse, 118 * UI_SCALE, 48 * UI_SCALE);
         status_display_log_heap_info("after_set_pos_indicator_mouse");
         status_display_log_lv_mem("after_set_pos_indicator_mouse_lv_mem");
         lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
@@ -471,6 +544,7 @@ static void status_display_init_icons(void)
     }
 
     lv_label_set_text(label_nrf_debug, "");
+    lv_obj_set_style_text_font(label_nrf_debug, UI_FONT, 0);
     status_display_log_heap_info("after_label_nrf_debug_settext");
     status_display_log_lv_mem("after_label_nrf_debug_settext_lv_mem");
 
@@ -510,6 +584,7 @@ static void status_display_init_icons(void)
         }
 
         lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
+        lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
         status_display_log_heap_info("after_label_layer_name_settext");
         status_display_log_lv_mem("after_label_layer_name_settext_lv_mem");
 
@@ -520,7 +595,7 @@ static void status_display_init_icons(void)
             return;
         }
 
-        lv_obj_set_pos(label_layer_name, 38, 48);
+        lv_obj_set_pos(label_layer_name, 38 * UI_SCALE, 48 * UI_SCALE);
         status_display_log_heap_info("after_set_pos_label_layer_name");
         status_display_log_lv_mem("after_set_pos_label_layer_name_lv_mem");
     } else {
@@ -540,6 +615,7 @@ static void status_display_init_icons(void)
         }
 
         lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
+        lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
         status_display_log_heap_info("after_label_layer_name_settext_existing");
         status_display_log_lv_mem("after_label_layer_name_settext_existing_lv_mem");
 
@@ -550,7 +626,7 @@ static void status_display_init_icons(void)
             return;
         }
 
-        lv_obj_set_pos(label_layer_name, 38, 48);
+        lv_obj_set_pos(label_layer_name, 38 * UI_SCALE, 48 * UI_SCALE);
         status_display_log_heap_info("after_set_pos_label_layer_name_existing");
         status_display_log_lv_mem("after_set_pos_label_layer_name_existing_lv_mem");
     }
@@ -615,6 +691,7 @@ static void status_display_show_version_splash(void)
     splash_start_tick = xTaskGetTickCount();
     status_display_initialized = false;
 }
+#endif /* !VERSION_1 */
 
 
 void status_display_show_DFU_prog(void)
@@ -627,13 +704,20 @@ void status_display_show_DFU_prog(void)
 
 void status_display_notify_mouse_activity(void)
 {
+#ifdef VERSION_1
+    round_ui_notify_mouse();
+#else
     last_mouse_activity = xTaskGetTickCount();
+#endif
 }
 
 void status_display_update_nrf_debug(uint32_t pps, uint8_t status, bool spi_ok, uint8_t rpd, uint8_t last_byte, uint8_t mode)
 {
     if (display_available == false || status_display_sleeping) return;
 
+#ifdef VERSION_1
+    round_ui_update_nrf_debug(pps, status, spi_ok, rpd, last_byte, mode);
+#else
     if (!status_display_initialized) {
         status_display_prepare_ui(false);
     }
@@ -667,4 +751,5 @@ void status_display_update_nrf_debug(uint32_t pps, uint8_t status, bool spi_ok, 
 
         lvgl_port_unlock();
     }
+#endif
 }
