@@ -7,6 +7,7 @@
  */
 
 #include "round_ui.h"
+#include "tamagotchi.h"
 #include "i2c_oled_display.h"
 #include "keyboard_config.h"
 #include "hid_bluetooth_manager.h"
@@ -53,6 +54,7 @@ static bool is_animating = false;
 /* State tracking */
 static bool ui_initialized = false;
 static bool ui_sleeping = false;
+static bool ui_showing_splash = false;  /* Splash screen active - don't update layer */
 static int last_bt_state = -1;
 static int last_path_state = -1;
 static TickType_t last_mouse_activity = 0;
@@ -66,7 +68,7 @@ static bool bt_blink_visible = true;
 static uint32_t keypress_count = 0;  /* Total keypresses since last sample */
 static uint32_t kpm_history[KPM_WINDOW_SIZE];  /* Rolling history of keypresses per sample */
 static int kpm_history_index = 0;
-static uint32_t current_kpm = 0;
+uint32_t current_kpm = 0;  /* Exported for LED strip KPM bar animation */
 static TickType_t last_kpm_sample = 0;
 static lv_obj_t *kpm_label = NULL;  /* Label to show KPM value */
 
@@ -156,7 +158,7 @@ static void create_layer_display(lv_obj_t *parent)
     lv_obj_set_style_text_color(layer_label, COLOR_TEXT, 0);
     lv_obj_set_style_text_align(layer_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(layer_label, default_layout_names[current_layout]);
-    lv_obj_center(layer_label);
+    lv_obj_align(layer_label, LV_ALIGN_CENTER, 0, 35);
 }
 
 /**
@@ -195,7 +197,7 @@ static void create_kpm_label(lv_obj_t *parent)
     lv_obj_set_style_text_color(kpm_label, COLOR_SECONDARY, 0);
     lv_obj_set_style_text_align(kpm_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(kpm_label, "0 KPM");
-    lv_obj_align(kpm_label, LV_ALIGN_CENTER, 0, 30);
+    lv_obj_align(kpm_label, LV_ALIGN_CENTER, 0, 65);
 }
 
 /**
@@ -218,6 +220,11 @@ static void create_main_ui(void)
     /* Create UI components */
     create_outer_arc(scr);
     create_status_icons(scr);
+    
+    /* Initialize and draw Tamagotchi */
+    tamagotchi_init();
+    tamagotchi_draw(scr);
+    
     create_layer_display(scr);
     create_kpm_label(scr);
     create_mouse_indicator(scr);
@@ -320,6 +327,7 @@ void round_ui_init(void)
         create_main_ui();
         ui_initialized = true;
         ui_sleeping = false;
+        ui_showing_splash = false;
         lvgl_port_unlock();
     }
     
@@ -328,7 +336,7 @@ void round_ui_init(void)
 
 void round_ui_update_layer(void)
 {
-    if (!display_available || ui_sleeping) {
+    if (!display_available || ui_sleeping || ui_showing_splash) {
         return;
     }
     
@@ -415,6 +423,9 @@ void round_ui_update(void)
         }
         lvgl_port_unlock();
     }
+    
+    /* Update Tamagotchi state */
+    tamagotchi_update(current_kpm);
 }
 
 void round_ui_sleep(void)
@@ -458,6 +469,7 @@ void round_ui_refresh_all(void)
     if (!display_available) return;
     
     ui_sleeping = false;
+    ui_showing_splash = false;  /* End splash mode */
     
     if (lvgl_port_lock(200)) {
         lv_obj_t *scr = lv_scr_act();
@@ -489,6 +501,7 @@ void round_ui_notify_mouse(void)
 void round_ui_notify_keypress(void)
 {
     keypress_count++;
+    tamagotchi_notify_keypress();
 }
 
 void round_ui_update_nrf_debug(uint32_t pps, uint8_t status, bool spi_ok, uint8_t rpd, uint8_t last_byte, uint8_t mode)
@@ -545,6 +558,7 @@ void round_ui_show_splash(const char *text)
         lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
         
         ui_initialized = false;
+        ui_showing_splash = true;  /* Block layer updates during splash */
         
         lvgl_port_unlock();
     }

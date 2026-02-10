@@ -24,7 +24,44 @@ extern uint8_t last_layer;
 extern uint8_t current_layout;
 extern uint8_t is_layer_changed;
 extern uint32_t last_activity_time_ms;
-//extern
+
+/* Key usage statistics */
+extern uint32_t key_stats[MATRIX_ROWS][MATRIX_COLS];  /* Press count per key */
+extern uint32_t key_stats_total;  /* Total keypresses tracked */
+
+/**
+ * @brief Get key usage statistics
+ * @param row Row index
+ * @param col Column index
+ * @return Number of times this key was pressed
+ */
+uint32_t get_key_stats(uint8_t row, uint8_t col);
+
+/**
+ * @brief Reset all key statistics to zero
+ */
+void reset_key_stats(void);
+
+/**
+ * @brief Get the maximum press count (for normalization)
+ */
+uint32_t get_key_stats_max(void);
+
+/**
+ * @brief Save key statistics to NVS
+ */
+void save_key_stats(void);
+
+/**
+ * @brief Load key statistics from NVS
+ */
+void load_key_stats(void);
+
+/**
+ * @brief Check if stats need saving (call periodically)
+ */
+void key_stats_check_save(void);
+
 /*
  * @brief deinitialize rtc pins
  */

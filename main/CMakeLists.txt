@@ -7,6 +7,8 @@ idf_component_register(
         "display/i2c_oled_display.c"
         "display/spi_round_display.c"
         "display/round_ui.c"
+        "display/tamagotchi.c"
+        "display/led_strip_anim.c"
         "display/img_usb.c"
         "display/img_signal.c"
         "display/img_bluetooth.c"
