@@ -540,6 +540,12 @@ static void cdc_send_line(const char *text)
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
+static void cdc_send_binary(const uint8_t *data, size_t len)
+{
+	tinyusb_cdcacm_write_queue(CDC_ITF, data, len);
+	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
+}
+
 static void trim_spaces(char *str)
 {
 	if (str == NULL)
@@ -838,6 +844,80 @@ static void cmd_reboot_to_dfu(void)
 	reboot_to_dfu();
 }
 
+/**
+ * @brief Send key usage statistics via CDC
+ * Format: Binary packet with header + data
+ * Header: "KEYSTATS" (8 bytes) + rows (1) + cols (1) + total_presses (4) + max_presses (4)
+ * Data: For each key [row][col]: 4 bytes (uint32_t little-endian) = press count
+ * 
+ * Or if "KEYSTATS?" text format: human readable
+ */
+static void cmd_get_keystats(bool binary)
+{
+	if (binary) {
+		/* Binary format for heatmap visualization */
+		uint8_t header[18];
+		memcpy(header, "KEYSTATS", 8);
+		header[8] = MATRIX_ROWS;
+		header[9] = MATRIX_COLS;
+		
+		/* Total presses (little-endian) */
+		header[10] = (key_stats_total >> 0) & 0xFF;
+		header[11] = (key_stats_total >> 8) & 0xFF;
+		header[12] = (key_stats_total >> 16) & 0xFF;
+		header[13] = (key_stats_total >> 24) & 0xFF;
+		
+		/* Max presses for normalization */
+		uint32_t max_val = get_key_stats_max();
+		header[14] = (max_val >> 0) & 0xFF;
+		header[15] = (max_val >> 8) & 0xFF;
+		header[16] = (max_val >> 16) & 0xFF;
+		header[17] = (max_val >> 24) & 0xFF;
+		
+		cdc_send_binary(header, sizeof(header));
+		
+		/* Send all key stats - translate to VERSION_2 positions for PC */
+		for (int r = 0; r < MATRIX_ROWS; r++) {
+			for (int c = 0; c < MATRIX_COLS; c++) {
+				/* Translate VERSION_1 position to VERSION_2 */
+				int v2_row, v2_col;
+				v1_to_v2_pos(r, c, &v2_row, &v2_col);
+				
+				uint32_t count = key_stats[r][c];
+				uint8_t data[4];
+				data[0] = (count >> 0) & 0xFF;
+				data[1] = (count >> 8) & 0xFF;
+				data[2] = (count >> 16) & 0xFF;
+				data[3] = (count >> 24) & 0xFF;
+				cdc_send_binary(data, 4);
+			}
+		}
+		cdc_send_line("");  /* End marker */
+	} else {
+		/* Text format for debugging */
+		char buf[128];
+		snprintf(buf, sizeof(buf), "Key Statistics - Total: %lu, Max: %lu", 
+				(unsigned long)key_stats_total, (unsigned long)get_key_stats_max());
+		cdc_send_line(buf);
+		
+		for (int r = 0; r < MATRIX_ROWS; r++) {
+			char line[256] = "";
+			int pos = 0;
+			pos += snprintf(line + pos, sizeof(line) - pos, "R%d: ", r);
+			for (int c = 0; c < MATRIX_COLS; c++) {
+				pos += snprintf(line + pos, sizeof(line) - pos, "%5lu ", (unsigned long)key_stats[r][c]);
+			}
+			cdc_send_line(line);
+		}
+		cdc_send_line("OK");
+	}
+}
+
+static void cmd_reset_keystats(void)
+{
+	reset_key_stats();
+	cdc_send_line("KEYSTATS_RESET:OK");
+}
 
 
 static void parse_and_execute(const char *line)
@@ -913,6 +993,21 @@ static void parse_and_execute(const char *line)
 	if (strncasecmp(line, "DFU", 3) == 0)
 	{
 		cmd_reboot_to_dfu();
+		return;
+	}
+	if (strncasecmp(line, "KEYSTATS?", 9) == 0)
+	{
+		cmd_get_keystats(false);  /* Text format */
+		return;
+	}
+	if (strncasecmp(line, "KEYSTATS", 8) == 0 && (line[8] == '\0' || line[8] == ' '))
+	{
+		cmd_get_keystats(true);  /* Binary format for heatmap */
+		return;
+	}
+	if (strncasecmp(line, "KEYSTATS_RESET", 14) == 0)
+	{
+		cmd_reset_keystats();
 		return;
 	}
 	ESP_LOGW(TAG_CDC, "Commande inconnue: %s", line);

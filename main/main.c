@@ -21,6 +21,7 @@
 #include "esp_heap_caps.h"
 #include "nrf24_receiver.h"
 #include "cpu_time.h"
+#include "led_strip_anim.h"
 
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for isolation testing */
 #ifndef SKIP_NRF_TASK
@@ -96,6 +97,10 @@ static void status_display_task(void *arg) {
     }
 
     status_display_update();
+    
+    /* Periodically check if key stats need saving */
+    key_stats_check_save();
+    
     vTaskDelay(pdMS_TO_TICKS(10));  // 10ms polling for responsive layer display
   }
 }
@@ -108,6 +113,7 @@ void app_main(void) {
   load_keymaps((uint16_t *)keymaps, LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
   load_layout_names(default_layout_names, LAYERS);
   load_macros(macros_list, MAX_MACROS);
+  load_key_stats();  /* Load key usage statistics from NVS */
 
   ESP_LOGI(TAG, "display init");
 #if !SKIP_STATUS_DISPLAY
@@ -145,6 +151,10 @@ void app_main(void) {
 #else
   ESP_LOGW(TAG, "SKIP_NRF_TASK enabled: NRF24 task not started");
 #endif
+
+  ESP_LOGI(TAG, "LED Strip init");
+  led_strip_test();  /* Verification au demarrage */
+  led_strip_start_task();
 
   // Start periodic CPU usage logger on core 1 (avoid interfering with keyboard task on core 0)
   xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL, 1);

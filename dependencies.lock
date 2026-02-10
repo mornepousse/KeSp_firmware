@@ -67,6 +67,17 @@ dependencies:
         /home/mae/Documents/GitHub/Mae_Keyboard_Code/components/espressif__keyboard_button
       type: local
     version: 1.0.0
+  espressif/led_strip:
+    component_hash: 
+      f0d1b7f93eb3ee57bcfd220656176b0b5616e1947f89ed44364555cf910c4840
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 3.0.2
   espressif/tinyusb:
     dependencies: []
     source:
@@ -103,9 +114,10 @@ direct_dependencies:
 - espressif/esp_lvgl_port
 - espressif/esp_tinyusb
 - espressif/keyboard_button
+- espressif/led_strip
 - idf
 - joltwallet/littlefs
 - lvgl/lvgl
-manifest_hash: 96ecd58b4ebba6ac3cfc3df24e2b47718d0dcf12759be7e8ac77c66c1aedbf59
+manifest_hash: 11c15dc478d5bb1befc333f93e0fb9b9d760c6c0bb8e99051f48682f024eed06
 target: esp32s3
 version: 2.0.0

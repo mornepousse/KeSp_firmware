@@ -7,8 +7,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "round_ui.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 
 #define TAG "MATRIX_SHIM"
+#define STORAGE_NAMESPACE "storage"
 
 // Define variables expected by other code
 uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
@@ -23,6 +26,12 @@ uint8_t last_layer = 0;
 uint8_t current_layout = 0;
 uint8_t is_layer_changed = 0;
 uint32_t last_activity_time_ms = 0;
+
+/* Key usage statistics */
+uint32_t key_stats[MATRIX_ROWS][MATRIX_COLS] = {0};
+uint32_t key_stats_total = 0;
+static uint32_t key_stats_last_saved_total = 0;  /* Track when to save */
+static TickType_t key_stats_last_save_tick = 0;
 
 static keyboard_btn_handle_t s_kbd = NULL;
 static uint8_t prev_matrix_state[MATRIX_ROWS][MATRIX_COLS];  /* For KPM: track new keypresses */
@@ -106,6 +115,9 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
                 /* Count NEW keypresses (wasn't pressed before) */
                 if (!prev_matrix_state[in_idx][out_idx]) {
                     new_keypresses++;
+                    /* Update key statistics */
+                    key_stats[in_idx][out_idx]++;
+                    key_stats_total++;
                 }
                 current_press_row[filled] = in_idx;
                 current_press_col[filled] = out_idx;
@@ -210,4 +222,127 @@ void layer_changed(void)
 uint32_t get_last_activity_time_ms(void)
 {
     return last_activity_time_ms;
+}
+
+/* Key statistics functions */
+uint32_t get_key_stats(uint8_t row, uint8_t col)
+{
+    if (row < MATRIX_ROWS && col < MATRIX_COLS) {
+        return key_stats[row][col];
+    }
+    return 0;
+}
+
+void reset_key_stats(void)
+{
+    memset(key_stats, 0, sizeof(key_stats));
+    key_stats_total = 0;
+    save_key_stats();  /* Persist the reset */
+    ESP_LOGI(TAG, "Key statistics reset and saved");
+}
+
+uint32_t get_key_stats_max(void)
+{
+    uint32_t max = 0;
+    for (int r = 0; r < MATRIX_ROWS; r++) {
+        for (int c = 0; c < MATRIX_COLS; c++) {
+            if (key_stats[r][c] > max) {
+                max = key_stats[r][c];
+            }
+        }
+    }
+    return max;
+}
+
+/* ============ Key Stats NVS Persistence ============ */
+
+void save_key_stats(void)
+{
+    nvs_handle_t my_handle;
+    esp_err_t err;
+    
+    err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) opening NVS for key_stats!", esp_err_to_name(err));
+        return;
+    }
+    
+    /* Save the stats array */
+    err = nvs_set_blob(my_handle, "key_stats", key_stats, sizeof(key_stats));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) writing key_stats!", esp_err_to_name(err));
+        nvs_close(my_handle);
+        return;
+    }
+    
+    /* Save the total count */
+    err = nvs_set_u32(my_handle, "key_stats_tot", key_stats_total);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) writing key_stats_total!", esp_err_to_name(err));
+    }
+    
+    err = nvs_commit(my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) committing key_stats!", esp_err_to_name(err));
+    }
+    
+    nvs_close(my_handle);
+    key_stats_last_saved_total = key_stats_total;
+    key_stats_last_save_tick = xTaskGetTickCount();
+    ESP_LOGI(TAG, "Key stats saved (total: %lu)", (unsigned long)key_stats_total);
+}
+
+void load_key_stats(void)
+{
+    nvs_handle_t my_handle;
+    esp_err_t err;
+    
+    err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "No NVS for key_stats (%s), starting fresh", esp_err_to_name(err));
+        return;
+    }
+    
+    /* Load the stats array */
+    size_t required_size = sizeof(key_stats);
+    err = nvs_get_blob(my_handle, "key_stats", key_stats, &required_size);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Key stats loaded from NVS");
+    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "No saved key_stats found, starting fresh");
+    } else {
+        ESP_LOGE(TAG, "Error (%s) reading key_stats!", esp_err_to_name(err));
+    }
+    
+    /* Load the total count */
+    err = nvs_get_u32(my_handle, "key_stats_tot", &key_stats_total);
+    if (err != ESP_OK) {
+        /* Recalculate total from array */
+        key_stats_total = 0;
+        for (int r = 0; r < MATRIX_ROWS; r++) {
+            for (int c = 0; c < MATRIX_COLS; c++) {
+                key_stats_total += key_stats[r][c];
+            }
+        }
+    }
+    
+    nvs_close(my_handle);
+    key_stats_last_saved_total = key_stats_total;
+    key_stats_last_save_tick = xTaskGetTickCount();
+    //ESP_LOGI(TAG, "Key stats total: %lu", (unsigned long)key_stats_total);
+}
+
+/**
+ * @brief Check if stats should be saved (call periodically)
+ * Saves every 100 keypresses OR every 60 seconds if there are changes
+ */
+void key_stats_check_save(void)
+{
+    uint32_t diff = key_stats_total - key_stats_last_saved_total;
+    TickType_t elapsed = xTaskGetTickCount() - key_stats_last_save_tick;
+    
+    /* Save if 100+ new keypresses, or 60s elapsed with changes */
+    if (diff >= 100 || (diff > 0 && elapsed >= pdMS_TO_TICKS(60000))) {
+        save_key_stats();
+    }
 }
