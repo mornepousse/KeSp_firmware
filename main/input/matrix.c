@@ -186,9 +186,9 @@ void matrix_setup(void)
     cfg.input_gpios = input_gpios;
     cfg.output_gpio_num = MATRIX_COLS;
     cfg.input_gpio_num = MATRIX_ROWS;
-    cfg.active_level = 1; // Active HIGH
-    cfg.debounce_ticks = 2; // Higher debounce to filter ghost keys
-    cfg.ticks_interval = 2000; // 8ms scan interval (slower)
+    cfg.active_level = 1; // Active HIGH 
+    cfg.debounce_ticks = 1; // Higher debounce to filter ghost keys
+    cfg.ticks_interval = 1000; // 8ms scan interval (slower)
     cfg.enable_power_save = false;
     cfg.priority = 5;
     cfg.core_id = 0;

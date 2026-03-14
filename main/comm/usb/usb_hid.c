@@ -1,7 +1,7 @@
 #include "tinyusb.h"
 #include "tinyusb_cdc_acm.h"
 #include "tinyusb_default_config.h"
-#include "usb_descriptors.h"
+#include "usb_hid.h"
 #include "esp_log.h"
 #include "i2c_oled_display.h"
 #include "cdc_acm_com.h"
@@ -14,7 +14,7 @@ static const char *TAG_UD = "USB_DESCRIPTORS";
 // Configuration standard compatible Windows (évite STATUS_DEVICE_DATA_ERROR)
 // -----------------------------------------------------------------------------
 
-// Index d'interfaces : on réutilise ceux définis dans usb_descriptors.h
+// Index d'interfaces : on réutilise ceux définis dans usb_hid.h
 // (ITF_NUM_CDC, ITF_NUM_CDC_DATA, ITF_NUM_HID, ITF_NUM_TOTAL)
 
 // Endpoints (valeurs USB complètes, 0x8x = IN, 0x0x = OUT)

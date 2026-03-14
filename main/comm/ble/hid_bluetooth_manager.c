@@ -1,5 +1,3 @@
-#ifndef HID_BLUETOOTH_MANAGER_C
-#define HID_BLUETOOTH_MANAGER_C
 #include "hid_bluetooth_manager.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -354,5 +352,3 @@ bool load_bt_state(void) {
     nvs_close(my_handle);
     return (enabled != 0);
 }
-
-#endif
