@@ -15,7 +15,7 @@
 #include "keymap.h"
 #include "littlefs_manager.h"
 #include "matrix.h"
-#include "usb_descriptors.h"
+#include "usb_hid.h"
 #include "status_display.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -152,9 +152,11 @@ void app_main(void) {
   ESP_LOGW(TAG, "SKIP_NRF_TASK enabled: NRF24 task not started");
 #endif
 
+#ifdef VERSION_1
   ESP_LOGI(TAG, "LED Strip init");
-  led_strip_test();  /* Verification au demarrage */
+  led_strip_test();
   led_strip_start_task();
+#endif
 
   // Start periodic CPU usage logger on core 1 (avoid interfering with keyboard task on core 0)
   xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL, 1);

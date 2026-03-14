@@ -879,11 +879,12 @@ static void cmd_get_keystats(bool binary)
 		/* Send all key stats - translate to VERSION_2 positions for PC */
 		for (int r = 0; r < MATRIX_ROWS; r++) {
 			for (int c = 0; c < MATRIX_COLS; c++) {
+				int v2_row = r, v2_col = c;
+#ifdef VERSION_1
 				/* Translate VERSION_1 position to VERSION_2 */
-				int v2_row, v2_col;
 				v1_to_v2_pos(r, c, &v2_row, &v2_col);
-				
-				uint32_t count = key_stats[r][c];
+#endif
+				uint32_t count = key_stats[v2_row][v2_col];
 				uint8_t data[4];
 				data[0] = (count >> 0) & 0xFF;
 				data[1] = (count >> 8) & 0xFF;

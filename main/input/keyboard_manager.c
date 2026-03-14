@@ -42,7 +42,7 @@ static const char *KM_TAG = "Keyboard_manager";
 #define KEYBOARD_SCAN_DEBUG 0
 #endif
 
-// Report IDs - must match usb_descriptors.c
+// Report IDs - must match usb_hid.c
 #define REPORT_ID_KEYBOARD 1
 #define REPORT_ID_MOUSE 2
 

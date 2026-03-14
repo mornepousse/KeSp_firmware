@@ -7,9 +7,9 @@
 #include "round_ui.h"
 #include "spi_round_display.h"
 #else
-#include "img_bluetooth.c"
-#include "img_usb.c"
-#include "img_signal.c"
+#include "assets/img_bluetooth.c"
+#include "assets/img_usb.c"
+#include "assets/img_signal.c"
 #endif
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
