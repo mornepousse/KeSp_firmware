@@ -593,7 +593,7 @@ void is_macro(uint16_t keycodeTMP) {
         }
       }
     }
-    send_hid_key();
+    /* send_hid_key() removed: caller sends HID report after full loop */
   }
 }
 
