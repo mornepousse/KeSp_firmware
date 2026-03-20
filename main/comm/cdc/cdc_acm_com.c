@@ -310,7 +310,6 @@ bool cdc_cmd_peek(cdc_cmd_t *out)
 		return false;
 	*out = cmd_fifo[fifo_r];
 	return true;
-	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
 uint16_t cdc_cmd_count(void)
@@ -847,8 +846,9 @@ static void cmd_reboot_to_dfu(void)
 /**
  * @brief Send key usage statistics via CDC
  * Format: Binary packet with header + data
- * Header: "KEYSTATS" (8 bytes) + rows (1) + cols (1) + total_presses (4) + max_presses (4)
- * Data: For each key [row][col]: 4 bytes (uint32_t little-endian) = press count
+ * Header: "KEYSTATS" (8) + rows (1) + cols (1) + hw_version (1) + total_presses (4) + max_presses (4) = 19 bytes
+ * Data: For each key [row][col] in V2 order: 4 bytes (uint32_t LE) = press count
+ * Total: 19 + rows*cols*4 bytes, followed by "\r\n"
  * 
  * Or if "KEYSTATS?" text format: human readable
  */
@@ -856,43 +856,49 @@ static void cmd_get_keystats(bool binary)
 {
 	if (binary) {
 		/* Binary format for heatmap visualization */
-		uint8_t header[18];
+		uint8_t header[19];
 		memcpy(header, "KEYSTATS", 8);
 		header[8] = MATRIX_ROWS;
 		header[9] = MATRIX_COLS;
-		
+		header[10] = MODULE_ID;  /* Hardware version: 0x01=V1, 0x02=V2/V2_DEBUG */
+
 		/* Total presses (little-endian) */
-		header[10] = (key_stats_total >> 0) & 0xFF;
-		header[11] = (key_stats_total >> 8) & 0xFF;
-		header[12] = (key_stats_total >> 16) & 0xFF;
-		header[13] = (key_stats_total >> 24) & 0xFF;
-		
+		header[11] = (key_stats_total >> 0) & 0xFF;
+		header[12] = (key_stats_total >> 8) & 0xFF;
+		header[13] = (key_stats_total >> 16) & 0xFF;
+		header[14] = (key_stats_total >> 24) & 0xFF;
+
 		/* Max presses for normalization */
 		uint32_t max_val = get_key_stats_max();
-		header[14] = (max_val >> 0) & 0xFF;
-		header[15] = (max_val >> 8) & 0xFF;
-		header[16] = (max_val >> 16) & 0xFF;
-		header[17] = (max_val >> 24) & 0xFF;
+		header[15] = (max_val >> 0) & 0xFF;
+		header[16] = (max_val >> 8) & 0xFF;
+		header[17] = (max_val >> 16) & 0xFF;
+		header[18] = (max_val >> 24) & 0xFF;
 		
-		cdc_send_binary(header, sizeof(header));
-		
-		/* Send all key stats - translate to VERSION_2 positions for PC */
+		/* Send header + all data in one batch to avoid USB fragmentation */
+		uint8_t payload[19 + MATRIX_ROWS * MATRIX_COLS * 4];
+		memcpy(payload, header, 19);
+		size_t offset = 19;
+
+		/* Send stats in V2 order so PC always gets consistent layout */
 		for (int r = 0; r < MATRIX_ROWS; r++) {
 			for (int c = 0; c < MATRIX_COLS; c++) {
-				int v2_row = r, v2_col = c;
 #ifdef VERSION_1
-				/* Translate VERSION_1 position to VERSION_2 */
-				v1_to_v2_pos(r, c, &v2_row, &v2_col);
+				/* Translate V2 position back to V1 to read the correct counter */
+				int v1_row, v1_col;
+				v2_to_v1_pos(r, c, &v1_row, &v1_col);
+				uint32_t count = key_stats[v1_row][v1_col];
+#else
+				uint32_t count = key_stats[r][c];
 #endif
-				uint32_t count = key_stats[v2_row][v2_col];
-				uint8_t data[4];
-				data[0] = (count >> 0) & 0xFF;
-				data[1] = (count >> 8) & 0xFF;
-				data[2] = (count >> 16) & 0xFF;
-				data[3] = (count >> 24) & 0xFF;
-				cdc_send_binary(data, 4);
+				payload[offset++] = (count >> 0) & 0xFF;
+				payload[offset++] = (count >> 8) & 0xFF;
+				payload[offset++] = (count >> 16) & 0xFF;
+				payload[offset++] = (count >> 24) & 0xFF;
 			}
 		}
+		tinyusb_cdcacm_write_queue(CDC_ITF, payload, offset);
+		tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 		cdc_send_line("");  /* End marker */
 	} else {
 		/* Text format for debugging */
@@ -912,6 +918,155 @@ static void cmd_get_keystats(bool binary)
 		}
 		cdc_send_line("OK");
 	}
+}
+
+/**
+ * @brief Send bigram statistics via CDC
+ * Binary: header + top-N bigrams (sorted by count desc)
+ * Text: human-readable top-N list
+ *
+ * Binary header: "BIGRAMS\0" (8) + hw_version (1) + num_keys (1) + total (4) + max (2) + count_entries (2) = 18 bytes
+ * Each entry: prev_key (1) + curr_key (1) + count (2) = 4 bytes
+ */
+static void cmd_get_bigrams(bool binary)
+{
+	if (binary) {
+		/* Collect non-zero bigrams */
+		typedef struct { uint8_t prev; uint8_t curr; uint16_t count; } bigram_entry_t;
+		/* Max entries we can send — limit to 256 to keep packet reasonable */
+		#define MAX_BIGRAM_ENTRIES 256
+		bigram_entry_t *entries = malloc(MAX_BIGRAM_ENTRIES * sizeof(bigram_entry_t));
+		if (!entries) {
+			cdc_send_line("ERROR:OOM");
+			return;
+		}
+		uint16_t n_entries = 0;
+
+		/* Find all non-zero entries, keep top MAX_BIGRAM_ENTRIES by insertion */
+		uint16_t min_in_list = 0;
+		for (int i = 0; i < NUM_KEYS; i++) {
+			for (int j = 0; j < NUM_KEYS; j++) {
+				if (bigram_stats[i][j] == 0) continue;
+				if (n_entries < MAX_BIGRAM_ENTRIES) {
+					entries[n_entries].prev = (uint8_t)i;
+					entries[n_entries].curr = (uint8_t)j;
+					entries[n_entries].count = bigram_stats[i][j];
+					n_entries++;
+					if (bigram_stats[i][j] < min_in_list || min_in_list == 0)
+						min_in_list = bigram_stats[i][j];
+				} else if (bigram_stats[i][j] > min_in_list) {
+					/* Replace the smallest entry */
+					uint16_t min_idx = 0;
+					for (uint16_t k = 1; k < MAX_BIGRAM_ENTRIES; k++)
+						if (entries[k].count < entries[min_idx].count)
+							min_idx = k;
+					entries[min_idx].prev = (uint8_t)i;
+					entries[min_idx].curr = (uint8_t)j;
+					entries[min_idx].count = bigram_stats[i][j];
+					/* Recalculate min */
+					min_in_list = entries[0].count;
+					for (uint16_t k = 1; k < MAX_BIGRAM_ENTRIES; k++)
+						if (entries[k].count < min_in_list)
+							min_in_list = entries[k].count;
+				}
+			}
+		}
+
+		/* Sort by count descending (simple insertion sort, N is small) */
+		for (uint16_t i = 1; i < n_entries; i++) {
+			bigram_entry_t tmp = entries[i];
+			int j = i - 1;
+			while (j >= 0 && entries[j].count < tmp.count) {
+				entries[j + 1] = entries[j];
+				j--;
+			}
+			entries[j + 1] = tmp;
+		}
+
+		/* Build packet: header (18 bytes) + entries (4 bytes each) */
+		uint16_t max_val = get_bigram_stats_max();
+		uint8_t header[18];
+		memcpy(header, "BIGRAMS", 7);
+		header[7] = 0;
+		header[8] = MODULE_ID;
+		header[9] = (uint8_t)NUM_KEYS;
+		header[10] = (bigram_total >> 0) & 0xFF;
+		header[11] = (bigram_total >> 8) & 0xFF;
+		header[12] = (bigram_total >> 16) & 0xFF;
+		header[13] = (bigram_total >> 24) & 0xFF;
+		header[14] = (max_val >> 0) & 0xFF;
+		header[15] = (max_val >> 8) & 0xFF;
+		header[16] = (n_entries >> 0) & 0xFF;
+		header[17] = (n_entries >> 8) & 0xFF;
+
+		size_t total_size = 18 + n_entries * 4;
+		uint8_t *payload = malloc(total_size);
+		if (!payload) {
+			free(entries);
+			cdc_send_line("ERROR:OOM");
+			return;
+		}
+		memcpy(payload, header, 18);
+		for (uint16_t i = 0; i < n_entries; i++) {
+			size_t off = 18 + i * 4;
+			payload[off + 0] = entries[i].prev;
+			payload[off + 1] = entries[i].curr;
+			payload[off + 2] = (entries[i].count >> 0) & 0xFF;
+			payload[off + 3] = (entries[i].count >> 8) & 0xFF;
+		}
+		tinyusb_cdcacm_write_queue(CDC_ITF, payload, total_size);
+		tinyusb_cdcacm_write_flush(CDC_ITF, 0);
+		free(payload);
+		free(entries);
+		cdc_send_line("");
+	} else {
+		/* Text format: top 20 bigrams */
+		char buf[128];
+		snprintf(buf, sizeof(buf), "Bigram Statistics - Total: %lu, Max: %u",
+				(unsigned long)bigram_total, get_bigram_stats_max());
+		cdc_send_line(buf);
+
+		/* Collect top 20 */
+		typedef struct { uint8_t prev; uint8_t curr; uint16_t count; } bg_t;
+		bg_t top[20] = {0};
+		uint8_t n = 0;
+		for (int i = 0; i < NUM_KEYS; i++) {
+			for (int j = 0; j < NUM_KEYS; j++) {
+				if (bigram_stats[i][j] == 0) continue;
+				if (n < 20) {
+					top[n].prev = i; top[n].curr = j; top[n].count = bigram_stats[i][j];
+					n++;
+				} else {
+					uint8_t mi = 0;
+					for (uint8_t k = 1; k < 20; k++)
+						if (top[k].count < top[mi].count) mi = k;
+					if (bigram_stats[i][j] > top[mi].count) {
+						top[mi].prev = i; top[mi].curr = j; top[mi].count = bigram_stats[i][j];
+					}
+				}
+			}
+		}
+		/* Sort desc */
+		for (uint8_t i = 1; i < n; i++) {
+			bg_t tmp = top[i];
+			int j = i - 1;
+			while (j >= 0 && top[j].count < tmp.count) { top[j+1] = top[j]; j--; }
+			top[j+1] = tmp;
+		}
+		for (uint8_t i = 0; i < n; i++) {
+			uint8_t pr = top[i].prev / MATRIX_COLS, pc = top[i].prev % MATRIX_COLS;
+			uint8_t cr = top[i].curr / MATRIX_COLS, cc = top[i].curr % MATRIX_COLS;
+			snprintf(buf, sizeof(buf), "  R%dC%d -> R%dC%d : %u", pr, pc, cr, cc, top[i].count);
+			cdc_send_line(buf);
+		}
+		cdc_send_line("OK");
+	}
+}
+
+static void cmd_reset_bigrams(void)
+{
+	reset_bigram_stats();
+	cdc_send_line("BIGRAMS_RESET:OK");
 }
 
 static void cmd_reset_keystats(void)
@@ -1011,6 +1166,21 @@ static void parse_and_execute(const char *line)
 		cmd_reset_keystats();
 		return;
 	}
+	if (strncasecmp(line, "BIGRAMS?", 8) == 0)
+	{
+		cmd_get_bigrams(false);
+		return;
+	}
+	if (strncasecmp(line, "BIGRAMS", 7) == 0 && (line[7] == '\0' || line[7] == ' '))
+	{
+		cmd_get_bigrams(true);
+		return;
+	}
+	if (strncasecmp(line, "BIGRAMS_RESET", 13) == 0)
+	{
+		cmd_reset_bigrams();
+		return;
+	}
 	ESP_LOGW(TAG_CDC, "Commande inconnue: %s", line);
 	// ...existing code...
 	
@@ -1096,5 +1266,5 @@ void init_cdc_commands(void)
 	// original_log_vprintf = esp_log_set_vprintf(cdc_log_vprintf);
 
 	// Increase stack depth to cope with larger CDC_CMD_MAX_LEN buffers
-	xTaskCreate(cdc_process_commands_task, "cdc_cmd", 4096, NULL, 4, NULL);
+	xTaskCreate(cdc_process_commands_task, "cdc_cmd", 6144, NULL, 4, NULL);
 }

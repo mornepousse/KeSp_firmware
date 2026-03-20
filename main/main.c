@@ -113,7 +113,8 @@ void app_main(void) {
   load_keymaps((uint16_t *)keymaps, LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
   load_layout_names(default_layout_names, LAYERS);
   load_macros(macros_list, MAX_MACROS);
-  load_key_stats();  /* Load key usage statistics from NVS */
+  load_key_stats();
+  load_bigram_stats();
 
   ESP_LOGI(TAG, "display init");
 #if !SKIP_STATUS_DISPLAY

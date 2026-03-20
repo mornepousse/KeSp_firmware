@@ -29,6 +29,11 @@ extern uint32_t last_activity_time_ms;
 extern uint32_t key_stats[MATRIX_ROWS][MATRIX_COLS];  /* Press count per key */
 extern uint32_t key_stats_total;  /* Total keypresses tracked */
 
+/* Bigram tracking: bigram_stats[prev_key][curr_key] where key = row * MATRIX_COLS + col */
+#define NUM_KEYS (MATRIX_ROWS * MATRIX_COLS)
+extern uint16_t bigram_stats[NUM_KEYS][NUM_KEYS];
+extern uint32_t bigram_total;
+
 /**
  * @brief Get key usage statistics
  * @param row Row index
@@ -41,6 +46,26 @@ uint32_t get_key_stats(uint8_t row, uint8_t col);
  * @brief Reset all key statistics to zero
  */
 void reset_key_stats(void);
+
+/**
+ * @brief Reset all bigram statistics to zero
+ */
+void reset_bigram_stats(void);
+
+/**
+ * @brief Save bigram statistics to NVS
+ */
+void save_bigram_stats(void);
+
+/**
+ * @brief Load bigram statistics from NVS
+ */
+void load_bigram_stats(void);
+
+/**
+ * @brief Get the maximum bigram count (for normalization)
+ */
+uint16_t get_bigram_stats_max(void);
 
 /**
  * @brief Get the maximum press count (for normalization)
