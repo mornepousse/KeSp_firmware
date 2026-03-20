@@ -185,7 +185,7 @@ void init_display(void)
         .monochrome = true,
         .rotation = {
             .swap_xy = false,
-            .mirror_x = true,
+            .mirror_x = false,
             .mirror_y = false,
         },
         .flags = {
