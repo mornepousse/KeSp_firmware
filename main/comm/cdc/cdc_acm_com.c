@@ -100,7 +100,10 @@ static int cdc_log_vprintf(const char *fmt, va_list args) {
     // 1. Call original log handler (UART/JTAG) if it exists
     int ret = 0;
     if (original_log_vprintf) {
-        ret = original_log_vprintf(fmt, args);
+        va_list args_copy;
+        va_copy(args_copy, args);
+        ret = original_log_vprintf(fmt, args_copy);
+        va_end(args_copy);
     }
 
     // 2. Send to CDC if connected
@@ -418,6 +421,10 @@ __attribute__((unused)) static void cmd_display_text(const char *txt)
 
 static void cmd_get_name_layer(uint8_t layer)
 {
+	if (layer >= LAYERS) {
+		cdc_send_line("ERROR:INVALID_LAYER");
+		return;
+	}
 	// Réponse binaire: [index (1 octet)] [nom (len octets, sans '\0')]
 	const char *name = default_layout_names[layer];
 	size_t name_len = strlen(name);
@@ -1090,7 +1097,7 @@ static void parse_and_execute(const char *line)
 	}
 	if (toupper((unsigned char)line[0]) == 'L' && toupper((unsigned char)line[1]) == 'N' && isdigit((unsigned char)line[2]))
 	{
-		cmd_get_name_layer((unsigned char)line[2]);
+		cmd_get_name_layer((unsigned char)(line[2] - '0'));
 		return;
 	}
 	if (toupper((unsigned char)line[0]) == 'L' && isdigit((unsigned char)line[1]))

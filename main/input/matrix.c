@@ -36,7 +36,7 @@ static TickType_t key_stats_last_save_tick = 0;
 /* Bigram tracking */
 uint16_t bigram_stats[NUM_KEYS][NUM_KEYS] = {0};
 uint32_t bigram_total = 0;
-static int8_t last_key_idx = -1;  /* -1 = no previous key */
+static int16_t last_key_idx = -1;  /* -1 = no previous key */
 static uint32_t bigram_last_saved_total = 0;
 static TickType_t bigram_last_save_tick = 0;
 
@@ -76,7 +76,7 @@ static bool is_ghost_key(keyboard_btn_report_t *report, uint8_t check_idx) {
         
         // If both other corners exist, this forms a ghost rectangle
         // The key with highest column index on the same row is likely the ghost
-        if (corner1 || corner2) {
+        if (corner1 && corner2) {
             // Simple heuristic: if this key appeared AFTER another key on same row, it's ghost
             for (uint32_t k = 0; k < check_idx; k++) {
                 if (report->key_data[k].input_index == check_row) {
@@ -124,7 +124,7 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
                     key_stats[in_idx][out_idx]++;
                     key_stats_total++;
                     /* Update bigram */
-                    int8_t curr_idx = in_idx * MATRIX_COLS + out_idx;
+                    int16_t curr_idx = in_idx * MATRIX_COLS + out_idx;
                     if (last_key_idx >= 0 && last_key_idx < NUM_KEYS) {
                         if (bigram_stats[last_key_idx][curr_idx] < UINT16_MAX) {
                             bigram_stats[last_key_idx][curr_idx]++;
@@ -386,8 +386,14 @@ void save_bigram_stats(void)
         return;
     }
 
-    nvs_set_u32(my_handle, "bigram_total", bigram_total);
-    nvs_commit(my_handle);
+    err = nvs_set_u32(my_handle, "bigram_total", bigram_total);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) writing bigram_total!", esp_err_to_name(err));
+    }
+    err = nvs_commit(my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) committing bigram_stats!", esp_err_to_name(err));
+    }
     nvs_close(my_handle);
 
     bigram_last_saved_total = bigram_total;
