@@ -33,6 +33,13 @@ uint32_t key_stats_total = 0;
 static uint32_t key_stats_last_saved_total = 0;  /* Track when to save */
 static TickType_t key_stats_last_save_tick = 0;
 
+/* Bigram tracking */
+uint16_t bigram_stats[NUM_KEYS][NUM_KEYS] = {0};
+uint32_t bigram_total = 0;
+static int8_t last_key_idx = -1;  /* -1 = no previous key */
+static uint32_t bigram_last_saved_total = 0;
+static TickType_t bigram_last_save_tick = 0;
+
 static keyboard_btn_handle_t s_kbd = NULL;
 static uint8_t prev_matrix_state[MATRIX_ROWS][MATRIX_COLS];  /* For KPM: track new keypresses */
 
@@ -102,11 +109,9 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
             uint8_t out_idx = kbd_report.key_data[i].output_index;
             uint8_t in_idx = kbd_report.key_data[i].input_index;
             
-            // Skip ghost keys
-            if (kbd_report.key_pressed_num > 1 && is_ghost_key(&kbd_report, i)) {
-                ESP_LOGW(TAG, "  GHOST filtered: row=%d col=%d", in_idx, out_idx);
-                continue;
-            }
+            // Ghost filtering disabled: each key has its own diode,
+            // so ghosting cannot occur. The filter caused stuck keys
+            // by not recording ghost-filtered keys in MATRIX_STATE.
             
             valid_count++;
             ESP_LOGI(TAG, "  Key[%d]: row=%d col=%d", valid_count, in_idx, out_idx);
@@ -118,6 +123,15 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
                     /* Update key statistics */
                     key_stats[in_idx][out_idx]++;
                     key_stats_total++;
+                    /* Update bigram */
+                    int8_t curr_idx = in_idx * MATRIX_COLS + out_idx;
+                    if (last_key_idx >= 0 && last_key_idx < NUM_KEYS) {
+                        if (bigram_stats[last_key_idx][curr_idx] < UINT16_MAX) {
+                            bigram_stats[last_key_idx][curr_idx]++;
+                            bigram_total++;
+                        }
+                    }
+                    last_key_idx = curr_idx;
                 }
                 current_press_row[filled] = in_idx;
                 current_press_col[filled] = out_idx;
@@ -187,8 +201,8 @@ void matrix_setup(void)
     cfg.output_gpio_num = MATRIX_COLS;
     cfg.input_gpio_num = MATRIX_ROWS;
     cfg.active_level = 1; // Active HIGH 
-    cfg.debounce_ticks = 1; // Higher debounce to filter ghost keys
-    cfg.ticks_interval = 1000; // 8ms scan interval (slower)
+    cfg.debounce_ticks = 3; // 3 consecutive scans to validate a keypress
+    cfg.ticks_interval = 1000; // 1ms scan interval
     cfg.enable_power_save = false;
     cfg.priority = 5;
     cfg.core_id = 0;
@@ -340,9 +354,94 @@ void key_stats_check_save(void)
 {
     uint32_t diff = key_stats_total - key_stats_last_saved_total;
     TickType_t elapsed = xTaskGetTickCount() - key_stats_last_save_tick;
-    
+
     /* Save if 100+ new keypresses, or 60s elapsed with changes */
     if (diff >= 100 || (diff > 0 && elapsed >= pdMS_TO_TICKS(60000))) {
         save_key_stats();
     }
+
+    /* Also check bigram save */
+    uint32_t bg_diff = bigram_total - bigram_last_saved_total;
+    TickType_t bg_elapsed = xTaskGetTickCount() - bigram_last_save_tick;
+    if (bg_diff >= 100 || (bg_diff > 0 && bg_elapsed >= pdMS_TO_TICKS(120000))) {
+        save_bigram_stats();
+    }
+}
+
+/* ============ Bigram Stats ============ */
+
+void save_bigram_stats(void)
+{
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) opening NVS for bigrams!", esp_err_to_name(err));
+        return;
+    }
+
+    err = nvs_set_blob(my_handle, "bigram_stats", bigram_stats, sizeof(bigram_stats));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) writing bigram_stats!", esp_err_to_name(err));
+        nvs_close(my_handle);
+        return;
+    }
+
+    nvs_set_u32(my_handle, "bigram_total", bigram_total);
+    nvs_commit(my_handle);
+    nvs_close(my_handle);
+
+    bigram_last_saved_total = bigram_total;
+    bigram_last_save_tick = xTaskGetTickCount();
+    ESP_LOGI(TAG, "Bigram stats saved (total: %lu)", (unsigned long)bigram_total);
+}
+
+void load_bigram_stats(void)
+{
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "No NVS for bigram_stats, starting fresh");
+        return;
+    }
+
+    size_t required_size = sizeof(bigram_stats);
+    err = nvs_get_blob(my_handle, "bigram_stats", bigram_stats, &required_size);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Bigram stats loaded from NVS");
+    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "No saved bigram_stats, starting fresh");
+    } else {
+        ESP_LOGE(TAG, "Error (%s) reading bigram_stats!", esp_err_to_name(err));
+    }
+
+    err = nvs_get_u32(my_handle, "bigram_total", &bigram_total);
+    if (err != ESP_OK) {
+        bigram_total = 0;
+        for (int i = 0; i < NUM_KEYS; i++)
+            for (int j = 0; j < NUM_KEYS; j++)
+                bigram_total += bigram_stats[i][j];
+    }
+
+    nvs_close(my_handle);
+    bigram_last_saved_total = bigram_total;
+    bigram_last_save_tick = xTaskGetTickCount();
+}
+
+void reset_bigram_stats(void)
+{
+    memset(bigram_stats, 0, sizeof(bigram_stats));
+    bigram_total = 0;
+    last_key_idx = -1;
+    save_bigram_stats();
+    ESP_LOGI(TAG, "Bigram statistics reset and saved");
+}
+
+uint16_t get_bigram_stats_max(void)
+{
+    uint16_t max = 0;
+    for (int i = 0; i < NUM_KEYS; i++)
+        for (int j = 0; j < NUM_KEYS; j++)
+            if (bigram_stats[i][j] > max)
+                max = bigram_stats[i][j];
+    return max;
 }
