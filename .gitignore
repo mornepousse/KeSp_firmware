@@ -7,5 +7,6 @@
 /project-name/managed_components
 /.cache
 /build.clang
-/build 
-/ c
+/build
+/test/build
+/managed_components
