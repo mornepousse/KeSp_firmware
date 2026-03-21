@@ -81,14 +81,6 @@ static void status_display_task(void *arg) {
       display_sleep = 0;
     }
 
-    /* Quick heap sanity check to avoid calling LVGL if heap is corrupt */
-    if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-      ESP_LOGE(TAG, "Heap integrity FAILED in status_display_task loop - disabling display to avoid crash");
-      status_display_force_disable();
-      vTaskDelay(pdMS_TO_TICKS(1000));
-      continue;
-    }
-
     /* Handle deferred wake requests in display task context */
     extern bool request_wake_request;
     if (request_wake_request) {
