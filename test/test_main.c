@@ -11,6 +11,7 @@ extern void test_ghost_filter(void);
 extern void test_key_stats(void);
 extern void test_bigram(void);
 extern void test_cdc_protocol(void);
+extern void test_board_config(void);
 
 int main(void) {
     printf("KaSe Firmware Unit Tests\n");
@@ -21,6 +22,7 @@ int main(void) {
     test_key_stats();
     test_bigram();
     test_cdc_protocol();
+    test_board_config();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);

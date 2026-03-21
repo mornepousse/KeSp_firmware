@@ -25,8 +25,7 @@
 
 //Define matrix
 #define KEYPADS 1 // intended in order to create a Multiple keypad split boards
-#define MATRIX_ROWS 5 // For split keyboards, define rows for one side only.
-#define MATRIX_COLS 13 // For split keyboards, define columns for one side only.
+// MATRIX_ROWS and MATRIX_COLS are now defined in board.h
 
 #define NKRO // does not work on Android and iOS!,  we can get 18KRO on those
 #define LAYERS 10 // number of layers defined
@@ -64,109 +63,39 @@ extern char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH];
 
 extern TaskHandle_t xKeyreportTask;
 
-#ifdef VERSION_2_DEBUG
-#define ROWS0 GPIO_NUM_10
-#define ROWS1 GPIO_NUM_11
-#define ROWS2 GPIO_NUM_12
-#define ROWS3 GPIO_NUM_13
-#define ROWS4 GPIO_NUM_14
-
-
-#define COLS0 GPIO_NUM_9
-#define COLS1 GPIO_NUM_46
-#define COLS2 GPIO_NUM_3
-#define COLS3 GPIO_NUM_8
-#define COLS4 GPIO_NUM_18
-#define COLS5 GPIO_NUM_17
-#define COLS6 GPIO_NUM_16
-#define COLS7 GPIO_NUM_21  
-#define COLS8 GPIO_NUM_4 
-#define COLS9 GPIO_NUM_1
-#define COLS10 GPIO_NUM_2
-#define COLS11 GPIO_NUM_42
-#define COLS12 GPIO_NUM_41
-#endif
-
-
-#ifdef VERSION_2 
-#define ROWS0 GPIO_NUM_10
-#define ROWS1 GPIO_NUM_11
-#define ROWS2 GPIO_NUM_12
-#define ROWS3 GPIO_NUM_13
-#define ROWS4 GPIO_NUM_14
-
-
-#define COLS0 GPIO_NUM_9
-#define COLS1 GPIO_NUM_46
-#define COLS2 GPIO_NUM_37
-#define COLS3 GPIO_NUM_8
-#define COLS4 GPIO_NUM_18
-#define COLS5 GPIO_NUM_17
-#define COLS6 GPIO_NUM_16
-#define COLS7 GPIO_NUM_43 
-#define COLS8 GPIO_NUM_44
-#define COLS9 GPIO_NUM_1
-#define COLS10 GPIO_NUM_2
-#define COLS11 GPIO_NUM_42
-#define COLS12 GPIO_NUM_41
-#endif
-
-#ifdef VERSION_1
-
-#define ROWS0 GPIO_NUM_3
-#define ROWS1 GPIO_NUM_36
-#define ROWS2 GPIO_NUM_39
-#define ROWS3 GPIO_NUM_40
-#define ROWS4 GPIO_NUM_37
-
-
-#define COLS0 GPIO_NUM_21
-#define COLS1 GPIO_NUM_47
-#define COLS2 GPIO_NUM_48
-#define COLS3 GPIO_NUM_45
-#define COLS4 GPIO_NUM_35
-#define COLS5 GPIO_NUM_38
-#define COLS6 GPIO_NUM_9
-#define COLS7 GPIO_NUM_10
-#define COLS8 GPIO_NUM_11
-#define COLS9 GPIO_NUM_12
-#define COLS10 GPIO_NUM_13
-#define COLS11 GPIO_NUM_14
-#define COLS12 GPIO_NUM_46
-
-#endif
+/* GPIOs (ROWS0-4, COLS0-12) are now defined in board.h */
 
 static inline display_hw_config_t keyboard_get_display_config(void)
 {
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     display_hw_config_t cfg = {
-        .bus_type = DISPLAY_BUS_SPI,
-        .width = 240,
-        .height = 240,
-        .pixel_clock_hz = 20 * 1000 * 1000,  /* 20MHz for stable signal */
-        .reset_pin = GPIO_NUM_44, 
+        .bus_type = BOARD_DISPLAY_BUS,
+        .width = BOARD_DISPLAY_WIDTH,
+        .height = BOARD_DISPLAY_HEIGHT,
+        .pixel_clock_hz = BOARD_DISPLAY_CLK_HZ,
+        .reset_pin = BOARD_DISPLAY_RESET,
         .spi = {
-            .host = SPI2_HOST,
-            .sclk = GPIO_NUM_41,
-            .mosi = GPIO_NUM_42,
-            .cs = GPIO_NUM_1,
-            .dc = GPIO_NUM_2,
-            .backlight = GPIO_NUM_NC,
+            .host = BOARD_DISPLAY_SPI_HOST,
+            .sclk = BOARD_DISPLAY_SPI_SCLK,
+            .mosi = BOARD_DISPLAY_SPI_MOSI,
+            .cs = BOARD_DISPLAY_SPI_CS,
+            .dc = BOARD_DISPLAY_SPI_DC,
+            .backlight = BOARD_DISPLAY_SPI_BL,
         },
     };
 #else
 	display_hw_config_t cfg = {
-		.bus_type = DISPLAY_BUS_I2C,
-		.width = 128,
-		.height = 64,
-		.pixel_clock_hz = 400 * 1000,
-		.reset_pin = GPIO_NUM_NC,
+		.bus_type = BOARD_DISPLAY_BUS,
+		.width = BOARD_DISPLAY_WIDTH,
+		.height = BOARD_DISPLAY_HEIGHT,
+		.pixel_clock_hz = BOARD_DISPLAY_CLK_HZ,
+		.reset_pin = BOARD_DISPLAY_RESET,
 		.i2c = {
-			.host = I2C_NUM_0,
-			.sda = GPIO_NUM_15,
-			.scl = GPIO_NUM_7,
-			.address = 0x3C,
-			.enable_internal_pullups = true,
+			.host = BOARD_DISPLAY_I2C_HOST,
+			.sda = BOARD_DISPLAY_I2C_SDA,
+			.scl = BOARD_DISPLAY_I2C_SCL,
+			.address = BOARD_DISPLAY_I2C_ADDR,
+			.enable_internal_pullups = BOARD_DISPLAY_I2C_PULLUPS,
 		},
 	};
 #endif

@@ -153,7 +153,7 @@ void app_main(void) {
   ESP_LOGW(TAG, "SKIP_NRF_TASK enabled: NRF24 task not started");
 #endif
 
-#ifdef VERSION_1
+#if BOARD_HAS_LED_STRIP
   ESP_LOGI(TAG, "LED Strip init");
   led_strip_test();
   led_strip_start_task();

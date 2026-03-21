@@ -3,7 +3,7 @@
 #include "keyboard_manager.h"
 #include "i2c_oled_display.h"
 #include "keyboard_config.h"
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
 #include "round_ui.h"
 #include "spi_round_display.h"
 #else
@@ -29,7 +29,7 @@
 
 LV_FONT_DECLARE(lv_font_montserrat_28);
 
-#ifndef VERSION_1
+#ifndef BOARD_DISPLAY_BACKEND_ROUND
 /* Helper: log LVGL's dynamic memory state for diagnostics */
 static void status_display_log_lv_mem(const char *prefix)
 {
@@ -60,7 +60,7 @@ static const char *status_display_version_text = GATTS_TAG;
 static bool bt_blink_visible = true;
 static TickType_t bt_blink_last_tick = 0;
 static const TickType_t bt_blink_interval_ticks = pdMS_TO_TICKS(500);
-#endif /* !VERSION_1 */
+#endif /* !BOARD_DISPLAY_BACKEND_ROUND */
 
 static bool status_display_initialized = false;
 static bool status_display_sleeping = false;
@@ -84,7 +84,7 @@ static TickType_t splash_start_tick = 0;
 /* Extern visible flag for display task loop */
 volatile bool request_wake_request = false;
 
-#ifndef VERSION_1
+#ifndef BOARD_DISPLAY_BACKEND_ROUND
 static void status_display_prepare_ui(bool clear_screen);
 static void status_display_update_connection_icons(bool force);
 static void status_display_init_icons(void);
@@ -92,17 +92,11 @@ static void status_display_show_version_splash(void);
 #endif
 void status_display_show_DFU_prog(void);
 
-#ifdef VERSION_1
-    #define UI_SCALE 2
-    #define UI_FONT &lv_font_montserrat_28
-#else
-    #define UI_SCALE 1
-    #define UI_FONT &lv_font_montserrat_14
-#endif
+/* UI_SCALE and UI_FONT are now defined in board.h */
 
 void draw_separator_line(void)
 {
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     /* Not used for round display */
     return;
 #else
@@ -115,7 +109,7 @@ void status_display_update_layer_name(void)
 { 
     if(display_available == false || status_display_sleeping) return;
     
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_update_layer();
 #else
     is_showing_splash = false;
@@ -154,7 +148,7 @@ void status_display_update(void)
 {
     if(display_available == false || status_display_sleeping) return;
 
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     if (is_showing_splash) {
         if ((xTaskGetTickCount() - splash_start_tick) > pdMS_TO_TICKS(3000)) {
             is_showing_splash = false;
@@ -213,7 +207,7 @@ void status_display_start(void)
 {
     display_hw_config_t cfg = keyboard_get_display_config();
     
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     /* Use dedicated SPI driver for round display */
     if (!spi_display_init(&cfg)) {
         status_display_initialized = false;
@@ -238,7 +232,7 @@ void status_display_start(void)
     /* LVGL port provides a lock; ensure it's initialized (lvgl_port_init was called in init_display) */
 
     status_display_sleeping = false;
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_show_splash(GATTS_TAG);
     is_showing_splash = true;
     splash_start_tick = xTaskGetTickCount();
@@ -255,7 +249,7 @@ void status_display_refresh_all(void)
 
     is_showing_splash = false;
     status_display_sleeping = false;
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_refresh_all();
 #else
     status_display_prepare_ui(true);
@@ -269,7 +263,7 @@ void status_display_sleep(void)
     if (display_available == false || status_display_sleeping)
         return;
 
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_sleep();
     status_display_sleeping = true;
     status_display_initialized = false;
@@ -290,7 +284,7 @@ void status_display_sleep(void)
     } else {
         ESP_LOGE("STATUS_DISP", "Could not take LVGL port lock to enter sleep - aborting sleep");
     }
-#endif /* !VERSION_1 */
+#endif /* !BOARD_DISPLAY_BACKEND_ROUND */
 }
 
 void status_display_wake(void)
@@ -301,7 +295,7 @@ void status_display_wake(void)
     if (!status_display_sleeping)
         return;
 
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_wake();
     status_display_sleeping = false;
 #else
@@ -310,7 +304,7 @@ void status_display_wake(void)
 #endif
 }
 
-#ifndef VERSION_1
+#ifndef BOARD_DISPLAY_BACKEND_ROUND
 static void status_display_update_connection_icons(bool force)
 {
     if (display_available == false || status_display_sleeping)
@@ -452,7 +446,7 @@ static void status_display_init_icons(void)
     status_display_log_heap_info("before_set_pos_icon_bt");
     status_display_log_lv_mem("before_set_pos_icon_bt_lv_mem");
     lv_obj_set_pos(icon_bt, 20 * UI_SCALE, 48 * UI_SCALE);   // bas droite (16x16)
-    #ifdef VERSION_1
+    #ifdef BOARD_DISPLAY_BACKEND_ROUND
         lv_img_set_zoom(icon_bt, 512); // 2x zoom (256 is 1x)
     #endif
     status_display_log_heap_info("after_set_pos_icon_bt");
@@ -479,7 +473,7 @@ static void status_display_init_icons(void)
     status_display_log_lv_mem("before_set_pos_icon_path_lv_mem");
     if (icon_path) {
         lv_obj_set_pos(icon_path, 0, 48 * UI_SCALE);  // bas gauche (16x16)
-        #ifdef VERSION_1
+        #ifdef BOARD_DISPLAY_BACKEND_ROUND
             lv_img_set_zoom(icon_path, 512); // 2x zoom
         #endif
     } else {
@@ -691,7 +685,7 @@ static void status_display_show_version_splash(void)
     splash_start_tick = xTaskGetTickCount();
     status_display_initialized = false;
 }
-#endif /* !VERSION_1 */
+#endif /* !BOARD_DISPLAY_BACKEND_ROUND */
 
 
 void status_display_show_DFU_prog(void)
@@ -704,7 +698,7 @@ void status_display_show_DFU_prog(void)
 
 void status_display_notify_mouse_activity(void)
 {
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_notify_mouse();
 #else
     last_mouse_activity = xTaskGetTickCount();
@@ -715,7 +709,7 @@ void status_display_update_nrf_debug(uint32_t pps, uint8_t status, bool spi_ok, 
 {
     if (display_available == false || status_display_sleeping) return;
 
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_update_nrf_debug(pps, status, spi_ok, rpd, last_byte, mode);
 #else
     if (!status_display_initialized) {

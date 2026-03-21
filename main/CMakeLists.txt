@@ -25,6 +25,7 @@ idf_component_register(
         "input/matrix.c"
         "input/keyboard_worker.c"
         "input/trackball.c"
+        "${BOARD_DIR}/board_keymap.c"
     INCLUDE_DIRS
         "."
         "config"
@@ -37,6 +38,7 @@ idf_component_register(
         "comm/ble"
         "comm/wireless"
         "input"
+        "${BOARD_DIR}"
     PRIV_REQUIRES
         esp_driver_gpio
         esp_timer
