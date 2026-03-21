@@ -16,4 +16,4 @@ endif()
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 set(COMPONENTS main)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(Mae_Keyboard_Code)
+project(KeSp)

@@ -32,7 +32,7 @@ for i in "${!BOARDS[@]}"; do
     idf.py -DBOARD="$board" fullclean > /dev/null 2>&1 || true
     idf.py -DBOARD="$board" build 2>&1 | tail -5
 
-    cp "$PROJECT_DIR/build/Mae_Keyboard_Code.bin" "$RELEASE_DIR/KaSe_${VERSION_TAG}_${hw_name}.bin"
+    cp "$PROJECT_DIR/build/KeSp.bin" "$RELEASE_DIR/KaSe_${VERSION_TAG}_${hw_name}.bin"
     echo "  -> release/KaSe_${VERSION_TAG}_${hw_name}.bin"
 done
 

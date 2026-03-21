@@ -31,8 +31,26 @@ static bool mem_released = false;
 #define HID_BT_TAG HID_DEMO_TAG
 #define CHAR_DECLARATION_SIZE   (sizeof(uint8_t))
 
-#define HIDD_DEVICE_NAME            "MAE_KEYBOARD"
+#include "version.h"
+#define HIDD_DEVICE_NAME            GATTS_TAG
 #define HID_DEMO_TAG "HID_BL"
+
+/* BLE connection and advertising parameters (overridable via board.h) */
+#ifndef BLE_CONN_MIN_INTERVAL
+#define BLE_CONN_MIN_INTERVAL   0x0006  /* 7.5 ms */
+#endif
+#ifndef BLE_CONN_MAX_INTERVAL
+#define BLE_CONN_MAX_INTERVAL   0x0010  /* 20 ms */
+#endif
+#ifndef BLE_ADV_INT_MIN
+#define BLE_ADV_INT_MIN         0x20
+#endif
+#ifndef BLE_ADV_INT_MAX
+#define BLE_ADV_INT_MAX         0x30
+#endif
+#ifndef BLE_APPEARANCE
+#define BLE_APPEARANCE          0x03c1  /* HID Keyboard */
+#endif
 
 static uint8_t hidd_service_uuid128[] = {
     /* LSB <--------------------------------------------------------------------------------> MSB */
@@ -44,9 +62,9 @@ esp_ble_adv_data_t hidd_adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
     .include_txpower = true,
-    .min_interval = 0x0006, //slave connection min interval, Time = min_interval * 1.25 msec
-    .max_interval = 0x0010, //slave connection max interval, Time = max_interval * 1.25 msec
-    .appearance = 0x03c0,       //HID Generic,
+    .min_interval = BLE_CONN_MIN_INTERVAL,
+    .max_interval = BLE_CONN_MAX_INTERVAL,
+    .appearance = BLE_APPEARANCE,
     .manufacturer_len = 0,
     .p_manufacturer_data =  NULL,
     .service_data_len = 0,
@@ -57,8 +75,8 @@ esp_ble_adv_data_t hidd_adv_data = {
 };
 
 esp_ble_adv_params_t hidd_adv_params = {
-    .adv_int_min        = 0x20,
-    .adv_int_max        = 0x30,
+    .adv_int_min        = BLE_ADV_INT_MIN,
+    .adv_int_max        = BLE_ADV_INT_MAX,
     .adv_type           = ADV_TYPE_IND,
     .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
     //.peer_addr            =

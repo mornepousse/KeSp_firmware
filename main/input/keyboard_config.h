@@ -17,21 +17,8 @@
 
 #define MAX_BT_DEVICENAME_LENGTH 40
 
-#define MASTER  // undefine if you are not flashing the main controller
-
-#define COL2ROW //COL2ROW ROW2COL
-
-#define DEBOUNCE 1 //debounce time in ms
-
-//Define matrix
-#define KEYPADS 1 // intended in order to create a Multiple keypad split boards
-// MATRIX_ROWS and MATRIX_COLS are now defined in board.h
-
 #define NKRO // does not work on Android and iOS!,  we can get 18KRO on those
 #define LAYERS 10 // number of layers defined
-
-//deep sleep parameters, mind that reconnecting after deep sleep might take a minute or two
-#define SLEEP_MINS 45 // undefine if you do not need deep sleep, otherwise define number of minutes for deepsleep
 
 /*
  *---------------------------- Everything below here should not be modified for standard usage----------------------
