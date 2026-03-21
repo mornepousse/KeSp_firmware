@@ -1,7 +1,6 @@
 dependencies:
   espressif/cmake_utilities:
-    component_hash: 
-      351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
+    component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
     dependencies:
     - name: idf
       require: private
@@ -11,8 +10,7 @@ dependencies:
       type: service
     version: 0.5.3
   espressif/esp_lcd_gc9a01:
-    component_hash: 
-      2ccbdfa5a1762c7a8be66770b69a256d809651d6069098852d2c829648707b5b
+    component_hash: 2ccbdfa5a1762c7a8be66770b69a256d809651d6069098852d2c829648707b5b
     dependencies:
     - name: idf
       require: private
@@ -26,8 +24,7 @@ dependencies:
       type: service
     version: 1.2.0
   espressif/esp_lvgl_port:
-    component_hash: 
-      f872401524cb645ee6ff1c9242d44fb4ddcfd4d37d7be8b9ed3f4e85a404efcd
+    component_hash: f872401524cb645ee6ff1c9242d44fb4ddcfd4d37d7be8b9ed3f4e85a404efcd
     dependencies:
     - name: idf
       require: private
@@ -41,8 +38,7 @@ dependencies:
       type: service
     version: 2.7.0
   espressif/esp_tinyusb:
-    component_hash: 
-      6f1f0c140990bf27a86611e3c1f47f9fa8468bffc3bf1eb6d551cb09f31f8908
+    component_hash: 6f1f0c140990bf27a86611e3c1f47f9fa8468bffc3bf1eb6d551cb09f31f8908
     dependencies:
     - name: idf
       require: private
@@ -63,13 +59,11 @@ dependencies:
   espressif/keyboard_button:
     dependencies: []
     source:
-      path: 
-        /home/mae/Documents/GitHub/Mae_Keyboard_Code/components/espressif__keyboard_button
+      path: /home/mae/Documents/GitHub/KaSe_firmware/components/espressif__keyboard_button
       type: local
     version: 1.0.0
   espressif/led_strip:
-    component_hash: 
-      f0d1b7f93eb3ee57bcfd220656176b0b5616e1947f89ed44364555cf910c4840
+    component_hash: f0d1b7f93eb3ee57bcfd220656176b0b5616e1947f89ed44364555cf910c4840
     dependencies:
     - name: idf
       require: private
@@ -81,17 +75,15 @@ dependencies:
   espressif/tinyusb:
     dependencies: []
     source:
-      path: 
-        /home/mae/Documents/GitHub/Mae_Keyboard_Code/components/espressif__tinyusb
+      path: /home/mae/Documents/GitHub/KaSe_firmware/components/espressif__tinyusb
       type: local
     version: 0.19.0~2
   idf:
     source:
       type: idf
-    version: 5.5.1
+    version: 5.5.2
   joltwallet/littlefs:
-    component_hash: 
-      1808d73e99168f6f3c26dd31799a248484762b3a320ec4962dec11a145f4277f
+    component_hash: 1808d73e99168f6f3c26dd31799a248484762b3a320ec4962dec11a145f4277f
     dependencies:
     - name: idf
       require: private
@@ -101,8 +93,7 @@ dependencies:
       type: service
     version: 1.20.3
   lvgl/lvgl:
-    component_hash: 
-      d7c1ac037ae6e85d94897f807d6e7ba0946a83e720074fc95a4f6241da9f9f53
+    component_hash: d7c1ac037ae6e85d94897f807d6e7ba0946a83e720074fc95a4f6241da9f9f53
     dependencies: []
     source:
       registry_url: https://components.espressif.com/
@@ -118,6 +109,6 @@ direct_dependencies:
 - idf
 - joltwallet/littlefs
 - lvgl/lvgl
-manifest_hash: 11c15dc478d5bb1befc333f93e0fb9b9d760c6c0bb8e99051f48682f024eed06
+manifest_hash: 66ca695886a169a472a757d4a033c3522a150b86fcb7c62d52d244b5e302c25b
 target: esp32s3
 version: 2.0.0
