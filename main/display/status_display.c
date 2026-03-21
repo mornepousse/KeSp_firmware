@@ -3,7 +3,7 @@
 #include "keyboard_manager.h"
 #include "i2c_oled_display.h"
 #include "keyboard_config.h"
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
 #include "round_ui.h"
 #include "spi_round_display.h"
 #else
@@ -29,22 +29,7 @@
 
 LV_FONT_DECLARE(lv_font_montserrat_28);
 
-#ifndef VERSION_1
-/* Helper: log LVGL's dynamic memory state for diagnostics */
-static void status_display_log_lv_mem(const char *prefix)
-{
-    lv_mem_monitor_t mon;
-    lv_mem_monitor(&mon);
-    ESP_LOGI("STATUS_DISP", "%s LV_MEM free=%u biggest=%u used_pct=%u frag_pct=%u", prefix, (unsigned)mon.free_size, (unsigned)mon.free_biggest_size, (unsigned)mon.used_pct, (unsigned)mon.frag_pct);
-}
-
-static void status_display_log_heap_info(const char *prefix)
-{
-    size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-    size_t free32 = heap_caps_get_free_size(MALLOC_CAP_32BIT);
-    size_t largest8 = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    ESP_LOGI("STATUS_DISP", "%s Heap free: 8bit=%u, 32bit=%u, largest8=%u", prefix, (unsigned)free8, (unsigned)free32, (unsigned)largest8);
-}
+#ifndef BOARD_DISPLAY_BACKEND_ROUND
 
 static int last_bt_state = -1;   // -1 = inconnu, 0 = OFF, 1 = ON, 2 = JUSTE BT
 static int last_path_state = -1; // 0 = USB, 1 = BLE
@@ -60,7 +45,7 @@ static const char *status_display_version_text = GATTS_TAG;
 static bool bt_blink_visible = true;
 static TickType_t bt_blink_last_tick = 0;
 static const TickType_t bt_blink_interval_ticks = pdMS_TO_TICKS(500);
-#endif /* !VERSION_1 */
+#endif /* !BOARD_DISPLAY_BACKEND_ROUND */
 
 static bool status_display_initialized = false;
 static bool status_display_sleeping = false;
@@ -84,7 +69,7 @@ static TickType_t splash_start_tick = 0;
 /* Extern visible flag for display task loop */
 volatile bool request_wake_request = false;
 
-#ifndef VERSION_1
+#ifndef BOARD_DISPLAY_BACKEND_ROUND
 static void status_display_prepare_ui(bool clear_screen);
 static void status_display_update_connection_icons(bool force);
 static void status_display_init_icons(void);
@@ -92,17 +77,11 @@ static void status_display_show_version_splash(void);
 #endif
 void status_display_show_DFU_prog(void);
 
-#ifdef VERSION_1
-    #define UI_SCALE 2
-    #define UI_FONT &lv_font_montserrat_28
-#else
-    #define UI_SCALE 1
-    #define UI_FONT &lv_font_montserrat_14
-#endif
+/* UI_SCALE and UI_FONT are now defined in board.h */
 
 void draw_separator_line(void)
 {
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     /* Not used for round display */
     return;
 #else
@@ -115,7 +94,7 @@ void status_display_update_layer_name(void)
 { 
     if(display_available == false || status_display_sleeping) return;
     
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_update_layer();
 #else
     is_showing_splash = false;
@@ -131,17 +110,9 @@ void status_display_update_layer_name(void)
 
     /* Update persistent label text instead of recreating UI objects */
     if (label_layer_name) {
-        if (lvgl_port_lock(100)) {
-            if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-                ESP_LOGE("STATUS_DISP", "Heap integrity FAILED before updating layer name - skipping");
-                status_display_log_heap_info("layer_name_update");
-                lvgl_port_unlock();
-                return;
-            }
+        if (lvgl_port_lock(50)) {
             lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
             lvgl_port_unlock();
-        } else {
-            ESP_LOGW("STATUS_DISP", "Could not take LVGL port lock to update layer name");
         }
     } else {
         /* Fallback: ensure UI prepared */
@@ -154,7 +125,7 @@ void status_display_update(void)
 {
     if(display_available == false || status_display_sleeping) return;
 
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     if (is_showing_splash) {
         if ((xTaskGetTickCount() - splash_start_tick) > pdMS_TO_TICKS(3000)) {
             is_showing_splash = false;
@@ -164,47 +135,25 @@ void status_display_update(void)
     }
     round_ui_update();
 #else
-    uint64_t _t0 = esp_timer_get_time();
-
     if (is_showing_splash) {
         if ((xTaskGetTickCount() - splash_start_tick) > pdMS_TO_TICKS(3000)) {
             is_showing_splash = false;
             status_display_refresh_all();
-        } else {
-            uint64_t _t1 = esp_timer_get_time();
-            uint64_t _dur = _t1 - _t0;
-            if (_dur > 5000) {
-                ESP_LOGW("STATUS_DISP", "status_display_update early returned after %llu us", (unsigned long long)_dur);
-            }
-            return;
         }
+        return;
     }
 
     status_display_update_connection_icons(false);
 
     if (indicator_mouse) {
         if (lvgl_port_lock(50)) {
-            if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-                ESP_LOGE("STATUS_DISP", "Heap integrity FAILED before updating indicator_mouse - skipping");
-                status_display_log_heap_info("indicator_mouse_update");
-                lvgl_port_unlock();
+            if ((xTaskGetTickCount() - last_mouse_activity) < pdMS_TO_TICKS(200)) {
+                lv_obj_clear_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
             } else {
-                if ((xTaskGetTickCount() - last_mouse_activity) < pdMS_TO_TICKS(200)) {
-                    lv_obj_clear_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
-                } else {
-                    lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
-                }
-                lvgl_port_unlock();
+                lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
             }
-        } else {
-            ESP_LOGW("STATUS_DISP", "Could not take LVGL port lock to update indicator_mouse");
+            lvgl_port_unlock();
         }
-    }
-
-    uint64_t _t1 = esp_timer_get_time();
-    uint64_t _dur = _t1 - _t0;
-    if (_dur > 5000) {
-        ESP_LOGW("STATUS_DISP", "status_display_update took %llu us", (unsigned long long)_dur);
     }
 #endif
 } 
@@ -213,7 +162,7 @@ void status_display_start(void)
 {
     display_hw_config_t cfg = keyboard_get_display_config();
     
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     /* Use dedicated SPI driver for round display */
     if (!spi_display_init(&cfg)) {
         status_display_initialized = false;
@@ -238,7 +187,7 @@ void status_display_start(void)
     /* LVGL port provides a lock; ensure it's initialized (lvgl_port_init was called in init_display) */
 
     status_display_sleeping = false;
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_show_splash(GATTS_TAG);
     is_showing_splash = true;
     splash_start_tick = xTaskGetTickCount();
@@ -255,7 +204,7 @@ void status_display_refresh_all(void)
 
     is_showing_splash = false;
     status_display_sleeping = false;
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_refresh_all();
 #else
     status_display_prepare_ui(true);
@@ -269,7 +218,7 @@ void status_display_sleep(void)
     if (display_available == false || status_display_sleeping)
         return;
 
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_sleep();
     status_display_sleeping = true;
     status_display_initialized = false;
@@ -290,7 +239,7 @@ void status_display_sleep(void)
     } else {
         ESP_LOGE("STATUS_DISP", "Could not take LVGL port lock to enter sleep - aborting sleep");
     }
-#endif /* !VERSION_1 */
+#endif /* !BOARD_DISPLAY_BACKEND_ROUND */
 }
 
 void status_display_wake(void)
@@ -301,7 +250,7 @@ void status_display_wake(void)
     if (!status_display_sleeping)
         return;
 
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_wake();
     status_display_sleeping = false;
 #else
@@ -310,12 +259,11 @@ void status_display_wake(void)
 #endif
 }
 
-#ifndef VERSION_1
+#ifndef BOARD_DISPLAY_BACKEND_ROUND
 static void status_display_update_connection_icons(bool force)
 {
     if (display_available == false || status_display_sleeping)
         return;
-    uint64_t _t0 = esp_timer_get_time();
 
     int bt_state;
     if (!hid_bluetooth_is_initialized()) {
@@ -328,36 +276,29 @@ static void status_display_update_connection_icons(bool force)
 
     int path_state = (keyboard_get_usb_bl_state() == 0) ? 0 : 1;
 
-    if (!force && bt_state == last_bt_state && path_state == last_path_state && bt_state != 2) {
-        uint64_t _t1 = esp_timer_get_time();
-        uint64_t _dur = _t1 - _t0;
-        if (_dur > 5000) {
-            ESP_LOGW("STATUS_DISP", "status_display_update_connection_icons short-circuit took %llu us", (unsigned long long)_dur);
+    /* For blink mode (bt_state==2), check if blink toggle is due */
+    bool blink_toggled = false;
+    if (bt_state == 2 && !force) {
+        TickType_t now = xTaskGetTickCount();
+        if ((now - bt_blink_last_tick) >= bt_blink_interval_ticks) {
+            bt_blink_visible = !bt_blink_visible;
+            bt_blink_last_tick = now;
+            blink_toggled = true;
         }
+    }
+
+    /* Short-circuit: nothing changed */
+    if (!force && bt_state == last_bt_state && path_state == last_path_state && !blink_toggled) {
         return;
     }
 
     /* Take LVGL lock and init icons if needed */
-    if (!lvgl_port_lock(100)) {
-        ESP_LOGW("STATUS_DISP", "Could not take LVGL port lock to update icons");
+    if (!lvgl_port_lock(50)) {
         return;
     }
     status_display_init_icons();
 
-    /* Re-check heap after init_icons to catch mid-flight corruption */
-    if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-        ESP_LOGE("STATUS_DISP", "Heap integrity failed after init_icons - aborting update_connection_icons");
-        status_display_log_heap_info("update_conn_icons_after_init");
-        lvgl_port_unlock();
-        return;
-    }
-
     if (!icon_path) {
-        uint64_t _t1 = esp_timer_get_time();
-        uint64_t _dur = _t1 - _t0;
-        if (_dur > 5000) {
-            ESP_LOGW("STATUS_DISP", "status_display_update_connection_icons early exit (no icon) took %llu us", (unsigned long long)_dur);
-        }
         lvgl_port_unlock();
         return;
     }
@@ -377,15 +318,10 @@ static void status_display_update_connection_icons(bool force)
             lv_img_set_src(icon_bt, &wifi);
         }
     } else {
-        TickType_t now = xTaskGetTickCount();
         if (force) {
             bt_blink_visible = true;
-            bt_blink_last_tick = now;
-        } else if ((now - bt_blink_last_tick) >= bt_blink_interval_ticks) {
-            bt_blink_visible = !bt_blink_visible;
-            bt_blink_last_tick = now;
+            bt_blink_last_tick = xTaskGetTickCount();
         }
-
         if (icon_bt) {
             if (bt_blink_visible) {
                 lv_obj_clear_flag(icon_bt, LV_OBJ_FLAG_HIDDEN);
@@ -400,18 +336,12 @@ static void status_display_update_connection_icons(bool force)
     if (path_state == 0) {
         lv_img_set_src(icon_path, &flash);        // USB
     } else {
-        lv_img_set_src(icon_path, &bluetooth_16px);         // BLE (on réutilise wifi comme “onde”)
+        lv_img_set_src(icon_path, &bluetooth_16px);         // BLE
     }
 
     last_bt_state = bt_state;
     last_path_state = path_state;
-    uint64_t _t1 = esp_timer_get_time();
-    uint64_t _dur = _t1 - _t0;
-    if (_dur > 5000) {
-        ESP_LOGW("STATUS_DISP", "status_display_update_connection_icons took %llu us", (unsigned long long)_dur);
-    }
 
-    /* Release LVGL lock */
     lvgl_port_unlock();
 }
 
@@ -421,214 +351,52 @@ static void status_display_init_icons(void)
     if(display_available == false) return;
     if (icon_bt != NULL || icon_path != NULL) return;
 
-    /* Basic heap sanity check before LVGL allocations */
-    if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-        ESP_LOGE("STATUS_DISP", "Heap integrity check failed - skipping LVGL allocations");
-        return;
-    }
-
     /* Note: caller must hold lvgl_mutex */
     lv_obj_t *scr = lv_scr_act();
 
-    /* Re-check heap before each allocation to catch mid-flight corruption and log progress */
-    ESP_LOGI("STATUS_DISP", "init_icons: starting");
-    status_display_log_heap_info("init_start");
-
-    if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-        ESP_LOGE("STATUS_DISP", "Heap integrity failed before creating icon_bt - aborting");
-        status_display_log_heap_info("icon_bt_fail");
-        display_available = false;
-        return;
-    }
-    ESP_LOGI("STATUS_DISP", "init_icons: creating icon_bt");
-    status_display_log_heap_info("before_icon_bt");
-    status_display_log_lv_mem("before_icon_bt_lv_mem");
     icon_bt = lv_img_create(scr);
-    ESP_LOGI("STATUS_DISP", "init_icons: created icon_bt=%p", (void*)icon_bt);
-    status_display_log_heap_info("after_icon_bt");
-    status_display_log_lv_mem("after_icon_bt_lv_mem");
-
-    ESP_LOGI("STATUS_DISP", "init_icons: setting pos icon_bt");
-    status_display_log_heap_info("before_set_pos_icon_bt");
-    status_display_log_lv_mem("before_set_pos_icon_bt_lv_mem");
-    lv_obj_set_pos(icon_bt, 20 * UI_SCALE, 48 * UI_SCALE);   // bas droite (16x16)
-    #ifdef VERSION_1
-        lv_img_set_zoom(icon_bt, 512); // 2x zoom (256 is 1x)
+    lv_obj_set_pos(icon_bt, 20 * UI_SCALE, 48 * UI_SCALE);
+    #ifdef BOARD_DISPLAY_BACKEND_ROUND
+        lv_img_set_zoom(icon_bt, 512);
     #endif
-    status_display_log_heap_info("after_set_pos_icon_bt");
-    status_display_log_lv_mem("after_set_pos_icon_bt_lv_mem");
 
-    if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-        ESP_LOGE("STATUS_DISP", "Heap integrity failed before creating icon_path - aborting");
-        status_display_log_heap_info("icon_path_fail");
-        display_available = false;
-        return;
-    }
 #if !STATUS_DISPLAY_MINIMAL
-    ESP_LOGI("STATUS_DISP", "init_icons: creating icon_path");
-    status_display_log_heap_info("before_icon_path");
-    status_display_log_lv_mem("before_icon_path_lv_mem");
     icon_path = lv_img_create(scr);
-    ESP_LOGI("STATUS_DISP", "init_icons: created icon_path=%p", (void*)icon_path);
-    status_display_log_heap_info("after_icon_path");
-    status_display_log_lv_mem("after_icon_path_lv_mem");
 #endif
-
-    ESP_LOGI("STATUS_DISP", "init_icons: setting pos icon_path");
-    status_display_log_heap_info("before_set_pos_icon_path");
-    status_display_log_lv_mem("before_set_pos_icon_path_lv_mem");
     if (icon_path) {
-        lv_obj_set_pos(icon_path, 0, 48 * UI_SCALE);  // bas gauche (16x16)
-        #ifdef VERSION_1
-            lv_img_set_zoom(icon_path, 512); // 2x zoom
+        lv_obj_set_pos(icon_path, 0, 48 * UI_SCALE);
+        #ifdef BOARD_DISPLAY_BACKEND_ROUND
+            lv_img_set_zoom(icon_path, 512);
         #endif
-    } else {
-        ESP_LOGW("STATUS_DISP", "init_icons: icon_path is NULL (STATUS_DISPLAY_MINIMAL?), skipping set_pos");
     }
-    status_display_log_heap_info("after_set_pos_icon_path");
-    status_display_log_lv_mem("after_set_pos_icon_path_lv_mem");
 
-    if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-        ESP_LOGE("STATUS_DISP", "Heap integrity failed before creating indicator_mouse - aborting");
-        status_display_log_heap_info("indicator_mouse_fail");
-        display_available = false;
-        return;
-    }
 #if !STATUS_DISPLAY_MINIMAL
-    ESP_LOGI("STATUS_DISP", "init_icons: creating indicator_mouse");
-    status_display_log_heap_info("before_indicator_mouse");
-    status_display_log_lv_mem("before_indicator_mouse_lv_mem");
     indicator_mouse = lv_label_create(scr);
-    ESP_LOGI("STATUS_DISP", "init_icons: created indicator_mouse=%p", (void*)indicator_mouse);
-    status_display_log_heap_info("after_indicator_mouse");
-    status_display_log_lv_mem("after_indicator_mouse_lv_mem");
 #endif
-
-    ESP_LOGI("STATUS_DISP", "init_icons: setting label/text for indicator_mouse");
     if (indicator_mouse) {
         lv_label_set_text(indicator_mouse, "M");
-        lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0); // Apply bigger font if needed
-        status_display_log_heap_info("after_indicator_mouse_settext");
-        ESP_LOGI("STATUS_DISP", "init_icons: setting pos indicator_mouse");
-        status_display_log_heap_info("before_set_pos_indicator_mouse");
-        status_display_log_lv_mem("before_set_pos_indicator_mouse_lv_mem");
+        lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0);
         lv_obj_set_pos(indicator_mouse, 118 * UI_SCALE, 48 * UI_SCALE);
-        status_display_log_heap_info("after_set_pos_indicator_mouse");
-        status_display_log_lv_mem("after_set_pos_indicator_mouse_lv_mem");
         lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        ESP_LOGW("STATUS_DISP", "init_icons: indicator_mouse is NULL (STATUS_DISPLAY_MINIMAL?), skipping settext/pos");
     }
 
-    if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-        ESP_LOGE("STATUS_DISP", "Heap integrity failed before creating label_nrf_debug - aborting");
-        status_display_log_heap_info("label_nrf_debug_fail");
-        display_available = false;
-        return;
-    }
 #if !STATUS_DISPLAY_MINIMAL
-    ESP_LOGI("STATUS_DISP", "init_icons: creating label_nrf_debug");
-    status_display_log_heap_info("before_label_nrf_debug");
-    status_display_log_lv_mem("before_label_nrf_debug_lv_mem");
     label_nrf_debug = lv_label_create(scr);
-    ESP_LOGI("STATUS_DISP", "init_icons: created label_nrf_debug=%p", (void*)label_nrf_debug);
-    status_display_log_heap_info("after_label_nrf_debug");
-    status_display_log_lv_mem("after_label_nrf_debug_lv_mem");
-
-    /* Double-check LVGL memory integrity before mutating the label */
-    if (lv_mem_test() != LV_RES_OK) {
-        ESP_LOGE("STATUS_DISP", "lv_mem_test failed before label_nrf_debug settext - aborting");
-        status_display_log_lv_mem("lv_mem_test_before_label_nrf_debug");
-        display_available = false;
-        return;
-    }
-
     lv_label_set_text(label_nrf_debug, "");
     lv_obj_set_style_text_font(label_nrf_debug, UI_FONT, 0);
-    status_display_log_heap_info("after_label_nrf_debug_settext");
-    status_display_log_lv_mem("after_label_nrf_debug_settext_lv_mem");
-
-    if (lv_mem_test() != LV_RES_OK) {
-        ESP_LOGE("STATUS_DISP", "lv_mem_test failed before label_nrf_debug set_pos - aborting");
-        status_display_log_lv_mem("lv_mem_test_before_set_pos_label_nrf_debug");
-        display_available = false;
-        return;
-    }
-
     lv_obj_set_pos(label_nrf_debug, 0, 0);
-    status_display_log_heap_info("after_set_pos_label_nrf_debug");
-    status_display_log_lv_mem("after_set_pos_label_nrf_debug_lv_mem");
 #endif
 
     /* persistent label for layer name (created once) */
     if (!label_layer_name) {
-        if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-            ESP_LOGE("STATUS_DISP", "Heap integrity failed before creating label_layer_name - aborting");
-            status_display_log_heap_info("label_layer_name_fail");
-            display_available = false;
-            return;
-        }
-        ESP_LOGI("STATUS_DISP", "init_icons: creating label_layer_name");
-        status_display_log_heap_info("before_label_layer_name");
-        status_display_log_lv_mem("before_label_layer_name_lv_mem");
         label_layer_name = lv_label_create(scr);
-        ESP_LOGI("STATUS_DISP", "init_icons: created label_layer_name=%p", (void*)label_layer_name);
-        status_display_log_heap_info("after_label_layer_name");
-        status_display_log_lv_mem("after_label_layer_name_lv_mem");
-
-        if (lv_mem_test() != LV_RES_OK) {
-            ESP_LOGE("STATUS_DISP", "lv_mem_test failed before label_layer_name settext - aborting");
-            status_display_log_lv_mem("lv_mem_test_before_label_layer_name");
-            display_available = false;
-            return;
-        }
-
         lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
         lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
-        status_display_log_heap_info("after_label_layer_name_settext");
-        status_display_log_lv_mem("after_label_layer_name_settext_lv_mem");
-
-        if (lv_mem_test() != LV_RES_OK) {
-            ESP_LOGE("STATUS_DISP", "lv_mem_test failed before label_layer_name set_pos - aborting");
-            status_display_log_lv_mem("lv_mem_test_before_set_pos_label_layer_name");
-            display_available = false;
-            return;
-        }
-
         lv_obj_set_pos(label_layer_name, 38 * UI_SCALE, 48 * UI_SCALE);
-        status_display_log_heap_info("after_set_pos_label_layer_name");
-        status_display_log_lv_mem("after_set_pos_label_layer_name_lv_mem");
     } else {
-        status_display_log_heap_info("before_update_label_layer_name");
-        status_display_log_lv_mem("before_update_label_layer_name_lv_mem");
-        if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-            ESP_LOGE("STATUS_DISP", "Heap integrity FAILED before updating label_layer_name - disabling display");
-            status_display_log_heap_info("label_layer_name_update_fail");
-            display_available = false;
-            return;
-        }
-        if (lv_mem_test() != LV_RES_OK) {
-            ESP_LOGE("STATUS_DISP", "lv_mem_test FAILED before updating label_layer_name - disabling display");
-            status_display_log_lv_mem("lv_mem_test_before_label_layer_name_update");
-            display_available = false;
-            return;
-        }
-
         lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
         lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
-        status_display_log_heap_info("after_label_layer_name_settext_existing");
-        status_display_log_lv_mem("after_label_layer_name_settext_existing_lv_mem");
-
-        if (lv_mem_test() != LV_RES_OK) {
-            ESP_LOGE("STATUS_DISP", "lv_mem_test FAILED after settext - disabling display");
-            status_display_log_lv_mem("lv_mem_test_after_settext_label_layer_name");
-            display_available = false;
-            return;
-        }
-
         lv_obj_set_pos(label_layer_name, 38 * UI_SCALE, 48 * UI_SCALE);
-        status_display_log_heap_info("after_set_pos_label_layer_name_existing");
-        status_display_log_lv_mem("after_set_pos_label_layer_name_existing_lv_mem");
     }
 }
 
@@ -658,22 +426,7 @@ static void status_display_prepare_ui(bool clear_screen)
         bt_blink_last_tick = xTaskGetTickCount();
     }
 
-    /* Check heap integrity before creating LVGL objects */
-    if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-        ESP_LOGE("STATUS_DISP", "Heap integrity FAILED before init_icons - disabling display to avoid crash");
-        status_display_log_heap_info("PrepareUI");
-        display_available = false;
-        lvgl_port_unlock();
-        return;
-    }
-
     status_display_init_icons();
-
-    if (!display_available) {
-        ESP_LOGW("STATUS_DISP", "Display disabled during init_icons - aborting prepare_ui");
-        lvgl_port_unlock();
-        return;
-    }
 
     status_display_initialized = true;
     lvgl_port_unlock();
@@ -691,7 +444,7 @@ static void status_display_show_version_splash(void)
     splash_start_tick = xTaskGetTickCount();
     status_display_initialized = false;
 }
-#endif /* !VERSION_1 */
+#endif /* !BOARD_DISPLAY_BACKEND_ROUND */
 
 
 void status_display_show_DFU_prog(void)
@@ -704,7 +457,7 @@ void status_display_show_DFU_prog(void)
 
 void status_display_notify_mouse_activity(void)
 {
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_notify_mouse();
 #else
     last_mouse_activity = xTaskGetTickCount();
@@ -715,7 +468,7 @@ void status_display_update_nrf_debug(uint32_t pps, uint8_t status, bool spi_ok, 
 {
     if (display_available == false || status_display_sleeping) return;
 
-#ifdef VERSION_1
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
     round_ui_update_nrf_debug(pps, status, spi_ok, rpd, last_byte, mode);
 #else
     if (!status_display_initialized) {
@@ -723,15 +476,7 @@ void status_display_update_nrf_debug(uint32_t pps, uint8_t status, bool spi_ok, 
     }
 
     if (label_nrf_debug) {
-        if (!lvgl_port_lock(100)) {
-            ESP_LOGW("STATUS_DISP", "Could not take LVGL port lock to update nrf debug");
-            return;
-        }
-
-        if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-            ESP_LOGE("STATUS_DISP", "Heap integrity FAILED before updating label_nrf_debug - skipping");
-            status_display_log_heap_info("label_nrf_debug_update");
-            lvgl_port_unlock();
+        if (!lvgl_port_lock(50)) {
             return;
         }
 

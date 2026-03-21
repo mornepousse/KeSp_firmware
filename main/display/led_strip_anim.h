@@ -14,9 +14,15 @@
 extern "C" {
 #endif
 
-/* LED strip configuration */
-#define LED_STRIP_GPIO      4
-#define LED_STRIP_NUM_LEDS  17  /* Adjust to your strip length */
+/* LED strip configuration (from board.h) */
+#include "board.h"
+#if BOARD_HAS_LED_STRIP
+#define LED_STRIP_GPIO      BOARD_LED_STRIP_GPIO
+#define LED_STRIP_NUM_LEDS  BOARD_LED_STRIP_NUM_LEDS
+#else
+#define LED_STRIP_GPIO      0
+#define LED_STRIP_NUM_LEDS  0
+#endif
 
 /* Animation types */
 typedef enum {

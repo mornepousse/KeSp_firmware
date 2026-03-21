@@ -14,6 +14,7 @@
 #include "esp_rom_sys.h"
 #include "keyboard_button.h"
 #include "kbd_gpio.h"
+#include "board.h"
 #include "kbd_gptimer.h"
 
 static const char *TAG = "keyboard_button";
@@ -90,17 +91,17 @@ static inline void kbd_handler(keyboard_btn_t *kbd)
     for (int i = 0; i < kbd->output_gpio_num; i++) {
         /*!< Set the output level */
         kbd_gpio_set_level(kbd->output_gpios[i], kbd->active_level ? 1 : 0);
-#ifdef VERSION_1
-        /*!< Delay for signal settling (anti-ghosting V1 fix) */
-        esp_rom_delay_us(20);
+#if BOARD_MATRIX_SETTLING_US > 0
+        /*!< Delay for signal settling (anti-ghosting fix) */
+        esp_rom_delay_us(BOARD_MATRIX_SETTLING_US);
 #endif
         /*!< Read the input level */
         uint32_t input_level = kbd_gpios_read_level(kbd->input_gpios, kbd->input_gpio_num);
         /*!< Clear the output level */
         kbd_gpio_set_level(kbd->output_gpios[i], kbd->active_level ? 0 : 1);
-#ifdef VERSION_1
-        /*!< Delay for pull-up recovery (anti-ghosting V1 fix) */
-        esp_rom_delay_us(50);
+#if BOARD_MATRIX_RECOVERY_US > 0
+        /*!< Delay for pull-up recovery (anti-ghosting fix) */
+        esp_rom_delay_us(BOARD_MATRIX_RECOVERY_US);
 #endif
         for (int j = 0; j < kbd->input_gpio_num; j++) {
             uint8_t currect_btn_num = i * kbd->input_gpio_num + j;

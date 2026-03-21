@@ -39,6 +39,7 @@ uint32_t bigram_total = 0;
 static int16_t last_key_idx = -1;  /* -1 = no previous key */
 static uint32_t bigram_last_saved_total = 0;
 static TickType_t bigram_last_save_tick = 0;
+static bool bigram_save_disabled = false;  /* Set on NVS_NOT_ENOUGH_SPACE to stop retrying */
 
 static keyboard_btn_handle_t s_kbd = NULL;
 static uint8_t prev_matrix_state[MATRIX_ROWS][MATRIX_COLS];  /* For KPM: track new keypresses */
@@ -360,11 +361,13 @@ void key_stats_check_save(void)
         save_key_stats();
     }
 
-    /* Also check bigram save */
-    uint32_t bg_diff = bigram_total - bigram_last_saved_total;
-    TickType_t bg_elapsed = xTaskGetTickCount() - bigram_last_save_tick;
-    if (bg_diff >= 100 || (bg_diff > 0 && bg_elapsed >= pdMS_TO_TICKS(120000))) {
-        save_bigram_stats();
+    /* Also check bigram save (skip if NVS is too small) */
+    if (!bigram_save_disabled) {
+        uint32_t bg_diff = bigram_total - bigram_last_saved_total;
+        TickType_t bg_elapsed = xTaskGetTickCount() - bigram_last_save_tick;
+        if (bg_diff >= 100 || (bg_diff > 0 && bg_elapsed >= pdMS_TO_TICKS(120000))) {
+            save_bigram_stats();
+        }
     }
 }
 
@@ -381,7 +384,12 @@ void save_bigram_stats(void)
 
     err = nvs_set_blob(my_handle, "bigram_stats", bigram_stats, sizeof(bigram_stats));
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error (%s) writing bigram_stats!", esp_err_to_name(err));
+        if (err == ESP_ERR_NVS_NOT_ENOUGH_SPACE) {
+            ESP_LOGW(TAG, "NVS too small for bigram_stats (%u bytes), disabling save", (unsigned)sizeof(bigram_stats));
+            bigram_save_disabled = true;
+        } else {
+            ESP_LOGE(TAG, "Error (%s) writing bigram_stats!", esp_err_to_name(err));
+        }
         nvs_close(my_handle);
         return;
     }
