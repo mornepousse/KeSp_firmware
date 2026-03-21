@@ -4,10 +4,14 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
-# Hardware version - uncomment the one you're building for
-# add_compile_definitions(VERSION_1)
-# add_compile_definitions(VERSION_2)
-add_compile_definitions(VERSION_2_DEBUG)
+# Board selection: idf.py -DBOARD=kase_v1 build
+if(NOT DEFINED BOARD)
+    set(BOARD "kase_v2_debug" CACHE STRING "Target board")
+endif()
+set(BOARD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD}" CACHE INTERNAL "")
+if(NOT EXISTS "${BOARD_DIR}/board.h")
+    message(FATAL_ERROR "Board '${BOARD}' not found: ${BOARD_DIR}/board.h does not exist")
+endif()
 
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 set(COMPONENTS main)
