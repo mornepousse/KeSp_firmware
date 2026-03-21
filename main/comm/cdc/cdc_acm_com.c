@@ -490,6 +490,20 @@ static void cdc_send_binary(const uint8_t *data, size_t len)
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
+static void cdc_send_large(const char *data, size_t len)
+{
+	const size_t chunk = 256;
+	while (len > 0) {
+		size_t n = (len < chunk) ? len : chunk;
+		tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)data, n);
+		tinyusb_cdcacm_write_flush(CDC_ITF, pdMS_TO_TICKS(100));
+		data += n;
+		len -= n;
+	}
+	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)"\r\n", 2);
+	tinyusb_cdcacm_write_flush(CDC_ITF, pdMS_TO_TICKS(100));
+}
+
 static void trim_spaces(char *str)
 {
 	if (str == NULL)
@@ -1080,6 +1094,16 @@ static void parse_and_execute(const char *line)
 	{
 		cmd_macro_delete(line + 8);
 		return;
+	}
+	if (strncasecmp(line, "LAYOUT?", 7) == 0 && (line[7] == '\0' || line[7] == 'S'))
+	{
+		if (line[7] == '\0') {
+			/* LAYOUT? — return physical key position JSON */
+			extern const char board_layout_json[];
+			cdc_send_large(board_layout_json, strlen(board_layout_json));
+			return;
+		}
+		/* fall through to LAYOUTS? below */
 	}
 	if (strncasecmp(line, "LAYOUTS?", 8) == 0)
 	{
