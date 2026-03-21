@@ -26,6 +26,7 @@ idf_component_register(
         "input/keyboard_worker.c"
 
         "${BOARD_DIR}/board_keymap.c"
+        "${BOARD_DIR}/board_layout.c"
     INCLUDE_DIRS
         "."
         "config"
