@@ -1,2 +1,6 @@
-/* V2 Debug shares the same physical layout as V2 */
-#include "../kase_v2/board_layout.c"
+#include "board.h"
+
+#define _STR(x) #x
+#define STR(x)  _STR(x)
+
+#include "../kase_layout.inc"
