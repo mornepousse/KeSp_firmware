@@ -1,6 +1,5 @@
 /*
- * KaSe keyboard.
- *
+ * KeSp — keyboard firmware framework
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -19,14 +18,10 @@
 #include "status_display.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
-#include "nrf24_receiver.h"
 #include "cpu_time.h"
 #include "led_strip_anim.h"
 
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for isolation testing */
-#ifndef SKIP_NRF_TASK
-#define SKIP_NRF_TASK 1
-#endif
 #ifndef SKIP_STATUS_DISPLAY
 #define SKIP_STATUS_DISPLAY 0
 #endif
@@ -71,7 +66,7 @@ static void status_display_task(void *arg) {
     uint32_t now = esp_timer_get_time() / 1000;
     uint32_t last = get_last_activity_time_ms();
 
-    if (!display_sleep && last != 0 && (now - last) > 60000) {
+    if (!display_sleep && last != 0 && (now - last) > BOARD_DISPLAY_SLEEP_MS) {
       status_display_sleep();
       display_sleep = 1;
     }
@@ -98,7 +93,7 @@ static void status_display_task(void *arg) {
 }
 
 void app_main(void) {
-  ESP_LOGI(TAG, "--------------- KaSe keyboard ----------------");
+  ESP_LOGI(TAG, "--------------- KeSp [%s] ----------------", PRODUCT_NAME);
   kase_tinyusb_init();
   init_cdc_commands();
   keymap_init_nvs();
@@ -135,15 +130,6 @@ void app_main(void) {
   } else {
       ESP_LOGI(TAG, "Bluetooth disabled (saved state: OFF)");
   }
-
-  ESP_LOGI(TAG, "NRF24 init");
-#if !SKIP_NRF_TASK
-  // NRF24 on CPU 1, priority 3 (won't block IDLE on CPU 1)
-  /* Increase nrf24 task stack to reduce stack pressure (was 4096) */
-  xTaskCreatePinnedToCore(nrf24_task, "nrf24_task", 6144, NULL, 3, NULL, 1);
-#else
-  ESP_LOGW(TAG, "SKIP_NRF_TASK enabled: NRF24 task not started");
-#endif
 
 #if BOARD_HAS_LED_STRIP
   ESP_LOGI(TAG, "LED Strip init");

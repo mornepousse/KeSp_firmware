@@ -23,10 +23,20 @@
 
 #define TAG "ROUND_UI"
 
+#ifndef BT_BLINK_INTERVAL_MS
+#define BT_BLINK_INTERVAL_MS    500
+#endif
+#ifndef SPLASH_DURATION_MS
+#define SPLASH_DURATION_MS      3000
+#endif
+#ifndef MOUSE_INDICATOR_MS
+#define MOUSE_INDICATOR_MS      200
+#endif
+
 /* Display dimensions */
-#define DISP_SIZE 240
-#define CENTER_X (DISP_SIZE / 2)
-#define CENTER_Y (DISP_SIZE / 2)
+#define DISP_SIZE BOARD_DISPLAY_WIDTH
+#define CENTER_X  (DISP_SIZE / 2)
+#define CENTER_Y  (DISP_SIZE / 2)
 
 /* Colors - Modern dark theme with cyan accents */
 #define COLOR_BG        lv_color_hex(0x0D1117)   /* Dark background */
@@ -45,8 +55,6 @@ static lv_obj_t *layer_label = NULL;
 static lv_obj_t *status_icon = NULL;
 static lv_obj_t *conn_icon = NULL;
 static lv_obj_t *mouse_indicator = NULL;
-static lv_obj_t *debug_label = NULL;
-
 /* Animation */
 static lv_anim_t arc_anim;
 static bool is_animating = false;
@@ -62,9 +70,15 @@ static TickType_t bt_blink_last_tick = 0;
 static bool bt_blink_visible = true;
 
 /* KPM (Keys Per Minute) tracking */
-#define KPM_WINDOW_SIZE 60  /* Track keypresses over last N samples */
-#define KPM_SAMPLE_INTERVAL_MS 1000  /* Sample every 1 second */
-#define KPM_MAX_DISPLAY 400  /* Max KPM for full arc */
+#ifndef KPM_WINDOW_SIZE
+#define KPM_WINDOW_SIZE 60
+#endif
+#ifndef KPM_SAMPLE_INTERVAL_MS
+#define KPM_SAMPLE_INTERVAL_MS 1000
+#endif
+#ifndef KPM_MAX_DISPLAY
+#define KPM_MAX_DISPLAY 400
+#endif
 static uint32_t keypress_count = 0;  /* Total keypresses since last sample */
 static uint32_t kpm_history[KPM_WINDOW_SIZE];  /* Rolling history of keypresses per sample */
 static int kpm_history_index = 0;
@@ -174,18 +188,6 @@ static void create_mouse_indicator(lv_obj_t *parent)
     lv_obj_add_flag(mouse_indicator, LV_OBJ_FLAG_HIDDEN);
 }
 
-/**
- * @brief Create debug info label (NRF status)
- */
-static void create_debug_label(lv_obj_t *parent)
-{
-    debug_label = lv_label_create(parent);
-    lv_obj_set_style_text_font(debug_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(debug_label, COLOR_TEXT_DIM, 0);
-    lv_obj_set_style_text_align(debug_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(debug_label, "");
-    lv_obj_align(debug_label, LV_ALIGN_BOTTOM_MID, 0, -35);
-}
 
 /**
  * @brief Create KPM display label (below layer name)
@@ -228,8 +230,7 @@ static void create_main_ui(void)
     create_layer_display(scr);
     create_kpm_label(scr);
     create_mouse_indicator(scr);
-    create_debug_label(scr);
-    
+
     /* Initialize KPM tracking */
     memset(kpm_history, 0, sizeof(kpm_history));
     kpm_history_index = 0;
@@ -291,7 +292,7 @@ static void update_connection_status(bool force)
             if (force) {
                 bt_blink_visible = true;
                 bt_blink_last_tick = now;
-            } else if ((now - bt_blink_last_tick) >= pdMS_TO_TICKS(500)) {
+            } else if ((now - bt_blink_last_tick) >= pdMS_TO_TICKS(BT_BLINK_INTERVAL_MS)) {
                 bt_blink_visible = !bt_blink_visible;
                 bt_blink_last_tick = now;
             }
@@ -416,7 +417,7 @@ void round_ui_update(void)
     
     /* Update mouse indicator */
     if (mouse_indicator && lvgl_port_lock(10)) {
-        if ((xTaskGetTickCount() - last_mouse_activity) < pdMS_TO_TICKS(200)) {
+        if ((xTaskGetTickCount() - last_mouse_activity) < pdMS_TO_TICKS(MOUSE_INDICATOR_MS)) {
             lv_obj_clear_flag(mouse_indicator, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_add_flag(mouse_indicator, LV_OBJ_FLAG_HIDDEN);
@@ -442,7 +443,7 @@ void round_ui_sleep(void)
         status_icon = NULL;
         conn_icon = NULL;
         mouse_indicator = NULL;
-        debug_label = NULL;
+
         kpm_label = NULL;
         
         ui_sleeping = true;
@@ -481,7 +482,7 @@ void round_ui_refresh_all(void)
         status_icon = NULL;
         conn_icon = NULL;
         mouse_indicator = NULL;
-        debug_label = NULL;
+
         kpm_label = NULL;
         
         create_main_ui();
@@ -504,27 +505,6 @@ void round_ui_notify_keypress(void)
     tamagotchi_notify_keypress();
 }
 
-void round_ui_update_nrf_debug(uint32_t pps, uint8_t status, bool spi_ok, uint8_t rpd, uint8_t last_byte, uint8_t mode)
-{
-    if (!display_available || ui_sleeping || !debug_label) return;
-    
-    if (!lvgl_port_lock(100)) return;
-    
-    if (spi_ok) {
-        if (mode == 99) {
-            lv_label_set_text(debug_label, "Scanning...");
-        } else if (mode > 0 && mode < 99) {
-            lv_label_set_text_fmt(debug_label, "CH: %d", mode);
-        } else {
-            lv_label_set_text_fmt(debug_label, "RX:%lu  S:%02X", (unsigned long)pps, status);
-        }
-    } else {
-        lv_label_set_text(debug_label, "SPI Error");
-        lv_obj_set_style_text_color(debug_label, COLOR_WARNING, 0);
-    }
-    
-    lvgl_port_unlock();
-}
 
 void round_ui_show_splash(const char *text)
 {

@@ -19,12 +19,12 @@ idf_component_register(
         "comm/ble/hid_dev.c"
         "comm/ble/hid_device_le_prf.c"
         "comm/ble/hid_bluetooth_manager.c"
-        "comm/wireless/nrf24_receiver.c"
+
         "input/keyboard_manager.c"
         "input/keymap.c"
         "input/matrix.c"
         "input/keyboard_worker.c"
-        "input/trackball.c"
+
         "${BOARD_DIR}/board_keymap.c"
     INCLUDE_DIRS
         "."
@@ -36,7 +36,7 @@ idf_component_register(
         "comm/usb"
         "comm/cdc"
         "comm/ble"
-        "comm/wireless"
+
         "input"
         "${BOARD_DIR}"
     PRIV_REQUIRES
@@ -48,6 +48,5 @@ idf_component_register(
         esp_lcd
         unity
         esp_driver_i2c
-        esp_driver_ledc
 )
 littlefs_create_partition_image(storage ../flash_data FLASH_IN_PROJECT)

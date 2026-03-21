@@ -1,4 +1,4 @@
-/* Host-side unit test runner for KaSe firmware */
+/* Host-side unit test runner for KeSp firmware */
 #include "test_framework.h"
 
 /* Shared test counters */
@@ -14,7 +14,7 @@ extern void test_cdc_protocol(void);
 extern void test_board_config(void);
 
 int main(void) {
-    printf("KaSe Firmware Unit Tests\n");
+    printf("KeSp Firmware Unit Tests\n");
     printf("========================\n");
 
     test_position_mapping();

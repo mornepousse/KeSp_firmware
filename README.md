@@ -1,209 +1,117 @@
-# KaSe Keyboard Firmware
+# KeSp — Keyboard ESP32 Framework
 
-Custom firmware for the KaSe mechanical keyboard, built on an ESP32‑S3 with USB HID, Bluetooth HID, OLED display and multi‑layer keymaps.
+Open-source keyboard firmware framework for ESP32-S3, designed for custom mechanical keyboards with display, USB HID, Bluetooth HID and multi-layer keymaps.
 
-> Work in progress project. Open to ideas, feedback and contributions.
-
----
-
-### Roadmap (short)
-
-- 🚧 Bluetooth Screen mark
-
-## Overview
-
-This repository contains the **embedded firmware** for the KaSe custom keyboard:
-
-- Runs on an **ESP32‑S3**.
-- Handles key matrix scanning, layers, keymaps, display, USB/BLE HID, CDC ACM, storage.
-- Designed to work together with two other repositories:
-	- **Hardware / PCB / mechanics** – `KaSe_PCB`  
-		https://github.com/mornepousse/KaSe_PCB
-	- **Desktop configuration & manager** – `KaSe_soft`  
-		https://github.com/mornepousse/KaSe_soft
-
-For hardware details (exact MCU, pinout, schematics, mechanical design) and for the end‑user configuration tool, please refer to those repositories.
-
----
-
-## Related repositories
-
-- **KaSe_PCB** – Hardware, PCB and mechanical design  
-	Contains:
-	- Schematics and PCB layout.
-	- MCU and component choices.
-	- Pin mapping, connectors, and mechanical constraints.
-
-	👉 https://github.com/mornepousse/KaSe_PCB
-
-- **KaSe_soft** – Configuration / keymap manager  
-	Desktop software to:
-	- Remap keys and layers.
-	- Manage configuration and other keyboard settings.
-	- Communicate with this firmware over USB CDC ACM.
-
-	👉 https://github.com/mornepousse/KaSe_soft
-
-This firmware repo focuses on the code running on the ESP32‑S3.
+> KeSp provides the framework. Your board definition provides the hardware specifics.
 
 ---
 
 ## Features
 
-From the current codebase (still evolving, but already functional):
-
-- **ESP32‑S3 keyboard core**
-	- Key matrix scanning (`input/matrix.c`).
-	- **Event-driven architecture**: Optimized `vTaskKeyboard` using FreeRTOS notifications for low latency and reduced CPU usage.
-	- Keyboard logic and key handling (`input/keyboard_manager.c`, `input/keymap.c`).
-	- Multiple layers with per‑key mapping stored in NVS / LittleFS.
-	- **Macro support**: Up to 20 configurable macros (`input/keymap.c`).
-
-- **Wireless Communication**
-	- **Bluetooth HID**: BLE HID device (`comm/hid_bluetooth_manager.c`) for wireless connectivity.
-	- **NRF24L01 Receiver**: Support for NRF24L01 modules (`comm/nrf24_receiver.c`) for split keyboard communication or custom wireless links.
-
-- **USB support (TinyUSB)**
-	- USB HID keyboard implementation (`comm/usb_descriptors.c`, TinyUSB HID class).
-	- USB CDC ACM channel for:
-		- Debug and logging.
-		- Command and configuration interface (`comm/cdc_acm_com.c`).
-
-- **Bluetooth HID**
-	- BLE HID device (`comm/hid_bluetooth_manager.c`, `comm/esp_hidd_prf_api.c`).
-	- Wireless keyboard mode in addition to USB.
-	- Multi-host switching support.
-
-- **OLED display**
-	- I²C OLED driver and UI layer (`display/i2c_oled_display.c`, `display/status_display.c`).
-	- Shows current layer name, transport icons and a boot splash with version info.
-
-- **Storage**
-	- LittleFS manager (`app/littlefs_manager.c`) for persistent storage.
-	- Keymaps loaded at boot (`keymap_init_nvs()`, `load_keymaps()`).
-
-- **Command interface over CDC ACM**
-	- Parses simple text commands (`comm/cdc_acm_com.c`), for example:
-		- Set current layer.
-		- Change a single key in a specific layer/row/column.
-		- Display custom text on the OLED.
-	- This protocol is used by the external tool **KaSe_soft**.
+- **Board abstraction** — All hardware config (GPIOs, display, LEDs, USB IDs, debounce, etc.) isolated in `boards/<name>/board.h`. Add a new keyboard by creating a new board directory.
+- **Key matrix scanning** — Event-driven architecture with configurable debounce, anti-ghosting, and per-board scan timing.
+- **Multi-layer keymaps** — Up to 10 layers with per-key mapping, persistent in NVS.
+- **USB HID** — Keyboard + mouse composite device via TinyUSB.
+- **Bluetooth HID** — BLE HID with configurable connection parameters.
+- **CDC ACM** — USB serial port for configuration, key remapping, statistics, and macros.
+- **Display support** — I2C OLED (SSD1306) and SPI round (GC9A01) via LVGL. Auto-sleep on inactivity.
+- **WS2812 LED strip** — Animations (breathe, chase, reactive, KPM bar) with configurable frame rate.
+- **Key statistics** — Per-key press counts and bigram tracking, auto-saved to NVS.
+- **Macros** — Up to 20 configurable multi-key macros.
+- **Tamagotchi** — Virtual pet on round display, reacts to typing activity.
+- **Deep sleep** — Configurable inactivity timeout.
 
 ---
 
-## Hardware
-
-- **MCU**: ESP32‑S3 family.  
-	Exact MCU reference, pinout and electrical details are defined in **KaSe_PCB**:  
-	https://github.com/mornepousse/KaSe_PCB
-
-- **Main peripherals** (inferred from the firmware):
-	- Key matrix (rows/columns) managed by the `matrix` module.
-	- I²C OLED display (typical 128×32 or 128×64).
-	- USB (likely USB‑C or micro‑USB) for power and USB HID/CDC.
-	- BLE radio (integrated in ESP32‑S3) for Bluetooth HID.
-
-For precise BOM, schematics, mechanical parts and connector details, always refer to `KaSe_PCB`.
-
----
-
-## Project layout & development environment
+## Project structure
 
 ```
+boards/
+  kase_v1/          # KaSe V1: round SPI display, LED strip, position mapping
+  kase_v2/          # KaSe V2: I2C OLED, no LEDs
+  kase_v2_debug/    # KaSe V2 Debug: inherits V2, overrides 3 GPIOs
 main/
-├── app/        # high-level tasks (main, filesystem, dfu)
-├── input/      # matrix scan, keyboard manager, keymaps
-├── display/    # OLED drivers, status UI and assets
-├── comm/       # USB/BLE stacks, CDC commands
-├── include/    # shared headers (display types, configs)
-└── CMakeLists.txt / idf_component.yml
+  app/              # Filesystem, DFU
+  input/            # Matrix, keyboard manager, keymaps
+  display/          # Display drivers, LVGL UI, LED strip, tamagotchi
+  comm/
+    usb/            # USB HID (TinyUSB)
+    cdc/            # CDC ACM commands
+    ble/            # Bluetooth HID
+  config/           # version.h (includes board.h)
+  sys/              # CPU time monitoring
+scripts/
+  build_release.sh  # Multi-variant release builder
+test/               # Host-side unit tests (794 tests)
+docs/               # Protocol documentation
 ```
 
-The project uses:
+---
 
-- **ESP‑IDF** (v5.x) – via the VS Code ESP‑IDF extension.
-- **VS Code** as main IDE.
-- CMake + Ninja build system (generated by ESP‑IDF).
+## Adding a new board
 
-Typical command‑line workflow with `idf.py`:
+1. Create `boards/<your_board>/board.h` — define all hardware macros:
+   - Product info (`GATTS_TAG`, `PRODUCT_NAME`, `MANUFACTURER_NAME`, etc.)
+   - Matrix GPIOs (`ROWS0-4`, `COLS0-12`, `MATRIX_ROWS`, `MATRIX_COLS`)
+   - Display config (`BOARD_DISPLAY_BACKEND_ROUND` or `BOARD_DISPLAY_BACKEND_OLED`, bus, pins, dimensions)
+   - Feature flags (`BOARD_HAS_LED_STRIP`, `BOARD_HAS_POSITION_MAP`)
+   - USB (`BOARD_USB_VID`, `BOARD_USB_PID`)
+   - Timing (`BOARD_DEBOUNCE_TICKS`, `BOARD_MATRIX_SCAN_INTERVAL_US`, `BOARD_DISPLAY_SLEEP_MS`, `BOARD_SLEEP_MINS`)
+
+2. Create `boards/<your_board>/board_keymap.c` — define `keymaps[]` and `default_layout_names[]`.
+
+3. Build: `idf.py -DBOARD=<your_board> build`
+
+See `boards/kase_v2/board.h` for a minimal example.
+
+---
+
+## Build
+
+Requires [ESP-IDF v5.x](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/).
 
 ```bash
-idf.py set-target esp32s3
-idf.py build
-idf.py flash
-idf.py monitor
+# Build for a specific board (default: kase_v2_debug)
+idf.py -DBOARD=kase_v2 build
+
+# Flash
+idf.py -DBOARD=kase_v2 -p /dev/ttyUSB0 flash
+
+# Monitor
+idf.py -p /dev/ttyUSB0 monitor
+
+# Run host tests
+cd test && mkdir -p build && cd build && cmake .. && make && ./test_runner
 ```
 
-Make sure ESP‑IDF is correctly installed and `IDF_PATH` is set before building.
+### Release build (all variants)
+
+```bash
+./scripts/build_release.sh v3.2
+# Output: release/KaSe_v3.2_V1.bin, KaSe_v3.2_V2.bin, KaSe_v3.2_V2_Debug.bin
+```
 
 ---
 
-## Configuration & usage
+## Configuration tool
 
-### Keymaps and layers
+The firmware communicates with [KaSe_soft](https://github.com/mornepousse/KaSe_soft) over USB CDC for key remapping, layer management, and macro configuration.
 
-- Keymaps are initialized at boot:
-	- `keymap_init_nvs()` for NVS setup.
-	- `load_keymaps()` to load stored layouts.
-- Data is stored in NVS / LittleFS so user configuration is persistent.
-- Current layer is:
-	- Sent over CDC (`cdc_send_layer()`).
-	- Displayed on the OLED using the text functions in `i2c_oled_display.c`.
-
-### OLED splash and status
-
-- On boot the OLED shows the firmware name + version (from `PRODUCT_NAME` / `GATTS_TAG`) for roughly two seconds before the UI transitions to real-time status.
-- The steady-state screen exposes the active layer, USB/BLE transport icon, and Bluetooth link status so users can quickly confirm connectivity.
-- After ~60 seconds of inactivity the display sleeps automatically and wakes on the next key press to avoid burn-in while staying responsive.
-
-### CDC ACM command interface
-
-- The firmware exposes a **CDC ACM** serial port over USB.
-- Through this virtual COM port, you can:
-	- Change the active layer.
-	- Update individual keys: layer, row, column, value.
-	- Send strings to be rendered on the OLED.
-- Command syntax and higher‑level UX are documented and implemented in **KaSe_soft**:  
-	https://github.com/mornepousse/KaSe_soft
-
-### Desktop configuration tool
-
-For a user‑friendly way to manage layouts and settings:
-
-- Use **KaSe_soft**:
-	- Provides a GUI/manager for layers and keymaps.
-	- Talks to this firmware via the CDC ACM protocol.
-- This README focuses on the firmware itself; `KaSe_soft` contains more end‑user documentation.
+Protocol documentation: [`docs/CDC_KEYSTATS_PROTOCOL.md`](docs/CDC_KEYSTATS_PROTOCOL.md)
 
 ---
 
-## Project status & contributions
+## Reference implementation: KaSe keyboard
 
-- This is an **active, work‑in‑progress** project:
-	- Internal APIs and protocols may change.
-	- New features (macros, advanced layouts, power optimizations, etc.) are planned.
-- Contributions and ideas are welcome:
-	- Firmware improvements or refactors.
-	- New features (RGB, extra devices, better power management).
-	- Documentation, examples, and tools around KaSe.
+KeSp was extracted from the [KaSe keyboard](https://github.com/mornepousse/KaSe_PCB) project. The `boards/kase_v1`, `kase_v2` and `kase_v2_debug` directories are the reference board definitions.
 
-Note: commit history can be a bit erratic while the project is evolving; apologies in advance if some changes look noisy.
-
-Feel free to open issues or pull requests. If your work touches hardware or the configuration tool, please reference `KaSe_PCB` and `KaSe_soft` when relevant.
+- **KaSe_PCB** — Hardware, schematics, mechanical design: https://github.com/mornepousse/KaSe_PCB
+- **KaSe_soft** — Desktop configuration tool: https://github.com/mornepousse/KaSe_soft
 
 ---
 
 ## License
 
-This project is licensed under **GPL‑3.0** (GNU General Public License, version 3).  
-See the `LICENSE` file at the root of this repository for the full legal text.
+**GPL-3.0** — See [LICENSE](LICENSE).
 
-Short non‑legal explanation:
-
-- GPL is a **copyleft** license:
-	- Anyone can use, study, modify and redistribute the code.
-	- If someone distributes a modified version (for example, their own KaSe‑derived firmware), they must also publish their source code under the **same GPL‑3.0 license**.
-- This protects the project from being turned into a closed‑source fork while keeping it open and hackable for the community.
-
----
-
+Anyone can use, study, modify and redistribute. Modified versions must be published under the same license.

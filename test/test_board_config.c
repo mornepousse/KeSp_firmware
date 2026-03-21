@@ -146,6 +146,32 @@ void test_board_matrix_delays(void) {
     TEST_ASSERT(BOARD_MATRIX_RECOVERY_US >= 0, "recovery delay >= 0");
 }
 
+/* Test: USB VID/PID are defined */
+void test_board_usb_ids(void) {
+    TEST_ASSERT(BOARD_USB_VID > 0, "BOARD_USB_VID > 0");
+    TEST_ASSERT(BOARD_USB_PID > 0, "BOARD_USB_PID > 0");
+}
+
+/* Test: debounce ticks are positive */
+void test_board_debounce(void) {
+    TEST_ASSERT(BOARD_DEBOUNCE_TICKS > 0, "BOARD_DEBOUNCE_TICKS > 0");
+}
+
+/* Test: display sleep timeout is reasonable */
+void test_board_display_sleep(void) {
+    TEST_ASSERT(BOARD_DISPLAY_SLEEP_MS >= 1000, "BOARD_DISPLAY_SLEEP_MS >= 1s");
+}
+
+/* Test: matrix scan interval is defined */
+void test_board_matrix_scan_interval(void) {
+    TEST_ASSERT(BOARD_MATRIX_SCAN_INTERVAL_US > 0, "BOARD_MATRIX_SCAN_INTERVAL_US > 0");
+}
+
+/* Test: deep sleep minutes are non-negative */
+void test_board_sleep_mins(void) {
+    TEST_ASSERT(BOARD_SLEEP_MINS >= 0, "BOARD_SLEEP_MINS >= 0");
+}
+
 void test_board_config(void) {
     TEST_SUITE("Board Configuration");
     TEST_RUN(test_board_product_info);
@@ -157,4 +183,9 @@ void test_board_config(void) {
     TEST_RUN(test_board_led_strip_config);
     TEST_RUN(test_board_feature_flags);
     TEST_RUN(test_board_matrix_delays);
+    TEST_RUN(test_board_usb_ids);
+    TEST_RUN(test_board_debounce);
+    TEST_RUN(test_board_display_sleep);
+    TEST_RUN(test_board_matrix_scan_interval);
+    TEST_RUN(test_board_sleep_mins);
 }
