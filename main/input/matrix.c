@@ -13,6 +13,19 @@
 #define TAG "MATRIX_SHIM"
 #define STORAGE_NAMESPACE "storage"
 
+#ifndef KEY_STATS_SAVE_THRESHOLD
+#define KEY_STATS_SAVE_THRESHOLD      100
+#endif
+#ifndef KEY_STATS_SAVE_INTERVAL_MS
+#define KEY_STATS_SAVE_INTERVAL_MS    60000
+#endif
+#ifndef BIGRAM_SAVE_THRESHOLD
+#define BIGRAM_SAVE_THRESHOLD         100
+#endif
+#ifndef BIGRAM_SAVE_INTERVAL_MS
+#define BIGRAM_SAVE_INTERVAL_MS       120000
+#endif
+
 // Define variables expected by other code
 uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
 uint8_t SLAVE_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
@@ -177,7 +190,7 @@ void matrix_setup(void)
     // Build gpio arrays from keyboard_config defines
     static int output_gpios[MATRIX_COLS];
     static int input_gpios[MATRIX_ROWS];
-#if defined(COL2ROW)
+#if defined(BOARD_MATRIX_COL2ROW)
     // outputs = cols, inputs = rows
     const int cols_map[MATRIX_COLS] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
     const int rows_map[MATRIX_ROWS] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
@@ -202,8 +215,8 @@ void matrix_setup(void)
     cfg.output_gpio_num = MATRIX_COLS;
     cfg.input_gpio_num = MATRIX_ROWS;
     cfg.active_level = 1; // Active HIGH 
-    cfg.debounce_ticks = 3; // 3 consecutive scans to validate a keypress
-    cfg.ticks_interval = 1000; // 1ms scan interval
+    cfg.debounce_ticks = BOARD_DEBOUNCE_TICKS;
+    cfg.ticks_interval = BOARD_MATRIX_SCAN_INTERVAL_US;
     cfg.enable_power_save = false;
     cfg.priority = 5;
     cfg.core_id = 0;
@@ -356,8 +369,7 @@ void key_stats_check_save(void)
     uint32_t diff = key_stats_total - key_stats_last_saved_total;
     TickType_t elapsed = xTaskGetTickCount() - key_stats_last_save_tick;
 
-    /* Save if 100+ new keypresses, or 60s elapsed with changes */
-    if (diff >= 100 || (diff > 0 && elapsed >= pdMS_TO_TICKS(60000))) {
+    if (diff >= KEY_STATS_SAVE_THRESHOLD || (diff > 0 && elapsed >= pdMS_TO_TICKS(KEY_STATS_SAVE_INTERVAL_MS))) {
         save_key_stats();
     }
 
@@ -365,7 +377,7 @@ void key_stats_check_save(void)
     if (!bigram_save_disabled) {
         uint32_t bg_diff = bigram_total - bigram_last_saved_total;
         TickType_t bg_elapsed = xTaskGetTickCount() - bigram_last_save_tick;
-        if (bg_diff >= 100 || (bg_diff > 0 && bg_elapsed >= pdMS_TO_TICKS(120000))) {
+        if (bg_diff >= BIGRAM_SAVE_THRESHOLD || (bg_diff > 0 && bg_elapsed >= pdMS_TO_TICKS(BIGRAM_SAVE_INTERVAL_MS))) {
             save_bigram_stats();
         }
     }

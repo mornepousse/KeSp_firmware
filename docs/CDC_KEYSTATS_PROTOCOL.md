@@ -1,6 +1,6 @@
-# KaSe CDC Key Statistics Protocol
+# KeSp CDC Key Statistics Protocol
 
-Protocol for reading key usage statistics from the KaSe keyboard via USB CDC (serial port).
+Protocol for reading key usage statistics from a KeSp-based keyboard via USB CDC (serial port).
 
 ## Connection
 

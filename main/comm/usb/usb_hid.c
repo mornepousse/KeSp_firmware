@@ -34,8 +34,8 @@ static const tusb_desc_device_t device_descriptor = {
     .bDeviceProtocol    = MISC_PROTOCOL_IAD,
     .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
 
-    .idVendor           = 0xCafe,
-    .idProduct          = 0x4001,
+    .idVendor           = BOARD_USB_VID,
+    .idProduct          = BOARD_USB_PID,
     .bcdDevice          = 0x0100,
 
     .iManufacturer      = 0x01,
@@ -80,8 +80,8 @@ const char *hid_string_descriptor[] = {
     MANUFACTURER_NAME,            // 1: Manufacturer
     PRODUCT_NAME,                 // 2: Product
     SERIAL_NUMBER,                // 3: Serial
-    "KaSe CDC",                  // 4: Interface string pour le port série
-    "KaSe Keyboard",             // 5: Interface string pour le clavier HID
+    PRODUCT_NAME " CDC",         // 4: Interface string pour le port série
+    PRODUCT_NAME " Keyboard",   // 5: Interface string pour le clavier HID
 };
 
 /**
