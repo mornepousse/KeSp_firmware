@@ -17,6 +17,10 @@
 
 #define TAG "LED_STRIP"
 
+#ifndef LED_STRIP_FRAME_MS
+#define LED_STRIP_FRAME_MS 20  /* 50 FPS */
+#endif
+
 /* LED strip handle */
 static led_strip_handle_t led_strip = NULL;
 static bool strip_initialized = false;
@@ -356,7 +360,7 @@ static void led_strip_task(void *arg)
     
     for (;;) {
         led_strip_update();
-        vTaskDelay(pdMS_TO_TICKS(20));  /* 50 FPS */
+        vTaskDelay(pdMS_TO_TICKS(LED_STRIP_FRAME_MS));
     }
 }
 

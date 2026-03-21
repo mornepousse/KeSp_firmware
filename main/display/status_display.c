@@ -20,6 +20,16 @@
 #define STATUS_DISPLAY_MINIMAL 0
 #endif
 
+#ifndef BT_BLINK_INTERVAL_MS
+#define BT_BLINK_INTERVAL_MS    500
+#endif
+#ifndef SPLASH_DURATION_MS
+#define SPLASH_DURATION_MS      3000
+#endif
+#ifndef MOUSE_INDICATOR_MS
+#define MOUSE_INDICATOR_MS      200
+#endif
+
 #include "matrix.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -37,14 +47,13 @@ static int last_path_state = -1; // 0 = USB, 1 = BLE
 static lv_obj_t *icon_bt = NULL;
 static lv_obj_t *icon_path = NULL;
 static lv_obj_t *indicator_mouse = NULL;
-static lv_obj_t *label_nrf_debug = NULL;
 static lv_obj_t *label_layer_name = NULL; /* persistent label for layout name - avoid recreating each update */
 static TickType_t last_mouse_activity = 0;
 
 static const char *status_display_version_text = GATTS_TAG;
 static bool bt_blink_visible = true;
 static TickType_t bt_blink_last_tick = 0;
-static const TickType_t bt_blink_interval_ticks = pdMS_TO_TICKS(500);
+static const TickType_t bt_blink_interval_ticks = pdMS_TO_TICKS(BT_BLINK_INTERVAL_MS);
 #endif /* !BOARD_DISPLAY_BACKEND_ROUND */
 
 static bool status_display_initialized = false;
@@ -127,7 +136,7 @@ void status_display_update(void)
 
 #ifdef BOARD_DISPLAY_BACKEND_ROUND
     if (is_showing_splash) {
-        if ((xTaskGetTickCount() - splash_start_tick) > pdMS_TO_TICKS(3000)) {
+        if ((xTaskGetTickCount() - splash_start_tick) > pdMS_TO_TICKS(SPLASH_DURATION_MS)) {
             is_showing_splash = false;
             round_ui_refresh_all();
         }
@@ -136,7 +145,7 @@ void status_display_update(void)
     round_ui_update();
 #else
     if (is_showing_splash) {
-        if ((xTaskGetTickCount() - splash_start_tick) > pdMS_TO_TICKS(3000)) {
+        if ((xTaskGetTickCount() - splash_start_tick) > pdMS_TO_TICKS(SPLASH_DURATION_MS)) {
             is_showing_splash = false;
             status_display_refresh_all();
         }
@@ -147,7 +156,7 @@ void status_display_update(void)
 
     if (indicator_mouse) {
         if (lvgl_port_lock(50)) {
-            if ((xTaskGetTickCount() - last_mouse_activity) < pdMS_TO_TICKS(200)) {
+            if ((xTaskGetTickCount() - last_mouse_activity) < pdMS_TO_TICKS(MOUSE_INDICATOR_MS)) {
                 lv_obj_clear_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
             } else {
                 lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
@@ -380,13 +389,6 @@ static void status_display_init_icons(void)
         lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
     }
 
-#if !STATUS_DISPLAY_MINIMAL
-    label_nrf_debug = lv_label_create(scr);
-    lv_label_set_text(label_nrf_debug, "");
-    lv_obj_set_style_text_font(label_nrf_debug, UI_FONT, 0);
-    lv_obj_set_pos(label_nrf_debug, 0, 0);
-#endif
-
     /* persistent label for layer name (created once) */
     if (!label_layer_name) {
         label_layer_name = lv_label_create(scr);
@@ -417,7 +419,6 @@ static void status_display_prepare_ui(bool clear_screen)
         icon_bt = NULL;
         icon_path = NULL;
         indicator_mouse = NULL;
-        label_nrf_debug = NULL;
         /* persistent label can be freed by display_clear_screen; reset it to avoid dangling pointer */
         label_layer_name = NULL;
         last_bt_state = -1;
@@ -464,37 +465,3 @@ void status_display_notify_mouse_activity(void)
 #endif
 }
 
-void status_display_update_nrf_debug(uint32_t pps, uint8_t status, bool spi_ok, uint8_t rpd, uint8_t last_byte, uint8_t mode)
-{
-    if (display_available == false || status_display_sleeping) return;
-
-#ifdef BOARD_DISPLAY_BACKEND_ROUND
-    round_ui_update_nrf_debug(pps, status, spi_ok, rpd, last_byte, mode);
-#else
-    if (!status_display_initialized) {
-        status_display_prepare_ui(false);
-    }
-
-    if (label_nrf_debug) {
-        if (!lvgl_port_lock(50)) {
-            return;
-        }
-
-        if (spi_ok) {
-            if (mode == 99) {
-                lv_label_set_text(label_nrf_debug, "Scanning...");
-            } else if (mode > 0 && mode < 99) {
-                lv_label_set_text_fmt(label_nrf_debug, "Found CH:%d", mode);
-            } else {
-                // Normal Mode
-                // Shortened to fit on screen: RX count, Status hex, RPD (Carrier)
-                lv_label_set_text_fmt(label_nrf_debug, "RX:%lu S:%02X R:%d", (unsigned long)pps, status, rpd);
-            }
-        } else {
-            lv_label_set_text(label_nrf_debug, "SPI ERROR");
-        }
-
-        lvgl_port_unlock();
-    }
-#endif
-}

@@ -53,11 +53,26 @@
 /* ── LED strip ─────────────────────────────────────────────── */
 #define BOARD_HAS_LED_STRIP       0
 
-/* ── Matrix scanning delays (anti-ghosting) ────────────────── */
-#define BOARD_MATRIX_SETTLING_US  0
-#define BOARD_MATRIX_RECOVERY_US  0
+/* ── Matrix scanning ───────────────────────────────────────── */
+#define BOARD_MATRIX_COL2ROW
+#define BOARD_MATRIX_SCAN_INTERVAL_US  1000
+#define BOARD_MATRIX_SETTLING_US       0
+#define BOARD_MATRIX_RECOVERY_US       0
 
 /* ── Position mapping ──────────────────────────────────────── */
 #define BOARD_HAS_POSITION_MAP    0
+
+/* ── USB identification ────────────────────────────────────── */
+#define BOARD_USB_VID             0xCafe
+#define BOARD_USB_PID             0x4001
+
+/* ── Debounce ──────────────────────────────────────────────── */
+#define BOARD_DEBOUNCE_TICKS      3
+
+/* ── Display sleep timeout (ms of inactivity) ──────────────── */
+#define BOARD_DISPLAY_SLEEP_MS    60000
+
+/* ── Deep sleep (minutes of inactivity, 0 to disable) ──────── */
+#define BOARD_SLEEP_MINS          45
 
 #endif /* BOARD_H */

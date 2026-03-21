@@ -56,11 +56,6 @@ void round_ui_notify_mouse(void);
 void round_ui_notify_keypress(void);
 
 /**
- * @brief Update NRF debug info display
- */
-void round_ui_update_nrf_debug(uint32_t pps, uint8_t status, bool spi_ok, uint8_t rpd, uint8_t last_byte, uint8_t mode);
-
-/**
  * @brief Show splash screen with text
  */
 void round_ui_show_splash(const char *text);
