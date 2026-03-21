@@ -17,7 +17,7 @@ RELEASE_DIR="$PROJECT_DIR/release"
 CMAKE_FILE="$PROJECT_DIR/CMakeLists.txt"
 
 VARIANTS=("VERSION_1" "VERSION_2" "VERSION_2_DEBUG")
-BIN_NAMES=("KaSe_V1" "KaSe_V2" "KaSe_V2_Debug")
+HW_NAMES=("V1" "V2" "V2_Debug")
 
 # Save original CMakeLists.txt
 cp "$CMAKE_FILE" "$CMAKE_FILE.bak"
@@ -27,7 +27,7 @@ mkdir -p "$RELEASE_DIR"
 
 for i in "${!VARIANTS[@]}"; do
     variant="${VARIANTS[$i]}"
-    bin_name="${BIN_NAMES[$i]}"
+    hw_name="${HW_NAMES[$i]}"
 
     echo ""
     echo "========================================"
@@ -41,12 +41,12 @@ for i in "${!VARIANTS[@]}"; do
     idf.py fullclean > /dev/null 2>&1 || true
     idf.py build 2>&1 | tail -5
 
-    cp "$PROJECT_DIR/build/Mae_Keyboard_Code.bin" "$RELEASE_DIR/${bin_name}_${VERSION_TAG}.bin"
-    echo "  -> release/${bin_name}_${VERSION_TAG}.bin"
+    cp "$PROJECT_DIR/build/Mae_Keyboard_Code.bin" "$RELEASE_DIR/KaSe_${VERSION_TAG}_${hw_name}.bin"
+    echo "  -> release/KaSe_${VERSION_TAG}_${hw_name}.bin"
 done
 
 echo ""
 echo "========================================"
 echo "  Release binaries in $RELEASE_DIR:"
-ls -lh "$RELEASE_DIR"/*_"$VERSION_TAG".bin
+ls -lh "$RELEASE_DIR"/KaSe_"$VERSION_TAG"_*.bin
 echo "========================================"
