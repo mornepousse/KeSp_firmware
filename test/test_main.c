@@ -12,6 +12,8 @@ extern void test_key_stats(void);
 extern void test_bigram(void);
 extern void test_cdc_protocol(void);
 extern void test_board_config(void);
+extern void test_matrix_constants(void);
+extern void test_led_anim_constants(void);
 
 int main(void) {
     printf("KeSp Firmware Unit Tests\n");
@@ -23,6 +25,8 @@ int main(void) {
     test_bigram();
     test_cdc_protocol();
     test_board_config();
+    test_matrix_constants();
+    test_led_anim_constants();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);
