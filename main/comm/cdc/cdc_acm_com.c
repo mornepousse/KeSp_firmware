@@ -15,6 +15,9 @@
 #include "dfu_manager.h"      // reboot_to_dfu
 #include "status_display.h" // status_display_show_DFU_prog
 #include "tusb.h"           // tud_cdc_n_connected
+#include "version.h"        // FW_VERSION, PRODUCT_NAME
+#include "esp_ota_ops.h"    // OTA over CDC
+#include "esp_partition.h"
 
 /* CDC interface (0 by default) */
 #ifndef CDC_ITF
@@ -72,7 +75,18 @@ static uint16_t fifo_count = 0;
 
 // Assembly buffer for the current line
 static char assemble_buf[CDC_CMD_MAX_LEN];
-static uint16_t assemble_len = 0; 
+static uint16_t assemble_len = 0;
+
+/* OTA over CDC state */
+static volatile enum { OTA_IDLE, OTA_RECEIVING } ota_state = OTA_IDLE;
+static esp_ota_handle_t ota_handle = 0;
+static const esp_partition_t *ota_partition = NULL;
+static size_t ota_total_size = 0;
+static size_t ota_received = 0;
+static uint8_t ota_buf[OTA_CHUNK_SIZE];
+static size_t ota_buf_pos = 0;
+static volatile bool ota_chunk_ready = false;
+static uint32_t ota_last_activity_ms = 0;
 
 void cdc_cmd_fifo_init(void)
 {
@@ -1025,6 +1039,58 @@ static void cmd_reset_keystats(void)
 }
 
 
+static void ota_abort(const char *reason)
+{
+	esp_ota_abort(ota_handle);
+	ota_state = OTA_IDLE;
+	ota_handle = 0;
+	ESP_LOGE(TAG_CDC, "OTA aborted: %s", reason);
+	char msg[64];
+	snprintf(msg, sizeof(msg), "OTA_FAIL %s", reason);
+	cdc_send_line(msg);
+}
+
+static void cmd_ota_start(const char *arg)
+{
+	if (arg == NULL || *arg == '\0') {
+		cdc_send_line("OTA_ERROR missing size");
+		return;
+	}
+	uint32_t size = (uint32_t)strtoul(arg, NULL, 10);
+	if (size == 0 || size > 0x200000) {
+		cdc_send_line("OTA_ERROR invalid size");
+		return;
+	}
+
+	ota_partition = esp_ota_get_next_update_partition(NULL);
+	if (!ota_partition) {
+		cdc_send_line("OTA_ERROR no update partition");
+		return;
+	}
+
+	esp_err_t err = esp_ota_begin(ota_partition, size, &ota_handle);
+	if (err != ESP_OK) {
+		ESP_LOGE(TAG_CDC, "OTA begin failed: %s", esp_err_to_name(err));
+		cdc_send_line("OTA_ERROR begin failed");
+		return;
+	}
+
+	ota_total_size = size;
+	ota_received = 0;
+	ota_buf_pos = 0;
+	ota_chunk_ready = false;
+	ota_last_activity_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+	ota_state = OTA_RECEIVING;
+
+	/* Reset line assembly to avoid leftover bytes */
+	assemble_len = 0;
+
+	ESP_LOGI(TAG_CDC, "OTA started: %lu bytes -> %s", (unsigned long)size, ota_partition->label);
+	char resp[64];
+	snprintf(resp, sizeof(resp), "OTA_READY %u", OTA_CHUNK_SIZE);
+	cdc_send_line(resp);
+}
+
 static void parse_and_execute(const char *line)
 {
 	// Trim spaces
@@ -1105,6 +1171,16 @@ static void parse_and_execute(const char *line)
 		cmd_set_layout_name(line + 10);
 		return;
 	}
+	if (strncasecmp(line, "VERSION?", 8) == 0)
+	{
+		cdc_send_line(PRODUCT_NAME " v" FW_VERSION);
+		return;
+	}
+	if (strncasecmp(line, "OTA ", 4) == 0)
+	{
+		cmd_ota_start(line + 4);
+		return;
+	}
 	if (strncasecmp(line, "DFU", 3) == 0)
 	{
 		cmd_reboot_to_dfu();
@@ -1150,6 +1226,20 @@ static void parse_and_execute(const char *line)
 // ----------------------------------------------------------------------------------
 void receive_data(const char *data, uint16_t len)
 {
+	/* OTA binary receive mode — bypass line assembly */
+	if (ota_state == OTA_RECEIVING) {
+		for (size_t i = 0; i < len; i++) {
+			if (ota_chunk_ready) break;
+			ota_buf[ota_buf_pos++] = (uint8_t)data[i];
+			ota_received++;
+			if (ota_buf_pos >= OTA_CHUNK_SIZE || ota_received >= ota_total_size) {
+				ota_chunk_ready = true;
+			}
+		}
+		ota_last_activity_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+		return;
+	}
+
 	static bool last_was_cr = false; // to handle CRLF
 	static bool overflowed = false;  // if a line exceeds CDC_CMD_MAX_LEN, drop until next \r/\n
 	for (size_t i = 0; i < len; ++i)
@@ -1205,6 +1295,46 @@ void cdc_process_commands_task(void *arg)
 	cdc_cmd_t cmd;
 	for (;;)
 	{
+		/* OTA chunk processing */
+		if (ota_state == OTA_RECEIVING) {
+			if (ota_chunk_ready) {
+				esp_err_t err = esp_ota_write(ota_handle, ota_buf, ota_buf_pos);
+				if (err != ESP_OK) {
+					ota_abort("write error");
+				} else if (ota_received >= ota_total_size) {
+					err = esp_ota_end(ota_handle);
+					if (err != ESP_OK) {
+						ota_abort("validation failed");
+					} else {
+						err = esp_ota_set_boot_partition(ota_partition);
+						if (err != ESP_OK) {
+							ota_abort("set boot failed");
+						} else {
+							ota_state = OTA_IDLE;
+							cdc_send_line("OTA_DONE");
+							ESP_LOGI(TAG_CDC, "OTA complete, rebooting...");
+							vTaskDelay(pdMS_TO_TICKS(500));
+							esp_restart();
+						}
+					}
+				} else {
+					ota_buf_pos = 0;
+					ota_chunk_ready = false;
+					char resp[48];
+					snprintf(resp, sizeof(resp), "OTA_OK %u/%u",
+							 (unsigned)ota_received, (unsigned)ota_total_size);
+					cdc_send_line(resp);
+				}
+			} else {
+				uint32_t now = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+				if ((now - ota_last_activity_ms) > OTA_TIMEOUT_MS) {
+					ota_abort("timeout");
+				}
+			}
+			vTaskDelay(pdMS_TO_TICKS(10));
+			continue;
+		}
+
 		while (cdc_cmd_pop(&cmd))
 		{
 			parse_and_execute(cmd.line);

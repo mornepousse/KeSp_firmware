@@ -292,6 +292,129 @@ Response: `LAYOUTNAME:OK\r\n`
 
 ---
 
+## OTA Firmware Update
+
+Flash new firmware over USB CDC without esptool. Keymaps, macros and statistics in NVS are preserved.
+
+### `OTA <size>` — Start OTA update
+
+Send: `OTA 971152\r\n` (firmware binary size in bytes)
+
+Response:
+- `OTA_READY 4096\r\n` — device is ready, send data in 4096-byte chunks
+- `OTA_ERROR <reason>\r\n` — cannot start (no partition, invalid size, etc.)
+
+### Binary data transfer
+
+After `OTA_READY`, switch to binary mode: send raw firmware bytes in chunks of 4096 (last chunk may be smaller).
+
+**Wait for ACK after each chunk:**
+- `OTA_OK <received>/<total>\r\n` — chunk written, send next
+- `OTA_FAIL <reason>\r\n` — write error, OTA aborted
+
+### Completion
+
+After the last chunk is written and validated:
+- `OTA_DONE\r\n` — success, device reboots into new firmware
+- `OTA_FAIL validation failed\r\n` — image invalid, device stays on current firmware
+
+### Timeout
+
+If no data is received for 30 seconds during transfer, the OTA is aborted automatically.
+
+### Protocol flow
+
+```
+Host                              Device
+  │                                  │
+  │  "OTA 971152\r\n"               │
+  │ ──────────────────────────────>  │
+  │                                  │  (erase OTA partition)
+  │           "OTA_READY 4096\r\n"   │
+  │ <──────────────────────────────  │
+  │                                  │
+  │  <4096 bytes raw binary>         │
+  │ ──────────────────────────────>  │
+  │                                  │  (write to flash)
+  │      "OTA_OK 4096/971152\r\n"    │
+  │ <──────────────────────────────  │
+  │                                  │
+  │  <4096 bytes raw binary>         │
+  │ ──────────────────────────────>  │
+  │      "OTA_OK 8192/971152\r\n"    │
+  │ <──────────────────────────────  │
+  │                                  │
+  │  ... (repeat until all sent) ... │
+  │                                  │
+  │         "OTA_DONE\r\n"           │
+  │ <──────────────────────────────  │
+  │                                  │  (reboot)
+```
+
+### Example (Python)
+
+```python
+import serial
+import struct
+import os
+
+firmware_path = "KeSp_v3.4_V2_Debug.bin"
+firmware_size = os.path.getsize(firmware_path)
+
+ser = serial.Serial('/dev/ttyACM0', timeout=5)
+
+# Start OTA
+ser.write(f"OTA {firmware_size}\r\n".encode())
+response = ser.readline().decode().strip()
+if not response.startswith("OTA_READY"):
+    raise RuntimeError(f"OTA start failed: {response}")
+
+chunk_size = int(response.split()[1])
+
+# Send firmware
+with open(firmware_path, "rb") as f:
+    sent = 0
+    while sent < firmware_size:
+        chunk = f.read(chunk_size)
+        ser.write(chunk)
+        sent += len(chunk)
+
+        ack = ser.readline().decode().strip()
+        if ack.startswith("OTA_OK"):
+            progress = sent * 100 // firmware_size
+            print(f"\r{progress}%", end="", flush=True)
+        elif ack.startswith("OTA_DONE"):
+            print("\nOTA complete! Device rebooting...")
+            break
+        else:
+            raise RuntimeError(f"\nOTA failed: {ack}")
+```
+
+### Partition layout
+
+The firmware uses a dual-partition scheme:
+
+| Partition | Offset | Size | Purpose |
+|-----------|--------|------|---------|
+| factory | 0x20000 | 2MB | Recovery firmware (flashed via esptool) |
+| ota_0 | 0x220000 | 2MB | OTA target (updated via CDC) |
+
+NVS (keymaps, macros, stats) is at 0x9000 and is never touched by OTA.
+
+### First-time setup
+
+The first flash with OTA support requires esptool (full partition table change):
+
+```bash
+esptool --chip esp32s3 -p /dev/ttyUSB0 -b 460800 \
+  write_flash 0x0 bootloader.bin 0x8000 partition-table.bin \
+  0xf000 ota_data_initial.bin 0x20000 KeSp.bin 0x420000 storage.bin
+```
+
+After this initial flash, all future updates can use the CDC OTA protocol.
+
+---
+
 ## Data persistence
 
 - Key stats and bigram stats are stored in NVS flash and survive reboots

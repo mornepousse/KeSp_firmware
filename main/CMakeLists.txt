@@ -49,5 +49,6 @@ idf_component_register(
         esp_lcd
         unity
         esp_driver_i2c
+        app_update
 )
 littlefs_create_partition_image(storage ../flash_data FLASH_IN_PROJECT)
