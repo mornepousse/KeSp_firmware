@@ -8,6 +8,10 @@
 /* Number of queued lines */
 #define CDC_CMD_FIFO_DEPTH 4
 
+/* OTA over CDC */
+#define OTA_CHUNK_SIZE 4096
+#define OTA_TIMEOUT_MS 30000
+
 typedef struct {
 	char line[CDC_CMD_MAX_LEN];
 	uint16_t len;

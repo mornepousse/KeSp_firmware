@@ -20,6 +20,7 @@
 #include "esp_heap_caps.h"
 #include "cpu_time.h"
 #include "led_strip_anim.h"
+#include "esp_ota_ops.h"
 
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for isolation testing */
 #ifndef SKIP_STATUS_DISPLAY
@@ -93,6 +94,10 @@ static void status_display_task(void *arg) {
 
 void app_main(void) {
   ESP_LOGI(TAG, "--------------- KeSp [%s] ----------------", PRODUCT_NAME);
+
+  /* Confirm this firmware is valid (prevents rollback to factory on next reboot) */
+  esp_ota_mark_app_valid_cancel_rollback();
+
   kase_tinyusb_init();
   init_cdc_commands();
   keymap_init_nvs();

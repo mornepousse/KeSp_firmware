@@ -31,6 +31,7 @@
 #endif
 
 #include "matrix.h"
+#include "version.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
@@ -48,9 +49,9 @@ static lv_obj_t *icon_bt = NULL;
 static lv_obj_t *icon_path = NULL;
 static lv_obj_t *indicator_mouse = NULL;
 static lv_obj_t *label_layer_name = NULL; /* persistent label for layout name - avoid recreating each update */
+static lv_obj_t *label_version = NULL;
 static TickType_t last_mouse_activity = 0;
 
-static const char *status_display_version_text = GATTS_TAG;
 static bool bt_blink_visible = true;
 static TickType_t bt_blink_last_tick = 0;
 static const TickType_t bt_blink_interval_ticks = pdMS_TO_TICKS(BT_BLINK_INTERVAL_MS);
@@ -82,7 +83,6 @@ volatile bool request_wake_request = false;
 static void status_display_prepare_ui(bool clear_screen);
 static void status_display_update_connection_icons(bool force);
 static void status_display_init_icons(void);
-static void status_display_show_version_splash(void);
 #endif
 void status_display_show_DFU_prog(void);
 
@@ -90,13 +90,7 @@ void status_display_show_DFU_prog(void);
 
 void draw_separator_line(void)
 {
-#ifdef BOARD_DISPLAY_BACKEND_ROUND
-    /* Not used for round display */
-    return;
-#else
-    if(display_available == false) return;
-    draw_rectangle_White(0, 37 * UI_SCALE, 128 * UI_SCALE, 2 * UI_SCALE);
-#endif
+    /* Separator removed — version label uses top area */
 }
 
 void status_display_update_layer_name(void)
@@ -196,14 +190,7 @@ void status_display_start(void)
     /* LVGL port provides a lock; ensure it's initialized (lvgl_port_init was called in init_display) */
 
     status_display_sleeping = false;
-#ifdef BOARD_DISPLAY_BACKEND_ROUND
-    round_ui_show_splash(GATTS_TAG);
-    is_showing_splash = true;
-    splash_start_tick = xTaskGetTickCount();
-#else
-    status_display_show_version_splash();
-#endif
-    // status_display_refresh_all();
+    status_display_refresh_all();
 }
 
 void status_display_refresh_all(void)
@@ -390,6 +377,13 @@ static void status_display_init_icons(void)
     }
 
     /* persistent label for layer name (created once) */
+    if (!label_version) {
+        label_version = lv_label_create(scr);
+        lv_label_set_text(label_version, "v" FW_VERSION);
+        lv_obj_set_style_text_font(label_version, &lv_font_montserrat_28, 0);
+        lv_obj_align(label_version, LV_ALIGN_TOP_MID, 0, 2 * UI_SCALE);
+    }
+
     if (!label_layer_name) {
         label_layer_name = lv_label_create(scr);
         lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
@@ -419,7 +413,7 @@ static void status_display_prepare_ui(bool clear_screen)
         icon_bt = NULL;
         icon_path = NULL;
         indicator_mouse = NULL;
-        /* persistent label can be freed by display_clear_screen; reset it to avoid dangling pointer */
+        label_version = NULL;
         label_layer_name = NULL;
         last_bt_state = -1;
         last_path_state = -1;
@@ -433,18 +427,6 @@ static void status_display_prepare_ui(bool clear_screen)
     lvgl_port_unlock();
 }
 
-static void status_display_show_version_splash(void)
-{
-    if (display_available == false)
-        return;
-
-    display_clear_screen();
-    write_text_to_display_centre(status_display_version_text, 0, 0);
-    
-    is_showing_splash = true;
-    splash_start_tick = xTaskGetTickCount();
-    status_display_initialized = false;
-}
 #endif /* !BOARD_DISPLAY_BACKEND_ROUND */
 
 
