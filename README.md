@@ -42,7 +42,7 @@ main/
   sys/              # CPU time monitoring
 scripts/
   build_release.sh  # Multi-variant release builder
-test/               # Host-side unit tests (794 tests)
+test/               # Host-side unit tests (844 tests)
 docs/               # Protocol documentation
 ```
 
@@ -87,8 +87,8 @@ cd test && mkdir -p build && cd build && cmake .. && make && ./test_runner
 ### Release build (all variants)
 
 ```bash
-./scripts/build_release.sh v3.2
-# Output: release/KaSe_v3.2_V1.bin, KaSe_v3.2_V2.bin, KaSe_v3.2_V2_Debug.bin
+./scripts/build_release.sh v3.3
+# Output: release/KaSe_v3.3_V1.bin, KaSe_v3.3_V2.bin, KaSe_v3.3_V2_Debug.bin
 ```
 
 ---
