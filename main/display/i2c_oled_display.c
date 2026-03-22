@@ -1,4 +1,5 @@
 #include "i2c_oled_display.h"
+#include "version.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
@@ -48,18 +49,6 @@ const display_hw_config_t *display_get_hw_config(void)
 // Bit number used to represent command and parameter
 #define DISPL_LCD_CMD_BITS 8
 #define DISPL_LCD_PARAM_BITS 8
-
-void example_lvgl_demo_ui(lv_disp_t *disp)
-{
-    if(display_available == false) return;
-    lv_obj_t *scr = lv_disp_get_scr_act(disp);
-    lv_obj_t *label = lv_label_create(scr);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR); /* Circular scroll */
-    lv_label_set_text(label, "Hello, my name is KaSe. I am a keyboard.");
-    /* Size of the screen (if you use rotation 90 or 270, please set disp->driver->ver_res) */
-    lv_obj_set_width(label, disp->driver->hor_res);
-    lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 0);
-}
 
 void display_test_text(char *text)
 {
@@ -202,7 +191,7 @@ void init_display(void)
 
     ESP_LOGI(TAG_DISP, "I2C OLED display initialized");
     display_available = true;
-    display_test_text("KaSe_V2");
+    display_test_text(PRODUCT_NAME);
 }
 
 // ------------------------------------------------------------------------------------

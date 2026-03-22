@@ -17,6 +17,9 @@
 
 #define MAX_BT_DEVICENAME_LENGTH 40
 
+/* NVS namespace shared by all subsystems */
+#define STORAGE_NAMESPACE "storage"
+
 #define NKRO // does not work on Android and iOS!,  we can get 18KRO on those
 #define LAYERS 10 // number of layers defined
 

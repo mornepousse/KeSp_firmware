@@ -1,4 +1,5 @@
 #include "matrix.h"
+#include "keyboard_config.h"
 #include <esp_log.h>
 #include <stdint.h>
 #include <string.h>
@@ -11,7 +12,6 @@
 #include "nvs.h"
 
 #define TAG "MATRIX_SHIM"
-#define STORAGE_NAMESPACE "storage"
 
 #ifndef KEY_STATS_SAVE_THRESHOLD
 #define KEY_STATS_SAVE_THRESHOLD      100
@@ -30,10 +30,13 @@
 uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
 uint8_t SLAVE_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
 uint8_t (*matrix_states[])[MATRIX_ROWS][MATRIX_COLS] = { &MATRIX_STATE, &SLAVE_MATRIX_STATE };
-uint8_t keycodes[6];
-uint8_t current_press_row[6];
-uint8_t current_press_col[6];
-uint8_t current_press_stat[6];
+#define MAX_REPORT_KEYS  6       /* HID boot protocol: max 6 simultaneous keys */
+#define INVALID_KEY_POS  0xFF
+
+uint8_t keycodes[MAX_REPORT_KEYS];
+uint8_t current_press_row[MAX_REPORT_KEYS];
+uint8_t current_press_col[MAX_REPORT_KEYS];
+uint8_t current_press_stat[MAX_REPORT_KEYS];
 uint8_t stat_matrix_changed = 0;
 uint8_t last_layer = 0;
 uint8_t current_layout = 0;
@@ -107,9 +110,9 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
     // Clear matrix state
     memset(MATRIX_STATE, 0, sizeof(MATRIX_STATE));
     // Reset current press arrays
-    for (int i = 0; i < 6; i++) {
-        current_press_row[i] = 255;
-        current_press_col[i] = 255;
+    for (int i = 0; i < MAX_REPORT_KEYS; i++) {
+        current_press_row[i] = INVALID_KEY_POS;
+        current_press_col[i] = INVALID_KEY_POS;
         current_press_stat[i] = 0;
         keycodes[i] = 0;
     }
@@ -119,7 +122,7 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
     uint8_t valid_count = 0;
     uint8_t new_keypresses = 0;  /* Count new keys for KPM */
     if (kbd_report.key_pressed_num > 0 && kbd_report.key_data) {
-        for (uint32_t i = 0; i < kbd_report.key_pressed_num && filled < 6; i++) {
+        for (uint32_t i = 0; i < kbd_report.key_pressed_num && filled < MAX_REPORT_KEYS; i++) {
             uint8_t out_idx = kbd_report.key_data[i].output_index;
             uint8_t in_idx = kbd_report.key_data[i].input_index;
             
@@ -357,7 +360,6 @@ void load_key_stats(void)
     nvs_close(my_handle);
     key_stats_last_saved_total = key_stats_total;
     key_stats_last_save_tick = xTaskGetTickCount();
-    //ESP_LOGI(TAG, "Key stats total: %lu", (unsigned long)key_stats_total);
 }
 
 /**

@@ -84,18 +84,6 @@ const char *hid_string_descriptor[] = {
     PRODUCT_NAME " Keyboard",   // 5: Interface string pour le clavier HID
 };
 
-/**
- * @brief Configuration descriptor
- *
- * This is a simple configuration descriptor that defines 1 configuration and 1
- * HID interface
- */
-// static const uint8_t hid_configuration_descriptor[] = { 
-//     TUD_CONFIG_DESCRIPTOR(1, 1, 0, TUSB_DESC_TOTAL_LEN,
-//                           TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100), 
-//     TUD_HID_DESCRIPTOR(0, 4, false, sizeof(hid_report_descriptor), 0x81, 16, 1),
-// };
-
 /********* TinyUSB HID callbacks ***************/
 
 // Invoked when received GET HID REPORT DESCRIPTOR request
@@ -156,13 +144,6 @@ void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
     ESP_LOGI(TAG_UD, "Calling receive_data : %d", rx_size);
     receive_data((char*)buf, rx_size);
 
-    /* write back */
-
-    //display_clear_screen();
-    //display_test_text((char*)buf);
-
-    //tinyusb_cdcacm_write_queue(itf, buf, rx_size);
-    //tinyusb_cdcacm_write_flush(itf, 0);
 }
 
 void tinyusb_cdc_line_state_changed_callback(int itf, cdcacm_event_t *event)
