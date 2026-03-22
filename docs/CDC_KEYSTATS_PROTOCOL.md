@@ -254,6 +254,44 @@ Response: `BIGRAMS_RESET:OK\r\n`
 
 ---
 
+## Layout Commands
+
+### `LAYOUT?` — Physical key layout JSON
+
+Send: `LAYOUT?\r\n`
+
+Returns a JSON string describing the physical key positions in a hierarchical tree format. The response is sent in 256-byte chunks via `cdc_send_large()`.
+
+The JSON contains:
+- `name`: product name
+- `rows`, `cols`: matrix dimensions
+- `keys`: total number of physical keys (64)
+- `groups`: array of key groups (left hand, right hand)
+
+Each group contains `lines` (vertical columns), each line contains `keycaps` (individual keys). Keys are described with:
+- `row`, `col`: matrix coordinates
+- `margin`: CSS-like pixel margins `"left,top,right,bottom"`
+- `angle`: rotation in degrees (positive = clockwise)
+- `width`: key width in pixels (omitted = default 1u)
+
+> The layout is board-independent (all KaSe boards share the same physical layout). Column 6, row 1 has no physical key.
+
+### `LAYOUTS?` — List layout names
+
+Send: `LAYOUTS?\r\n`
+
+Returns one line per layer with format: `<index>:<name>\r\n`, followed by `OK\r\n`.
+
+### `LAYOUTNAME<idx>:<name>` — Rename a layer
+
+Send: `LAYOUTNAME0:AZERTY_FR\r\n`
+
+Renames layer `<idx>` (0-9) to `<name>` (max 14 chars) and persists to NVS.
+
+Response: `LAYOUTNAME:OK\r\n`
+
+---
+
 ## Data persistence
 
 - Key stats and bigram stats are stored in NVS flash and survive reboots

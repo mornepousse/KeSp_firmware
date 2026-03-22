@@ -1,13 +1,7 @@
-
-/project-name/build
-/project-name/.vscode
-/project-name/build
-/project/build
-/project-name/.cache
-/project-name/managed_components
 /.cache
-/build.clang
 /build
+/build.clang
 /test/build
 /managed_components
 /release
+sdkconfig.old
