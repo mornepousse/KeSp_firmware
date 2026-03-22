@@ -1,4 +1,4 @@
-// Gestion commandes CDC ACM
+// CDC ACM command handling
 #include "cdc_acm_com.h"
 #include <string.h>
 #include <stdio.h>
@@ -16,7 +16,7 @@
 #include "status_display.h" // status_display_show_DFU_prog
 #include "tusb.h"           // tud_cdc_n_connected
 
-// Interface CDC utilisée (0 par défaut)
+/* CDC interface (0 by default) */
 #ifndef CDC_ITF
 #define CDC_ITF TINYUSB_CDC_ACM_0
 #endif
@@ -63,14 +63,14 @@ static int cdc_log_vprintf(const char *fmt, va_list args) {
 }
 
 // ----------------------------------------------------------------------------------
-// FIFO circulaire de lignes de commandes
+// Circular FIFO for command lines
 // ----------------------------------------------------------------------------------
 static cdc_cmd_t cmd_fifo[CDC_CMD_FIFO_DEPTH];
 static uint16_t fifo_w = 0; // write index
 static uint16_t fifo_r = 0; // read index
 static uint16_t fifo_count = 0;
 
-// Buffer d'assemblage de la ligne courante
+// Assembly buffer for the current line
 static char assemble_buf[CDC_CMD_MAX_LEN];
 static uint16_t assemble_len = 0; 
 
@@ -80,13 +80,13 @@ void cdc_cmd_fifo_init(void)
 	assemble_len = 0;
 }
 
-// Commande: SETLAYER<layer>:<val1>,<val2>,...,<valN>
-// Exemple: SETLAYER0:0x0004,0x0005,0x0006,... (N must be MATRIX_ROWS*MATRIX_COLS)
+// Command: SETLAYER<layer>:<val1>,<val2>,...,<valN>
+// Example: SETLAYER0:0x0004,0x0005,0x0006,... (N must be MATRIX_ROWS*MATRIX_COLS)
 static void cmd_setlayer_command(const char *arg)
 {
 	if (arg == NULL)
 	{
-		cdc_send_line("ERR SETLAYER: arguments manquants");
+		cdc_send_line("ERR SETLAYER: missing arguments");
 		return;
 	}
 
@@ -109,14 +109,14 @@ static void cmd_setlayer_command(const char *arg)
 	trim_spaces(list_str);
 	if (*idx_str == '\0' || *list_str == '\0')
 	{
-		cdc_send_line("ERR SETLAYER: index ou liste vide");
+		cdc_send_line("ERR SETLAYER: empty index or list");
 		return;
 	}
 
 	int idx = atoi(idx_str);
 	if (idx < 0 || idx >= LAYERS)
 	{
-		cdc_send_line("ERR SETLAYER: index invalide");
+		cdc_send_line("ERR SETLAYER: invalid index");
 		return;
 	}
 
@@ -136,7 +136,7 @@ static void cmd_setlayer_command(const char *arg)
 		long v = strtol(tok, NULL, 0); // support 0x.. or decimal
 		if (v < 0 || v > 0xFFFF)
 		{
-			cdc_send_line("ERR SETLAYER: valeur hors plage");
+			cdc_send_line("ERR SETLAYER: value out of range");
 			return;
 		}
 		parsed[count++] = (uint16_t)v;
@@ -146,7 +146,7 @@ static void cmd_setlayer_command(const char *arg)
 	if (count != expected)
 	{
 		char msg[64];
-		snprintf(msg, sizeof(msg), "ERR SETLAYER: attendu %u valeurs, recu %u", (unsigned)expected, (unsigned)count);
+		snprintf(msg, sizeof(msg), "ERR SETLAYER: expected %u values, got %u", (unsigned)expected, (unsigned)count);
 		cdc_send_line(msg);
 		return;
 	}
@@ -219,10 +219,10 @@ bool cdc_cmd_push(const char *line, uint16_t len)
 	if (len == 0)
 		return false;
 	if (len >= CDC_CMD_MAX_LEN)
-		len = CDC_CMD_MAX_LEN - 1; // tronquer
+		len = CDC_CMD_MAX_LEN - 1; // truncate
 	if (fifo_full())
 	{
-		ESP_LOGW(TAG_CDC, "FIFO pleine - drop commande");
+		ESP_LOGW(TAG_CDC, "FIFO full - dropping command");
 		return false;
 	}
 	cdc_cmd_t *slot = &cmd_fifo[fifo_w];
@@ -293,26 +293,26 @@ void cdc_ping(void)
 
 
 // ----------------------------------------------------------------------------------
-// Parsing des commandes
-// Commandes proposées:
-//   L<n>        => changer layer (0..MAX_LAYER)
-//   DISP:<txt>  => afficher texte sur l'écran (si présent)
-//   HELP        => lister commandes
-//   L?          => renvoie le layer courant
-// (Extension future: MACRO:<id>, etc.)
+// Command parsing
+// Available commands:
+//   L<n>        => change layer (0..MAX_LAYER)
+//   DISP:<txt>  => display text on screen (if present)
+//   HELP        => list commands
+//   L?          => return current layer
+// (Future extension: MACRO:<id>, etc.)
 // ----------------------------------------------------------------------------------
 
 __attribute__((unused)) static void cmd_set_layer(const char *arg)
 {
 	if (!isdigit((unsigned char)arg[0]))
 	{
-		ESP_LOGW(TAG_CDC, "Layer invalide");
+		ESP_LOGW(TAG_CDC, "Invalid layer");
 		return;
 	}
 	int layer = atoi(arg);
 	if (layer < 0 || layer > MAX_LAYER)
 	{
-		ESP_LOGW(TAG_CDC, "Layer hors limites (%d)", layer);
+		ESP_LOGW(TAG_CDC, "Layer out of range (%d)", layer);
 		return;
 	}
 	extern uint8_t current_layout;
@@ -325,7 +325,7 @@ __attribute__((unused)) static void cmd_set_layer(const char *arg)
 static void cmd_get_current_layer_index(void)
 {
 	extern uint8_t current_layout; 
-	ESP_LOGI(TAG_CDC, "Layer courant: %d", current_layout);
+	ESP_LOGI(TAG_CDC, "Current layer: %d", current_layout);
 	start_command_queue(c_get_current_layer_index_t, 1);
 	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)&current_layout, 1); 
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
@@ -335,12 +335,12 @@ __attribute__((unused)) static void cmd_display_text(const char *txt)
 {
 	if (txt == NULL || *txt == '\0')
 	{
-		ESP_LOGW(TAG_CDC, "Texte vide");
+		ESP_LOGW(TAG_CDC, "Empty text");
 		return;
 	}
 	write_text_to_display((char *)txt, 0, 8); // simple position
-	ESP_LOGI(TAG_CDC, "Affiche: %s", txt);
-	// Accusé de réception
+	ESP_LOGI(TAG_CDC, "Display: %s", txt);
+	/* Acknowledgment */
 	char ack[16] = "OK\r\n";
 	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)ack, 4);
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
@@ -353,7 +353,7 @@ static void cmd_get_name_layer(uint8_t layer)
 		cdc_send_line("ERROR:INVALID_LAYER");
 		return;
 	}
-	// Réponse binaire: [index (1 octet)] [nom (len octets, sans '\0')]
+	/* Binary response: [index (1 byte)] [name (len bytes, no null)] */
 	const char *name = default_layout_names[layer];
 	size_t name_len = strlen(name);
 	size_t total_size = 1 + name_len;
@@ -364,18 +364,18 @@ static void cmd_get_name_layer(uint8_t layer)
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
-// Liste tous les noms de layouts dans une seule trame binaire
+// List all layout names in a single binary frame
 static void cmd_list_layout_names(void)
 {
-	// Format payload:
-	// [LAYERS (1 octet)] puis pour chaque layout:
-	//   [index (1 octet)] [nom (N octets, sans '\0')] [';' (1 octet separateur)]
+	// Payload format:
+	// [LAYERS (1 byte)] then for each layout:
+	//   [index (1 byte)] [name (N bytes, no null)] [';' (1 byte separator)]
 
-	// Calcul longueur totale
-	size_t total_size = 1; // nombre de layers
+	// Calculate total length
+	size_t total_size = 1; // number of layers
 	for (int i = 0; i < LAYERS; ++i)
 	{
-		total_size += 1 + strlen(default_layout_names[i]) + 1; // index + nom + separateur
+		total_size += 1 + strlen(default_layout_names[i]) + 1; // index + name + separator
 	}
 
 	start_command_queue(c_get_all_layout_names_t, total_size);
@@ -391,7 +391,7 @@ static void cmd_list_layout_names(void)
 
 		tinyusb_cdcacm_write_queue(CDC_ITF, &idx, 1);//index
 		tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)name, name_len);
-		// Ajout d'un caractere de separation entre les noms
+		// Add a separator character between names
 		uint8_t sep = ';';
 		tinyusb_cdcacm_write_queue(CDC_ITF, &sep, 1);
 	}
@@ -401,10 +401,10 @@ static void cmd_list_layout_names(void)
 
 static void cmd_get_keymap_by_layer(uint8_t layer)
 {
-	// Envoie le keymap complet de la layer demandée sous forme binaire (MATRIX_ROWS * MATRIX_COLS * 2 bytes)
+	/* Send the complete keymap for the requested layer as binary (MATRIX_ROWS * MATRIX_COLS * 2 bytes) */
 	if (layer >= LAYERS)
 	{
-		ESP_LOGW(TAG_CDC, "Layer %u invalide", (unsigned)layer);
+		ESP_LOGW(TAG_CDC, "Layer %u invalid", (unsigned)layer);
 		return;
 	}
 	extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
@@ -414,7 +414,7 @@ static void cmd_get_keymap_by_layer(uint8_t layer)
 	bytes[0] = (unsigned char)(layer & 0xFF);
 	bytes[1] = (unsigned char)((layer >> 8) & 0xFF);
 	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)bytes, 2); 
-	// Envoi de la matrice (traduite en format VERSION_2 pour le PC)
+	// Send the matrix (translated to VERSION_2 format for the PC)
 	for (int v2_row = 0; v2_row < MATRIX_ROWS; v2_row++)
 	{
 		for (int v2_col = 0; v2_col < MATRIX_COLS; v2_col++)
@@ -434,21 +434,21 @@ static void cmd_get_keymap_by_layer(uint8_t layer)
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
-// Commande: SETKEY layer,row,col,value
+// Command: SETKEY layer,row,col,value
 static void cmd_set_key(const char *arg)
 {
-	// Format attendu: layer,row,col,value
+	// Expected format: layer,row,col,value
 	int layer, row, col;
 	unsigned int value;
 	if (sscanf(arg, "%d,%d,%d,%x", &layer, &row, &col, &value) != 4)
 	{
-		ESP_LOGW(TAG_CDC, "SETKEY: format invalide");
+		ESP_LOGW(TAG_CDC, "SETKEY: invalid format");
 		// send_data("ERR format\r\n", 12);
 		return;
 	}
 	if (layer < 0 || layer >= LAYERS || row < 0 || row >= MATRIX_ROWS || col < 0 || col >= MATRIX_COLS)
 	{
-		ESP_LOGW(TAG_CDC, "SETKEY: index hors limites");
+		ESP_LOGW(TAG_CDC, "SETKEY: index out of range");
 		return;
 	}
 	// Translate (row,col) from CDC (VERSION_2 format) to internal format
@@ -510,13 +510,13 @@ static void trim_spaces(char *str)
 	str[len] = '\0';
 }
 
-// Commande: LAYOUTNAME<layer>:<nouveau_nom>
-// Exemple: LAYOUTNAME0:AZERTY_FR
+// Command: LAYOUTNAME<layer>:<new_name>
+// Example: LAYOUTNAME0:AZERTY_FR
 static void  cmd_set_layout_name(const char *arg)
 {
 	if (arg == NULL)
 	{
-		cdc_send_line("ERR LAYOUTNAME: arguments manquants");
+		cdc_send_line("ERR LAYOUTNAME: missing arguments");
 		return;
 	}
 
@@ -527,7 +527,7 @@ static void  cmd_set_layout_name(const char *arg)
 	char *sep = strchr(buffer, ':');
 	if (!sep)
 	{
-		cdc_send_line("ERR LAYOUTNAME: format LAYOUTNAME<idx>:<nom>");
+		cdc_send_line("ERR LAYOUTNAME: format LAYOUTNAME<idx>:<name>");
 		return;
 	}
 
@@ -540,24 +540,24 @@ static void  cmd_set_layout_name(const char *arg)
 
 	if (*idx_str == '\0' || *name_str == '\0')
 	{
-		cdc_send_line("ERR LAYOUTNAME: index ou nom vide");
+		cdc_send_line("ERR LAYOUTNAME: empty index or name");
 		return;
 	}
 
 	int idx = atoi(idx_str);
 	if (idx < 0 || idx >= LAYERS)
 	{
-		cdc_send_line("ERR LAYOUTNAME: index invalide");
+		cdc_send_line("ERR LAYOUTNAME: invalid index");
 		return;
 	}
 
 	strncpy(default_layout_names[idx], name_str, MAX_LAYOUT_NAME_LENGTH - 1);
 	default_layout_names[idx][MAX_LAYOUT_NAME_LENGTH - 1] = '\0';
 
-	// Sauvegarde en NVS via keymap.c
+	// Save to NVS via keymap.c
 	save_layout_names(default_layout_names, LAYERS);
 
-	// Si c'est le layout courant, rafraîchir l'affichage OLED
+	/* If this is the current layout, refresh the OLED display */
 	extern uint8_t current_layout;
 	void status_display_update_layer_name(void);
 	if ((uint8_t)idx == current_layout)
@@ -565,7 +565,7 @@ static void  cmd_set_layout_name(const char *arg)
 		status_display_update_layer_name();
 	}
 
-	// Réponse binaire: même format que cmd_get_name_layer
+	/* Binary response: same format as cmd_get_name_layer */
 	const char *name = default_layout_names[idx];
 	size_t name_len = strlen(name);
 	size_t total_size = 1 + name_len;
@@ -583,18 +583,18 @@ static uint16_t macro_keycode_from_index(size_t idx)
 
 static void cmd_list_macros(void)
 {
-	// Format binaire via start_command_queue, pour MACROS?
+	// Binary format via start_command_queue, for MACROS?
 	// Payload:
-	//   [count (1 octet)]
-	//   pour chaque macro définie:
-	//     [index (1 octet)]
-	//     [keycode (2 octets, little-endian)]
-	//     [nameLen (1 octet)]
-	//     [name (nameLen octets, sans '\0')]
-	//     [keysLen (1 octet)]
-	//     [keys (keysLen octets)]
+	//   [count (1 byte)]
+	//   for each defined macro:
+	//     [index (1 byte)]
+	//     [keycode (2 bytes, little-endian)]
+	//     [nameLen (1 byte)]
+	//     [name (nameLen bytes, no null)]
+	//     [keysLen (1 byte)]
+	//     [keys (keysLen bytes)]
 
-	// 1) Calculer la taille totale
+	// 1) Calculate total size
 	size_t count = 0;
 	size_t total_size = 1; // count
 	for (size_t i = 0; i < MAX_MACROS; ++i)
@@ -604,7 +604,7 @@ static void cmd_list_macros(void)
 		++count;
 		size_t name_len = strlen(macros_list[i].name);
 		if (name_len > 255)
-			name_len = 255; // borne par 1 octet
+			name_len = 255; // bounded by 1 byte
 		uint8_t keys_len = 0;
 		for (int k = 0; k < 6; ++k)
 		{
@@ -618,7 +618,7 @@ static void cmd_list_macros(void)
 	uint8_t ucount = (uint8_t)count;
 	tinyusb_cdcacm_write_queue(CDC_ITF, &ucount, 1);
 
-	// 2) Envoyer chaque macro définie
+	// 2) Send each defined macro
 	for (size_t i = 0; i < MAX_MACROS; ++i)
 	{
 		if (macros_list[i].name[0] == '\0')
@@ -672,7 +672,7 @@ static void cmd_macro_add(const char *arg)
 {
 	if (arg == NULL)
 	{
-		cdc_send_line("ERR MACROADD: arguments manquants");
+		cdc_send_line("ERR MACROADD: missing arguments");
 		return;
 	}
 	char buffer[CDC_CMD_MAX_LEN];
@@ -684,7 +684,7 @@ static void cmd_macro_add(const char *arg)
 	char *keys_str = strtok_r(NULL, ";", &saveptr);
 	if (!slot_str || !name_str || !keys_str)
 	{
-		cdc_send_line("ERR MACROADD format: MACROADD slot;nom;hex1,hex2,...");
+		cdc_send_line("ERR MACROADD format: MACROADD slot;name;hex1,hex2,...");
 		return;
 	}
 	trim_spaces(slot_str);
@@ -692,13 +692,13 @@ static void cmd_macro_add(const char *arg)
 	trim_spaces(keys_str);
 	if (*slot_str == '\0' || *name_str == '\0' || *keys_str == '\0')
 	{
-		cdc_send_line("ERR MACROADD: parametre vide");
+		cdc_send_line("ERR MACROADD: empty parameter");
 		return;
 	}
 	int slot = atoi(slot_str);
 	if (slot < 0 || slot >= MAX_MACROS)
 	{
-		cdc_send_line("ERR MACROADD: slot invalide");
+		cdc_send_line("ERR MACROADD: invalid slot");
 		return;
 	}
 	uint8_t parsed_keys[6] = {0};
@@ -717,7 +717,7 @@ static void cmd_macro_add(const char *arg)
 		unsigned long value = strtoul(token, &endptr, 0);
 		if (endptr == token || value > 0xFF)
 		{
-			cdc_send_line("ERR MACROADD: code touche invalide");
+			cdc_send_line("ERR MACROADD: invalid keycode");
 			return;
 		}
 		parsed_keys[key_index++] = (uint8_t)value;
@@ -725,7 +725,7 @@ static void cmd_macro_add(const char *arg)
 	}
 	if (key_index == 0)
 	{
-		cdc_send_line("ERR MACROADD: aucune touche fournie");
+		cdc_send_line("ERR MACROADD: no keys provided");
 		return;
 	}
 	while (key_index < 6)
@@ -742,7 +742,7 @@ static void cmd_macro_add(const char *arg)
 	}
 	save_macros(macros_list, macros_count);
 	char msg[64];
-	snprintf(msg, sizeof(msg), "MACRO %d enregistree", slot);
+	snprintf(msg, sizeof(msg), "MACRO %d saved", slot);
 	cdc_send_line(msg);
 }
 
@@ -750,7 +750,7 @@ static void cmd_macro_delete(const char *arg)
 {
 	if (arg == NULL)
 	{
-		cdc_send_line("ERR MACRODEL: arguments manquants");
+		cdc_send_line("ERR MACRODEL: missing arguments");
 		return;
 	}
 	char buffer[CDC_CMD_MAX_LEN];
@@ -759,18 +759,18 @@ static void cmd_macro_delete(const char *arg)
 	trim_spaces(buffer);
 	if (*buffer == '\0')
 	{
-		cdc_send_line("ERR MACRODEL: slot manquant");
+		cdc_send_line("ERR MACRODEL: missing slot");
 		return;
 	}
 	int slot = atoi(buffer);
 	if (slot < 0 || slot >= MAX_MACROS)
 	{
-		cdc_send_line("ERR MACRODEL: slot invalide");
+		cdc_send_line("ERR MACRODEL: invalid slot");
 		return;
 	}
 	if (macros_list[slot].name[0] == '\0')
 	{
-		cdc_send_line("MACRODEL: slot deja vide");
+		cdc_send_line("MACRODEL: slot already empty");
 		return;
 	}
 	macros_list[slot].name[0] = '\0';
@@ -779,7 +779,7 @@ static void cmd_macro_delete(const char *arg)
 	recalc_macros_count();
 	save_macros(macros_list, macros_count);
 	char msg[64];
-	snprintf(msg, sizeof(msg), "MACRO %d supprimee", slot);
+	snprintf(msg, sizeof(msg), "MACRO %d deleted", slot);
 	cdc_send_line(msg);
 }
 
@@ -1027,7 +1027,7 @@ static void cmd_reset_keystats(void)
 
 static void parse_and_execute(const char *line)
 {
-	// Trim espaces
+	// Trim spaces
 	while (*line == ' ' || *line == '\t')
 		line++;
 	if (*line == '\0')
@@ -1140,24 +1140,24 @@ static void parse_and_execute(const char *line)
 		cmd_reset_bigrams();
 		return;
 	}
-	ESP_LOGW(TAG_CDC, "Commande inconnue: %s", line);
+	ESP_LOGW(TAG_CDC, "Unknown command: %s", line);
 	// ...existing code...
 	
 }
 
 // ----------------------------------------------------------------------------------
-// Réception de chunks USB CDC -> assemblage en lignes terminées par \n ou \r
+// Receiving USB CDC chunks -> assembling into lines terminated by \n or \r
 // ----------------------------------------------------------------------------------
 void receive_data(const char *data, uint16_t len)
 {
-	static bool last_was_cr = false; // pour gérer CRLF
-	static bool overflowed = false;  // si une ligne dépasse CDC_CMD_MAX_LEN, on drop jusqu'à prochain \r/\n
+	static bool last_was_cr = false; // to handle CRLF
+	static bool overflowed = false;  // if a line exceeds CDC_CMD_MAX_LEN, drop until next \r/\n
 	for (size_t i = 0; i < len; ++i)
 	{
 		char c = data[i];
 		if (c == '\r')
 		{
-			// Fin de ligne sur CR
+			// End of line on CR
 			if (!overflowed && assemble_len > 0)
 			{
 				cdc_cmd_push(assemble_buf, assemble_len);
@@ -1169,7 +1169,7 @@ void receive_data(const char *data, uint16_t len)
 		}
 		if (c == '\n')
 		{
-			// Si juste après un CR => déjà flush (CRLF), on ignore
+			// If right after a CR => already flushed (CRLF), ignore
 			if (last_was_cr)
 			{
 				last_was_cr = false;
@@ -1198,7 +1198,7 @@ void receive_data(const char *data, uint16_t len)
 }
 
 // ----------------------------------------------------------------------------------
-// Tâche de traitement (à créer dans main si souhaité)
+// Processing task (create in main if desired)
 // ----------------------------------------------------------------------------------
 void cdc_process_commands_task(void *arg)
 {
