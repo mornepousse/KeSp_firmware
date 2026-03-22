@@ -21,6 +21,16 @@
 #define LED_STRIP_FRAME_MS 20  /* 50 FPS */
 #endif
 
+#ifndef REACTIVE_ATTACK_MS
+#define REACTIVE_ATTACK_MS  100   /* full brightness hold after keypress */
+#endif
+#ifndef REACTIVE_DECAY_MS
+#define REACTIVE_DECAY_MS   500   /* fade to zero over this period */
+#endif
+#ifndef KPM_BAR_MAX
+#define KPM_BAR_MAX         400   /* KPM value that lights all LEDs */
+#endif
+
 /* LED strip handle */
 static led_strip_handle_t led_strip = NULL;
 static bool strip_initialized = false;
@@ -143,10 +153,10 @@ static void anim_reactive(void)
     TickType_t now = xTaskGetTickCount();
     uint32_t elapsed_ms = (now - last_keypress_tick) * portTICK_PERIOD_MS;
     
-    if (elapsed_ms < 100) {
+    if (elapsed_ms < REACTIVE_ATTACK_MS) {
         reactive_brightness = 255;
-    } else if (elapsed_ms < 500) {
-        reactive_brightness = 255 - ((elapsed_ms - 100) * 255 / 400);
+    } else if (elapsed_ms < REACTIVE_DECAY_MS) {
+        reactive_brightness = 255 - ((elapsed_ms - REACTIVE_ATTACK_MS) * 255 / (REACTIVE_DECAY_MS - REACTIVE_ATTACK_MS));
     } else {
         reactive_brightness = 0;
     }
@@ -168,8 +178,8 @@ static void anim_kpm_bar(void)
     /* Show KPM as a bar graph */
     extern uint32_t current_kpm;  /* From round_ui.c */
     
-    /* Map 0-400 KPM to 0-NUM_LEDS */
-    int lit_leds = (current_kpm * LED_STRIP_NUM_LEDS) / 400;
+    /* Map 0-KPM_BAR_MAX to 0-NUM_LEDS */
+    int lit_leds = (current_kpm * LED_STRIP_NUM_LEDS) / KPM_BAR_MAX;
     if (lit_leds > LED_STRIP_NUM_LEDS) lit_leds = LED_STRIP_NUM_LEDS;
     
     for (int i = 0; i < LED_STRIP_NUM_LEDS; i++) {

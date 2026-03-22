@@ -1,13 +1,7 @@
 #include "hid_bluetooth_manager.h"
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/event_groups.h"
-#include "esp_system.h"
-#include "esp_wifi.h"
-#include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -17,11 +11,8 @@
 #include "esp_bt_defs.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
-#include "esp_gatt_defs.h"
 #include "esp_bt_main.h"
-#include "esp_bt_device.h"
-#include "driver/gpio.h"
-#include "hid_dev.h"
+#include "keyboard_config.h"
 
 
 uint16_t hid_conn_id = 0;
@@ -79,8 +70,6 @@ esp_ble_adv_params_t hidd_adv_params = {
     .adv_int_max        = BLE_ADV_INT_MAX,
     .adv_type           = ADV_TYPE_IND,
     .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
-    //.peer_addr            =
-    //.peer_addr_type       =
     .channel_map        = ADV_CHNL_ALL,
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
@@ -90,9 +79,8 @@ void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param)
     switch(event) {
         case ESP_HIDD_EVENT_REG_FINISH: {
             if (param->init_finish.state == ESP_HIDD_INIT_OK) {
-                //esp_bd_addr_t rand_addr = {0x04,0x11,0x11,0x11,0x11,0x05};
                 esp_ble_gap_set_device_name(HIDD_DEVICE_NAME);
-                esp_ble_gap_config_adv_data(&hidd_adv_data);//????????????
+                esp_ble_gap_config_adv_data(&hidd_adv_data);
 
             }
             break;
@@ -110,7 +98,7 @@ void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param)
         case ESP_HIDD_EVENT_BLE_DISCONNECT: {
             sec_conn = false;
             ESP_LOGI(HID_DEMO_TAG, "ESP_HIDD_EVENT_BLE_DISCONNECT");
-            esp_ble_gap_start_advertising(&hidd_adv_params); //3333333333333333333333333333333333333333333333333333
+            esp_ble_gap_start_advertising(&hidd_adv_params);
             break;
         }
         case ESP_HIDD_EVENT_BLE_VENDOR_REPORT_WRITE_EVT: {
@@ -145,13 +133,9 @@ void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
         sec_conn = true;
         esp_bd_addr_t bd_addr;
         memcpy(bd_addr, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t));
-        //ESP_LOGI(HID_DEMO_TAG, "remote BD_ADDR: %08x%04x",
-                //(bd_addr[0] << 24) + (bd_addr[1] << 16) + (bd_addr[2] << 8) + bd_addr[3],
-                //(bd_addr[4] << 8) + bd_addr[5]);
-        //ESP_LOGI(HID_DEMO_TAG, "address type = %d", param->ble_security.auth_cmpl.addr_type);
-        //ESP_LOGI(HID_DEMO_TAG, "pair status = %s",param->ble_security.auth_cmpl.success ? "success" : "fail");
+        (void)bd_addr;
         if(!param->ble_security.auth_cmpl.success) {
-          //  ESP_LOGE(HID_DEMO_TAG, "fail reason = 0x%x",param->ble_security.auth_cmpl.fail_reason);
+            ESP_LOGE(HID_DEMO_TAG, "BLE auth fail reason = 0x%x", param->ble_security.auth_cmpl.fail_reason);
         }
         break;
     default:
@@ -159,32 +143,6 @@ void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
     }
 }
 
-/*
-void hid_demo_task(void *pvParameters)
-{
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    while(1) {
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
-        if (sec_conn) {
-            //ESP_LOGI(HID_DEMO_TAG, "Send the volume");
-            //send_volum_up = true;
-            //uint8_t key_vaule = {HID_KEY_A};
-            //esp_hidd_send_keyboard_value(hid_conn_id, 0, &key_vaule, 1);
-            //esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_UP, true);
-
-            vTaskDelay(3000 / portTICK_PERIOD_MS);
-            esp_hidd_send_keyboard_value(hid_conn_id, 0, NULL, 0);
-            //if (send_volum_up) {
-            //    send_volum_up = false;
-                //esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_UP, false);
-                //esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_DOWN, true);
-                //vTaskDelay(3000 / portTICK_PERIOD_MS);
-                //esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_DOWN, false);
-            //}
-        }
-    }
-}
-*/
 void init_hid_bluetooth(void)
 {
     uint64_t _t0 = esp_timer_get_time();
@@ -261,8 +219,7 @@ void init_hid_bluetooth(void)
     uint64_t _t1 = esp_timer_get_time();
     ESP_LOGW(HID_DEMO_TAG, "init_hid_bluetooth finished in %llu ms", (unsigned long long)((_t1-_t0)/1000));
 
-    //xTaskCreate(&hid_demo_task, "hid_task", 2048, NULL, 5, NULL);
-} 
+}
 
 void deinit_hid_bluetooth(void)
 {
@@ -334,8 +291,6 @@ void send_hid_bl_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
 {
     esp_hidd_send_mouse_value(hid_conn_id, buttons, x, y, wheel);
 }
-
-#define STORAGE_NAMESPACE "storage"
 
 void save_bt_state(bool enabled) {
     nvs_handle_t my_handle;

@@ -291,16 +291,6 @@ void cdc_ping(void)
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
-void cdc_debug(const char *msg)
-{
-	size_t len = strlen(msg);
-	//if (len > 0)
-	//{
-		start_command_queue(c_debug_t, len);
-		tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)msg, len);
-		tinyusb_cdcacm_write_flush(CDC_ITF, 0);
-	//}
-}
 
 // ----------------------------------------------------------------------------------
 // Parsing des commandes
@@ -1212,15 +1202,12 @@ void receive_data(const char *data, uint16_t len)
 // ----------------------------------------------------------------------------------
 void cdc_process_commands_task(void *arg)
 {
-	//ESP_LOGI(TAG_CDC, "C");
-	//cdc_debug("C");
 	cdc_cmd_t cmd;
 	for (;;)
 	{
 		while (cdc_cmd_pop(&cmd))
 		{
 			parse_and_execute(cmd.line);
-			//cdc_debug("C");
 		}
 
 		vTaskDelay(pdMS_TO_TICKS(50));

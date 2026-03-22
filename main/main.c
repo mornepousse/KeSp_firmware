@@ -61,8 +61,7 @@ static void status_display_task(void *arg) {
       cdc_send_layer(current_layout);
     }
 
-    // Gestion veille écran : efface après 1 minute d'inactivité clavier,
-    // puis rallume et réaffiche les infos à la prochaine activité.
+    /* Display sleep: turn off after inactivity, wake on next keypress */
     uint32_t now = esp_timer_get_time() / 1000;
     uint32_t last = get_last_activity_time_ms();
 
@@ -117,12 +116,12 @@ void app_main(void) {
   matrix_setup();
 
   ESP_LOGI(TAG, "Task Matrix init");
-  TaskHandle_t xHandleMatrix_Keybord = NULL;
+  TaskHandle_t xHandleMatrixKeyboard = NULL;
   static uint8_t ucParameterToPass;
   // Keyboard on CPU 0, priority 3 (below LVGL=4)
   /* Increase keyboard task stack to reduce stack pressure (was 4096) */
   xTaskCreatePinnedToCore(vTaskKeyboard, "Matrix_Keyboard", 6144, &ucParameterToPass,
-              3, &xHandleMatrix_Keybord, 0);
+              3, &xHandleMatrixKeyboard, 0);
   ESP_LOGI(TAG, "bluetooth init check");
   if (load_bt_state()) {
       ESP_LOGI(TAG, "Starting bluetooth (saved state: ON)");
