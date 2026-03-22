@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run unit tests
+        run: |
+          cd test
+          mkdir -p build && cd build
+          cmake ..
+          make
+          ./test_runner
+
+  build-firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        board: [kase_v1, kase_v2, kase_v2_debug]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ${{ matrix.board }}
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.1
+          target: esp32s3
+          command: idf.py -DBOARD=${{ matrix.board }} build
+      - name: Upload firmware binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.board }}
+          path: build/KeSp.bin
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [host-tests, build-firmware]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Prepare release binaries
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          mkdir -p release
+          cp artifacts/firmware-kase_v1/KeSp.bin "release/KaSe_${TAG}_V1.bin"
+          cp artifacts/firmware-kase_v2/KeSp.bin "release/KaSe_${TAG}_V2.bin"
+          cp artifacts/firmware-kase_v2_debug/KeSp.bin "release/KaSe_${TAG}_V2_Debug.bin"
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.bin
+          generate_release_notes: true
