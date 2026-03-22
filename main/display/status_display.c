@@ -312,7 +312,7 @@ static void status_display_update_connection_icons(bool force)
         return;
     }
 
-    // Gestion de l'icône BT : visible uniquement si le Bluetooth est initialisé
+    /* BT icon: only visible when Bluetooth is initialized */
     if (bt_state == 0) {
         bt_blink_visible = false;
         bt_blink_last_tick = xTaskGetTickCount();
@@ -341,7 +341,7 @@ static void status_display_update_connection_icons(bool force)
         }
     }
 
-    // Choix de l'icône chemin (USB/BLE)
+    /* Path icon: USB or BLE */
     if (path_state == 0) {
         lv_img_set_src(icon_path, &flash);        // USB
     } else {

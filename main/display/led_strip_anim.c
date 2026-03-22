@@ -14,6 +14,7 @@
 #include "esp_timer.h"
 #include <string.h>
 #include <math.h>
+#include "shared_state.h"
 
 #define TAG "LED_STRIP"
 
@@ -175,8 +176,7 @@ static void anim_reactive(void)
 
 static void anim_kpm_bar(void)
 {
-    /* Show KPM as a bar graph */
-    extern uint32_t current_kpm;  /* From round_ui.c */
+    /* Show KPM as a bar graph (current_kpm from shared_state.h) */
     
     /* Map 0-KPM_BAR_MAX to 0-NUM_LEDS */
     int lit_leds = (current_kpm * LED_STRIP_NUM_LEDS) / KPM_BAR_MAX;

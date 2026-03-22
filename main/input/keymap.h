@@ -3,12 +3,12 @@
 extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
 extern char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH];
 
-// Structure d'une macro (liste de touches + longueur)
+/* Macro definition (key list + trigger keycode) */
 #define MAX_MACRO_NAME_LENGTH 16
 #define MAX_MACROS 20
 typedef struct {
   char name[MAX_MACRO_NAME_LENGTH];
-  uint8_t keys[6]; // Jusqu'à 6 touches simultanées (HID limit)
+  uint8_t keys[6]; /* up to 6 simultaneous keys (HID limit) */
   uint16_t key_definition;
 } macro_t;
 

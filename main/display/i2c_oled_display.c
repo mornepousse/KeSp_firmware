@@ -15,7 +15,7 @@
 #include "driver/gpio.h"
 
 static const char *TAG_DISP = "I2C_OLED"; 
-// Déclaration préalable
+/* Forward declaration */
 bool test_oled_presence(void);
 
 lv_disp_t *disp;
@@ -98,7 +98,7 @@ void init_display(void)
     {
         if (!test_oled_presence())
         {
-            ESP_LOGW(TAG_DISP, "OLED non détecté - on saute l'initialisation graphique");
+            ESP_LOGW(TAG_DISP, "OLED not detected — skipping display init");
             display_available = false;
             return;
         }
@@ -194,11 +194,9 @@ void init_display(void)
     display_test_text(PRODUCT_NAME);
 }
 
-// ------------------------------------------------------------------------------------
-// Fonction dédiée : test rapide de présence de l'écran (SSD1306) avant initialisation
-// Retourne true si un ACK / write simple réussit, sinon false.
-// N'utilise pas l'infrastructure esp_lcd pour isoler les erreurs bas niveau.
-// ------------------------------------------------------------------------------------
+/* Quick OLED presence test (SSD1306) before full init.
+ * Returns true if a simple I2C write gets an ACK, false otherwise.
+ * Uses raw I2C (not esp_lcd) to isolate low-level errors. */
 bool test_oled_presence(void)
 {
     //if(display_available == false) return false;
@@ -218,7 +216,7 @@ bool test_oled_presence(void)
     err = i2c_new_master_bus(&bus_config, &bus);
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG_DISP, "Création bus I2C échec: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG_DISP, "I2C bus creation failed: %s", esp_err_to_name(err));
         display_available = false;
         return false;
     }
@@ -232,26 +230,26 @@ bool test_oled_presence(void)
     err = i2c_master_bus_add_device(bus, &dev_cfg, &dev);
     if (err != ESP_OK)
     {
-        ESP_LOGW(TAG_DISP, "Ajout device OLED (0x%02X) échec: %s", cfg->i2c.address, esp_err_to_name(err));
+        ESP_LOGW(TAG_DISP, "Add OLED device (0x%02X) failed: %s", cfg->i2c.address, esp_err_to_name(err));
         i2c_del_master_bus(bus);
         display_available = false;
         return false;
     }
 
-    // Paquet minimal : 0x00 (control byte) + 0xAE (DISPLAY OFF) commande inoffensive
+    /* Minimal packet: 0x00 (control byte) + 0xAE (DISPLAY OFF) — harmless command */
     uint8_t pkt[] = {0x00, 0xAE};
     err = i2c_master_transmit(dev, pkt, sizeof(pkt), 50); // timeout ms
     bool ok = (err == ESP_OK);
     if (!ok)
     {
-        ESP_LOGW(TAG_DISP, "Aucun ACK OLED @0x%02X (%s)", cfg->i2c.address, esp_err_to_name(err));
+        ESP_LOGW(TAG_DISP, "No ACK from OLED @0x%02X (%s)", cfg->i2c.address, esp_err_to_name(err));
     }
     else
     {
-        ESP_LOGI(TAG_DISP, "OLED détecté @0x%02X", cfg->i2c.address);
+        ESP_LOGI(TAG_DISP, "OLED detected @0x%02X", cfg->i2c.address);
     }
 
-    // Nettoyage (on recréera le bus dans init_display si présent)
+    /* Cleanup — bus will be re-created in init_display if OLED is present */
     i2c_master_bus_rm_device(dev);
     i2c_del_master_bus(bus);
 
