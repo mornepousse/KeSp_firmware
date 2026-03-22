@@ -42,7 +42,7 @@ main/
   sys/              # CPU time monitoring
 scripts/
   build_release.sh  # Multi-variant release builder
-test/               # Host-side unit tests (844 tests)
+test/               # Host-side unit tests (898 tests)
 docs/               # Protocol documentation
 ```
 
