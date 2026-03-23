@@ -75,6 +75,9 @@
 /* ── Display sleep timeout (ms of inactivity) ──────────────── */
 #define BOARD_DISPLAY_SLEEP_MS    60000
 
+/* ── Disable display task (round display causes input lag) ──── */
+#define SKIP_STATUS_DISPLAY       1
+
 /* ── Deep sleep (minutes of inactivity, 0 to disable) ──────── */
 #define BOARD_SLEEP_MINS          45
 
