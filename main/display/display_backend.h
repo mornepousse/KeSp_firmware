@@ -7,7 +7,7 @@
 #include "display_types.h"
 
 typedef struct {
-    bool (*init)(const display_hw_config_t *cfg);   /* Initialize hardware + LVGL */
+    bool (*init)(void);                             /* Initialize hardware + LVGL (reads board.h) */
     void (*update_layer)(void);                     /* Update layer name display */
     void (*update)(void);                           /* Periodic UI refresh */
     void (*refresh_all)(void);                      /* Full UI rebuild */

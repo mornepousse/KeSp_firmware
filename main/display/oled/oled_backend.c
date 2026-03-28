@@ -1,5 +1,6 @@
 /* OLED I2C (SSD1306) backend implementation */
 #include "display_backend.h"
+#include "board.h"
 #include "i2c_oled_display.h"
 #include "hid_bluetooth_manager.h"
 #include "hid_report.h"
@@ -149,9 +150,23 @@ static void oled_update_connection_icons(bool force)
 
 /* ── Backend interface ───────────────────────────────────────────── */
 
-static bool oled_init(const display_hw_config_t *cfg)
+static bool oled_init(void)
 {
-    display_set_hw_config(cfg);
+    display_hw_config_t cfg = {
+        .bus_type = BOARD_DISPLAY_BUS,
+        .width = BOARD_DISPLAY_WIDTH,
+        .height = BOARD_DISPLAY_HEIGHT,
+        .pixel_clock_hz = BOARD_DISPLAY_CLK_HZ,
+        .reset_pin = BOARD_DISPLAY_RESET,
+        .i2c = {
+            .host = BOARD_DISPLAY_I2C_HOST,
+            .sda = BOARD_DISPLAY_I2C_SDA,
+            .scl = BOARD_DISPLAY_I2C_SCL,
+            .address = BOARD_DISPLAY_I2C_ADDR,
+            .enable_internal_pullups = BOARD_DISPLAY_I2C_PULLUPS,
+        },
+    };
+    display_set_hw_config(&cfg);
     init_display();
     return display_available;
 }

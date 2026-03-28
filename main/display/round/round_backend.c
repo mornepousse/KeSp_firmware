@@ -2,10 +2,26 @@
 #include "display_backend.h"
 #include "spi_round_display.h"
 #include "round_ui.h"
+#include "board.h"
 
-static bool round_init(const display_hw_config_t *cfg)
+static bool round_init(void)
 {
-    return spi_display_init(cfg);
+    display_hw_config_t cfg = {
+        .bus_type = BOARD_DISPLAY_BUS,
+        .width = BOARD_DISPLAY_WIDTH,
+        .height = BOARD_DISPLAY_HEIGHT,
+        .pixel_clock_hz = BOARD_DISPLAY_CLK_HZ,
+        .reset_pin = BOARD_DISPLAY_RESET,
+        .spi = {
+            .host = BOARD_DISPLAY_SPI_HOST,
+            .sclk = BOARD_DISPLAY_SPI_SCLK,
+            .mosi = BOARD_DISPLAY_SPI_MOSI,
+            .cs = BOARD_DISPLAY_SPI_CS,
+            .dc = BOARD_DISPLAY_SPI_DC,
+            .backlight = BOARD_DISPLAY_SPI_BL,
+        },
+    };
+    return spi_display_init(&cfg);
 }
 
 static void round_update_layer(void)  { round_ui_update_layer(); }
