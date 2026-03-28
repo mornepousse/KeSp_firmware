@@ -17,6 +17,7 @@
 #include "keyboard_task.h"
 #include "hid_bluetooth_manager.h"
 #include "tap_hold.h"
+#include "tap_dance.h"
 #include "key_features.h"
 #include "esp_log.h"
 
@@ -118,6 +119,10 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
         tap_hold_on_press(kc, row, col);
         return 0;
     }
+    if (K_IS_TD(kc)) {
+        tap_dance_on_press(K_TD_INDEX(kc), row, col);
+        return 0;
+    }
     if (K_IS_OSL(kc)) { osl_arm(K_OSL_LAYER(kc)); return 0; }
     if (kc == K_CAPS_WORD) { caps_word_toggle(); return 0; }
     if (kc == K_REPEAT)    { return repeat_key_get(); }
@@ -138,8 +143,10 @@ static void detect_releases(void)
                 break;
             }
         }
-        if (!still_pressed)
+        if (!still_pressed) {
             tap_hold_on_release(prev_press_row[i], prev_press_col[i]);
+            tap_dance_on_release(prev_press_row[i], prev_press_col[i]);
+        }
     }
 }
 
