@@ -488,15 +488,9 @@ static void cmd_get_keystats(bool binary)
 		header[8] = MATRIX_ROWS;
 		header[9] = MATRIX_COLS;
 		header[10] = MODULE_ID;
-		header[11] = (key_stats_total >> 0) & 0xFF;
-		header[12] = (key_stats_total >> 8) & 0xFF;
-		header[13] = (key_stats_total >> 16) & 0xFF;
-		header[14] = (key_stats_total >> 24) & 0xFF;
+		pack_u32_le(&header[11], key_stats_total);
 		uint32_t max_val = get_key_stats_max();
-		header[15] = (max_val >> 0) & 0xFF;
-		header[16] = (max_val >> 8) & 0xFF;
-		header[17] = (max_val >> 16) & 0xFF;
-		header[18] = (max_val >> 24) & 0xFF;
+		pack_u32_le(&header[15], max_val);
 
 		uint8_t payload[19 + MATRIX_ROWS * MATRIX_COLS * 4];
 		memcpy(payload, header, 19);
@@ -510,10 +504,8 @@ static void cmd_get_keystats(bool binary)
 #else
 				uint32_t count = key_stats[r][c];
 #endif
-				payload[offset++] = (count >> 0) & 0xFF;
-				payload[offset++] = (count >> 8) & 0xFF;
-				payload[offset++] = (count >> 16) & 0xFF;
-				payload[offset++] = (count >> 24) & 0xFF;
+				pack_u32_le(&payload[offset], count);
+				offset += 4;
 			}
 		}
 		tinyusb_cdcacm_write_queue(CDC_ITF, payload, offset);
@@ -583,14 +575,9 @@ static void cmd_get_bigrams(bool binary)
 		header[7] = 0;
 		header[8] = MODULE_ID;
 		header[9] = (uint8_t)NUM_KEYS;
-		header[10] = (bigram_total >> 0) & 0xFF;
-		header[11] = (bigram_total >> 8) & 0xFF;
-		header[12] = (bigram_total >> 16) & 0xFF;
-		header[13] = (bigram_total >> 24) & 0xFF;
-		header[14] = (max_val >> 0) & 0xFF;
-		header[15] = (max_val >> 8) & 0xFF;
-		header[16] = (n_entries >> 0) & 0xFF;
-		header[17] = (n_entries >> 8) & 0xFF;
+		pack_u32_le(&header[10], bigram_total);
+		pack_u16_le(&header[14], max_val);
+		pack_u16_le(&header[16], n_entries);
 
 		size_t total_size = 18 + n_entries * 4;
 		uint8_t *payload = malloc(total_size);
@@ -600,8 +587,7 @@ static void cmd_get_bigrams(bool binary)
 			size_t off = 18 + i * 4;
 			payload[off + 0] = entries[i].prev;
 			payload[off + 1] = entries[i].curr;
-			payload[off + 2] = (entries[i].count >> 0) & 0xFF;
-			payload[off + 3] = (entries[i].count >> 8) & 0xFF;
+			pack_u16_le(&payload[off + 2], entries[i].count);
 		}
 		tinyusb_cdcacm_write_queue(CDC_ITF, payload, total_size);
 		tinyusb_cdcacm_write_flush(CDC_ITF, 0);

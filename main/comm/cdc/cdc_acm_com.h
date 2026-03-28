@@ -56,6 +56,18 @@ void trim_spaces(char *str);
 /* Binary response framing: sends [C][>][type][len_lo][len_hi] header */
 void start_command_queue(unsigned char type, size_t total_size);
 
+/* Byte-packing helpers for binary protocol */
+static inline void pack_u16_le(uint8_t *buf, uint16_t val) {
+    buf[0] = (uint8_t)(val & 0xFF);
+    buf[1] = (uint8_t)((val >> 8) & 0xFF);
+}
+static inline void pack_u32_le(uint8_t *buf, uint32_t val) {
+    buf[0] = (uint8_t)(val & 0xFF);
+    buf[1] = (uint8_t)((val >> 8) & 0xFF);
+    buf[2] = (uint8_t)((val >> 16) & 0xFF);
+    buf[3] = (uint8_t)((val >> 24) & 0xFF);
+}
+
 /* ── USB callbacks ───────────────────────────────────────────────── */
 
 /* Called by TinyUSB ISR/callback with arbitrary chunks */

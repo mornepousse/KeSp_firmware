@@ -164,7 +164,32 @@ void status_display_update(void)
 
 void status_display_start(void)
 {
-    display_hw_config_t cfg = keyboard_get_display_config();
+    /* Build display config from board.h defines */
+    display_hw_config_t cfg = {
+        .bus_type = BOARD_DISPLAY_BUS,
+        .width = BOARD_DISPLAY_WIDTH,
+        .height = BOARD_DISPLAY_HEIGHT,
+        .pixel_clock_hz = BOARD_DISPLAY_CLK_HZ,
+        .reset_pin = BOARD_DISPLAY_RESET,
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
+        .spi = {
+            .host = BOARD_DISPLAY_SPI_HOST,
+            .sclk = BOARD_DISPLAY_SPI_SCLK,
+            .mosi = BOARD_DISPLAY_SPI_MOSI,
+            .cs = BOARD_DISPLAY_SPI_CS,
+            .dc = BOARD_DISPLAY_SPI_DC,
+            .backlight = BOARD_DISPLAY_SPI_BL,
+        },
+#else
+        .i2c = {
+            .host = BOARD_DISPLAY_I2C_HOST,
+            .sda = BOARD_DISPLAY_I2C_SDA,
+            .scl = BOARD_DISPLAY_I2C_SCL,
+            .address = BOARD_DISPLAY_I2C_ADDR,
+            .enable_internal_pullups = BOARD_DISPLAY_I2C_PULLUPS,
+        },
+#endif
+    };
     
 #ifdef BOARD_DISPLAY_BACKEND_ROUND
     /* Use dedicated SPI driver for round display */
