@@ -9,6 +9,7 @@
 #include "tap_dance.h"
 #include "combo.h"
 #include "leader.h"
+#include "keymap.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -69,6 +70,23 @@ void vTaskKeyboard(void *pvParameters)
             uint8_t kc = leader_consume(&mod);
             if (kc != 0)
                 send_tap(kc, mod);
+        }
+
+        /* Macro sequence pending → play step by step */
+        if (key_processor_has_pending_macro()) {
+            int16_t idx = key_processor_consume_macro();
+            if (idx >= 0 && idx < MAX_MACROS) {
+                const macro_step_t *steps = macros_list[idx].steps;
+                for (int s = 0; s < MACRO_MAX_STEPS && steps[s].keycode != 0; s++) {
+                    if (steps[s].keycode == MACRO_DELAY_MARKER) {
+                        /* Delay step */
+                        vTaskDelay(pdMS_TO_TICKS(steps[s].modifier * 10));
+                    } else {
+                        /* Key tap with optional modifier */
+                        send_tap(steps[s].keycode, steps[s].modifier);
+                    }
+                }
+            }
         }
 
         /* Matrix changed → full processing cycle */

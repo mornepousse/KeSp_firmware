@@ -92,16 +92,41 @@ static void dispatch_internal_function(void)
 
 /* ── Macro expansion ─────────────────────────────────────────────── */
 
+/* Pending macro sequence to play (set by expand_macro, consumed by keyboard_task) */
+static int16_t pending_macro_idx = -1;
+
 static void expand_macro(uint16_t keycode)
 {
     if (keycode < MACRO_1 || keycode > MACRO_20) return;
     int16_t idx = (keycode - MACRO_1) / 256;
     if (idx >= MAX_MACROS || macros_list[idx].name[0] == '\0') return;
+
+    /* New: if macro has steps, queue it for sequential playback */
+    if (macros_list[idx].steps[0].keycode != 0) {
+        pending_macro_idx = idx;
+        return;
+    }
+
+    /* Legacy fallback: simultaneous keys */
     uint8_t j = 0;
     for (uint8_t i = 0; i < 6 && j < 6; i++) {
         if (keycodes[i] == 0)
             keycodes[i] = macros_list[idx].keys[j++];
     }
+}
+
+/* Check if a macro sequence is pending */
+bool key_processor_has_pending_macro(void)
+{
+    return pending_macro_idx >= 0;
+}
+
+/* Get and clear the pending macro index */
+int16_t key_processor_consume_macro(void)
+{
+    int16_t idx = pending_macro_idx;
+    pending_macro_idx = -1;
+    return idx;
 }
 
 /* ── Advanced keycode processing ─────────────────────────────────── */

@@ -23,3 +23,9 @@ bool key_processor_has_tap(void);
 
 /* Clear injected tap keycodes from keycodes[] */
 void key_processor_clear_taps(void);
+
+/* Check if a macro sequence is pending playback */
+bool key_processor_has_pending_macro(void);
+
+/* Get and clear the pending macro index (-1 if none) */
+int16_t key_processor_consume_macro(void);

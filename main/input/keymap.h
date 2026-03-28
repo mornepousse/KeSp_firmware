@@ -3,12 +3,22 @@
 extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
 extern char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH];
 
-/* Macro definition (key list + trigger keycode) */
+/* Macro step: one keypress in a sequence */
+#define MACRO_MAX_STEPS 24
+typedef struct {
+  uint8_t keycode;   /* HID keycode (0 = end, 0xFF = delay marker) */
+  uint8_t modifier;  /* modifier mask, or delay in 10ms units if keycode=0xFF */
+} macro_step_t;
+
+#define MACRO_DELAY_MARKER 0xFF
+
+/* Macro definition */
 #define MAX_MACRO_NAME_LENGTH 16
 #define MAX_MACROS 20
 typedef struct {
   char name[MAX_MACRO_NAME_LENGTH];
-  uint8_t keys[6]; /* up to 6 simultaneous keys (HID limit) */
+  macro_step_t steps[MACRO_MAX_STEPS]; /* sequence of keypress/delay steps */
+  uint8_t keys[6];                     /* legacy: simultaneous keys (backward compat) */
   uint16_t key_definition;
 } macro_t;
 

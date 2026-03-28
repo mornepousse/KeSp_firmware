@@ -434,6 +434,60 @@ static void cmd_macro_add(const char *arg)
 	cdc_send_line(msg);
 }
 
+/* MACROSEQ slot;name;key1:mod1,key2:mod2,FF:delay,...  — sequence macro */
+static void cmd_macro_add_seq(const char *arg)
+{
+	if (!arg) { cdc_send_line("ERR MACROSEQ: missing args"); return; }
+	char buffer[CDC_CMD_MAX_LEN];
+	strncpy(buffer, arg, sizeof(buffer)); buffer[sizeof(buffer)-1] = '\0';
+
+	char *saveptr = NULL;
+	char *slot_str = strtok_r(buffer, ";", &saveptr);
+	char *name_str = strtok_r(NULL, ";", &saveptr);
+	char *steps_str = strtok_r(NULL, ";", &saveptr);
+	if (!slot_str || !name_str || !steps_str) {
+		cdc_send_line("ERR MACROSEQ format: slot;name;key:mod,key:mod,...");
+		return;
+	}
+	trim_spaces(slot_str); trim_spaces(name_str); trim_spaces(steps_str);
+
+	int slot = atoi(slot_str);
+	if (slot < 0 || slot >= MAX_MACROS) { cdc_send_line("ERR MACROSEQ: invalid slot"); return; }
+
+	macro_step_t steps[MACRO_MAX_STEPS] = {0};
+	char *tok = steps_str;
+	int step_idx = 0;
+	while (tok && *tok && step_idx < MACRO_MAX_STEPS) {
+		char *next = strchr(tok, ',');
+		if (next) *next = '\0';
+		trim_spaces(tok);
+
+		char *colon = strchr(tok, ':');
+		if (colon) {
+			*colon = '\0';
+			steps[step_idx].keycode = (uint8_t)strtoul(tok, NULL, 16);
+			steps[step_idx].modifier = (uint8_t)strtoul(colon + 1, NULL, 16);
+		} else {
+			steps[step_idx].keycode = (uint8_t)strtoul(tok, NULL, 16);
+			steps[step_idx].modifier = 0;
+		}
+		step_idx++;
+		tok = next ? next + 1 : NULL;
+	}
+
+	strncpy(macros_list[slot].name, name_str, MAX_MACRO_NAME_LENGTH - 1);
+	macros_list[slot].name[MAX_MACRO_NAME_LENGTH - 1] = '\0';
+	memcpy(macros_list[slot].steps, steps, sizeof(steps));
+	memset(macros_list[slot].keys, 0, sizeof(macros_list[slot].keys));
+	macros_list[slot].key_definition = macro_keycode_from_index((size_t)slot);
+	if ((size_t)(slot + 1) > macros_count) macros_count = slot + 1;
+	save_macros(macros_list, macros_count);
+
+	char msg[64];
+	snprintf(msg, sizeof(msg), "MACRO %d saved (%d steps)", slot, step_idx);
+	cdc_send_line(msg);
+}
+
 static void cmd_macro_delete(const char *arg)
 {
 	if (arg == NULL)
@@ -863,6 +917,7 @@ static const cdc_cmd_entry_t keyboard_cmd_table[] = {
 	{ "LAYOUTS?",       8,  false, cmd_layouts_q },
 	{ "LAYOUT?",        7,  false, cmd_layout_json },
 	/* Macros */
+	{ "MACROSEQ ",     9,  true,  cmd_macro_add_seq },
 	{ "MACROADD",       8,  true,  cmd_macro_add },
 	{ "MACRODEL",       8,  true,  cmd_macro_delete },
 	{ "MACROS?",        7,  false, cmd_macros_q },

@@ -10,8 +10,8 @@ static const char *TAG = "KEYMAP";
 /* keymaps[] and default_layout_names[] are defined in board_keymap.c */
 
 macro_t macros_list[MAX_MACROS] = {
-    {"Copier", {K_LCTRL, K_C}, MACRO_1},
-    {"Coller", {K_LCTRL, K_V}, MACRO_2},
+    { .name = "Copier",  .steps = {{0}}, .keys = {K_LCTRL, K_C}, .key_definition = MACRO_1 },
+    { .name = "Coller",  .steps = {{0}}, .keys = {K_LCTRL, K_V}, .key_definition = MACRO_2 },
 };
 size_t macros_count = 2;
 
