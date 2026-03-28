@@ -26,11 +26,11 @@ typedef enum { OTA_IDLE, OTA_RECEIVING } ota_state_t;
 
 extern volatile ota_state_t ota_state;
 extern uint8_t ota_buf[];
-extern size_t ota_buf_pos;
+extern volatile size_t ota_buf_pos;
 extern size_t ota_total_size;
-extern size_t ota_received;
+extern volatile size_t ota_received;
 extern volatile bool ota_chunk_ready;
-extern uint32_t ota_last_activity_ms;
+extern volatile uint32_t ota_last_activity_ms;
 
 void cmd_ota_start(const char *arg);
 void ota_abort(const char *reason);

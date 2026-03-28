@@ -8,11 +8,11 @@ volatile ota_state_t ota_state = OTA_IDLE;
 static esp_ota_handle_t ota_handle = 0;
 static const esp_partition_t *ota_partition = NULL;
 size_t ota_total_size = 0;
-size_t ota_received = 0;
+volatile size_t ota_received = 0;
 uint8_t ota_buf[OTA_CHUNK_SIZE];
-size_t ota_buf_pos = 0;
+volatile size_t ota_buf_pos = 0;
 volatile bool ota_chunk_ready = false;
-uint32_t ota_last_activity_ms = 0;
+volatile uint32_t ota_last_activity_ms = 0;
 
 void ota_abort(const char *reason)
 {

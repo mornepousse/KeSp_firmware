@@ -1,5 +1,6 @@
 /* OLED I2C (SSD1306) backend implementation */
 #include "display_backend.h"
+#include "status_display.h"
 #include "board.h"
 #include "i2c_oled_display.h"
 #include "hid_bluetooth_manager.h"
@@ -216,7 +217,6 @@ static void oled_sleep(void)
 static void oled_wake(void)
 {
     /* Defer to display task via request_wake_request flag */
-    extern volatile bool request_wake_request;
     request_wake_request = true;
 }
 
