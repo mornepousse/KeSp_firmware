@@ -19,7 +19,7 @@ static const char *TAG_DISP = "I2C_OLED";
 bool test_oled_presence(void);
 
 lv_disp_t *disp;
-bool display_available = true;
+/* display_available is defined in status_display.c */
 static display_hw_config_t current_cfg = {
     .bus_type = DISPLAY_BUS_I2C,
     .width = 128,

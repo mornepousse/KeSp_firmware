@@ -1,10 +1,10 @@
 /* HID report queue and sender task */
 #include "hid_report.h"
 #include "hid_transport.h"
+#include "keyboard_task.h"
 #include "matrix_scan.h"
 #include "key_definitions.h"
 #include "esp_log.h"
-#include "tinyusb.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"

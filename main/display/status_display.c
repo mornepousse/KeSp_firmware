@@ -22,11 +22,11 @@ static const display_backend_t *backend = NULL;
 void display_set_backend(const display_backend_t *b) { backend = b; }
 const display_backend_t *display_get_backend(void)    { return backend; }
 
+/* Display availability flag — set by backend init */
+bool display_available = false;
+
 /* Request wake flag for display task context */
 volatile bool request_wake_request = false;
-
-/* Expose a controlled way to disable the display from other modules */
-extern bool display_available;
 void status_display_force_disable(void)
 {
     display_available = false;
@@ -104,4 +104,9 @@ void status_display_show_DFU_prog(void)
 void status_display_notify_mouse_activity(void)
 {
     if (backend) backend->notify_mouse();
+}
+
+void status_display_notify_keypress(void)
+{
+    if (backend && backend->notify_keypress) backend->notify_keypress();
 }

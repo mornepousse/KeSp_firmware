@@ -1,3 +1,18 @@
+# Select display backend sources based on board
+if(DISPLAY_BACKEND STREQUAL "round")
+    set(DISPLAY_BACKEND_SRCS
+        "display/round/spi_round_display.c"
+        "display/round/round_ui.c"
+        "display/round/round_backend.c"
+        "display/round/tamagotchi.c"
+    )
+else()
+    set(DISPLAY_BACKEND_SRCS
+        "display/oled/i2c_oled_display.c"
+        "display/oled/oled_backend.c"
+    )
+endif()
+
 idf_component_register(
     SRCS
         "main.c"
@@ -7,12 +22,7 @@ idf_component_register(
         "app/littlefs_manager.c"
 
         "display/status_display.c"
-        "display/oled/i2c_oled_display.c"
-        "display/oled/oled_backend.c"
-        "display/round/spi_round_display.c"
-        "display/round/round_ui.c"
-        "display/round/round_backend.c"
-        "display/round/tamagotchi.c"
+        ${DISPLAY_BACKEND_SRCS}
         "led/led_strip_anim.c"
         "display/assets/img_usb.c"
         "display/assets/img_signal.c"

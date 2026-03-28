@@ -2,6 +2,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+/* Display availability — set by backend, checked by all modules */
+extern bool display_available;
+
 void status_display_start(void);
 void status_display_refresh_all(void);
 void status_display_sleep(void);
@@ -10,6 +13,7 @@ void status_display_update(void);
 void status_display_update_layer_name(void);
 void status_display_show_DFU_prog(void);
 void status_display_notify_mouse_activity(void);
+void status_display_notify_keypress(void);
 
 /* Request a wake/refresh from another task context */
 extern volatile bool request_wake_request;

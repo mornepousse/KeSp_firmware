@@ -14,6 +14,7 @@ typedef struct {
     void (*sleep)(void);                            /* Enter sleep mode */
     void (*wake)(void);                             /* Exit sleep mode */
     void (*notify_mouse)(void);                     /* Mouse activity notification */
+    void (*notify_keypress)(void);                  /* Keypress notification (for KPM) */
     void (*show_dfu)(void);                         /* Show DFU mode screen */
 } display_backend_t;
 

@@ -13,6 +13,14 @@ if(NOT EXISTS "${BOARD_DIR}/board.h")
     message(FATAL_ERROR "Board '${BOARD}' not found: ${BOARD_DIR}/board.h does not exist")
 endif()
 
+# Detect display backend from board.h
+file(READ "${BOARD_DIR}/board.h" _board_h_content)
+if(_board_h_content MATCHES "BOARD_DISPLAY_BACKEND_ROUND")
+    set(DISPLAY_BACKEND "round" CACHE INTERNAL "")
+else()
+    set(DISPLAY_BACKEND "oled" CACHE INTERNAL "")
+endif()
+
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 set(COMPONENTS main)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

@@ -238,6 +238,7 @@ const display_backend_t oled_display_backend = {
     .refresh_all   = oled_refresh_all,
     .sleep         = oled_sleep,
     .wake          = oled_wake,
-    .notify_mouse  = oled_notify_mouse,
-    .show_dfu      = oled_show_dfu,
+    .notify_mouse    = oled_notify_mouse,
+    .notify_keypress = NULL,
+    .show_dfu        = oled_show_dfu,
 };

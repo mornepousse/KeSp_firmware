@@ -1,14 +1,12 @@
 /* HID transport abstraction: USB/BLE routing with automatic fallback */
 #include "hid_transport.h"
+#include "keyboard_task.h"
 #include "tinyusb.h"
 #include "hid_bluetooth_manager.h"
 
 /* Report IDs - must match usb_hid.c */
 #define REPORT_ID_KEYBOARD 1
 #define REPORT_ID_MOUSE    2
-
-/* Transport selector: 0 = USB, 1 = BLE (defined in keyboard_manager.c) */
-extern uint8_t usb_bl_state;
 
 void hid_send_kb_mouse(uint8_t modifier, const uint8_t kb[6],
                        uint8_t buttons, int8_t x, int8_t y, int8_t wheel)

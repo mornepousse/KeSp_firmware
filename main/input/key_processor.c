@@ -5,14 +5,11 @@
 #include "key_definitions.h"
 #include "keymap.h"
 #include "keyboard_actions.h"
+#include "keyboard_task.h"
 #include "hid_bluetooth_manager.h"
 #include "esp_log.h"
 
 static const char *TAG = "KEY_PROC";
-
-/* ── State ───────────────────────────────────────────────────────── */
-
-extern uint8_t usb_bl_state;
 
 uint16_t keypress_internal_function = 0;
 uint8_t current_row_layer_changer = INVALID_KEY_POS;

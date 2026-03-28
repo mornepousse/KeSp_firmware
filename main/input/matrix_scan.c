@@ -9,7 +9,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "round_ui.h"
+#include "status_display.h"
 
 #define TAG "MATRIX_SCAN"
 
@@ -75,9 +75,9 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
         }
     }
     
-    /* Notify KPM tracker of new keypresses */
+    /* Notify display of new keypresses (for KPM tracking) */
     for (uint8_t k = 0; k < new_keypresses; k++) {
-        round_ui_notify_keypress();
+        status_display_notify_keypress();
     }
     
     /* Save current state for next comparison */

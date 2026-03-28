@@ -18,6 +18,7 @@
 #include "usb_hid.h"
 #include "status_display.h"
 #include "display_backend.h"
+#include "cdc_keyboard_cmds.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "cpu_time.h"
@@ -103,7 +104,6 @@ void app_main(void) {
   init_cdc_commands();
 
   /* Register keyboard-specific CDC commands */
-  extern void cdc_keyboard_cmds_init(void);
   cdc_keyboard_cmds_init();
   keymap_init_nvs();
   load_keymaps((uint16_t *)keymaps, LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
@@ -115,13 +115,16 @@ void app_main(void) {
   ESP_LOGI(TAG, "display init");
 #if !SKIP_STATUS_DISPLAY
   /* Register the display backend for this board */
+  {
+    extern const display_backend_t
 #ifdef BOARD_DISPLAY_BACKEND_ROUND
-  extern const display_backend_t round_display_backend;
-  display_set_backend(&round_display_backend);
+      round_display_backend;
+    display_set_backend(&round_display_backend);
 #else
-  extern const display_backend_t oled_display_backend;
-  display_set_backend(&oled_display_backend);
+      oled_display_backend;
+    display_set_backend(&oled_display_backend);
 #endif
+  }
   status_display_start();
   // Start status display task on core 1 to avoid interfering with keyboard
   xTaskCreatePinnedToCore(status_display_task, "status_disp", 6144, NULL, 2, &status_display_task_handle, 1);
