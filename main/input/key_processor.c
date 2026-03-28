@@ -58,7 +58,8 @@ static void apply_toggle_layer(uint16_t keycode)
 
 static bool detect_internal_function(int16_t keycode)
 {
-    if (keycode >= TO_L0) {
+    /* Only legacy internal functions (TO_L0..BT_TOGGLE range, not advanced keycodes) */
+    if (keycode >= TO_L0 && keycode < K_OSM_BASE) {
         if (keypress_internal_function == 0) {
             keypress_internal_function = keycode;
             return true;
@@ -107,16 +108,10 @@ static void expand_macro(uint16_t keycode)
 /* Process a single advanced keycode. Returns the HID keycode to emit (0 = absorbed). */
 static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col, uint8_t slot)
 {
-    /* Tap/Hold: LT and MT */
-    if (K_IS_LT(kc) || K_IS_MT(kc)) {
+    /* Tap/Hold: LT, MT, and OSM all go through the tap/hold engine */
+    if (K_IS_LT(kc) || K_IS_MT(kc) || K_IS_OSM(kc)) {
         tap_hold_on_press(kc, row, col);
         return 0; /* absorbed — resolved later */
-    }
-
-    /* One-Shot Modifier */
-    if (K_IS_OSM(kc)) {
-        osm_arm(K_OSM_MOD(kc));
-        return 0;
     }
 
     /* One-Shot Layer */

@@ -1,6 +1,7 @@
 /* Tap/Hold engine implementation */
 #include "tap_hold.h"
 #include "key_definitions.h"
+#include "key_features.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <string.h>
@@ -48,10 +49,11 @@ static void resolve_as_hold(tap_hold_entry_t *e)
     e->state = TH_HOLD;
     if (K_IS_MT(e->keycode)) {
         active_hold_mods |= K_MT_MOD(e->keycode);
-        ESP_LOGD(TAG, "MT hold: mod=0x%02X", K_MT_MOD(e->keycode));
     } else if (K_IS_LT(e->keycode)) {
         active_hold_layer = K_LT_LAYER(e->keycode);
-        ESP_LOGD(TAG, "LT hold: layer=%d", active_hold_layer);
+    } else if (K_IS_OSM(e->keycode)) {
+        /* Hold OSM = regular modifier (like holding shift) */
+        active_hold_mods |= K_OSM_MOD(e->keycode);
     }
 }
 
@@ -60,16 +62,17 @@ static void release_hold(tap_hold_entry_t *e)
     if (K_IS_MT(e->keycode)) {
         active_hold_mods &= ~K_MT_MOD(e->keycode);
     } else if (K_IS_LT(e->keycode)) {
-        /* Only clear if this was the active hold layer */
         if (active_hold_layer == K_LT_LAYER(e->keycode))
             active_hold_layer = -1;
+    } else if (K_IS_OSM(e->keycode)) {
+        active_hold_mods &= ~K_OSM_MOD(e->keycode);
     }
     e->state = TH_IDLE;
 }
 
 bool tap_hold_on_press(uint16_t keycode, uint8_t row, uint8_t col)
 {
-    if (!K_IS_LT(keycode) && !K_IS_MT(keycode))
+    if (!K_IS_LT(keycode) && !K_IS_MT(keycode) && !K_IS_OSM(keycode))
         return false;
 
     /* Already tracking this position? Skip. */
@@ -185,6 +188,11 @@ uint8_t tap_hold_consume_tap(void)
             pending[i].state = TH_IDLE;
             if (K_IS_LT(kc)) return K_LT_KEY(kc);
             if (K_IS_MT(kc)) return K_MT_KEY(kc);
+            if (K_IS_OSM(kc)) {
+                /* Tap OSM = arm one-shot modifier for next keypress */
+                osm_arm(K_OSM_MOD(kc));
+                return 0; /* no keycode to inject, just armed OSM */
+            }
             return 0;
         }
     }
