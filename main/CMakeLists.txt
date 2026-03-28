@@ -25,6 +25,8 @@ idf_component_register(
         "comm/ble/hid_bluetooth_manager.c"
 
         "input/keyboard_task.c"
+        "input/key_processor.c"
+        "input/hid_report.c"
         "input/keymap.c"
         "input/matrix_scan.c"
         "input/key_stats.c"

@@ -12,6 +12,7 @@
 #include "keyboard_config.h"
 #include "hid_bluetooth_manager.h"
 #include "keyboard_task.h"
+#include "hid_report.h"
 #include "keymap.h"
 #include "matrix_scan.h"
 #include "lvgl.h"

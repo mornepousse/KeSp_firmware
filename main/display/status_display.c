@@ -31,6 +31,7 @@
 #endif
 
 #include "matrix_scan.h"
+#include "hid_report.h"
 #include "version.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
