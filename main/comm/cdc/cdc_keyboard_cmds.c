@@ -97,7 +97,7 @@ static void cmd_setlayer_command(const char *arg)
 		return;
 	}
 
-	extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
+
 	for (size_t v2_row = 0; v2_row < MATRIX_ROWS; ++v2_row)
 	{
 		for (size_t v2_col = 0; v2_col < MATRIX_COLS; ++v2_col)
@@ -127,7 +127,7 @@ static void cmd_setlayer_command(const char *arg)
 			 preview[0], preview[1], preview[2], preview[3], preview[4], preview[5]);
 	cdc_send_line(dbg_msg);
 
-	extern uint8_t current_layout;
+
 	if ((uint8_t)idx == current_layout)
 		status_display_update_layer_name();
 
@@ -136,7 +136,7 @@ static void cmd_setlayer_command(const char *arg)
 
 static void cmd_get_current_layer_index(void)
 {
-	extern uint8_t current_layout;
+
 	ESP_LOGI(TAG_CDC, "Current layer: %d", current_layout);
 	start_command_queue(CDC_RESP_CURRENT_LAYER, 1);
 	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)&current_layout, 1);
@@ -190,7 +190,7 @@ static void cmd_get_keymap_by_layer(uint8_t layer)
 		ESP_LOGW(TAG_CDC, "Layer %u invalid", (unsigned)layer);
 		return;
 	}
-	extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
+
 	size_t total_size = (MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t)) + 2;
 	start_command_queue(CDC_RESP_LAYER, total_size);
 	unsigned char bytes[2];
@@ -237,7 +237,7 @@ static void cmd_set_key(const char *arg)
 	int internal_row = row;
 	int internal_col = col;
 #endif
-	extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
+
 	keymaps[layer][internal_row][internal_col] = (uint16_t)value;
 	ESP_LOGI(TAG_CDC, "SETKEY: [%d][%d][%d] = 0x%04X (v2: r%d,c%d)", layer, internal_row, internal_col, value, row, col);
 	size_t total_elements = (size_t)LAYERS * MATRIX_ROWS * MATRIX_COLS;
@@ -288,7 +288,7 @@ static void cmd_set_layout_name(const char *arg)
 	default_layout_names[idx][MAX_LAYOUT_NAME_LENGTH - 1] = '\0';
 	save_layout_names(default_layout_names, LAYERS);
 
-	extern uint8_t current_layout;
+
 	if ((uint8_t)idx == current_layout)
 		status_display_update_layer_name();
 
@@ -661,7 +661,7 @@ static void cmd_layout_json(const char *arg) {
 }
 static void cmd_keymap_current(const char *arg) {
 	(void)arg;
-	extern uint8_t current_layout;
+
 	cmd_get_keymap_by_layer(current_layout);
 }
 static void cmd_keymap_by_index(const char *arg) {

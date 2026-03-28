@@ -24,7 +24,7 @@ extern uint8_t current_press_col[6];
 extern uint8_t current_press_stat[6];
 extern uint8_t stat_matrix_changed;
 extern uint8_t last_layer;
-extern uint8_t current_layout;
+/* current_layout: declared in keyboard_config.h */
 extern uint8_t is_layer_changed;
 extern uint32_t last_activity_time_ms;
 

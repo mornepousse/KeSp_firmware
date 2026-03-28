@@ -78,7 +78,6 @@ static void status_display_task(void *arg) {
     }
 
     /* Handle deferred wake requests in display task context */
-    extern bool request_wake_request;
     if (request_wake_request) {
       request_wake_request = false;
       status_display_refresh_all();

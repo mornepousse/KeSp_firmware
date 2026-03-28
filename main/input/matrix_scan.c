@@ -1,4 +1,5 @@
 #include "matrix_scan.h"
+#include "keyboard_task.h"
 #include "key_stats.h"
 #include "keyboard_config.h"
 #include <esp_log.h>
@@ -85,7 +86,7 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
     stat_matrix_changed = 1;
     last_activity_time_ms = esp_timer_get_time() / 1000;
 
-    extern TaskHandle_t keyboard_task_handle; // defined in keyboard_manager.c
+    /* keyboard_task_handle declared in keyboard_task.h */
     if (keyboard_task_handle != NULL) {
         xTaskNotifyGive(keyboard_task_handle);
     }
