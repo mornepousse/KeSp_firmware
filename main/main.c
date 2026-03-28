@@ -2,28 +2,23 @@
  * KeSp — keyboard firmware framework
  */
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include "cdc_acm_com.h"
-#include "class/hid/hid_device.h"
+#include "cdc_keyboard_cmds.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "esp_ota_ops.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hid_bluetooth_manager.h"
 #include "keyboard_task.h"
 #include "keymap.h"
-#include "littlefs_manager.h"
 #include "matrix_scan.h"
 #include "key_stats.h"
 #include "usb_hid.h"
 #include "status_display.h"
 #include "display_backend.h"
-#include "cdc_keyboard_cmds.h"
-#include "esp_timer.h"
-#include "esp_heap_caps.h"
 #include "cpu_time.h"
 #include "led_strip_anim.h"
-#include "esp_ota_ops.h"
 
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for isolation testing */
 #ifndef SKIP_STATUS_DISPLAY
