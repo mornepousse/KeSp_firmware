@@ -2,9 +2,9 @@
    Registers with the generic CDC dispatch framework at init. */
 #include "cdc_internal.h"
 #include "cdc_keyboard_cmds.h"
-#include "matrix.h"
+#include "matrix_scan.h"
 #include "keyboard_config.h"
-#include "keyboard_manager.h"
+#include "keyboard_task.h"
 #include "keymap.h"
 #include "key_definitions.h"
 #include "dfu_manager.h"

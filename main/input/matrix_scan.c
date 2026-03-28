@@ -1,4 +1,4 @@
-#include "matrix.h"
+#include "matrix_scan.h"
 #include "keyboard_config.h"
 #include <esp_log.h>
 #include <stdint.h>

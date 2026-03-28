@@ -1,6 +1,6 @@
 #include "status_display.h"
 #include "hid_bluetooth_manager.h"
-#include "keyboard_manager.h"
+#include "keyboard_task.h"
 #include "i2c_oled_display.h"
 #include "keyboard_config.h"
 #ifdef BOARD_DISPLAY_BACKEND_ROUND
@@ -30,7 +30,7 @@
 #define MOUSE_INDICATOR_MS      200
 #endif
 
-#include "matrix.h"
+#include "matrix_scan.h"
 #include "version.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"

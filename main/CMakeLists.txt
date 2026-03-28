@@ -24,10 +24,10 @@ idf_component_register(
         "comm/ble/hid_device_le_prf.c"
         "comm/ble/hid_bluetooth_manager.c"
 
-        "input/keyboard_manager.c"
+        "input/keyboard_task.c"
         "input/keymap.c"
-        "input/matrix.c"
-        "input/keyboard_worker.c"
+        "input/matrix_scan.c"
+        "input/keyboard_actions.c"
 
         "${BOARD_DIR}/board_keymap.c"
         "${BOARD_DIR}/board_layout.c"
