@@ -89,7 +89,7 @@ static void status_display_task(void *arg) {
     /* Periodically check if key stats need saving */
     key_stats_check_save();
     
-    vTaskDelay(pdMS_TO_TICKS(10));  // 10ms polling for responsive layer display
+    vTaskDelay(pdMS_TO_TICKS(100));  // 100ms polling — fast enough for UI, no keyboard lag
   }
 }
 
@@ -116,7 +116,7 @@ void app_main(void) {
 #if !SKIP_STATUS_DISPLAY
   status_display_start();
   // Start status display task on core 1 to avoid interfering with keyboard
-  xTaskCreatePinnedToCore(status_display_task, "status_disp", 6144, NULL, 4, &status_display_task_handle, 1);
+  xTaskCreatePinnedToCore(status_display_task, "status_disp", 6144, NULL, 2, &status_display_task_handle, 1);
 #else
   ESP_LOGW(TAG, "SKIP_STATUS_DISPLAY enabled: display task not started");
 #endif

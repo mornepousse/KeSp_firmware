@@ -98,16 +98,16 @@ bool spi_display_init(const display_hw_config_t *cfg)
 
     ESP_LOGI(TAG, "Initialize LVGL for round display");
     const lvgl_port_cfg_t lvgl_cfg = {
-        .task_priority = 2,
+        .task_priority = 1,       /* Below keyboard (prio 3) to avoid lag */
         .task_stack = 6144,
-        .task_affinity = 0,
+        .task_affinity = 1,       /* Run on core 1, keyboard scans on core 0 */
         .task_max_sleep_ms = 100,
-        .timer_period_ms = 20,
+        .timer_period_ms = 33,    /* ~30 fps max */
     };
     lvgl_port_init(&lvgl_cfg);
 
-    /* Use smaller partial buffer for color display */
-    uint32_t buf_size = cfg->width * 40;
+    /* Half-screen buffer: 2 flushes per frame instead of 6 */
+    uint32_t buf_size = cfg->width * 120;
 
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = io_handle,

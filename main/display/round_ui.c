@@ -261,8 +261,8 @@ static void update_connection_status(bool force)
     if (!force && bt_state == last_bt_state && path_state == last_path_state && bt_state != 2) {
         return;
     }
-    
-    if (!lvgl_port_lock(10)) {
+
+    if (!lvgl_port_lock(50)) {
         return;
     }
     
@@ -377,54 +377,43 @@ void round_ui_update(void)
         current_kpm = total;  /* Since we sample every 1s and have 60 samples, total = KPM */
     }
     
+    /* Single lock for all UI updates — avoids repeated lock contention */
+    if (!lvgl_port_lock(50)) return;
+
     /* Update arc based on KPM */
-    if (outer_arc && lvgl_port_lock(10)) {
-        /* Map KPM to 0-100 arc value */
+    if (outer_arc) {
         int32_t arc_value = (current_kpm * 100) / KPM_MAX_DISPLAY;
         if (arc_value > 100) arc_value = 100;
-        if (arc_value < 2) arc_value = 2;  /* Minimum visible */
-        
+        if (arc_value < 2) arc_value = 2;
         lv_arc_set_value(outer_arc, arc_value);
-        
-        /* Change color based on KPM */
-        if (current_kpm > 300) {
-            lv_obj_set_style_arc_color(outer_arc, COLOR_SUCCESS, LV_PART_INDICATOR);  /* Green = fast */
-        } else if (current_kpm > 150) {
-            lv_obj_set_style_arc_color(outer_arc, COLOR_PRIMARY, LV_PART_INDICATOR);  /* Blue = moderate */
-        } else if (current_kpm > 50) {
-            lv_obj_set_style_arc_color(outer_arc, COLOR_WARNING, LV_PART_INDICATOR);  /* Orange = slow */
-        } else {
-            lv_obj_set_style_arc_color(outer_arc, COLOR_SECONDARY, LV_PART_INDICATOR);  /* Gray = idle */
-        }
-        
-        lvgl_port_unlock();
+
+        lv_color_t arc_color;
+        if (current_kpm > 300)      arc_color = COLOR_SUCCESS;
+        else if (current_kpm > 150) arc_color = COLOR_PRIMARY;
+        else if (current_kpm > 50)  arc_color = COLOR_WARNING;
+        else                        arc_color = COLOR_SECONDARY;
+        lv_obj_set_style_arc_color(outer_arc, arc_color, LV_PART_INDICATOR);
     }
-    
+
     /* Update KPM label */
-    if (kpm_label && lvgl_port_lock(10)) {
+    if (kpm_label) {
         lv_label_set_text_fmt(kpm_label, "%lu KPM", (unsigned long)current_kpm);
-        
-        /* Color based on speed */
-        if (current_kpm > 300) {
-            lv_obj_set_style_text_color(kpm_label, COLOR_SUCCESS, 0);
-        } else if (current_kpm > 150) {
-            lv_obj_set_style_text_color(kpm_label, COLOR_PRIMARY, 0);
-        } else {
-            lv_obj_set_style_text_color(kpm_label, COLOR_SECONDARY, 0);
-        }
-        
-        lvgl_port_unlock();
+        lv_color_t text_color;
+        if (current_kpm > 300)      text_color = COLOR_SUCCESS;
+        else if (current_kpm > 150) text_color = COLOR_PRIMARY;
+        else                        text_color = COLOR_SECONDARY;
+        lv_obj_set_style_text_color(kpm_label, text_color, 0);
     }
-    
+
     /* Update mouse indicator */
-    if (mouse_indicator && lvgl_port_lock(10)) {
-        if ((xTaskGetTickCount() - last_mouse_activity) < pdMS_TO_TICKS(MOUSE_INDICATOR_MS)) {
+    if (mouse_indicator) {
+        if ((xTaskGetTickCount() - last_mouse_activity) < pdMS_TO_TICKS(MOUSE_INDICATOR_MS))
             lv_obj_clear_flag(mouse_indicator, LV_OBJ_FLAG_HIDDEN);
-        } else {
+        else
             lv_obj_add_flag(mouse_indicator, LV_OBJ_FLAG_HIDDEN);
-        }
-        lvgl_port_unlock();
     }
+
+    lvgl_port_unlock();
     
     /* Update Tamagotchi state */
     tamagotchi_update(current_kpm);
