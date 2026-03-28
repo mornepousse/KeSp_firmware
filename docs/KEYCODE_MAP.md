@@ -1,6 +1,7 @@
 # KaSe Keycode Map
 
 All keycodes are 16-bit unsigned integers stored in `keymaps[layer][row][col]`.
+All hex values in CDC commands use **hex format** (e.g. `29` = 0x29 = ESC).
 
 ## Encoding Summary
 
@@ -10,73 +11,93 @@ All keycodes are 16-bit unsigned integers stored in `keymaps[layer][row][col]`.
 | `0x0100-0x0A00` | Momentary Layer (MO) | `0x0100 + layer * 0x100` | `MO_L2` = `0x0300` |
 | `0x0B00-0x1400` | Toggle Layer (TO) | `0x0B00 + layer * 0x100` | `TO_L1` = `0x0C00` |
 | `0x1500-0x2800` | Macro | `0x1500 + index * 0x100` | `MACRO_3` = `0x1700` |
-| `0x2E00` | BT Switch | USB ↔ BLE toggle | — |
-| `0x2F00` | BT Toggle | Enable/disable BLE | — |
-| `0x3000-0x30FF` | One-Shot Modifier (OSM) | `0x3000 \| mod_mask` | `OSM(Shift)` = `0x3002` |
-| `0x3100-0x310F` | One-Shot Layer (OSL) | `0x3100 \| layer` | `OSL(2)` = `0x3102` |
-| `0x3200` | Caps Word | Toggle caps-word mode | — |
-| `0x3300` | Repeat Key | Repeat last keypress | — |
-| `0x4000-0x4FFF` | Layer-Tap (LT) | `0x4000 \| (layer << 8) \| keycode` | `LT(2, Space)` = `0x422C` |
-| `0x5000-0x5FFF` | Mod-Tap (MT) | `0x5000 \| (mod << 8) \| keycode` | `MT(Shift, A)` = `0x5204` |
-| `0x6000-0x6FFF` | Tap Dance (TD) | `0x6000 \| (index << 8)` | `TD(0)` = `0x6000` |
+| `0x2E00` | BT Switch | USB / BLE toggle | |
+| `0x2F00` | BT Toggle | Enable/disable BLE | |
+| `0x3000-0x30FF` | One-Shot Modifier (OSM) | `0x3000 \| mod_mask` | `K_OSM(Shift)` = `0x3002` |
+| `0x3100-0x310F` | One-Shot Layer (OSL) | `0x3100 \| layer` | `K_OSL(2)` = `0x3102` |
+| `0x3200` | Caps Word | Toggle caps-word mode | |
+| `0x3300` | Repeat Key | Repeat last keypress | |
+| `0x3400` | Leader Key | Start leader sequence | |
+| `0x4000-0x4FFF` | Layer-Tap (LT) | `0x4000 \| (layer << 8) \| keycode` | `K_LT(2, Space)` = `0x422C` |
+| `0x5000-0x5FFF` | Mod-Tap (MT) | `0x5000 \| (mod << 8) \| keycode` | `K_MT(Shift, A)` = `0x5204` |
+| `0x6000-0x6FFF` | Tap Dance (TD) | `0x6000 \| (index << 8)` | `K_TD(0)` = `0x6000` |
 
 ## Modifier Mask (for OSM and MT)
 
-| Bit | Modifier |
-|-----|----------|
-| 0 | Left Ctrl |
-| 1 | Left Shift |
-| 2 | Left Alt |
-| 3 | Left GUI |
-| 4 | Right Ctrl |
-| 5 | Right Shift |
-| 6 | Right Alt |
-| 7 | Right GUI |
+| Bit | Value | Modifier |
+|-----|-------|----------|
+| 0 | 0x01 | Left Ctrl |
+| 1 | 0x02 | Left Shift |
+| 2 | 0x04 | Left Alt |
+| 3 | 0x08 | Left GUI |
+| 4 | 0x10 | Right Ctrl |
+| 5 | 0x20 | Right Shift |
+| 6 | 0x40 | Right Alt |
+| 7 | 0x80 | Right GUI |
 
-## Tap/Hold Behavior
+## Feature Behaviors
 
-For **Layer-Tap (LT)** and **Mod-Tap (MT)** keys:
-- **Tap** (press + release within 200ms, no other key pressed): sends the tap keycode
-- **Hold** (held longer than 200ms OR another key is pressed while held): activates modifier/layer
-- Configurable via `TAP_HOLD_TIMEOUT_MS` (default: 200)
+### Tap/Hold (LT, MT, OSM)
 
-## One-Shot Behavior
+- **Tap** (press + release < 200ms, no interrupt): sends the tap keycode
+- **Hold** (> 200ms OR another key pressed while held): activates modifier/layer
+- OSM tap: arms one-shot modifier for next key. OSM hold: regular modifier.
 
-- **OSM**: Press and release modifier → next keypress includes that modifier → auto-deactivates
-- **OSL**: Press and release layer key → next keypress uses that layer → returns to base layer
+### One-Shot Layer (OSL)
 
-## Caps Word
+Press and release: next keypress uses that layer, then returns to base.
 
-When active, all letter keys are shifted. Deactivates on space, enter, or any non-alphanumeric key.
+### Caps Word
 
-## Repeat Key
+Toggle on/off. While active, letters are shifted. Deactivates on space/punctuation.
 
-Sends the same HID keycode as the last non-modifier key that was pressed.
+### Repeat Key
 
-## Tap Dance
+Sends the same HID keycode as the last non-modifier key pressed.
 
-Each dance index (0-15) has a configurable action table:
-- 1 tap → action A
-- 2 taps → action B
-- 3 taps → action C
-- Hold → action D
+### Tap Dance
 
-Dance timeout: 200ms between taps.
+Up to 4 actions per slot: 1-tap, 2-taps, 3-taps, hold. 200ms between taps.
 
-## CDC Commands for Advanced Features
+### Combos
 
-### `FEATURES?` — Query supported features
-Response: `MT,LT,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE`
+Two keys pressed simultaneously trigger a different keycode. 50ms window.
 
-### `TDSET <index>;<a1>,<a2>,<a3>,<a4>` — Configure a tap dance slot
-- `index`: 0-15
-- `a1-a4`: HID keycodes (hex) for 1-tap, 2-tap, 3-tap, hold
-- Example: `TDSET 0;04,05,06,29` (1-tap=A, 2-tap=B, 3-tap=C, hold=ESC)
-- Response: `TDSET 0:OK`
+### Leader Key
 
-### `TD?` — List configured tap dance slots
-Response: one line per configured slot, then `OK`
-```
-TD0: 04,05,06,29
-OK
-```
+Press Leader, then a sequence of keys (up to 4). Matches against configured
+sequences and emits result keycode + modifier. 1000ms timeout between keys.
+
+## CDC Commands
+
+### Query
+
+| Command | Response | Description |
+|---------|----------|-------------|
+| `FEATURES?` | `MT,LT,OSM,OSL,...` | List supported features |
+| `VERSION?` | `KaSe V1 v3.4` | Firmware version |
+| `TD?` | `TD0: 04,05,06,29` | List tap dance configs |
+| `COMBO?` | `COMBO0: r3c3+r3c4=29` | List combo configs |
+| `LEADER?` | `LEADER0: 04,->29+00` | List leader sequences |
+| `MACROS?` | Binary response | List macros |
+
+### Configure
+
+| Command | Format | Example |
+|---------|--------|---------|
+| `SETKEY` | `layer,v2row,v2col,hex_keycode` | `SETKEY 0,4,0,5229` |
+| `TDSET` | `index;a1,a2,a3,a4` (hex) | `TDSET 0;04,05,06,29` |
+| `COMBOSET` | `index;r1,c1,r2,c2,result` (V1 coords) | `COMBOSET 0;3,3,3,4,29` |
+| `LEADERSET` | `index;seq_hex;result,mod` | `LEADERSET 0;04;29,00` |
+| `MACROADD` | `slot;name;key1,key2,...` (simultaneous) | `MACROADD 0;Copy;E0,06` |
+| `MACROSEQ` | `slot;name;key:mod,...` (sequence) | `MACROSEQ 0;CopyPaste;06:01,FF:0A,19:01` |
+| `MACRODEL` | `slot` | `MACRODEL 0` |
+
+### MACROSEQ Step Format
+
+Each step is `keycode:modifier` in hex:
+- `06:01` = C key with Ctrl modifier
+- `FF:0A` = delay 10 * 0x0A = 100ms
+- `19:01` = V key with Ctrl modifier
+
+Example: `MACROSEQ 0;CopyPaste;06:01,FF:0A,19:01` = Ctrl+C, 100ms, Ctrl+V

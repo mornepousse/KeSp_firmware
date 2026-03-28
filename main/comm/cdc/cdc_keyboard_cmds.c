@@ -765,7 +765,7 @@ static void cmd_tdset(const char *arg)
 		char *next = strchr(tok, ',');
 		if (next) *next = '\0';
 		trim_spaces(tok);
-		actions[i] = (uint8_t)strtoul(tok, NULL, 0);
+		actions[i] = (uint8_t)strtoul(tok, NULL, 16); /* always hex */
 		tok = next ? next + 1 : NULL;
 	}
 

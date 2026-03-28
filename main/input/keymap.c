@@ -159,6 +159,16 @@ void load_macros(macro_t *macros, size_t count) {
         return;
     }
 
+    /* Check stored size first — if it doesn't match current struct, skip (format changed) */
+    size_t stored_size = 0;
+    esp_err_t size_err = nvs_get_blob(my_handle, "macros", NULL, &stored_size);
+    if (size_err == ESP_OK && stored_size != required_size) {
+        ESP_LOGW(TAG, "Macros NVS size mismatch (stored=%u, expected=%u), using defaults",
+                 (unsigned)stored_size, (unsigned)required_size);
+        nvs_close(my_handle);
+        return;
+    }
+
     esp_err_t blob_err = nvs_get_blob(my_handle, "macros", macros, &required_size);
     if (blob_err == ESP_OK) {
         ESP_LOGI(TAG, "Macros loaded from NVS");
