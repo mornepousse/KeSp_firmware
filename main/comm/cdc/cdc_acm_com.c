@@ -7,7 +7,6 @@
 #include "esp_log.h"
 #include "matrix.h"			  // current_layout, layer_changed
 #include "keyboard_config.h"  // MAX_LAYER
-#include "i2c_oled_display.h" // write_text_to_display
 #include "tinyusb_cdc_acm.h"	  // tinyusb_cdcacm_write_queue
 #include "keyboard_manager.h" // macros
 #include "keymap.h"			  // default_layout_names
@@ -212,17 +211,17 @@ static void cmd_setlayer_command(const char *arg)
 	cdc_send_line("OK");
 }
 
-enum cdc_command_type
+/* Binary response type IDs (used by start_command_queue) */
+enum cdc_response_type
 {
-	c_nope_t = 0,
-	c_get_layer_t,
-	c_get_current_layer_index_t,
-	c_get_name_layer_t,
-	c_get_macros_t,
-	c_get_all_layout_names_t,
-	c_ping_t,
-	c_debug_t,
-
+	CDC_RESP_NONE = 0,
+	CDC_RESP_LAYER,
+	CDC_RESP_CURRENT_LAYER,
+	CDC_RESP_LAYER_NAME,
+	CDC_RESP_MACROS,
+	CDC_RESP_ALL_LAYOUT_NAMES,
+	CDC_RESP_PING,
+	CDC_RESP_DEBUG,
 };
 
 static inline bool fifo_full(void) { return fifo_count == CDC_CMD_FIFO_DEPTH; }
@@ -294,14 +293,14 @@ void start_command_queue(unsigned char type, size_t total_size)
 } 
 void cdc_send_layer(uint8_t layer)
 {
-	start_command_queue(c_get_current_layer_index_t, 1);
+	start_command_queue(CDC_RESP_CURRENT_LAYER, 1);
 	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)&layer, 1); 
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
 void cdc_ping(void)
 {
-	start_command_queue(c_ping_t, 0);
+	start_command_queue(CDC_RESP_PING, 0);
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
@@ -316,50 +315,16 @@ void cdc_ping(void)
 // (Future extension: MACRO:<id>, etc.)
 // ----------------------------------------------------------------------------------
 
-__attribute__((unused)) static void cmd_set_layer(const char *arg)
-{
-	if (!isdigit((unsigned char)arg[0]))
-	{
-		ESP_LOGW(TAG_CDC, "Invalid layer");
-		return;
-	}
-	int layer = atoi(arg);
-	if (layer < 0 || layer > MAX_LAYER)
-	{
-		ESP_LOGW(TAG_CDC, "Layer out of range (%d)", layer);
-		return;
-	}
-	extern uint8_t current_layout;
-	extern uint8_t last_layer;
-	last_layer = current_layout = (uint8_t)layer;
-	layer_changed();
-	ESP_LOGI(TAG_CDC, "Layer -> %d", layer);
-}
 
 static void cmd_get_current_layer_index(void)
 {
 	extern uint8_t current_layout; 
 	ESP_LOGI(TAG_CDC, "Current layer: %d", current_layout);
-	start_command_queue(c_get_current_layer_index_t, 1);
+	start_command_queue(CDC_RESP_CURRENT_LAYER, 1);
 	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)&current_layout, 1); 
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
-__attribute__((unused)) static void cmd_display_text(const char *txt)
-{
-	if (txt == NULL || *txt == '\0')
-	{
-		ESP_LOGW(TAG_CDC, "Empty text");
-		return;
-	}
-	write_text_to_display((char *)txt, 0, 8); // simple position
-	ESP_LOGI(TAG_CDC, "Display: %s", txt);
-	/* Acknowledgment */
-	char ack[16] = "OK\r\n";
-	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)ack, 4);
-	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
-	// send_data(ack, strlen(ack));
-}
 
 static void cmd_get_name_layer(uint8_t layer)
 {
@@ -371,7 +336,7 @@ static void cmd_get_name_layer(uint8_t layer)
 	const char *name = default_layout_names[layer];
 	size_t name_len = strlen(name);
 	size_t total_size = 1 + name_len;
-	start_command_queue(c_get_name_layer_t, total_size);
+	start_command_queue(CDC_RESP_LAYER_NAME, total_size);
 	uint8_t idx = (uint8_t)layer;
 	tinyusb_cdcacm_write_queue(CDC_ITF, &idx, 1);
 	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)name, name_len);
@@ -392,7 +357,7 @@ static void cmd_list_layout_names(void)
 		total_size += 1 + strlen(default_layout_names[i]) + 1; // index + name + separator
 	}
 
-	start_command_queue(c_get_all_layout_names_t, total_size);
+	start_command_queue(CDC_RESP_ALL_LAYOUT_NAMES, total_size);
 
 	uint8_t layers_count = (uint8_t)LAYERS;
 	tinyusb_cdcacm_write_queue(CDC_ITF, &layers_count, 1);
@@ -423,7 +388,7 @@ static void cmd_get_keymap_by_layer(uint8_t layer)
 	}
 	extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
 	size_t total_size = (MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t)) + 2; 
-	start_command_queue(c_get_layer_t, total_size);
+	start_command_queue(CDC_RESP_LAYER, total_size);
 	unsigned char bytes[2];
 	bytes[0] = (unsigned char)(layer & 0xFF);
 	bytes[1] = (unsigned char)((layer >> 8) & 0xFF);
@@ -583,7 +548,7 @@ static void  cmd_set_layout_name(const char *arg)
 	const char *name = default_layout_names[idx];
 	size_t name_len = strlen(name);
 	size_t total_size = 1 + name_len;
-	start_command_queue(c_get_name_layer_t, total_size);
+	start_command_queue(CDC_RESP_LAYER_NAME, total_size);
 	uint8_t uidx = (uint8_t)idx;
 	tinyusb_cdcacm_write_queue(CDC_ITF, &uidx, 1);
 	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)name, name_len);
@@ -628,7 +593,7 @@ static void cmd_list_macros(void)
 		total_size += 1 + 2 + 1 + name_len + 1 + keys_len;
 	}
 
-	start_command_queue(c_get_macros_t, total_size);
+	start_command_queue(CDC_RESP_MACROS, total_size);
 	uint8_t ucount = (uint8_t)count;
 	tinyusb_cdcacm_write_queue(CDC_ITF, &ucount, 1);
 
@@ -1091,134 +1056,119 @@ static void cmd_ota_start(const char *arg)
 	cdc_send_line(resp);
 }
 
+/* ── Command table ────────────────────────────────────────────────── */
+
+/* Handler that receives the argument part (after the prefix) */
+typedef void (*cdc_cmd_handler_t)(const char *arg);
+
+/* Wrapper handlers for commands that take no argument */
+static void cmd_version(const char *arg)   { (void)arg; cdc_send_line(PRODUCT_NAME " v" FW_VERSION); }
+static void cmd_dfu(const char *arg)       { (void)arg; cmd_reboot_to_dfu(); }
+static void cmd_layer_idx(const char *arg) { (void)arg; cmd_get_current_layer_index(); }
+static void cmd_macros_q(const char *arg)  { (void)arg; cmd_list_macros(); }
+static void cmd_layouts_q(const char *arg) { (void)arg; cmd_list_layout_names(); }
+static void cmd_layout_json(const char *arg) {
+	(void)arg;
+	extern const char board_layout_json[];
+	cdc_send_large(board_layout_json, strlen(board_layout_json));
+}
+static void cmd_keystats_text(const char *arg)   { (void)arg; cmd_get_keystats(false); }
+static void cmd_keystats_bin(const char *arg)    { (void)arg; cmd_get_keystats(true); }
+static void cmd_keystats_rst(const char *arg)    { (void)arg; cmd_reset_keystats(); }
+static void cmd_bigrams_text(const char *arg)    { (void)arg; cmd_get_bigrams(false); }
+static void cmd_bigrams_bin(const char *arg)     { (void)arg; cmd_get_bigrams(true); }
+static void cmd_bigrams_rst(const char *arg)     { (void)arg; cmd_reset_bigrams(); }
+
+typedef struct {
+	const char     *prefix;     /* command prefix to match (case-insensitive) */
+	uint8_t         prefix_len; /* strlen(prefix) — avoids runtime strlen */
+	bool            has_arg;    /* true: pass remainder after prefix to handler */
+	cdc_cmd_handler_t handler;
+} cdc_cmd_entry_t;
+
+/* Table is searched top-to-bottom; longer prefixes must come before shorter ones
+   (e.g. KEYSTATS_RESET before KEYSTATS? before KEYSTATS) */
+static const cdc_cmd_entry_t cmd_table[] = {
+	/* Keymap commands */
+	{ "SETLAYER",       8,  true,  cmd_setlayer_command },
+	{ "SETKEY",         6,  true,  cmd_set_key },
+	{ "KEYMAP?",        7,  false, NULL }, /* special: handled inline */
+	{ "KEYMAP",         6,  true,  NULL }, /* special: KEYMAP<digit> */
+
+	/* Layout commands */
+	{ "LAYOUTNAME",    10,  true,  cmd_set_layout_name },
+	{ "LAYOUTS?",       8,  false, cmd_layouts_q },
+	{ "LAYOUT?",        7,  false, cmd_layout_json },
+
+	/* Macro commands */
+	{ "MACROADD",       8,  true,  cmd_macro_add },
+	{ "MACRODEL",       8,  true,  cmd_macro_delete },
+	{ "MACROS?",        7,  false, cmd_macros_q },
+
+	/* Stats commands */
+	{ "KEYSTATS_RESET",14,  false, cmd_keystats_rst },
+	{ "KEYSTATS?",      9,  false, cmd_keystats_text },
+	{ "KEYSTATS",       8,  false, cmd_keystats_bin },
+	{ "BIGRAMS_RESET", 13,  false, cmd_bigrams_rst },
+	{ "BIGRAMS?",       8,  false, cmd_bigrams_text },
+	{ "BIGRAMS",        7,  false, cmd_bigrams_bin },
+
+	/* System commands */
+	{ "VERSION?",       8,  false, cmd_version },
+	{ "OTA ",           4,  true,  cmd_ota_start },
+	{ "DFU",            3,  false, cmd_dfu },
+	{ "L?",             2,  false, cmd_layer_idx },
+};
+#define CMD_TABLE_SIZE (sizeof(cmd_table) / sizeof(cmd_table[0]))
+
 static void parse_and_execute(const char *line)
 {
-	// Trim spaces
+	/* Trim leading whitespace */
 	while (*line == ' ' || *line == '\t')
 		line++;
 	if (*line == '\0')
 		return;
-	if (strncasecmp(line, "L?", 2) == 0)
-	{
-		cmd_get_current_layer_index();
-		return;
-	}
-	if (toupper((unsigned char)line[0]) == 'L' && toupper((unsigned char)line[1]) == 'N' && isdigit((unsigned char)line[2]))
-	{
-		cmd_get_name_layer((unsigned char)(line[2] - '0'));
-		return;
-	}
-	if (toupper((unsigned char)line[0]) == 'L' && isdigit((unsigned char)line[1]))
-	{
-		//cmd_set_layer(line + 1);
-		cmd_get_name_layer((unsigned char)(line[1] - '0'));
-		return;
-	}
-	// if (strncasecmp(line, "DISP:", 5) == 0) { cmd_display_text(line + 5); return; }
-	if (strncasecmp(line, "KEYMAP?", 7) == 0)
-	{
-		extern uint8_t current_layout;
-		cmd_get_keymap_by_layer(current_layout);
-		return;
-	}
-	if (strncasecmp(line, "KEYMAP", 6) == 0 && isdigit((unsigned char)line[6]))
-	{
-		cmd_get_keymap_by_layer((uint8_t)atoi(line + 6));
-		return;
-	}
-	if (strncasecmp(line, "SETKEY", 6) == 0)
-	{
-		cmd_set_key(line + 6);
-		return;
-	}
-	if (strncasecmp(line, "SETLAYER", 8) == 0)
-	{
-		cmd_setlayer_command(line + 8);
-		return;
-	}
-	if (strncasecmp(line, "MACROS?", 7) == 0)
-	{
-		cmd_list_macros();
-		return;
-	}
-	if (strncasecmp(line, "MACROADD", 8) == 0)
-	{
-		cmd_macro_add(line + 8);
-		return;
-	}
-	if (strncasecmp(line, "MACRODEL", 8) == 0)
-	{
-		cmd_macro_delete(line + 8);
-		return;
-	}
-	if (strncasecmp(line, "LAYOUT?", 7) == 0 && (line[7] == '\0' || line[7] == 'S'))
-	{
-		if (line[7] == '\0') {
-			/* LAYOUT? — return physical key position JSON */
-			extern const char board_layout_json[];
-			cdc_send_large(board_layout_json, strlen(board_layout_json));
+
+	/* Short-form layer commands: LN<digit> and L<digit> */
+	if (toupper((unsigned char)line[0]) == 'L') {
+		if (toupper((unsigned char)line[1]) == 'N' && isdigit((unsigned char)line[2])) {
+			cmd_get_name_layer((uint8_t)(line[2] - '0'));
 			return;
 		}
-		/* fall through to LAYOUTS? below */
+		if (isdigit((unsigned char)line[1])) {
+			cmd_get_name_layer((uint8_t)(line[1] - '0'));
+			return;
+		}
 	}
-	if (strncasecmp(line, "LAYOUTS?", 8) == 0)
-	{
-		cmd_list_layout_names();
+
+	/* Table-driven dispatch */
+	for (size_t i = 0; i < CMD_TABLE_SIZE; i++) {
+		const cdc_cmd_entry_t *cmd = &cmd_table[i];
+		if (strncasecmp(line, cmd->prefix, cmd->prefix_len) != 0)
+			continue;
+
+		/* Special cases for commands needing custom arg parsing */
+		if (cmd->handler == NULL) {
+			if (cmd->prefix_len == 7 && strncasecmp(cmd->prefix, "KEYMAP?", 7) == 0) {
+				extern uint8_t current_layout;
+				cmd_get_keymap_by_layer(current_layout);
+			} else if (cmd->prefix_len == 6 && strncasecmp(cmd->prefix, "KEYMAP", 6) == 0) {
+				if (isdigit((unsigned char)line[6]))
+					cmd_get_keymap_by_layer((uint8_t)atoi(line + 6));
+				else
+					continue; /* not a match, try next entry */
+			}
+			return;
+		}
+
+		if (cmd->has_arg)
+			cmd->handler(line + cmd->prefix_len);
+		else
+			cmd->handler(NULL);
 		return;
 	}
-	if (strncasecmp(line, "LAYOUTNAME", 10) == 0)
-	{
-		cmd_set_layout_name(line + 10);
-		return;
-	}
-	if (strncasecmp(line, "VERSION?", 8) == 0)
-	{
-		cdc_send_line(PRODUCT_NAME " v" FW_VERSION);
-		return;
-	}
-	if (strncasecmp(line, "OTA ", 4) == 0)
-	{
-		cmd_ota_start(line + 4);
-		return;
-	}
-	if (strncasecmp(line, "DFU", 3) == 0)
-	{
-		cmd_reboot_to_dfu();
-		return;
-	}
-	if (strncasecmp(line, "KEYSTATS?", 9) == 0)
-	{
-		cmd_get_keystats(false);  /* Text format */
-		return;
-	}
-	if (strncasecmp(line, "KEYSTATS", 8) == 0 && (line[8] == '\0' || line[8] == ' '))
-	{
-		cmd_get_keystats(true);  /* Binary format for heatmap */
-		return;
-	}
-	if (strncasecmp(line, "KEYSTATS_RESET", 14) == 0)
-	{
-		cmd_reset_keystats();
-		return;
-	}
-	if (strncasecmp(line, "BIGRAMS?", 8) == 0)
-	{
-		cmd_get_bigrams(false);
-		return;
-	}
-	if (strncasecmp(line, "BIGRAMS", 7) == 0 && (line[7] == '\0' || line[7] == ' '))
-	{
-		cmd_get_bigrams(true);
-		return;
-	}
-	if (strncasecmp(line, "BIGRAMS_RESET", 13) == 0)
-	{
-		cmd_reset_bigrams();
-		return;
-	}
+
 	ESP_LOGW(TAG_CDC, "Unknown command: %s", line);
-	// ...existing code...
-	
 }
 
 // ----------------------------------------------------------------------------------

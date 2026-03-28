@@ -60,50 +60,6 @@ static bool bigram_save_disabled = false;  /* Set on NVS_NOT_ENOUGH_SPACE to sto
 static keyboard_btn_handle_t s_kbd = NULL;
 static uint8_t prev_matrix_state[MATRIX_ROWS][MATRIX_COLS];  /* For KPM: track new keypresses */
 
-// Anti-ghosting: detect and filter phantom keys
-// Ghost keys form a "rectangle" pattern - if 3 corners are pressed, the 4th is a ghost
-static bool is_ghost_key(keyboard_btn_report_t *report, uint8_t check_idx) {
-    if (report->key_pressed_num < 2) return false;
-    
-    uint8_t check_row = report->key_data[check_idx].input_index;
-    uint8_t check_col = report->key_data[check_idx].output_index;
-    
-    // For each other key, check if there's a potential ghost rectangle
-    for (uint32_t i = 0; i < report->key_pressed_num; i++) {
-        if (i == check_idx) continue;
-        uint8_t row_i = report->key_data[i].input_index;
-        uint8_t col_i = report->key_data[i].output_index;
-        
-        // Skip if same row or same column (no rectangle possible)
-        if (row_i == check_row || col_i == check_col) continue;
-        
-        // We have two keys that form diagonal corners of a rectangle
-        // Check if the other two corners are also pressed (ghost condition)
-        bool corner1 = false, corner2 = false;
-        for (uint32_t j = 0; j < report->key_pressed_num; j++) {
-            if (j == check_idx || j == i) continue;
-            uint8_t row_j = report->key_data[j].input_index;
-            uint8_t col_j = report->key_data[j].output_index;
-            
-            // Corner at (check_row, col_i)
-            if (row_j == check_row && col_j == col_i) corner1 = true;
-            // Corner at (row_i, check_col)
-            if (row_j == row_i && col_j == check_col) corner2 = true;
-        }
-        
-        // If both other corners exist, this forms a ghost rectangle
-        // The key with highest column index on the same row is likely the ghost
-        if (corner1 && corner2) {
-            // Simple heuristic: if this key appeared AFTER another key on same row, it's ghost
-            for (uint32_t k = 0; k < check_idx; k++) {
-                if (report->key_data[k].input_index == check_row) {
-                    return true; // This key came after another on same row = likely ghost
-                }
-            }
-        }
-    }
-    return false;
-}
 
 static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_report_t kbd_report, void *user_data)
 {
@@ -285,39 +241,59 @@ uint32_t get_key_stats_max(void)
     return max;
 }
 
+/* ── Generic NVS helpers ──────────────────────────────────────────── */
+
+/** Save a blob + u32 total to NVS. Returns ESP_OK on success. */
+static esp_err_t nvs_save_stats(const char *blob_key, const void *blob, size_t blob_size,
+                                const char *total_key, uint32_t total)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "NVS open(%s) failed: %s", blob_key, esp_err_to_name(err));
+        return err;
+    }
+    err = nvs_set_blob(h, blob_key, blob, blob_size);
+    if (err != ESP_OK) { nvs_close(h); return err; }
+    nvs_set_u32(h, total_key, total); /* best-effort */
+    nvs_commit(h);
+    nvs_close(h);
+    return ESP_OK;
+}
+
+/** Load a blob + u32 total from NVS. Returns ESP_OK if blob was loaded. */
+static esp_err_t nvs_load_stats(const char *blob_key, void *blob, size_t blob_size,
+                                const char *total_key, uint32_t *total)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &h);
+    if (err != ESP_OK) return err;
+
+    size_t sz = blob_size;
+    err = nvs_get_blob(h, blob_key, blob, &sz);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "%s loaded from NVS", blob_key);
+    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "No saved %s, starting fresh", blob_key);
+    } else {
+        ESP_LOGE(TAG, "Error reading %s: %s", blob_key, esp_err_to_name(err));
+    }
+
+    if (total) nvs_get_u32(h, total_key, total); /* ignore error — caller recalculates */
+    nvs_close(h);
+    return err;
+}
+
 /* ============ Key Stats NVS Persistence ============ */
 
 void save_key_stats(void)
 {
-    nvs_handle_t my_handle;
-    esp_err_t err;
-    
-    err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
+    esp_err_t err = nvs_save_stats("key_stats", key_stats, sizeof(key_stats),
+                                    "key_stats_tot", key_stats_total);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error (%s) opening NVS for key_stats!", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to save key_stats: %s", esp_err_to_name(err));
         return;
     }
-    
-    /* Save the stats array */
-    err = nvs_set_blob(my_handle, "key_stats", key_stats, sizeof(key_stats));
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error (%s) writing key_stats!", esp_err_to_name(err));
-        nvs_close(my_handle);
-        return;
-    }
-    
-    /* Save the total count */
-    err = nvs_set_u32(my_handle, "key_stats_tot", key_stats_total);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error (%s) writing key_stats_total!", esp_err_to_name(err));
-    }
-    
-    err = nvs_commit(my_handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error (%s) committing key_stats!", esp_err_to_name(err));
-    }
-    
-    nvs_close(my_handle);
     key_stats_last_saved_total = key_stats_total;
     key_stats_last_save_tick = xTaskGetTickCount();
     ESP_LOGI(TAG, "Key stats saved (total: %lu)", (unsigned long)key_stats_total);
@@ -325,39 +301,15 @@ void save_key_stats(void)
 
 void load_key_stats(void)
 {
-    nvs_handle_t my_handle;
-    esp_err_t err;
-    
-    err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &my_handle);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "No NVS for key_stats (%s), starting fresh", esp_err_to_name(err));
-        return;
-    }
-    
-    /* Load the stats array */
-    size_t required_size = sizeof(key_stats);
-    err = nvs_get_blob(my_handle, "key_stats", key_stats, &required_size);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Key stats loaded from NVS");
-    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
-        ESP_LOGI(TAG, "No saved key_stats found, starting fresh");
-    } else {
-        ESP_LOGE(TAG, "Error (%s) reading key_stats!", esp_err_to_name(err));
-    }
-    
-    /* Load the total count */
-    err = nvs_get_u32(my_handle, "key_stats_tot", &key_stats_total);
-    if (err != ESP_OK) {
-        /* Recalculate total from array */
-        key_stats_total = 0;
-        for (int r = 0; r < MATRIX_ROWS; r++) {
-            for (int c = 0; c < MATRIX_COLS; c++) {
+    nvs_load_stats("key_stats", key_stats, sizeof(key_stats),
+                   "key_stats_tot", &key_stats_total);
+
+    /* If total wasn't saved, recalculate from array */
+    if (key_stats_total == 0) {
+        for (int r = 0; r < MATRIX_ROWS; r++)
+            for (int c = 0; c < MATRIX_COLS; c++)
                 key_stats_total += key_stats[r][c];
-            }
-        }
     }
-    
-    nvs_close(my_handle);
     key_stats_last_saved_total = key_stats_total;
     key_stats_last_save_tick = xTaskGetTickCount();
 }
@@ -389,35 +341,17 @@ void key_stats_check_save(void)
 
 void save_bigram_stats(void)
 {
-    nvs_handle_t my_handle;
-    esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error (%s) opening NVS for bigrams!", esp_err_to_name(err));
-        return;
-    }
-
-    err = nvs_set_blob(my_handle, "bigram_stats", bigram_stats, sizeof(bigram_stats));
+    esp_err_t err = nvs_save_stats("bigram_stats", bigram_stats, sizeof(bigram_stats),
+                                    "bigram_total", bigram_total);
     if (err != ESP_OK) {
         if (err == ESP_ERR_NVS_NOT_ENOUGH_SPACE) {
             ESP_LOGW(TAG, "NVS too small for bigram_stats (%u bytes), disabling save", (unsigned)sizeof(bigram_stats));
             bigram_save_disabled = true;
         } else {
-            ESP_LOGE(TAG, "Error (%s) writing bigram_stats!", esp_err_to_name(err));
+            ESP_LOGE(TAG, "Failed to save bigram_stats: %s", esp_err_to_name(err));
         }
-        nvs_close(my_handle);
         return;
     }
-
-    err = nvs_set_u32(my_handle, "bigram_total", bigram_total);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error (%s) writing bigram_total!", esp_err_to_name(err));
-    }
-    err = nvs_commit(my_handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error (%s) committing bigram_stats!", esp_err_to_name(err));
-    }
-    nvs_close(my_handle);
-
     bigram_last_saved_total = bigram_total;
     bigram_last_save_tick = xTaskGetTickCount();
     ESP_LOGI(TAG, "Bigram stats saved (total: %lu)", (unsigned long)bigram_total);
@@ -425,32 +359,15 @@ void save_bigram_stats(void)
 
 void load_bigram_stats(void)
 {
-    nvs_handle_t my_handle;
-    esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &my_handle);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "No NVS for bigram_stats, starting fresh");
-        return;
-    }
+    nvs_load_stats("bigram_stats", bigram_stats, sizeof(bigram_stats),
+                   "bigram_total", &bigram_total);
 
-    size_t required_size = sizeof(bigram_stats);
-    err = nvs_get_blob(my_handle, "bigram_stats", bigram_stats, &required_size);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Bigram stats loaded from NVS");
-    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
-        ESP_LOGI(TAG, "No saved bigram_stats, starting fresh");
-    } else {
-        ESP_LOGE(TAG, "Error (%s) reading bigram_stats!", esp_err_to_name(err));
-    }
-
-    err = nvs_get_u32(my_handle, "bigram_total", &bigram_total);
-    if (err != ESP_OK) {
-        bigram_total = 0;
+    /* If total wasn't saved, recalculate from array */
+    if (bigram_total == 0) {
         for (int i = 0; i < NUM_KEYS; i++)
             for (int j = 0; j < NUM_KEYS; j++)
                 bigram_total += bigram_stats[i][j];
     }
-
-    nvs_close(my_handle);
     bigram_last_saved_total = bigram_total;
     bigram_last_save_tick = xTaskGetTickCount();
 }

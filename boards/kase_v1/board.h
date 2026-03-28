@@ -70,7 +70,7 @@
 #define BOARD_USB_PID             0x4001
 
 /* ── Debounce ──────────────────────────────────────────────── */
-#define BOARD_DEBOUNCE_TICKS      3
+#define BOARD_DEBOUNCE_TICKS      5
 
 /* ── Display sleep timeout (ms of inactivity) ──────────────── */
 #define BOARD_DISPLAY_SLEEP_MS    60000

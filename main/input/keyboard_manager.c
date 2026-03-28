@@ -85,6 +85,70 @@ static SemaphoreHandle_t hid_report_mutex = NULL;
 static TaskHandle_t hid_sender_task_handle = NULL;
 static uint8_t current_modifiers = 0;
 
+/* ── USB/BLE transport abstraction ────────────────────────────────── */
+
+/* Send a combined keyboard+mouse HID report via the active transport (USB or BLE).
+   Handles BLE initialization check and automatic fallback to USB. */
+static void hid_send_kb_mouse(uint8_t modifier, const uint8_t kb[6],
+                               uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
+{
+	if (usb_bl_state == 0) {
+		if (tud_hid_ready()) {
+			tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE,
+			                        modifier, kb, buttons, x, y, wheel, 0);
+		}
+	} else {
+		if (hid_bluetooth_is_initialized()) {
+			send_hid_bl_key(modifier, kb);
+			send_hid_bl_mouse(buttons, x, y, wheel);
+		} else {
+			usb_bl_state = 0; /* BLE not ready, fall back to USB */
+			if (tud_hid_ready()) {
+				tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE,
+				                        modifier, kb, buttons, x, y, wheel, 0);
+			}
+		}
+	}
+}
+
+/* Send a keyboard-only HID report via the active transport. */
+static void hid_send_keyboard(uint8_t modifier, const uint8_t kb[6])
+{
+	if (usb_bl_state == 0) {
+		if (tud_hid_ready()) {
+			tud_hid_keyboard_report(REPORT_ID_KEYBOARD, modifier, kb);
+		}
+	} else {
+		if (hid_bluetooth_is_initialized()) {
+			send_hid_bl_key(modifier, kb);
+		} else {
+			usb_bl_state = 0;
+			if (tud_hid_ready()) {
+				tud_hid_keyboard_report(REPORT_ID_KEYBOARD, modifier, kb);
+			}
+		}
+	}
+}
+
+/* Send a mouse-only HID report via the active transport. */
+static void hid_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
+{
+	if (usb_bl_state == 0) {
+		if (tud_hid_ready()) {
+			tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
+		}
+	} else {
+		if (hid_bluetooth_is_initialized()) {
+			send_hid_bl_mouse(buttons, x, y, wheel);
+		} else {
+			usb_bl_state = 0;
+			if (tud_hid_ready()) {
+				tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
+			}
+		}
+	}
+}
+
 static void extract_modifiers(uint8_t *keycodes, uint8_t *modifier) {
     *modifier = 0;
     for (int i = 0; i < 6; i++) {
@@ -154,29 +218,7 @@ static void hid_sender_task(void *pvParameters) {
               break;
           }
 
-          if (usb_bl_state == 0) {
-            if (tud_hid_ready()) {
-              // always send combined report even if parts are zero
-              if (!tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE, kb_mod, kb_buf,
-                                           m_buttons, m_x, m_y, m_wheel, 0)) {
-                KM_LOGW("tud_hid_kb_mouse_report failed (ready=%d q=%u)", (int)tud_hid_ready(), (unsigned)(hid_queue?uxQueueMessagesWaiting(hid_queue):0));
-              }
-            }
-          } else {
-            // BLE: send keyboard snapshot then mouse, always (even if zeros)
-            if (hid_bluetooth_is_initialized()) {
-                send_hid_bl_key(kb_mod, kb_buf);
-                send_hid_bl_mouse(m_buttons, m_x, m_y, m_wheel);
-            } else {
-                usb_bl_state = 0;
-                if (tud_hid_ready()) {
-                  if (!tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE, kb_mod, kb_buf,
-                                              m_buttons, m_x, m_y, m_wheel, 0)) {
-                    KM_LOGW("tud_hid_kb_mouse_report failed (ready=%d q=%u)", (int)tud_hid_ready(), (unsigned)(hid_queue?uxQueueMessagesWaiting(hid_queue):0));
-                  }
-                }
-            }
-          }
+          hid_send_kb_mouse(kb_mod, kb_buf, m_buttons, m_x, m_y, m_wheel);
         }
         // measure latency and log occasionally
         {
@@ -393,20 +435,7 @@ void send_hid_key() {
     last_key_enqueue_tick = xTaskGetTickCount();
   } else {
     /* fallback: direct send if queue not initialized yet */
-    if (usb_bl_state == 0) {
-      if (tud_hid_ready()) {
-        tud_hid_keyboard_report(REPORT_ID_KEYBOARD, modifier, keycodes);
-      }
-    } else {
-        if (hid_bluetooth_is_initialized()) {
-            send_hid_bl_key(modifier, keycodes);
-        } else {
-            usb_bl_state = 0;
-            if (tud_hid_ready()) {
-                tud_hid_keyboard_report(REPORT_ID_KEYBOARD, modifier, keycodes);
-            }
-        }
-    }
+    hid_send_keyboard(modifier, keycodes);
     memcpy(last_enqueued_keycodes, keycodes, sizeof(keycodes));
     last_enqueued_modifier = modifier;
     last_key_enqueue_tick = xTaskGetTickCount();
@@ -444,20 +473,7 @@ void send_mouse_report(uint8_t buttons, int8_t x, int8_t y, int8_t wheel) {
     }
   } else {
     /* fallback: direct send if queue not initialized yet */
-    if (usb_bl_state == 0) {
-      if (tud_hid_ready()) {
-        tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
-      }
-    } else {
-        if (hid_bluetooth_is_initialized()) {
-            send_hid_bl_mouse(buttons, x, y, wheel);
-        } else {
-            usb_bl_state = 0;
-            if (tud_hid_ready()) {
-                tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
-            }
-        }
-    }
+    hid_send_mouse(buttons, x, y, wheel);
   }
 }
 
@@ -483,26 +499,9 @@ void send_hid_kb_mouse(uint8_t modifier, const uint8_t keycodes[6], uint8_t butt
     }
   } else {
     /* fallback: direct send if queue not initialized yet */
-    if (usb_bl_state == 0) {
-      if (tud_hid_ready()) {
-        tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE, modifier, msg.payload.kb_mouse.keycodes,
-                                msg.payload.kb_mouse.buttons, msg.payload.kb_mouse.x, msg.payload.kb_mouse.y,
-                                msg.payload.kb_mouse.wheel, 0);
-      }
-    } else {
-      // fallback to separate BL sends
-      if (hid_bluetooth_is_initialized()) {
-        send_hid_bl_key(modifier, msg.payload.kb_mouse.keycodes);
-        send_hid_bl_mouse(msg.payload.kb_mouse.buttons, msg.payload.kb_mouse.x, msg.payload.kb_mouse.y, msg.payload.kb_mouse.wheel);
-      } else {
-          usb_bl_state = 0;
-          if (tud_hid_ready()) {
-            tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE, modifier, msg.payload.kb_mouse.keycodes,
-                                    msg.payload.kb_mouse.buttons, msg.payload.kb_mouse.x, msg.payload.kb_mouse.y,
-                                    msg.payload.kb_mouse.wheel, 0);
-          }
-      }
-    }
+    hid_send_kb_mouse(modifier, msg.payload.kb_mouse.keycodes,
+                      msg.payload.kb_mouse.buttons, msg.payload.kb_mouse.x,
+                      msg.payload.kb_mouse.y, msg.payload.kb_mouse.wheel);
   }
 }
 
@@ -510,7 +509,7 @@ uint8_t keyboard_get_usb_bl_state(void) {
   return usb_bl_state;
 }
 
-// code degueu....
+/* ── Internal function / layer switching handlers ────────────────── */
 
 void run_internal_funct() {
 
