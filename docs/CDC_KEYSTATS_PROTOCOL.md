@@ -415,9 +415,75 @@ After this initial flash, all future updates can use the CDC OTA protocol.
 
 ---
 
+## Advanced Features Commands
+
+See [KEYCODE_MAP.md](KEYCODE_MAP.md) for keycode encoding details.
+
+### `FEATURES?` — Query supported features
+
+Send: `FEATURES?\r\n`
+
+Response: `MT,LT,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE,COMBO,LEADER\r\n`
+
+### `SETKEY layer,v2row,v2col,hex_keycode` — Set a single key
+
+Send: `SETKEY 0,4,0,5229\r\n` (Layer 0, V2 row 4 col 0 = MT(Shift, ESC))
+
+### `TDSET index;a1,a2,a3,a4` — Configure Tap Dance
+
+All values in **hex**. Actions: 1-tap, 2-tap, 3-tap, hold.
+
+Send: `TDSET 0;04,05,06,29\r\n` (1-tap=A, 2-tap=B, 3-tap=C, hold=ESC)
+
+Response: `TDSET 0:OK\r\n`
+
+### `TD?` — List Tap Dance configs
+
+Response: one line per configured slot, then `OK`.
+
+### `COMBOSET index;r1,c1,r2,c2,result_hex` — Configure Combo
+
+Positions use **V1 internal coordinates**.
+
+Send: `COMBOSET 0;3,3,3,4,29\r\n` (J+K = ESC)
+
+Response: `COMBOSET 0:OK\r\n`
+
+### `COMBO?` — List Combo configs
+
+### `LEADERSET index;seq_hex;result_hex,mod_hex` — Configure Leader sequence
+
+Sequence is comma-separated HID keycodes in hex. Result is keycode + modifier mask.
+
+Send: `LEADERSET 0;09,16;16,01\r\n` (Leader → F → S = Ctrl+S)
+
+Response: `LEADERSET 0:OK\r\n`
+
+### `LEADER?` — List Leader sequences
+
+### `MACROSEQ slot;name;key:mod,...` — Create sequence macro
+
+Each step is `keycode:modifier` in hex. Special: `FF:nn` = delay (nn × 10ms).
+
+Send: `MACROSEQ 0;CopyPaste;06:01,FF:0A,19:01\r\n` (Ctrl+C, 100ms, Ctrl+V)
+
+Response: `MACRO 0 saved (3 steps)\r\n`
+
+### `MACROADD slot;name;key1,key2,...` — Create simple macro (simultaneous keys)
+
+Send: `MACROADD 0;Copy;E0,06\r\n` (Ctrl+C)
+
+### `MACRODEL slot` — Delete macro
+
+Send: `MACRODEL 0\r\n`
+
+---
+
 ## Data persistence
 
 - Key stats and bigram stats are stored in NVS flash and survive reboots
 - Key stats auto-save: every **100 keypresses** or every **60 seconds**
 - Bigram stats auto-save: every **100 keypresses** or every **120 seconds**
-- On boot, both are loaded from NVS automatically
+- Tap dance, combo, and leader configs persist to NVS on set
+- Macro sequences persist to NVS on save
+- On boot, all configs are loaded from NVS automatically
