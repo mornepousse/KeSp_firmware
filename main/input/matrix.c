@@ -8,8 +8,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "round_ui.h"
-#include "nvs_flash.h"
-#include "nvs.h"
+#include "nvs_utils.h"
+#include "nvs.h"  /* ESP_ERR_NVS_NOT_ENOUGH_SPACE */
 
 #define TAG "MATRIX_SHIM"
 
@@ -241,55 +241,12 @@ uint32_t get_key_stats_max(void)
     return max;
 }
 
-/* ── Generic NVS helpers ──────────────────────────────────────────── */
-
-/** Save a blob + u32 total to NVS. Returns ESP_OK on success. */
-static esp_err_t nvs_save_stats(const char *blob_key, const void *blob, size_t blob_size,
-                                const char *total_key, uint32_t total)
-{
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &h);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "NVS open(%s) failed: %s", blob_key, esp_err_to_name(err));
-        return err;
-    }
-    err = nvs_set_blob(h, blob_key, blob, blob_size);
-    if (err != ESP_OK) { nvs_close(h); return err; }
-    nvs_set_u32(h, total_key, total); /* best-effort */
-    nvs_commit(h);
-    nvs_close(h);
-    return ESP_OK;
-}
-
-/** Load a blob + u32 total from NVS. Returns ESP_OK if blob was loaded. */
-static esp_err_t nvs_load_stats(const char *blob_key, void *blob, size_t blob_size,
-                                const char *total_key, uint32_t *total)
-{
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &h);
-    if (err != ESP_OK) return err;
-
-    size_t sz = blob_size;
-    err = nvs_get_blob(h, blob_key, blob, &sz);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "%s loaded from NVS", blob_key);
-    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
-        ESP_LOGI(TAG, "No saved %s, starting fresh", blob_key);
-    } else {
-        ESP_LOGE(TAG, "Error reading %s: %s", blob_key, esp_err_to_name(err));
-    }
-
-    if (total) nvs_get_u32(h, total_key, total); /* ignore error — caller recalculates */
-    nvs_close(h);
-    return err;
-}
-
 /* ============ Key Stats NVS Persistence ============ */
 
 void save_key_stats(void)
 {
-    esp_err_t err = nvs_save_stats("key_stats", key_stats, sizeof(key_stats),
-                                    "key_stats_tot", key_stats_total);
+    esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "key_stats", key_stats,
+                                              sizeof(key_stats), "key_stats_tot", key_stats_total);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to save key_stats: %s", esp_err_to_name(err));
         return;
@@ -301,10 +258,9 @@ void save_key_stats(void)
 
 void load_key_stats(void)
 {
-    nvs_load_stats("key_stats", key_stats, sizeof(key_stats),
-                   "key_stats_tot", &key_stats_total);
+    nvs_load_blob_with_total(STORAGE_NAMESPACE, "key_stats", key_stats,
+                              sizeof(key_stats), "key_stats_tot", &key_stats_total);
 
-    /* If total wasn't saved, recalculate from array */
     if (key_stats_total == 0) {
         for (int r = 0; r < MATRIX_ROWS; r++)
             for (int c = 0; c < MATRIX_COLS; c++)
@@ -341,8 +297,8 @@ void key_stats_check_save(void)
 
 void save_bigram_stats(void)
 {
-    esp_err_t err = nvs_save_stats("bigram_stats", bigram_stats, sizeof(bigram_stats),
-                                    "bigram_total", bigram_total);
+    esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "bigram_stats", bigram_stats,
+                                              sizeof(bigram_stats), "bigram_total", bigram_total);
     if (err != ESP_OK) {
         if (err == ESP_ERR_NVS_NOT_ENOUGH_SPACE) {
             ESP_LOGW(TAG, "NVS too small for bigram_stats (%u bytes), disabling save", (unsigned)sizeof(bigram_stats));
@@ -359,8 +315,8 @@ void save_bigram_stats(void)
 
 void load_bigram_stats(void)
 {
-    nvs_load_stats("bigram_stats", bigram_stats, sizeof(bigram_stats),
-                   "bigram_total", &bigram_total);
+    nvs_load_blob_with_total(STORAGE_NAMESPACE, "bigram_stats", bigram_stats,
+                              sizeof(bigram_stats), "bigram_total", &bigram_total);
 
     /* If total wasn't saved, recalculate from array */
     if (bigram_total == 0) {

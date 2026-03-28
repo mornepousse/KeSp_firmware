@@ -1,4 +1,5 @@
 #include "keyboard_manager.h"
+#include "hid_transport.h"
 #include "esp_gap_ble_api.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -84,70 +85,6 @@ static QueueHandle_t hid_queue = NULL;
 static SemaphoreHandle_t hid_report_mutex = NULL;
 static TaskHandle_t hid_sender_task_handle = NULL;
 static uint8_t current_modifiers = 0;
-
-/* ── USB/BLE transport abstraction ────────────────────────────────── */
-
-/* Send a combined keyboard+mouse HID report via the active transport (USB or BLE).
-   Handles BLE initialization check and automatic fallback to USB. */
-static void hid_send_kb_mouse(uint8_t modifier, const uint8_t kb[6],
-                               uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
-{
-	if (usb_bl_state == 0) {
-		if (tud_hid_ready()) {
-			tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE,
-			                        modifier, kb, buttons, x, y, wheel, 0);
-		}
-	} else {
-		if (hid_bluetooth_is_initialized()) {
-			send_hid_bl_key(modifier, kb);
-			send_hid_bl_mouse(buttons, x, y, wheel);
-		} else {
-			usb_bl_state = 0; /* BLE not ready, fall back to USB */
-			if (tud_hid_ready()) {
-				tud_hid_kb_mouse_report(REPORT_ID_KEYBOARD, REPORT_ID_MOUSE,
-				                        modifier, kb, buttons, x, y, wheel, 0);
-			}
-		}
-	}
-}
-
-/* Send a keyboard-only HID report via the active transport. */
-static void hid_send_keyboard(uint8_t modifier, const uint8_t kb[6])
-{
-	if (usb_bl_state == 0) {
-		if (tud_hid_ready()) {
-			tud_hid_keyboard_report(REPORT_ID_KEYBOARD, modifier, kb);
-		}
-	} else {
-		if (hid_bluetooth_is_initialized()) {
-			send_hid_bl_key(modifier, kb);
-		} else {
-			usb_bl_state = 0;
-			if (tud_hid_ready()) {
-				tud_hid_keyboard_report(REPORT_ID_KEYBOARD, modifier, kb);
-			}
-		}
-	}
-}
-
-/* Send a mouse-only HID report via the active transport. */
-static void hid_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
-{
-	if (usb_bl_state == 0) {
-		if (tud_hid_ready()) {
-			tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
-		}
-	} else {
-		if (hid_bluetooth_is_initialized()) {
-			send_hid_bl_mouse(buttons, x, y, wheel);
-		} else {
-			usb_bl_state = 0;
-			if (tud_hid_ready()) {
-				tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
-			}
-		}
-	}
-}
 
 static void extract_modifiers(uint8_t *keycodes, uint8_t *modifier) {
     *modifier = 0;
