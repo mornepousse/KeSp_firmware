@@ -7,7 +7,7 @@
 #include <stdbool.h>
 
 #ifndef LEADER_TIMEOUT_MS
-#define LEADER_TIMEOUT_MS 300
+#define LEADER_TIMEOUT_MS 1000
 #endif
 
 #define LEADER_MAX_SEQ_LEN   4

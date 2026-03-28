@@ -109,7 +109,7 @@ bool leader_feed(uint8_t keycode)
 
 bool leader_tick(void)
 {
-    resolved_flag = false;
+    if (resolved_flag) return true; /* result pending, don't reset */
     if (!active) return false;
 
     if ((now_ms() - last_key_ms) >= LEADER_TIMEOUT_MS) {
