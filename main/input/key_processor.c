@@ -1,5 +1,13 @@
-/* Key processing: keycode building, layer switching, macros, internal functions,
-   tap/hold, one-shot, caps word, repeat key. */
+/* Key processing: converts matrix state to HID keycodes.
+   Handles: layers (MO/TO/LT), modifiers (MT/OSM), macros, caps word, repeat key.
+
+   Flow per scan cycle:
+   1. Detect released keys → resolve tap/hold
+   2. Determine active layer (base + LT hold + OSL override)
+   3. For each pressed key: lookup keymap → process advanced or legacy keycodes
+   4. Inject resolved taps, one-shot modifiers, caps word
+   5. Save state for next cycle
+*/
 #include "key_processor.h"
 #include "matrix_scan.h"
 #include "keyboard_config.h"
@@ -14,21 +22,31 @@
 
 static const char *TAG = "KEY_PROC";
 
+/* ── State ───────────────────────────────────────────────────────── */
+
 uint16_t keypress_internal_function = 0;
 uint8_t current_row_layer_changer = INVALID_KEY_POS;
 uint8_t current_col_layer_changer = INVALID_KEY_POS;
 uint16_t extra_keycodes[6] = {0};
 
-/* Track previous press state for detecting new presses / releases */
-static uint8_t prev_press_row[6] = {INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS,
-                                     INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS};
-static uint8_t prev_press_col[6] = {INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS,
-                                     INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS};
+static uint8_t prev_press_row[6];
+static uint8_t prev_press_col[6];
+static uint8_t tap_injected_slots = 0;
 
-/* Track which keycode slots have injected taps (need press+release) */
-static uint8_t tap_injected_slots = 0; /* bitmask: bit i = keycodes[i] has a tap */
+static bool state_initialized = false;
 
-/* ── Layer switching ─────────────────────────────────────────────── */
+static void ensure_initialized(void)
+{
+    if (!state_initialized) {
+        for (int i = 0; i < 6; i++) {
+            prev_press_row[i] = INVALID_KEY_POS;
+            prev_press_col[i] = INVALID_KEY_POS;
+        }
+        state_initialized = true;
+    }
+}
+
+/* ── Legacy layer switching ──────────────────────────────────────── */
 
 static void apply_momentary_layer(int16_t keycode, uint8_t key_idx)
 {
@@ -45,20 +63,16 @@ static void apply_toggle_layer(uint16_t keycode)
 {
     if (keycode >= TO_L0 && keycode <= TO_L9) {
         int16_t new_layer = (keycode - TO_L0) / 256;
-        if (current_layout == new_layer)
-            current_layout = 0;
-        else
-            current_layout = new_layer;
+        current_layout = (current_layout == new_layer) ? 0 : new_layer;
         last_layer = current_layout;
         layer_changed();
     }
 }
 
-/* ── Internal function detection & dispatch ───────────────────────── */
+/* ── Legacy internal function dispatch ───────────────────────────── */
 
 static bool detect_internal_function(int16_t keycode)
 {
-    /* Only legacy internal functions (TO_L0..BT_TOGGLE range, not advanced keycodes) */
     if (keycode >= TO_L0 && keycode < K_OSM_BASE) {
         if (keypress_internal_function == 0) {
             keypress_internal_function = keycode;
@@ -79,7 +93,6 @@ static void dispatch_internal_function(void)
         km_post_display_update();
         break;
     case BT_TOGGLE:
-        ESP_LOGI(TAG, "BT_TOGGLE");
         km_post_bt_toggle();
         break;
     }
@@ -89,60 +102,40 @@ static void dispatch_internal_function(void)
 
 static void expand_macro(uint16_t keycode)
 {
-    if (keycode >= MACRO_1 && keycode <= MACRO_20) {
-        int16_t macro_i = (keycode - MACRO_1) / 256;
-        if (macro_i < MAX_MACROS && macros_list[macro_i].name[0] != '\0') {
-            uint8_t j = 0;
-            for (uint8_t i = 0; i < 6; i++) {
-                if (keycodes[i] == 0) {
-                    keycodes[i] = macros_list[macro_i].keys[j];
-                    j++;
-                }
-            }
-        }
+    if (keycode < MACRO_1 || keycode > MACRO_20) return;
+    int16_t idx = (keycode - MACRO_1) / 256;
+    if (idx >= MAX_MACROS || macros_list[idx].name[0] == '\0') return;
+    uint8_t j = 0;
+    for (uint8_t i = 0; i < 6 && j < 6; i++) {
+        if (keycodes[i] == 0)
+            keycodes[i] = macros_list[idx].keys[j++];
     }
 }
 
-/* ── Advanced keycode handling ───────────────────────────────────── */
+/* ── Advanced keycode processing ─────────────────────────────────── */
 
-/* Process a single advanced keycode. Returns the HID keycode to emit (0 = absorbed). */
-static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col, uint8_t slot)
+static bool is_advanced_keycode(uint16_t kc)
 {
-    /* Tap/Hold: LT, MT, and OSM all go through the tap/hold engine */
+    if (kc <= 0xFF) return false;
+    if (kc >= MO_L0 && kc <= TO_L9) return false;
+    if (kc >= MACRO_1 && kc <= MACRO_20) return false;
+    if (kc == BT_SWITCH_DEVICE || kc == BT_TOGGLE) return false;
+    return true;
+}
+
+static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
+{
     if (K_IS_LT(kc) || K_IS_MT(kc) || K_IS_OSM(kc)) {
         tap_hold_on_press(kc, row, col);
-        return 0; /* absorbed — resolved later */
-    }
-
-    /* One-Shot Layer */
-    if (K_IS_OSL(kc)) {
-        osl_arm(K_OSL_LAYER(kc));
         return 0;
     }
-
-    /* Caps Word toggle */
-    if (kc == K_CAPS_WORD) {
-        caps_word_toggle();
-        return 0;
-    }
-
-    /* Repeat Key */
-    if (kc == K_REPEAT) {
-        return repeat_key_get();
-    }
-
+    if (K_IS_OSL(kc)) { osl_arm(K_OSL_LAYER(kc)); return 0; }
+    if (kc == K_CAPS_WORD) { caps_word_toggle(); return 0; }
+    if (kc == K_REPEAT)    { return repeat_key_get(); }
     return 0;
 }
 
-/* Detect newly pressed/released keys for tap/hold tracking */
-static bool is_new_press(uint8_t row, uint8_t col)
-{
-    for (int i = 0; i < 6; i++) {
-        if (prev_press_row[i] == row && prev_press_col[i] == col)
-            return false;
-    }
-    return true;
-}
+/* ── Release detection for tap/hold ──────────────────────────────── */
 
 static void detect_releases(void)
 {
@@ -156,101 +149,90 @@ static void detect_releases(void)
                 break;
             }
         }
-        if (!still_pressed) {
+        if (!still_pressed)
             tap_hold_on_release(prev_press_row[i], prev_press_col[i]);
-        }
     }
 }
 
-/* ── Public API ──────────────────────────────────────────────────── */
+/* ── Main report builder ─────────────────────────────────────────── */
 
 void build_keycode_report(void)
 {
-    /* Reset tap tracking for this cycle */
+    ensure_initialized();
     tap_injected_slots = 0;
 
-    /* Detect key releases for tap/hold */
+    /* Step 1: detect releases and resolve pending tap/holds */
     detect_releases();
 
-    /* Check tap/hold timeouts */
-    tap_hold_tick();
-
-    /* Determine active layer (may be overridden by LT hold or OSL) */
+    /* Step 2: determine active layer */
     uint8_t active_layer = current_layout;
     int8_t lt_layer = tap_hold_get_active_layer();
     if (lt_layer >= 0) active_layer = (uint8_t)lt_layer;
     int8_t osl_layer = osl_get_layer();
     if (osl_layer >= 0) active_layer = (uint8_t)osl_layer;
 
-    /* Get tap/hold modifier additions */
     uint8_t th_mods = tap_hold_get_active_mods();
-
-    /* Check if any non-tap-hold key was pressed (interrupts pending) */
     bool has_normal_press = false;
 
+    /* Step 3: process each pressed key */
     for (uint8_t i = 0; i < 6; i++) {
-        if (current_press_col[i] != INVALID_KEY_POS) {
-            uint16_t kc = keymaps[active_layer][current_press_row[i]][current_press_col[i]];
-
-            /* Check if this is a tap/hold key with a resolved action */
-            bool is_hold = false;
-            uint16_t resolved = tap_hold_get_resolved(current_press_row[i], current_press_col[i], &is_hold);
-            if (resolved != 0 && !is_hold) {
-                /* Tap resolved — emit the tap keycode */
-                kc = resolved;
-            } else if (is_hold) {
-                /* Hold — modifier/layer already active via tap_hold engine */
-                extra_keycodes[i] = kc;
-                continue;
-            }
-
-            /* Process advanced keycodes */
-            if (K_IS_ADVANCED(kc) && !(kc >= MO_L0 && kc <= TO_L9) &&
-                !(kc >= MACRO_1 && kc <= MACRO_20) &&
-                kc != BT_SWITCH_DEVICE && kc != BT_TOGGLE) {
-                uint8_t hid_kc = process_advanced_key(kc, current_press_row[i], current_press_col[i], i);
-                if (hid_kc != 0) {
-                    keycodes[i] = hid_kc;
-                    has_normal_press = true;
-                } else {
-                    extra_keycodes[i] = kc;
-                }
-                continue;
-            }
-
-            /* Legacy keycode processing */
-            apply_momentary_layer(kc, i);
-            detect_internal_function(kc);
-            expand_macro(kc);
-
-            if (current_row_layer_changer == current_press_row[i] &&
-                current_col_layer_changer == current_press_col[i]) {
-                /* layer changer key — skip */
-            } else {
-                if (kc == K_NO)
-                    kc = keymaps[last_layer][current_press_row[i]][current_press_col[i]];
-
-                if (kc > 255) {
-                    extra_keycodes[i] = kc;
-                } else {
-                    keycodes[i] = kc;
-                    has_normal_press = true;
-                }
-            }
-        } else {
-            extra_keycodes[i] = 0;
+        if (current_press_col[i] == INVALID_KEY_POS) {
             keycodes[i] = 0;
+            extra_keycodes[i] = 0;
+            continue;
+        }
+
+        uint8_t row = current_press_row[i];
+        uint8_t col = current_press_col[i];
+        uint16_t kc = keymaps[active_layer][row][col];
+
+        /* Check tap/hold resolved state */
+        bool is_hold = false;
+        tap_hold_get_resolved(row, col, &is_hold);
+        if (is_hold) {
+            extra_keycodes[i] = kc;
+            continue;
+        }
+
+        /* Advanced keycodes (LT, MT, OSM, OSL, CapsWord, Repeat) */
+        if (is_advanced_keycode(kc)) {
+            uint8_t hid_kc = process_advanced_key(kc, row, col);
+            if (hid_kc != 0) {
+                keycodes[i] = hid_kc;
+                has_normal_press = true;
+            } else {
+                extra_keycodes[i] = kc;
+            }
+            continue;
+        }
+
+        /* Legacy: MO layers, TO layers, macros, BT, internal functions */
+        apply_momentary_layer(kc, i);
+        detect_internal_function(kc);
+        expand_macro(kc);
+
+        if (current_row_layer_changer == row && current_col_layer_changer == col) {
+            /* Layer changer key — absorbed */
+        } else {
+            if (kc == K_NO)
+                kc = keymaps[last_layer][row][col];
+            if (kc > 0xFF) {
+                extra_keycodes[i] = kc;
+            } else {
+                keycodes[i] = kc;
+                has_normal_press = true;
+            }
         }
     }
 
-    /* Interrupt pending tap/holds if a normal key was pressed */
+    /* Step 4: interrupt pending tap/holds if a normal key was pressed */
     if (has_normal_press)
         tap_hold_interrupt();
 
-    /* Apply one-shot modifiers and tap/hold modifiers to the report */
+    /* Step 5: apply modifiers (tap/hold + one-shot) */
     uint8_t extra_mods = th_mods | osm_consume();
 
-    /* Apply caps word processing */
+    /* Step 6: caps word + repeat key tracking */
     for (uint8_t i = 0; i < 6; i++) {
         if (keycodes[i] != 0) {
             caps_word_process(&keycodes[i], &extra_mods);
@@ -258,40 +240,35 @@ void build_keycode_report(void)
         }
     }
 
-    /* Inject extra modifiers into keycode slots (they'll be extracted by hid_report) */
-    if (extra_mods) {
-        for (uint8_t bit = 0; bit < 8; bit++) {
-            if (extra_mods & (1 << bit)) {
-                /* Map mod bit to HID keycode: bit 0 = LCtrl (0xE0), etc. */
-                uint8_t mod_hid = HID_KEY_CONTROL_LEFT + bit;
-                /* Find empty slot */
-                for (uint8_t i = 0; i < 6; i++) {
-                    if (keycodes[i] == 0) { keycodes[i] = mod_hid; break; }
-                }
-            }
+    /* Step 7: inject modifier keycodes */
+    for (uint8_t bit = 0; bit < 8; bit++) {
+        if (!(extra_mods & (1 << bit))) continue;
+        uint8_t mod_hid = HID_KEY_CONTROL_LEFT + bit;
+        for (uint8_t i = 0; i < 6; i++) {
+            if (keycodes[i] == 0) { keycodes[i] = mod_hid; break; }
         }
     }
 
-    /* Inject resolved taps (key already released — inject after main loop) */
+    /* Step 8: inject resolved taps (key already released) */
     {
         uint8_t tap_kc;
         while ((tap_kc = tap_hold_consume_tap()) != 0) {
             for (uint8_t i = 0; i < 6; i++) {
                 if (keycodes[i] == 0) {
                     keycodes[i] = tap_kc;
-                    has_normal_press = true;
                     tap_injected_slots |= (1 << i);
+                    has_normal_press = true;
                     break;
                 }
             }
         }
     }
 
-    /* Consume one-shot layer after processing */
+    /* Step 9: consume one-shot layer after a real keypress */
     if (osl_layer >= 0 && has_normal_press)
         osl_consume();
 
-    /* Check if momentary layer key was released */
+    /* Step 10: check if momentary layer key was released */
     if (current_layout != last_layer) {
         bool changer_held = false;
         for (uint8_t i = 0; i < 6; i++) {
@@ -309,7 +286,7 @@ void build_keycode_report(void)
         }
     }
 
-    /* Save current press state for next cycle */
+    /* Step 11: save state for next cycle */
     for (uint8_t i = 0; i < 6; i++) {
         prev_press_row[i] = current_press_row[i];
         prev_press_col[i] = current_press_col[i];
@@ -330,17 +307,13 @@ void process_matrix_changes(void)
     }
 
     if (!still_held) {
-        ESP_LOGI(TAG, "Executing internal func: 0x%04X", keypress_internal_function);
         dispatch_internal_function();
         apply_toggle_layer(keypress_internal_function);
         keypress_internal_function = 0;
     }
 }
 
-bool key_processor_has_tap(void)
-{
-    return tap_injected_slots != 0;
-}
+bool key_processor_has_tap(void)       { return tap_injected_slots != 0; }
 
 void key_processor_clear_taps(void)
 {
