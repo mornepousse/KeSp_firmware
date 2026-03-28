@@ -29,22 +29,11 @@ uint8_t current_row_layer_changer = INVALID_KEY_POS;
 uint8_t current_col_layer_changer = INVALID_KEY_POS;
 uint16_t extra_keycodes[6] = {0};
 
-static uint8_t prev_press_row[6];
-static uint8_t prev_press_col[6];
+static uint8_t prev_press_row[6] = {INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS,
+                                     INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS};
+static uint8_t prev_press_col[6] = {INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS,
+                                     INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS};
 static uint8_t tap_injected_slots = 0;
-
-static bool state_initialized = false;
-
-static void ensure_initialized(void)
-{
-    if (!state_initialized) {
-        for (int i = 0; i < 6; i++) {
-            prev_press_row[i] = INVALID_KEY_POS;
-            prev_press_col[i] = INVALID_KEY_POS;
-        }
-        state_initialized = true;
-    }
-}
 
 /* ── Legacy layer switching ──────────────────────────────────────── */
 
@@ -158,7 +147,6 @@ static void detect_releases(void)
 
 void build_keycode_report(void)
 {
-    ensure_initialized();
     tap_injected_slots = 0;
 
     /* Step 1: detect releases and resolve pending tap/holds */
