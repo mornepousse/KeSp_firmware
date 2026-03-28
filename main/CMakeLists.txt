@@ -8,8 +8,10 @@ idf_component_register(
 
         "display/status_display.c"
         "display/oled/i2c_oled_display.c"
+        "display/oled/oled_backend.c"
         "display/round/spi_round_display.c"
         "display/round/round_ui.c"
+        "display/round/round_backend.c"
         "display/round/tamagotchi.c"
         "led/led_strip_anim.c"
         "display/assets/img_usb.c"

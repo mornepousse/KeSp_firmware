@@ -1,6 +1,12 @@
 #ifndef BOARD_H
 #define BOARD_H
 
+#ifdef ESP_PLATFORM
+#include "driver/i2c.h"
+#else
+#define I2C_NUM_0 0
+#endif
+
 /* ── Product info ──────────────────────────────────────────── */
 #define GATTS_TAG           "KaSe_V2"
 #define MANUFACTURER_NAME   "Mae"
