@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include "esp_log.h"
+#include "keyboard_config.h"
 #include "nvs_utils.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
@@ -23,7 +24,6 @@ static const char *TAG = "KEY_STATS";
 #define BIGRAM_SAVE_INTERVAL_MS       120000
 #endif
 
-#define STORAGE_NAMESPACE "kesp"
 
 /* ── Key stats data ──────────────────────────────────────────────── */
 

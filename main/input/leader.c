@@ -1,12 +1,12 @@
 /* Leader Key engine */
 #include "leader.h"
+#include "keyboard_config.h"
 #include "nvs_utils.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <string.h>
 
 static const char *TAG = "LEADER";
-#define STORAGE_NAMESPACE "kesp"
 
 static leader_entry_t entries[LEADER_MAX_ENTRIES];
 

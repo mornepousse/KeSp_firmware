@@ -1,13 +1,13 @@
 /* Combo engine: detect simultaneous key presses */
 #include "combo.h"
 #include "matrix_scan.h"
+#include "keyboard_config.h"
 #include "nvs_utils.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <string.h>
 
 static const char *TAG = "COMBO";
-#define STORAGE_NAMESPACE "kesp"
 
 static combo_config_t configs[COMBO_MAX_SLOTS];
 static uint8_t resolved_queue[COMBO_MAX_SLOTS];

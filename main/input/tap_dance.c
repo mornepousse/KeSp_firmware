@@ -1,11 +1,11 @@
 /* Tap Dance engine implementation */
 #include "tap_dance.h"
+#include "keyboard_config.h"
 #include "nvs_utils.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <string.h>
 
-#define STORAGE_NAMESPACE "kesp"
 
 static const char *TAG = "TAP_DANCE";
 
