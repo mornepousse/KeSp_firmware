@@ -5,6 +5,7 @@
 #include "hid_report.h"
 #include "keyboard_actions.h"
 #include "matrix_scan.h"
+#include "tap_hold.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -38,6 +39,7 @@ void vTaskKeyboard(void *pvParameters)
 void keyboard_manager_init(void)
 {
     ESP_LOGI(TAG, "Keyboard manager initialized");
+    tap_hold_init();
     hid_report_init();
     keyboard_worker_init();
 }

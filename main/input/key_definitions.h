@@ -362,7 +362,60 @@ static const uint16_t TO_L9 = 0x1400;
 // #define BT_RECONNECT_LAST             0x2D00
 
 #define BT_SWITCH_DEVICE              0x2E00 // switch wire to bluetooth or bluetooth to wire
-#define BT_TOGGLE                     0x2F00 
+#define BT_TOGGLE                     0x2F00
+
+/* ── Advanced keycodes (v3.5+) ───────────────────────────────────── */
+/* See docs/KEYCODE_MAP.md for full encoding specification            */
+
+/* One-Shot Modifier: tap to apply modifier to next key only */
+#define K_OSM_BASE                   0x3000
+#define K_OSM(mod_mask)              (K_OSM_BASE | (mod_mask))
+#define K_IS_OSM(kc)                 (((kc) & 0xFF00) == K_OSM_BASE)
+#define K_OSM_MOD(kc)                ((kc) & 0xFF)
+/* Modifier bits */
+#define MOD_LCTL  0x01
+#define MOD_LSFT  0x02
+#define MOD_LALT  0x04
+#define MOD_LGUI  0x08
+#define MOD_RCTL  0x10
+#define MOD_RSFT  0x20
+#define MOD_RALT  0x40
+#define MOD_RGUI  0x80
+
+/* One-Shot Layer: activate layer for next key only */
+#define K_OSL_BASE                   0x3100
+#define K_OSL(layer)                 (K_OSL_BASE | (layer))
+#define K_IS_OSL(kc)                 (((kc) & 0xFFF0) == K_OSL_BASE)
+#define K_OSL_LAYER(kc)              ((kc) & 0x0F)
+
+/* Caps Word: auto-shift letters, deactivate on space/punctuation */
+#define K_CAPS_WORD                  0x3200
+
+/* Repeat Key: repeat the last non-modifier keypress */
+#define K_REPEAT                     0x3300
+
+/* Layer-Tap: hold = activate layer, tap = send keycode */
+#define K_LT_BASE                    0x4000
+#define K_LT(layer, kc)             (K_LT_BASE | ((layer) << 8) | (kc))
+#define K_IS_LT(kc)                 (((kc) & 0xF000) == K_LT_BASE)
+#define K_LT_LAYER(kc)              (((kc) >> 8) & 0x0F)
+#define K_LT_KEY(kc)                ((kc) & 0xFF)
+
+/* Mod-Tap: hold = modifier, tap = send keycode */
+#define K_MT_BASE                    0x5000
+#define K_MT(mod, kc)               (K_MT_BASE | ((mod) << 8) | (kc))
+#define K_IS_MT(kc)                 (((kc) & 0xF000) == K_MT_BASE)
+#define K_MT_MOD(kc)                (((kc) >> 8) & 0x0F)
+#define K_MT_KEY(kc)                ((kc) & 0xFF)
+
+/* Tap Dance: multiple tap actions per key */
+#define K_TD_BASE                    0x6000
+#define K_TD(index)                 (K_TD_BASE | ((index) << 8))
+#define K_IS_TD(kc)                 (((kc) & 0xF000) == K_TD_BASE)
+#define K_TD_INDEX(kc)              (((kc) >> 8) & 0x0F)
+
+/* Check if a keycode is an advanced (non-HID) keycode */
+#define K_IS_ADVANCED(kc)           ((kc) > 0x00FF)
 
 
 

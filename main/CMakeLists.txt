@@ -40,6 +40,8 @@ idf_component_register(
 
         "input/keyboard_task.c"
         "input/key_processor.c"
+        "input/tap_hold.c"
+        "input/key_features.c"
         "input/hid_report.c"
         "input/keymap.c"
         "input/matrix_scan.c"
