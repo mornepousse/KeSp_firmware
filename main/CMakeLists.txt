@@ -27,6 +27,7 @@ idf_component_register(
         "input/keyboard_task.c"
         "input/keymap.c"
         "input/matrix_scan.c"
+        "input/key_stats.c"
         "input/keyboard_actions.c"
 
         "${BOARD_DIR}/board_keymap.c"

@@ -3,6 +3,7 @@
 #include "cdc_internal.h"
 #include "cdc_keyboard_cmds.h"
 #include "matrix_scan.h"
+#include "key_stats.h"
 #include "keyboard_config.h"
 #include "keyboard_task.h"
 #include "keymap.h"

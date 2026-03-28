@@ -14,6 +14,7 @@
 #include "keymap.h"
 #include "littlefs_manager.h"
 #include "matrix_scan.h"
+#include "key_stats.h"
 #include "usb_hid.h"
 #include "status_display.h"
 #include "esp_timer.h"
