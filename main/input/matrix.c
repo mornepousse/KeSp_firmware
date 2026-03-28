@@ -31,7 +31,6 @@ uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
 uint8_t SLAVE_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
 uint8_t (*matrix_states[])[MATRIX_ROWS][MATRIX_COLS] = { &MATRIX_STATE, &SLAVE_MATRIX_STATE };
 #define MAX_REPORT_KEYS  6       /* HID boot protocol: max 6 simultaneous keys */
-#define INVALID_KEY_POS  0xFF
 
 uint8_t keycodes[MAX_REPORT_KEYS];
 uint8_t current_press_row[MAX_REPORT_KEYS];

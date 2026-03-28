@@ -202,8 +202,8 @@ static void is_macro(uint16_t keycodeTMP);
 
 uint8_t usb_bl_state = 0; // 0: USB, 1: BL
 uint16_t keypress_internal_function = 0;
-uint8_t current_row_layer_changer = 255;
-uint8_t current_col_layer_changer = 255;
+uint8_t current_row_layer_changer = INVALID_KEY_POS;
+uint8_t current_col_layer_changer = INVALID_KEY_POS;
 
 uint16_t extra_keycodes[6] = {0, 0, 0, 0, 0, 0};
 
@@ -245,7 +245,7 @@ static void process_matrix_changes(void)
 static void build_keycode_report(void)
 {
   for (uint8_t i = 0; i < 6; i++) {
-    if (current_press_col[i] != 255) {
+    if (current_press_col[i] != INVALID_KEY_POS) {
       uint16_t keycodeTMP = keymaps[current_layout][current_press_row[i]][current_press_col[i]];
 
       is_momentary_layer(keycodeTMP, i);
@@ -284,8 +284,8 @@ static void build_keycode_report(void)
     if (changer == 0) {
       current_layout = last_layer;
       layer_changed();
-      current_col_layer_changer = 255;
-      current_row_layer_changer = 255;
+      current_col_layer_changer = INVALID_KEY_POS;
+      current_row_layer_changer = INVALID_KEY_POS;
     }
   }
 }
@@ -533,164 +533,77 @@ void is_macro(uint16_t keycodeTMP) {
   }
 }
 
+/* Process a matrix change: build report, handle internals, send HID */
+static void handle_matrix_change(void)
+{
+    build_keycode_report();
+    stat_matrix_changed = 0;
+    process_matrix_changes();
+    send_hid_key();
+}
+
+/* Log periodic scan timing stats and reset counters */
+static void maybe_log_scan_stats(void)
+{
+    uint32_t now_ms = esp_timer_get_time() / 1000;
+    if (last_scan_report_ms == 0) last_scan_report_ms = now_ms;
+    if (now_ms - last_scan_report_ms <= SCAN_REPORT_INTERVAL_MS) return;
+
+    last_scan_report_ms = now_ms;
+    if (full_scan_count > 0) {
+      KM_LOGI("Scan avg FULL: %llu us over %u samples",
+              (unsigned long long)(total_full_scan_us / full_scan_count), full_scan_count);
+    }
+    if (partial_scan_count > 0) {
+      KM_LOGI("Scan avg PARTIAL: %llu us over %u samples",
+              (unsigned long long)(total_partial_scan_us / partial_scan_count), partial_scan_count);
+    }
+    total_full_scan_us = total_partial_scan_us = 0;
+    full_scan_count = partial_scan_count = 0;
+}
+
+/* Record scan duration if there was keyboard/mouse activity */
+static void record_scan_timing(bool is_full_scan, uint64_t scan_dur, bool had_change)
+{
+    bool active = had_change;
+    if (!active) {
+      for (int k = 0; k < 6; k++)
+        if (keycodes[k] != 0) { active = true; break; }
+    }
+    if (!active && last_mouse_event_tick != 0 &&
+        (xTaskGetTickCount() - last_mouse_event_tick) <= MOUSE_EVENT_WINDOW) {
+      active = true;
+    }
+    if (!active) return;
+
+    if (is_full_scan) { total_full_scan_us += scan_dur; full_scan_count++; }
+    else              { total_partial_scan_us += scan_dur; partial_scan_count++; }
+}
+
 void vTaskKeyboard(void *pvParameters) {
+  (void)pvParameters;
   for (;;) {
-    /* Register own task handle for ISR notifications */
-    if (keyboard_task_handle == NULL) {
+    if (keyboard_task_handle == NULL)
       keyboard_task_handle = xTaskGetCurrentTaskHandle();
+
+    /* Wait for ISR notification or timeout */
+    uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
+    bool is_full_scan = (notified != 0);
+    uint64_t scan_start = esp_timer_get_time();
+    bool had_change = false;
+
+    if (stat_matrix_changed == 1) {
+      had_change = true;
+      handle_matrix_change();
     }
 
-    /* Per-iteration scan timing state (used to attribute scan durations only when activity occurs) */
-    uint64_t __scan_start_us = 0;
-    bool __did_full_scan = false;
-    bool __did_partial_scan = false;
-    bool __scan_detected_change = false;  
+    if (is_full_scan) taskYIELD();
 
-    /* Quick heap sanity check to detect corruption early */
-    if (!heap_caps_check_integrity_all(MALLOC_CAP_DEFAULT)) {
-      size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-      size_t free32 = heap_caps_get_free_size(MALLOC_CAP_32BIT);
-      size_t largest8 = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-      KM_LOGE("Heap integrity FAILED in vTaskKeyboard - free8=%u free32=%u largest8=%u", (unsigned)free8, (unsigned)free32, (unsigned)largest8);
-    }
-
-    /* Wait for notification (from ISR) or timeout to do periodic/partial scan */
-    /* Increased from 10ms to reduce idle CPU when using event-driven keyboard_button */
-    const TickType_t wait_ticks = pdMS_TO_TICKS(50);
-    uint32_t notified = ulTaskNotifyTake(pdTRUE, wait_ticks);
-
-    if (notified) {
-      /* ISR triggered: Matrix changed (debounced by keyboard_button) */
-      __scan_start_us = esp_timer_get_time();
-      __did_full_scan = true;
-      
-      /* Process the change immediately */
-      if (stat_matrix_changed == 1) {
-          __scan_detected_change = true;
-
-#if KEYBOARD_SCAN_DEBUG
-          /* Debug: dump current presses */
-          {
-            uint32_t now = esp_timer_get_time() / 1000;
-            char buf[128];
-            int off = snprintf(buf, sizeof(buf), "scan@%u ms:", now);
-            for (int k = 0; k < 6; k++) {
-              int rem = (int)sizeof(buf) - off;
-              if (rem <= 1) break;
-              int n = snprintf(buf + off, rem, " [%d,%d]", current_press_row[k], current_press_col[k]);
-              if (n < 0) break;
-              if (n >= rem) { off = (int)sizeof(buf) - 1; break; }
-              off += n;
-            }
-            buf[sizeof(buf) - 1] = '\0';
-            KM_LOGI("%s", buf);
-          }
-#endif
-
-          /* Build report and process internal funcs/releases */
-          build_keycode_report();
-          
-          /* Reset flag and process changes */
-          stat_matrix_changed = 0;
-          process_matrix_changes();
-
-          /* Send HID only when keycodes changed to reduce redundant reports */
-          send_hid_key();
-      }
-      
-      taskYIELD(); /* hint to scheduler that others can run */
-
-    } else {
-      /* Timeout / Idle */
-      __scan_start_us = esp_timer_get_time();
-      __did_partial_scan = true;
-      
-      /* Check state even if not notified */
-      if (stat_matrix_changed == 1) {
-          __scan_detected_change = true;
-          build_keycode_report();
-          stat_matrix_changed = 0;
-          process_matrix_changes();
-          send_hid_key();
-      }
-    }
-
-    /* If we performed a scan this iteration compute duration and only count it if it had activity */
-    if (__did_full_scan || __did_partial_scan) {
-      uint64_t scan_end_us = esp_timer_get_time();
-      uint64_t scan_dur = (scan_end_us > __scan_start_us) ? (scan_end_us - __scan_start_us) : 0;
-      if (scan_dur > 2000) {
-        KM_LOGW("scan took %llu us", (unsigned long long)scan_dur);
-      }
-
-      bool scan_event = __scan_detected_change;
-      /* check for keycodes (non-zero) */
-      if (!scan_event) {
-        for (int k = 0; k < 6; k++) {
-          if (keycodes[k] != 0) { scan_event = true; break; }
-        }
-      }
-      /* check recent mouse activity */
-      if (!scan_event && last_mouse_event_tick != 0 && (xTaskGetTickCount() - last_mouse_event_tick) <= MOUSE_EVENT_WINDOW) {
-        scan_event = true;
-      }
-
-      if (scan_event) {
-        if (__did_full_scan) {
-          total_full_scan_us += scan_dur;
-          full_scan_count++;
-        } else {
-          total_partial_scan_us += scan_dur;
-          partial_scan_count++;
-        }
-
-        /* rate-limited visible log: log only 1/16 events to reduce noise, always log if scan longer than 1ms */
-        static uint32_t scan_event_log_count = 0;
-        scan_event_log_count++;
-        bool mouse_recent = (last_mouse_event_tick != 0 && (xTaskGetTickCount() - last_mouse_event_tick) <= MOUSE_EVENT_WINDOW);
-        bool keycodes_nonzero = false;
-        
-        (void)mouse_recent; (void)keycodes_nonzero; // suppress unused warnings
-
-        for (int k = 0; k < 6; k++) { if (keycodes[k] != 0) { keycodes_nonzero = true; break; } }
-        if ((scan_event_log_count & 0xF) == 0 || scan_dur > 1000) { /* 1/16 events or long scan */
-          KM_LOGI("SCAN EVENT: %s dur=%llu us keys=%d mouse_recent=%d change=%d",
-                   (__did_full_scan ? "FULL" : "PARTIAL"), (unsigned long long)scan_dur, (int)keycodes_nonzero, (int)mouse_recent, (int)__scan_detected_change);
-        }
-      }
-
-      /* reset local flags */
-      __did_full_scan = __did_partial_scan = false;
-      __scan_detected_change = false;
-      __scan_start_us = 0;
-    }
-
-    /* Periodic scan timing report */
-    {
-      uint32_t now_ms = esp_timer_get_time() / 1000;
-      if (last_scan_report_ms == 0) last_scan_report_ms = now_ms;
-      if (now_ms - last_scan_report_ms > SCAN_REPORT_INTERVAL_MS) {
-        last_scan_report_ms = now_ms;
-
-        if (full_scan_count > 0) {
-          uint64_t avg_full = total_full_scan_us / full_scan_count;
-          (void)avg_full;
-          KM_LOGI("Scan avg FULL (events only): %llu us over %u samples", (unsigned long long)avg_full, full_scan_count);
-        }
-
-        if (partial_scan_count > 0) {
-          uint64_t avg_partial = total_partial_scan_us / partial_scan_count;
-          (void)avg_partial;
-          KM_LOGI("Scan avg PARTIAL (events only): %llu us over %u samples", (unsigned long long)avg_partial, partial_scan_count);
-        }
-
-        /* reset counters */
-        total_full_scan_us = 0;
-        full_scan_count = 0;
-        total_partial_scan_us = 0;
-        partial_scan_count = 0;
-      }
-    }
+    /* Record timing */
+    uint64_t scan_dur = esp_timer_get_time() - scan_start;
+    if (scan_dur > 2000) KM_LOGW("scan took %llu us", (unsigned long long)scan_dur);
+    record_scan_timing(is_full_scan, scan_dur, had_change);
+    maybe_log_scan_stats();
   }
 }
 

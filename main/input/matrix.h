@@ -11,6 +11,9 @@
 #define MATRIX_IRQ_ENABLED 1
 #endif
 
+/* Sentinel value for "no key at this position" */
+#define INVALID_KEY_POS  0xFF
+
 
 extern uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
 extern uint8_t SLAVE_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
