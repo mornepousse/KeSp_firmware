@@ -1,30 +1,53 @@
-/* CDC ACM core: FIFO, line assembly, send helpers, processing task */
+/* CDC ACM core: FIFO, line assembly, pluggable dispatch, send helpers */
 #include "cdc_internal.h"
 
 const char *TAG_CDC = "CDC_CMD";
 
-/* Custom log handler to redirect ESP_LOG to CDC (currently disabled) */
-static vprintf_like_t original_log_vprintf = NULL;
+/* ── Pluggable command tables ────────────────────────────────────── */
 
-__attribute__((unused))
-static int cdc_log_vprintf(const char *fmt, va_list args) {
-    int ret = 0;
-    if (original_log_vprintf) {
-        va_list args_copy;
-        va_copy(args_copy, args);
-        ret = original_log_vprintf(fmt, args_copy);
-        va_end(args_copy);
-    }
-    char buf[256];
-    int len = vsnprintf(buf, sizeof(buf), fmt, args);
-    if (len > 0) {
-        if ((size_t)len > sizeof(buf) - 1) len = sizeof(buf) - 1;
-        if (tud_cdc_n_connected(CDC_ITF)) {
-            tinyusb_cdcacm_write_queue(CDC_ITF, (uint8_t*)buf, len);
-            tinyusb_cdcacm_write_flush(CDC_ITF, 0);
-        }
-    }
-    return ret;
+static struct {
+	const cdc_cmd_entry_t *table;
+	size_t count;
+} cmd_tables[CDC_MAX_CMD_TABLES];
+static size_t cmd_tables_count = 0;
+
+void cdc_register_commands(const cdc_cmd_entry_t *table, size_t count)
+{
+	if (cmd_tables_count < CDC_MAX_CMD_TABLES) {
+		cmd_tables[cmd_tables_count].table = table;
+		cmd_tables[cmd_tables_count].count = count;
+		cmd_tables_count++;
+		ESP_LOGI(TAG_CDC, "Registered %u CDC commands", (unsigned)count);
+	} else {
+		ESP_LOGE(TAG_CDC, "CDC command table limit reached (%d)", CDC_MAX_CMD_TABLES);
+	}
+}
+
+static void parse_and_execute(const char *line)
+{
+	while (*line == ' ' || *line == '\t')
+		line++;
+	if (*line == '\0')
+		return;
+
+	for (size_t t = 0; t < cmd_tables_count; t++) {
+		const cdc_cmd_entry_t *table = cmd_tables[t].table;
+		size_t count = cmd_tables[t].count;
+		for (size_t i = 0; i < count; i++) {
+			const cdc_cmd_entry_t *cmd = &table[i];
+			if (strncasecmp(line, cmd->prefix, cmd->prefix_len) != 0)
+				continue;
+			if (!cmd->handler)
+				continue;
+			if (cmd->has_arg)
+				cmd->handler(line + cmd->prefix_len);
+			else
+				cmd->handler(NULL);
+			return;
+		}
+	}
+
+	ESP_LOGW(TAG_CDC, "Unknown command: %s", line);
 }
 
 /* ── Circular FIFO for command lines ─────────────────────────────── */
@@ -60,7 +83,6 @@ bool cdc_cmd_push(const char *line, uint16_t len)
 	slot->len = len;
 	fifo_w = (fifo_w + 1) % CDC_CMD_FIFO_DEPTH;
 	fifo_count++;
-	ESP_LOGI(TAG_CDC, "CDC RX line len=%u", (unsigned)len);
 	return true;
 }
 
@@ -93,26 +115,21 @@ void start_command_queue(unsigned char type, size_t total_size)
 	data_tmp[0] = 'C';
 	data_tmp[1] = '>';
 	data_tmp[2] = type;
-	if (total_size > 0) {
-		data_tmp[3] = (unsigned char)(total_size & 0xFF);
-		data_tmp[4] = (unsigned char)((total_size >> 8) & 0xFF);
-	} else {
-		data_tmp[3] = 0;
-		data_tmp[4] = 0;
-	}
+	data_tmp[3] = (unsigned char)(total_size & 0xFF);
+	data_tmp[4] = (unsigned char)((total_size >> 8) & 0xFF);
 	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)data_tmp, 5);
 }
 
 void cdc_send_layer(uint8_t layer)
 {
-	start_command_queue(CDC_RESP_CURRENT_LAYER, 1);
+	start_command_queue(2 /* CDC_RESP_CURRENT_LAYER */, 1);
 	tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)&layer, 1);
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
 void cdc_ping(void)
 {
-	start_command_queue(CDC_RESP_PING, 0);
+	start_command_queue(6 /* CDC_RESP_PING */, 0);
 	tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
@@ -159,7 +176,6 @@ void trim_spaces(char *str)
 
 void receive_data(const char *data, uint16_t len)
 {
-	/* OTA binary receive mode — bypass line assembly */
 	if (ota_state == OTA_RECEIVING) {
 		ota_receive_bytes(data, len);
 		return;
@@ -167,11 +183,9 @@ void receive_data(const char *data, uint16_t len)
 
 	static bool last_was_cr = false;
 	static bool overflowed = false;
-	for (size_t i = 0; i < len; ++i)
-	{
+	for (size_t i = 0; i < len; ++i) {
 		char c = data[i];
-		if (c == '\r')
-		{
+		if (c == '\r') {
 			if (!overflowed && assemble_len > 0) {
 				cdc_cmd_push(assemble_buf, assemble_len);
 				assemble_len = 0;
@@ -180,8 +194,7 @@ void receive_data(const char *data, uint16_t len)
 			last_was_cr = true;
 			continue;
 		}
-		if (c == '\n')
-		{
+		if (c == '\n') {
 			if (last_was_cr) { last_was_cr = false; continue; }
 			if (!overflowed && assemble_len > 0) {
 				cdc_cmd_push(assemble_buf, assemble_len);
@@ -195,7 +208,6 @@ void receive_data(const char *data, uint16_t len)
 			assemble_buf[assemble_len++] = c;
 		} else {
 			overflowed = true;
-			ESP_LOGW(TAG_CDC, "CDC RX overflow (len>=%u)", (unsigned)CDC_CMD_MAX_LEN);
 		}
 	}
 }
@@ -206,17 +218,14 @@ void cdc_process_commands_task(void *arg)
 {
 	(void)arg;
 	cdc_cmd_t cmd;
-	for (;;)
-	{
+	for (;;) {
 		if (ota_state == OTA_RECEIVING) {
 			ota_process_chunk();
 			vTaskDelay(pdMS_TO_TICKS(10));
 			continue;
 		}
-
 		while (cdc_cmd_pop(&cmd))
 			parse_and_execute(cmd.line);
-
 		vTaskDelay(pdMS_TO_TICKS(50));
 	}
 }

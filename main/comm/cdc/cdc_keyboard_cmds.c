@@ -1,5 +1,7 @@
-/* CDC command handlers and dispatch table */
+/* KaSe keyboard-specific CDC command handlers.
+   Registers with the generic CDC dispatch framework at init. */
 #include "cdc_internal.h"
+#include "cdc_keyboard_cmds.h"
 #include "matrix.h"
 #include "keyboard_config.h"
 #include "keyboard_manager.h"
@@ -12,6 +14,18 @@
 #if BOARD_HAS_POSITION_MAP
 #include "board_position_map.h"
 #endif
+
+/* Binary response type IDs (KaSe protocol, used by start_command_queue) */
+enum {
+	CDC_RESP_NONE = 0,
+	CDC_RESP_LAYER,
+	CDC_RESP_CURRENT_LAYER,
+	CDC_RESP_LAYER_NAME,
+	CDC_RESP_MACROS,
+	CDC_RESP_ALL_LAYOUT_NAMES,
+	CDC_RESP_PING,
+	CDC_RESP_DEBUG,
+};
 
 /* ── Keymap commands ─────────────────────────────────────────────── */
 
@@ -646,9 +660,7 @@ static void cmd_reset_keystats(void)
 	cdc_send_line("KEYSTATS_RESET:OK");
 }
 
-/* ── Command table & dispatcher ──────────────────────────────────── */
-
-typedef void (*cdc_cmd_handler_t)(const char *arg);
+/* ── Wrapper handlers ────────────────────────────────────────────── */
 
 static void cmd_version(const char *arg)   { (void)arg; cdc_send_line(PRODUCT_NAME " v" FW_VERSION); }
 static void cmd_dfu(const char *arg)       { (void)arg; cmd_reboot_to_dfu(); }
@@ -660,6 +672,25 @@ static void cmd_layout_json(const char *arg) {
 	extern const char board_layout_json[];
 	cdc_send_large(board_layout_json, strlen(board_layout_json));
 }
+static void cmd_keymap_current(const char *arg) {
+	(void)arg;
+	extern uint8_t current_layout;
+	cmd_get_keymap_by_layer(current_layout);
+}
+static void cmd_keymap_by_index(const char *arg) {
+	if (arg && isdigit((unsigned char)arg[0]))
+		cmd_get_keymap_by_layer((uint8_t)atoi(arg));
+}
+static void cmd_layer_name_short(const char *arg) {
+	if (!arg) return;
+	if (arg[0] == '?') {
+		cmd_get_current_layer_index();
+	} else if (toupper((unsigned char)arg[0]) == 'N' && isdigit((unsigned char)arg[1])) {
+		cmd_get_name_layer((uint8_t)(arg[1] - '0'));
+	} else if (isdigit((unsigned char)arg[0])) {
+		cmd_get_name_layer((uint8_t)(arg[0] - '0'));
+	}
+}
 static void cmd_keystats_text(const char *arg)   { (void)arg; cmd_get_keystats(false); }
 static void cmd_keystats_bin(const char *arg)    { (void)arg; cmd_get_keystats(true); }
 static void cmd_keystats_rst(const char *arg)    { (void)arg; cmd_reset_keystats(); }
@@ -667,19 +698,14 @@ static void cmd_bigrams_text(const char *arg)    { (void)arg; cmd_get_bigrams(fa
 static void cmd_bigrams_bin(const char *arg)     { (void)arg; cmd_get_bigrams(true); }
 static void cmd_bigrams_rst(const char *arg)     { (void)arg; cmd_reset_bigrams(); }
 
-typedef struct {
-	const char     *prefix;
-	uint8_t         prefix_len;
-	bool            has_arg;
-	cdc_cmd_handler_t handler;
-} cdc_cmd_entry_t;
+/* ── Command table ───────────────────────────────────────────────── */
 
-static const cdc_cmd_entry_t cmd_table[] = {
+static const cdc_cmd_entry_t keyboard_cmd_table[] = {
 	/* Keymap */
 	{ "SETLAYER",       8,  true,  cmd_setlayer_command },
 	{ "SETKEY",         6,  true,  cmd_set_key },
-	{ "KEYMAP?",        7,  false, NULL },
-	{ "KEYMAP",         6,  true,  NULL },
+	{ "KEYMAP?",        7,  false, cmd_keymap_current },
+	{ "KEYMAP",         6,  true,  cmd_keymap_by_index },
 	/* Layout */
 	{ "LAYOUTNAME",    10,  true,  cmd_set_layout_name },
 	{ "LAYOUTS?",       8,  false, cmd_layouts_q },
@@ -699,54 +725,12 @@ static const cdc_cmd_entry_t cmd_table[] = {
 	{ "VERSION?",       8,  false, cmd_version },
 	{ "OTA ",           4,  true,  cmd_ota_start },
 	{ "DFU",            3,  false, cmd_dfu },
-	{ "L?",             2,  false, cmd_layer_idx },
+	/* Short-form layer: L? L0 LN0 etc */
+	{ "L",              1,  true,  cmd_layer_name_short },
 };
-#define CMD_TABLE_SIZE (sizeof(cmd_table) / sizeof(cmd_table[0]))
 
-void parse_and_execute(const char *line)
+void cdc_keyboard_cmds_init(void)
 {
-	while (*line == ' ' || *line == '\t')
-		line++;
-	if (*line == '\0')
-		return;
-
-	/* Short-form layer commands: LN<digit> and L<digit> */
-	if (toupper((unsigned char)line[0]) == 'L') {
-		if (toupper((unsigned char)line[1]) == 'N' && isdigit((unsigned char)line[2])) {
-			cmd_get_name_layer((uint8_t)(line[2] - '0'));
-			return;
-		}
-		if (isdigit((unsigned char)line[1])) {
-			cmd_get_name_layer((uint8_t)(line[1] - '0'));
-			return;
-		}
-	}
-
-	/* Table-driven dispatch */
-	for (size_t i = 0; i < CMD_TABLE_SIZE; i++) {
-		const cdc_cmd_entry_t *cmd = &cmd_table[i];
-		if (strncasecmp(line, cmd->prefix, cmd->prefix_len) != 0)
-			continue;
-
-		if (cmd->handler == NULL) {
-			if (cmd->prefix_len == 7 && strncasecmp(cmd->prefix, "KEYMAP?", 7) == 0) {
-				extern uint8_t current_layout;
-				cmd_get_keymap_by_layer(current_layout);
-			} else if (cmd->prefix_len == 6 && strncasecmp(cmd->prefix, "KEYMAP", 6) == 0) {
-				if (isdigit((unsigned char)line[6]))
-					cmd_get_keymap_by_layer((uint8_t)atoi(line + 6));
-				else
-					continue;
-			}
-			return;
-		}
-
-		if (cmd->has_arg)
-			cmd->handler(line + cmd->prefix_len);
-		else
-			cmd->handler(NULL);
-		return;
-	}
-
-	ESP_LOGW(TAG_CDC, "Unknown command: %s", line);
+	cdc_register_commands(keyboard_cmd_table,
+	                      sizeof(keyboard_cmd_table) / sizeof(keyboard_cmd_table[0]));
 }

@@ -100,6 +100,10 @@ void app_main(void) {
 
   kase_tinyusb_init();
   init_cdc_commands();
+
+  /* Register keyboard-specific CDC commands */
+  extern void cdc_keyboard_cmds_init(void);
+  cdc_keyboard_cmds_init();
   keymap_init_nvs();
   load_keymaps((uint16_t *)keymaps, LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
   load_layout_names(default_layout_names, LAYERS);

@@ -17,7 +17,7 @@ idf_component_register(
         "comm/usb/usb_hid.c"
         "comm/hid_transport.c"
         "comm/cdc/cdc_acm_com.c"
-        "comm/cdc/cdc_commands.c"
+        "comm/cdc/cdc_keyboard_cmds.c"
         "comm/cdc/cdc_ota.c"
         "comm/ble/esp_hidd_prf_api.c"
         "comm/ble/hid_dev.c"
