@@ -2,6 +2,7 @@
 #include "tap_hold.h"
 #include "key_definitions.h"
 #include "key_features.h"
+#include "matrix_scan.h"  /* current_layout, last_layer, layer_changed */
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <string.h>
@@ -51,6 +52,9 @@ static void resolve_as_hold(tap_hold_entry_t *e)
         active_hold_mods |= K_MT_MOD(e->keycode);
     } else if (K_IS_LT(e->keycode)) {
         active_hold_layer = K_LT_LAYER(e->keycode);
+        last_layer = current_layout;
+        current_layout = active_hold_layer;
+        layer_changed();
     } else if (K_IS_OSM(e->keycode)) {
         /* Hold OSM = regular modifier (like holding shift) */
         active_hold_mods |= K_OSM_MOD(e->keycode);
@@ -64,6 +68,8 @@ static void release_hold(tap_hold_entry_t *e)
     } else if (K_IS_LT(e->keycode)) {
         if (active_hold_layer == K_LT_LAYER(e->keycode))
             active_hold_layer = -1;
+        current_layout = last_layer;
+        layer_changed();
     } else if (K_IS_OSM(e->keycode)) {
         active_hold_mods &= ~K_OSM_MOD(e->keycode);
     }
