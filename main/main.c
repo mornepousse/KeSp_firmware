@@ -108,8 +108,13 @@ void app_main(void) {
   load_bigram_stats();
 
   /* Load tap dance configurations */
+  /* Load advanced feature configs */
   extern void tap_dance_load(void);
+  extern void combo_load(void);
+  extern void leader_load(void);
   tap_dance_load();
+  combo_load();
+  leader_load();
 
   ESP_LOGI(TAG, "display init");
 #if !SKIP_STATUS_DISPLAY

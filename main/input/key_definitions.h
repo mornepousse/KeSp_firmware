@@ -394,6 +394,9 @@ static const uint16_t TO_L9 = 0x1400;
 /* Repeat Key: repeat the last non-modifier keypress */
 #define K_REPEAT                     0x3300
 
+/* Leader Key: starts a leader key sequence */
+#define K_LEADER                     0x3400
+
 /* Layer-Tap: hold = activate layer, tap = send keycode */
 #define K_LT_BASE                    0x4000
 #define K_LT(layer, kc)             (K_LT_BASE | ((layer) << 8) | (kc))

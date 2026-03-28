@@ -10,6 +10,8 @@
 #include "key_definitions.h"
 #include "dfu_manager.h"
 #include "tap_dance.h"
+#include "combo.h"
+#include "leader.h"
 #include "status_display.h"
 #include "version.h"
 
@@ -738,11 +740,114 @@ static void cmd_tdlist(const char *arg)
 	cdc_send_line("OK");
 }
 
+/* COMBOSET <index>;<r1>,<c1>,<r2>,<c2>,<result> — configure a combo (V1 coords) */
+static void cmd_comboset(const char *arg)
+{
+	if (!arg) { cdc_send_line("ERR COMBOSET: missing args"); return; }
+	char buf[CDC_CMD_MAX_LEN];
+	strncpy(buf, arg, sizeof(buf)); buf[sizeof(buf)-1] = '\0';
+
+	char *sep = strchr(buf, ';');
+	if (!sep) { cdc_send_line("ERR COMBOSET: format index;r1,c1,r2,c2,result"); return; }
+	*sep = '\0';
+	int idx = atoi(buf);
+	if (idx < 0 || idx >= COMBO_MAX_SLOTS) { cdc_send_line("ERR COMBOSET: invalid index"); return; }
+
+	combo_config_t cfg = {0};
+	int r1, c1, r2, c2, res;
+	if (sscanf(sep + 1, "%d,%d,%d,%d,%x", &r1, &c1, &r2, &c2, &res) != 5) {
+		cdc_send_line("ERR COMBOSET: format r1,c1,r2,c2,result_hex");
+		return;
+	}
+	cfg.row1 = r1; cfg.col1 = c1; cfg.row2 = r2; cfg.col2 = c2; cfg.result = (uint8_t)res;
+	combo_set((uint8_t)idx, &cfg);
+	combo_save();
+
+	char resp[32];
+	snprintf(resp, sizeof(resp), "COMBOSET %d:OK", idx);
+	cdc_send_line(resp);
+}
+
+/* COMBO? — list configured combos */
+static void cmd_combolist(const char *arg)
+{
+	(void)arg;
+	char buf[64];
+	for (int i = 0; i < COMBO_MAX_SLOTS; i++) {
+		const combo_config_t *c = combo_get(i);
+		if (!c || c->result == 0) continue;
+		snprintf(buf, sizeof(buf), "COMBO%d: r%dc%d+r%dc%d=%02X",
+		         i, c->row1, c->col1, c->row2, c->col2, c->result);
+		cdc_send_line(buf);
+	}
+	cdc_send_line("OK");
+}
+
+/* LEADERSET <index>;<seq_hex>;<result_hex>,<mod_hex> */
+static void cmd_leaderset(const char *arg)
+{
+	if (!arg) { cdc_send_line("ERR LEADERSET: missing args"); return; }
+	char buf[CDC_CMD_MAX_LEN];
+	strncpy(buf, arg, sizeof(buf)); buf[sizeof(buf)-1] = '\0';
+
+	char *sep1 = strchr(buf, ';');
+	if (!sep1) { cdc_send_line("ERR LEADERSET: format index;seq;result,mod"); return; }
+	*sep1 = '\0';
+	int idx = atoi(buf);
+	if (idx < 0 || idx >= LEADER_MAX_ENTRIES) { cdc_send_line("ERR LEADERSET: invalid index"); return; }
+
+	char *sep2 = strchr(sep1 + 1, ';');
+	if (!sep2) { cdc_send_line("ERR LEADERSET: missing result"); return; }
+	*sep2 = '\0';
+
+	leader_entry_t entry = {0};
+	/* Parse sequence: comma-separated hex keycodes */
+	char *tok = sep1 + 1;
+	for (int i = 0; i < LEADER_MAX_SEQ_LEN && tok && *tok; i++) {
+		char *next = strchr(tok, ',');
+		if (next) *next = '\0';
+		trim_spaces(tok);
+		entry.sequence[i] = (uint8_t)strtoul(tok, NULL, 16);
+		tok = next ? next + 1 : NULL;
+	}
+
+	/* Parse result and mod */
+	unsigned int res = 0, mod = 0;
+	sscanf(sep2 + 1, "%x,%x", &res, &mod);
+	entry.result = (uint8_t)res;
+	entry.result_mod = (uint8_t)mod;
+
+	leader_set((uint8_t)idx, &entry);
+	leader_save();
+
+	char resp[32];
+	snprintf(resp, sizeof(resp), "LEADERSET %d:OK", idx);
+	cdc_send_line(resp);
+}
+
+/* LEADER? — list configured leader sequences */
+static void cmd_leaderlist(const char *arg)
+{
+	(void)arg;
+	char buf[80];
+	for (int i = 0; i < LEADER_MAX_ENTRIES; i++) {
+		const leader_entry_t *e = leader_get(i);
+		if (!e || e->result == 0) continue;
+		int pos = snprintf(buf, sizeof(buf), "LEADER%d: ", i);
+		for (int j = 0; j < LEADER_MAX_SEQ_LEN && e->sequence[j]; j++)
+			pos += snprintf(buf + pos, sizeof(buf) - pos, "%02X,", e->sequence[j]);
+		if (pos > 0 && buf[pos-1] == ',') pos--;
+		snprintf(buf + pos, sizeof(buf) - pos, "->%02X+%02X", e->result, e->result_mod);
+		cdc_send_line(buf);
+	}
+	cdc_send_line("OK");
+}
+
 /* FEATURES? — list supported advanced features */
 static void cmd_features(const char *arg)
 {
 	(void)arg;
-	cdc_send_line("MT,LT,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE");
+	cdc_send_line("MT,LT,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE,COMBO,LEADER");
 }
 
 /* ── Command table ───────────────────────────────────────────────── */
@@ -771,6 +876,12 @@ static const cdc_cmd_entry_t keyboard_cmd_table[] = {
 	/* Tap Dance */
 	{ "TDSET",          5,  true,  cmd_tdset },
 	{ "TD?",            3,  false, cmd_tdlist },
+	/* Combos */
+	{ "COMBOSET",       8,  true,  cmd_comboset },
+	{ "COMBO?",         6,  false, cmd_combolist },
+	/* Leader */
+	{ "LEADERSET",      9,  true,  cmd_leaderset },
+	{ "LEADER?",        7,  false, cmd_leaderlist },
 	/* System */
 	{ "FEATURES?",     9,  false, cmd_features },
 	{ "VERSION?",       8,  false, cmd_version },

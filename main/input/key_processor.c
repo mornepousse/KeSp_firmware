@@ -18,6 +18,8 @@
 #include "hid_bluetooth_manager.h"
 #include "tap_hold.h"
 #include "tap_dance.h"
+#include "combo.h"
+#include "leader.h"
 #include "key_features.h"
 #include "esp_log.h"
 
@@ -126,10 +128,20 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
     if (K_IS_OSL(kc)) { osl_arm(K_OSL_LAYER(kc)); return 0; }
     if (kc == K_CAPS_WORD) { caps_word_toggle(); return 0; }
     if (kc == K_REPEAT)    { return repeat_key_get(); }
+    if (kc == K_LEADER)    { leader_start(); return 0; }
     return 0;
 }
 
 /* ── Release detection for tap/hold ──────────────────────────────── */
+
+static bool is_new_press(uint8_t row, uint8_t col)
+{
+    for (int i = 0; i < 6; i++) {
+        if (prev_press_row[i] == row && prev_press_col[i] == col)
+            return false;
+    }
+    return true;
+}
 
 static void detect_releases(void)
 {
@@ -201,6 +213,14 @@ void build_keycode_report(void)
             continue;
         }
 
+        /* Leader mode: absorb normal keycodes into sequence */
+        if (leader_is_active() && kc <= 0xFF && kc != 0) {
+            if (is_new_press(row, col))
+                leader_feed((uint8_t)kc);
+            extra_keycodes[i] = kc;
+            continue;
+        }
+
         /* Legacy: MO layers, TO layers, macros, BT, internal functions */
         apply_momentary_layer(kc, i);
         detect_internal_function(kc);
@@ -259,7 +279,22 @@ void build_keycode_report(void)
         }
     }
 
-    /* Step 9: consume one-shot layer after a real keypress */
+    /* Step 9: check combos */
+    combo_process(current_press_row, current_press_col);
+    {
+        uint8_t combo_kc;
+        while ((combo_kc = combo_consume()) != 0) {
+            for (uint8_t i = 0; i < 6; i++) {
+                if (keycodes[i] == 0) {
+                    keycodes[i] = combo_kc;
+                    has_normal_press = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    /* Step 10: consume one-shot layer after a real keypress */
     if (osl_layer >= 0 && has_normal_press)
         osl_consume();
 
