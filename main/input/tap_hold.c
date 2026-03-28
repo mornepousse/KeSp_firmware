@@ -10,6 +10,7 @@ static const char *TAG = "TAP_HOLD";
 static tap_hold_entry_t pending[TAP_HOLD_MAX_PENDING];
 static uint8_t active_hold_mods = 0;
 static int8_t active_hold_layer = -1;
+static bool hold_activated_flag = false;
 
 static uint32_t now_ms(void)
 {
@@ -71,6 +72,10 @@ bool tap_hold_on_press(uint16_t keycode, uint8_t row, uint8_t col)
     if (!K_IS_LT(keycode) && !K_IS_MT(keycode))
         return false;
 
+    /* Already tracking this position? Skip. */
+    tap_hold_entry_t *existing = find_by_pos(row, col);
+    if (existing) return true; /* already absorbed */
+
     tap_hold_entry_t *e = find_free();
     if (!e) {
         ESP_LOGW(TAG, "No free tap/hold slot");
@@ -82,6 +87,7 @@ bool tap_hold_on_press(uint16_t keycode, uint8_t row, uint8_t col)
     e->row = row;
     e->col = col;
     e->press_time_ms = now_ms();
+    ESP_LOGI(TAG, "PRESS r%d c%d kc=0x%04X", row, col, keycode);
     return true;
 }
 
@@ -93,6 +99,9 @@ bool tap_hold_on_release(uint8_t row, uint8_t col)
     if (e->state == TH_PENDING) {
         /* Released before timeout and no interrupt → TAP */
         e->state = TH_TAP;
+        ESP_LOGI(TAG, "TAP r%d c%d -> 0x%02X",
+                 e->row, e->col,
+                 K_IS_LT(e->keycode) ? K_LT_KEY(e->keycode) : K_MT_KEY(e->keycode));
         return true;
     } else if (e->state == TH_HOLD) {
         /* Hold released → deactivate modifier/layer */
@@ -106,14 +115,22 @@ bool tap_hold_on_release(uint8_t row, uint8_t col)
 
 void tap_hold_tick(void)
 {
+    hold_activated_flag = false;
     uint32_t t = now_ms();
     for (int i = 0; i < TAP_HOLD_MAX_PENDING; i++) {
         if (pending[i].state == TH_PENDING) {
             if ((t - pending[i].press_time_ms) >= TAP_HOLD_TIMEOUT_MS) {
                 resolve_as_hold(&pending[i]);
+                hold_activated_flag = true;
+                ESP_LOGI(TAG, "HOLD timeout r%d c%d", pending[i].row, pending[i].col);
             }
         }
     }
+}
+
+bool tap_hold_hold_just_activated(void)
+{
+    return hold_activated_flag;
 }
 
 void tap_hold_interrupt(void)
@@ -158,4 +175,18 @@ uint8_t tap_hold_get_active_mods(void)
 int8_t tap_hold_get_active_layer(void)
 {
     return active_hold_layer;
+}
+
+uint8_t tap_hold_consume_tap(void)
+{
+    for (int i = 0; i < TAP_HOLD_MAX_PENDING; i++) {
+        if (pending[i].state == TH_TAP) {
+            uint16_t kc = pending[i].keycode;
+            pending[i].state = TH_IDLE;
+            if (K_IS_LT(kc)) return K_LT_KEY(kc);
+            if (K_IS_MT(kc)) return K_MT_KEY(kc);
+            return 0;
+        }
+    }
+    return 0;
 }

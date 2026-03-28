@@ -13,8 +13,6 @@
 static const char *TAG = "KB_TASK";
 
 TaskHandle_t keyboard_task_handle = NULL;
-
-/* USB/BLE transport state: 0 = USB, 1 = BLE */
 uint8_t usb_bl_state = 0;
 
 void vTaskKeyboard(void *pvParameters)
@@ -24,14 +22,31 @@ void vTaskKeyboard(void *pvParameters)
         if (keyboard_task_handle == NULL)
             keyboard_task_handle = xTaskGetCurrentTaskHandle();
 
-        /* Wait for ISR notification or 50ms timeout */
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
+        /* Short timeout: 10ms for responsive tap/hold timing */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
+
+        /* Always tick tap/hold timer — even without matrix change */
+        tap_hold_tick();
+
+        /* If a hold just activated (timeout reached), rebuild and send report */
+        if (tap_hold_hold_just_activated()) {
+            build_keycode_report();
+            send_hid_key();
+        }
 
         if (stat_matrix_changed == 1) {
             build_keycode_report();
             stat_matrix_changed = 0;
             process_matrix_changes();
-            send_hid_key();
+
+            if (key_processor_has_tap()) {
+                send_hid_key();
+                vTaskDelay(pdMS_TO_TICKS(10));
+                key_processor_clear_taps();
+                send_hid_key();
+            } else {
+                send_hid_key();
+            }
         }
     }
 }

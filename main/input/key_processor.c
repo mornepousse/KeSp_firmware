@@ -25,6 +25,9 @@ static uint8_t prev_press_row[6] = {INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KE
 static uint8_t prev_press_col[6] = {INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS,
                                      INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS};
 
+/* Track which keycode slots have injected taps (need press+release) */
+static uint8_t tap_injected_slots = 0; /* bitmask: bit i = keycodes[i] has a tap */
+
 /* ── Layer switching ─────────────────────────────────────────────── */
 
 static void apply_momentary_layer(int16_t keycode, uint8_t key_idx)
@@ -168,6 +171,9 @@ static void detect_releases(void)
 
 void build_keycode_report(void)
 {
+    /* Reset tap tracking for this cycle */
+    tap_injected_slots = 0;
+
     /* Detect key releases for tap/hold */
     detect_releases();
 
@@ -271,6 +277,21 @@ void build_keycode_report(void)
         }
     }
 
+    /* Inject resolved taps (key already released — inject after main loop) */
+    {
+        uint8_t tap_kc;
+        while ((tap_kc = tap_hold_consume_tap()) != 0) {
+            for (uint8_t i = 0; i < 6; i++) {
+                if (keycodes[i] == 0) {
+                    keycodes[i] = tap_kc;
+                    has_normal_press = true;
+                    tap_injected_slots |= (1 << i);
+                    break;
+                }
+            }
+        }
+    }
+
     /* Consume one-shot layer after processing */
     if (osl_layer >= 0 && has_normal_press)
         osl_consume();
@@ -319,4 +340,18 @@ void process_matrix_changes(void)
         apply_toggle_layer(keypress_internal_function);
         keypress_internal_function = 0;
     }
+}
+
+bool key_processor_has_tap(void)
+{
+    return tap_injected_slots != 0;
+}
+
+void key_processor_clear_taps(void)
+{
+    for (uint8_t i = 0; i < 6; i++) {
+        if (tap_injected_slots & (1 << i))
+            keycodes[i] = 0;
+    }
+    tap_injected_slots = 0;
 }

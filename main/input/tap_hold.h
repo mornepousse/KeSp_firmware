@@ -51,3 +51,9 @@ uint8_t tap_hold_get_active_mods(void);
 
 /* Get active hold layer (for LT keys currently held), -1 if none */
 int8_t tap_hold_get_active_layer(void);
+
+/* Consume one resolved tap. Returns the HID tap keycode, 0 if none pending. */
+uint8_t tap_hold_consume_tap(void);
+
+/* Returns true if tick() just resolved a pending key to HOLD (need to send report) */
+bool tap_hold_hold_just_activated(void);
