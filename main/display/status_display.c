@@ -89,10 +89,6 @@ void status_display_show_DFU_prog(void);
 
 /* UI_SCALE and UI_FONT are now defined in board.h */
 
-void draw_separator_line(void)
-{
-    /* Separator removed — version label uses top area */
-}
 
 void status_display_update_layer_name(void)
 { 
@@ -435,7 +431,6 @@ static void status_display_prepare_ui(bool clear_screen)
     if (clear_screen)
     {
         display_clear_screen();
-        draw_separator_line();
         icon_bt = NULL;
         icon_path = NULL;
         indicator_mouse = NULL;

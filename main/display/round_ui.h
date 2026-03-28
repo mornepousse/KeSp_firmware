@@ -56,6 +56,11 @@ void round_ui_notify_mouse(void);
 void round_ui_notify_keypress(void);
 
 /**
+ * @brief Get current keys-per-minute value (for LED animations)
+ */
+extern uint32_t current_kpm;
+
+/**
  * @brief Show splash screen with text
  */
 void round_ui_show_splash(const char *text);
