@@ -107,6 +107,10 @@ void app_main(void) {
   load_key_stats();
   load_bigram_stats();
 
+  /* Load tap dance configurations */
+  extern void tap_dance_load(void);
+  tap_dance_load();
+
   ESP_LOGI(TAG, "display init");
 #if !SKIP_STATUS_DISPLAY
   /* Register the display backend for this board */

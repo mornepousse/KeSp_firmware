@@ -40,3 +40,10 @@ uint8_t tap_dance_consume(void);
 
 /* Check if a dance just resolved (for keyboard_task to know when to send) */
 bool tap_dance_just_resolved(void);
+
+/* Get config for a slot (for CDC query) */
+const tap_dance_config_t *tap_dance_get(uint8_t index);
+
+/* NVS persistence */
+void tap_dance_save(void);
+void tap_dance_load(void);

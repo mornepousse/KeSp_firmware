@@ -62,3 +62,21 @@ Each dance index (0-15) has a configurable action table:
 - Hold → action D
 
 Dance timeout: 200ms between taps.
+
+## CDC Commands for Advanced Features
+
+### `FEATURES?` — Query supported features
+Response: `MT,LT,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE`
+
+### `TDSET <index>;<a1>,<a2>,<a3>,<a4>` — Configure a tap dance slot
+- `index`: 0-15
+- `a1-a4`: HID keycodes (hex) for 1-tap, 2-tap, 3-tap, hold
+- Example: `TDSET 0;04,05,06,29` (1-tap=A, 2-tap=B, 3-tap=C, hold=ESC)
+- Response: `TDSET 0:OK`
+
+### `TD?` — List configured tap dance slots
+Response: one line per configured slot, then `OK`
+```
+TD0: 04,05,06,29
+OK
+```

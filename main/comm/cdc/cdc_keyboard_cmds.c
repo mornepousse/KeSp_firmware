@@ -9,6 +9,7 @@
 #include "keymap.h"
 #include "key_definitions.h"
 #include "dfu_manager.h"
+#include "tap_dance.h"
 #include "status_display.h"
 #include "version.h"
 
@@ -685,6 +686,65 @@ static void cmd_bigrams_text(const char *arg)    { (void)arg; cmd_get_bigrams(fa
 static void cmd_bigrams_bin(const char *arg)     { (void)arg; cmd_get_bigrams(true); }
 static void cmd_bigrams_rst(const char *arg)     { (void)arg; cmd_reset_bigrams(); }
 
+/* ── Tap Dance commands ──────────────────────────────────────────── */
+
+/* TDSET <index>;<a1>,<a2>,<a3>,<a4>  — configure a tap dance slot */
+static void cmd_tdset(const char *arg)
+{
+	if (!arg) { cdc_send_line("ERR TDSET: missing args"); return; }
+	char buf[CDC_CMD_MAX_LEN];
+	strncpy(buf, arg, sizeof(buf)); buf[sizeof(buf)-1] = '\0';
+
+	char *sep = strchr(buf, ';');
+	if (!sep) { cdc_send_line("ERR TDSET: format index;a1,a2,a3,a4"); return; }
+	*sep = '\0';
+	trim_spaces(buf);
+
+	int idx = atoi(buf);
+	if (idx < 0 || idx >= TAP_DANCE_MAX_SLOTS) { cdc_send_line("ERR TDSET: invalid index"); return; }
+
+	uint8_t actions[4] = {0};
+	char *tok = sep + 1;
+	for (int i = 0; i < 4 && tok; i++) {
+		char *next = strchr(tok, ',');
+		if (next) *next = '\0';
+		trim_spaces(tok);
+		actions[i] = (uint8_t)strtoul(tok, NULL, 0);
+		tok = next ? next + 1 : NULL;
+	}
+
+	tap_dance_set((uint8_t)idx, actions);
+	tap_dance_save();
+
+	char resp[48];
+	snprintf(resp, sizeof(resp), "TDSET %d:OK", idx);
+	cdc_send_line(resp);
+}
+
+/* TD? — list all configured tap dance slots */
+static void cmd_tdlist(const char *arg)
+{
+	(void)arg;
+	char buf[64];
+	for (int i = 0; i < TAP_DANCE_MAX_SLOTS; i++) {
+		const tap_dance_config_t *td = tap_dance_get(i);
+		if (!td || (td->actions[0] == 0 && td->actions[1] == 0 &&
+		            td->actions[2] == 0 && td->actions[3] == 0))
+			continue;
+		snprintf(buf, sizeof(buf), "TD%d: %02X,%02X,%02X,%02X",
+		         i, td->actions[0], td->actions[1], td->actions[2], td->actions[3]);
+		cdc_send_line(buf);
+	}
+	cdc_send_line("OK");
+}
+
+/* FEATURES? — list supported advanced features */
+static void cmd_features(const char *arg)
+{
+	(void)arg;
+	cdc_send_line("MT,LT,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE");
+}
+
 /* ── Command table ───────────────────────────────────────────────── */
 
 static const cdc_cmd_entry_t keyboard_cmd_table[] = {
@@ -708,7 +768,11 @@ static const cdc_cmd_entry_t keyboard_cmd_table[] = {
 	{ "BIGRAMS_RESET", 13,  false, cmd_bigrams_rst },
 	{ "BIGRAMS?",       8,  false, cmd_bigrams_text },
 	{ "BIGRAMS",        7,  false, cmd_bigrams_bin },
+	/* Tap Dance */
+	{ "TDSET",          5,  true,  cmd_tdset },
+	{ "TD?",            3,  false, cmd_tdlist },
 	/* System */
+	{ "FEATURES?",     9,  false, cmd_features },
 	{ "VERSION?",       8,  false, cmd_version },
 	{ "OTA ",           4,  true,  cmd_ota_start },
 	{ "DFU",            3,  false, cmd_dfu },

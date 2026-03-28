@@ -1,8 +1,11 @@
 /* Tap Dance engine implementation */
 #include "tap_dance.h"
+#include "nvs_utils.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <string.h>
+
+#define STORAGE_NAMESPACE "kesp"
 
 static const char *TAG = "TAP_DANCE";
 
@@ -140,4 +143,33 @@ uint8_t tap_dance_consume(void)
 bool tap_dance_just_resolved(void)
 {
     return resolved_flag;
+}
+
+const tap_dance_config_t *tap_dance_get(uint8_t index)
+{
+    if (index >= TAP_DANCE_MAX_SLOTS) return NULL;
+    return &configs[index];
+}
+
+void tap_dance_save(void)
+{
+    /* Save all configs as a single blob. Only count used slots. */
+    uint8_t count = 0;
+    for (int i = 0; i < TAP_DANCE_MAX_SLOTS; i++) {
+        for (int j = 0; j < 4; j++) {
+            if (configs[i].actions[j] != 0) { count = i + 1; break; }
+        }
+    }
+    nvs_save_blob_with_total(STORAGE_NAMESPACE, "td_configs", configs,
+                              count * sizeof(tap_dance_config_t), "td_count", count);
+    ESP_LOGI(TAG, "Tap dance saved (%d slots)", count);
+}
+
+void tap_dance_load(void)
+{
+    uint32_t count = 0;
+    nvs_load_blob_with_total(STORAGE_NAMESPACE, "td_configs", configs,
+                              sizeof(configs), "td_count", &count);
+    if (count > 0)
+        ESP_LOGI(TAG, "Tap dance loaded (%lu slots)", (unsigned long)count);
 }
