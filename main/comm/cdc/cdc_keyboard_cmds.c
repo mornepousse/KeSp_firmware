@@ -12,6 +12,7 @@
 #include "tap_dance.h"
 #include "combo.h"
 #include "leader.h"
+#include "tama_engine.h"
 #include "status_display.h"
 #include "version.h"
 
@@ -897,6 +898,52 @@ static void cmd_leaderlist(const char *arg)
 	cdc_send_line("OK");
 }
 
+/* TAMA? — query tama stats */
+static void cmd_tama_query(const char *arg)
+{
+	(void)arg;
+	const tama2_stats_t *s = tama_engine_get_stats();
+	char buf[128];
+	snprintf(buf, sizeof(buf), "TAMA: Lv%d hunger=%d happy=%d energy=%d health=%d keys=%lu enabled=%d",
+	         s->level + 1, s->hunger, s->happiness, s->energy, s->health,
+	         (unsigned long)s->total_keys, tama_engine_is_enabled());
+	cdc_send_line(buf);
+}
+
+/* TAMA ENABLE/DISABLE/FEED/PLAY/SLEEP/MEDICINE */
+static void cmd_tama_action(const char *arg)
+{
+	if (!arg) { cdc_send_line("ERR TAMA: missing action"); return; }
+	char buf[32];
+	strncpy(buf, arg, sizeof(buf)); buf[sizeof(buf)-1] = '\0';
+	trim_spaces(buf);
+
+	if (strcasecmp(buf, "ENABLE") == 0) {
+		tama_engine_set_enabled(true);
+		cdc_send_line("TAMA:ENABLED");
+	} else if (strcasecmp(buf, "DISABLE") == 0) {
+		tama_engine_set_enabled(false);
+		cdc_send_line("TAMA:DISABLED");
+	} else if (strcasecmp(buf, "FEED") == 0) {
+		tama_engine_action(TAMA2_ACTION_FEED);
+		cdc_send_line("TAMA:FED");
+	} else if (strcasecmp(buf, "PLAY") == 0) {
+		tama_engine_action(TAMA2_ACTION_PLAY);
+		cdc_send_line("TAMA:PLAYED");
+	} else if (strcasecmp(buf, "SLEEP") == 0) {
+		tama_engine_action(TAMA2_ACTION_SLEEP);
+		cdc_send_line("TAMA:SLEPT");
+	} else if (strcasecmp(buf, "MEDICINE") == 0) {
+		tama_engine_action(TAMA2_ACTION_MEDICINE);
+		cdc_send_line("TAMA:HEALED");
+	} else if (strcasecmp(buf, "SAVE") == 0) {
+		tama_engine_save();
+		cdc_send_line("TAMA:SAVED");
+	} else {
+		cdc_send_line("ERR TAMA: ENABLE|DISABLE|FEED|PLAY|SLEEP|MEDICINE|SAVE");
+	}
+}
+
 /* FEATURES? — list supported advanced features */
 static void cmd_features(const char *arg)
 {
@@ -937,6 +984,9 @@ static const cdc_cmd_entry_t keyboard_cmd_table[] = {
 	/* Leader */
 	{ "LEADERSET",      9,  true,  cmd_leaderset },
 	{ "LEADER?",        7,  false, cmd_leaderlist },
+	/* Tama */
+	{ "TAMA?",          5,  false, cmd_tama_query },
+	{ "TAMA ",          5,  true,  cmd_tama_action },
 	/* System */
 	{ "FEATURES?",     9,  false, cmd_features },
 	{ "VERSION?",       8,  false, cmd_version },

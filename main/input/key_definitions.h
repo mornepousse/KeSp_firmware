@@ -397,6 +397,12 @@ static const uint16_t TO_L9 = 0x1400;
 /* Leader Key: starts a leader key sequence */
 #define K_LEADER                     0x3400
 
+/* Tama interactions (mappable to keys or combos) */
+#define K_TAMA_FEED                  0x3500
+#define K_TAMA_PLAY                  0x3600
+#define K_TAMA_SLEEP                 0x3700
+#define K_TAMA_MEDICINE              0x3800
+
 /* Layer-Tap: hold = activate layer, tap = send keycode */
 #define K_LT_BASE                    0x4000
 #define K_LT(layer, kc)             (K_LT_BASE | ((layer) << 8) | (kc))

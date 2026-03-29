@@ -21,6 +21,7 @@
 #include "combo.h"
 #include "leader.h"
 #include "key_features.h"
+#include "tama_engine.h"
 #include "esp_log.h"
 
 static const char *TAG = "KEY_PROC";
@@ -154,6 +155,10 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
     if (kc == K_CAPS_WORD) { caps_word_toggle(); return 0; }
     if (kc == K_REPEAT)    { return repeat_key_get(); }
     if (kc == K_LEADER)    { leader_start(); return 0; }
+    if (kc == K_TAMA_FEED)     { tama_engine_action(TAMA2_ACTION_FEED); return 0; }
+    if (kc == K_TAMA_PLAY)     { tama_engine_action(TAMA2_ACTION_PLAY); return 0; }
+    if (kc == K_TAMA_SLEEP)    { tama_engine_action(TAMA2_ACTION_SLEEP); return 0; }
+    if (kc == K_TAMA_MEDICINE) { tama_engine_action(TAMA2_ACTION_MEDICINE); return 0; }
     return 0;
 }
 
