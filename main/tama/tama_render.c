@@ -1,6 +1,7 @@
 /* Tamagotchi LVGL renderer */
 #include "tama_render.h"
 #include "tama_sprites.h"
+#include "esp_timer.h"
 #include "esp_log.h"
 #include <string.h>
 
@@ -8,12 +9,22 @@ static const char *TAG = "TAMA_RENDER";
 
 /* ── UI elements ─────────────────────────────────────────────────── */
 
-static lv_obj_t *container = NULL;  /* main container */
-static lv_obj_t *canvas = NULL;     /* sprite canvas */
+static lv_obj_t *container = NULL;
+static lv_obj_t *canvas = NULL;
 static lv_obj_t *bar_hunger = NULL;
 static lv_obj_t *bar_happy = NULL;
 static lv_obj_t *bar_energy = NULL;
 static lv_obj_t *label_level = NULL;
+
+/* Animation state */
+static bool anim_frame = false;    /* toggles between main/idle */
+static uint32_t last_anim_ms = 0;
+static int8_t bounce_offset = 0;   /* vertical bounce for idle breathing */
+static uint8_t bounce_dir = 0;     /* 0=down, 1=up */
+
+#define ANIM_FRAME_MS   600   /* frame toggle speed */
+#define BOUNCE_STEP_MS  150   /* breathing bounce speed */
+#define BOUNCE_RANGE    3     /* pixels of bounce */
 
 /* Canvas buffer — keep small to avoid RAM issues with BLE stack */
 static lv_color_t canvas_buf[32 * 32]; /* no upscale in canvas, LVGL zoom handles it */
@@ -63,7 +74,6 @@ void tama_render_create(lv_obj_t *parent, uint16_t screen_w, uint16_t screen_h)
 
     /* Always render at native 32x32 — use LVGL zoom for upscale */
     scale = 1;
-    uint16_t sprite_size = TAMA_SPRITE_W;
 
     /* Sprite canvas — 32x32, zoomed by LVGL for round display */
     canvas = lv_canvas_create(parent);
@@ -98,11 +108,30 @@ void tama_render_update(tama2_state_t state, const tama2_stats_t *stats, uint8_t
     const tama_critter_t *critter = &tama_critters[critter_idx];
     const uint8_t *frame;
 
-    /* Alternate main/idle based on state */
-    if (state == TAMA2_IDLE || state == TAMA2_SLEEPY || state == TAMA2_SLEEPING || state == TAMA2_SAD) {
-        frame = critter->idle_frame;
+    /* Animate: toggle frame every ANIM_FRAME_MS */
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if ((now - last_anim_ms) >= ANIM_FRAME_MS) {
+        anim_frame = !anim_frame;
+        last_anim_ms = now;
+
+        /* Breathing bounce */
+        if (bounce_dir == 0) {
+            bounce_offset++;
+            if (bounce_offset >= BOUNCE_RANGE) bounce_dir = 1;
+        } else {
+            bounce_offset--;
+            if (bounce_offset <= -BOUNCE_RANGE) bounce_dir = 0;
+        }
+    }
+
+    /* Select frame: sleeping/sad use idle more, active states use main more */
+    if (state == TAMA2_SLEEPING) {
+        frame = critter->idle_frame; /* always idle when sleeping */
+    } else if (state == TAMA2_EXCITED || state == TAMA2_CELEBRATING) {
+        frame = anim_frame ? critter->main_frame : critter->idle_frame; /* fast toggle */
     } else {
-        frame = critter->main_frame;
+        /* Normal: mostly main, occasionally idle */
+        frame = anim_frame ? critter->idle_frame : critter->main_frame;
     }
 
     /* Colors based on state */
@@ -125,7 +154,15 @@ void tama_render_update(tama2_state_t state, const tama2_stats_t *stats, uint8_t
     }
 
     draw_sprite(frame, fg, bg);
-    lv_obj_invalidate(canvas);
+
+    /* Apply breathing bounce to canvas position */
+    if (canvas) {
+        if (scr_w >= 240)
+            lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -15 + bounce_offset);
+        else
+            lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -10 + bounce_offset);
+        lv_obj_invalidate(canvas);
+    }
 
     /* Update bars */
     if (bar_hunger) lv_bar_set_value(bar_hunger, stats->hunger, LV_ANIM_ON);
