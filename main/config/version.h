@@ -3,6 +3,6 @@
 
 #include "board.h"
 
-#define FW_VERSION "3.4"
+#define FW_VERSION "3.5"
 
 #endif // VERSION_H
