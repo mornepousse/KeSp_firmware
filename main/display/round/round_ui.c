@@ -148,20 +148,20 @@ static void create_outer_arc(lv_obj_t *parent)
  */
 static void create_status_icons(lv_obj_t *parent)
 {
-    /* USB/BLE indicator at top */
+    /* USB/BLE indicator — top left */
     conn_icon = lv_label_create(parent);
-    lv_obj_set_style_text_font(conn_icon, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(conn_icon, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(conn_icon, COLOR_PRIMARY, 0);
-    lv_label_set_text(conn_icon, LV_SYMBOL_USB);  /* Will be updated */
-    lv_obj_align(conn_icon, LV_ALIGN_TOP_MID, 0, 35);
-    
-    /* Bluetooth status icon */
+    lv_label_set_text(conn_icon, LV_SYMBOL_USB);
+    lv_obj_align(conn_icon, LV_ALIGN_TOP_MID, -20, 40);
+
+    /* Bluetooth status icon — top right */
     status_icon = lv_label_create(parent);
-    lv_obj_set_style_text_font(status_icon, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(status_icon, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(status_icon, COLOR_SUCCESS, 0);
     lv_label_set_text(status_icon, LV_SYMBOL_BLUETOOTH);
-    lv_obj_align(status_icon, LV_ALIGN_TOP_MID, 0, 65);
-    lv_obj_add_flag(status_icon, LV_OBJ_FLAG_HIDDEN);  /* Hidden by default */
+    lv_obj_align(status_icon, LV_ALIGN_TOP_MID, 20, 40);
+    lv_obj_add_flag(status_icon, LV_OBJ_FLAG_HIDDEN);
 }
 
 /**
@@ -169,13 +169,13 @@ static void create_status_icons(lv_obj_t *parent)
  */
 static void create_layer_display(lv_obj_t *parent)
 {
-    /* Main layer name - big and centered */
+    /* Layer name — top area, smaller to make room for tama */
     layer_label = lv_label_create(parent);
-    lv_obj_set_style_text_font(layer_label, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(layer_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(layer_label, COLOR_TEXT, 0);
     lv_obj_set_style_text_align(layer_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(layer_label, default_layout_names[current_layout]);
-    lv_obj_align(layer_label, LV_ALIGN_CENTER, 0, 35);
+    lv_obj_align(layer_label, LV_ALIGN_TOP_MID, 0, 58);
 }
 
 /**
@@ -186,8 +186,8 @@ static void create_mouse_indicator(lv_obj_t *parent)
     mouse_indicator = lv_label_create(parent);
     lv_obj_set_style_text_font(mouse_indicator, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(mouse_indicator, COLOR_WARNING, 0);
-    lv_label_set_text(mouse_indicator, LV_SYMBOL_EYE_OPEN " Mouse");
-    lv_obj_align(mouse_indicator, LV_ALIGN_BOTTOM_MID, 0, -55);
+    lv_label_set_text(mouse_indicator, LV_SYMBOL_EYE_OPEN);
+    lv_obj_align(mouse_indicator, LV_ALIGN_BOTTOM_MID, 0, -35);
     lv_obj_add_flag(mouse_indicator, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -197,12 +197,13 @@ static void create_mouse_indicator(lv_obj_t *parent)
  */
 static void create_kpm_label(lv_obj_t *parent)
 {
+    /* KPM — bottom area */
     kpm_label = lv_label_create(parent);
     lv_obj_set_style_text_font(kpm_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(kpm_label, COLOR_SECONDARY, 0);
     lv_obj_set_style_text_align(kpm_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(kpm_label, "0 KPM");
-    lv_obj_align(kpm_label, LV_ALIGN_CENTER, 0, 65);
+    lv_obj_align(kpm_label, LV_ALIGN_BOTTOM_MID, 0, -50);
 }
 
 /**
@@ -327,13 +328,9 @@ void round_ui_init(void)
     
     if (lvgl_port_lock(200)) {
         create_main_ui();
-        /* DEBUG: direct label to test if UI creation works here */
         {
             lv_obj_t *scr = lv_scr_act();
-            lv_obj_t *test = lv_label_create(scr);
-            lv_label_set_text(test, "TAMA OK");
-            lv_obj_set_style_text_color(test, lv_color_hex(0xFF0000), 0);
-            lv_obj_align(test, LV_ALIGN_CENTER, 0, 40);
+            tama_render_create(scr, BOARD_DISPLAY_WIDTH, BOARD_DISPLAY_HEIGHT);
         }
         ui_initialized = true;
         ui_sleeping = false;
@@ -483,19 +480,11 @@ void round_ui_refresh_all(void)
         status_icon = NULL;
         conn_icon = NULL;
         mouse_indicator = NULL;
-
         kpm_label = NULL;
-        
+        tama_render_destroy(); /* reset tama render state before rebuild */
+
         create_main_ui();
-
-        /* Tama label after main UI rebuild */
-        {
-            lv_obj_t *test = lv_label_create(scr);
-            lv_label_set_text(test, "TAMA OK");
-            lv_obj_set_style_text_color(test, lv_color_hex(0xFF0000), 0);
-            lv_obj_align(test, LV_ALIGN_CENTER, 0, 40);
-        }
-
+        tama_render_create(scr, BOARD_DISPLAY_WIDTH, BOARD_DISPLAY_HEIGHT);
         ui_initialized = true;
         lvgl_port_unlock();
     }

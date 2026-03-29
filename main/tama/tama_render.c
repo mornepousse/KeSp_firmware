@@ -65,11 +65,23 @@ void tama_render_create(lv_obj_t *parent, uint16_t screen_w, uint16_t screen_h)
     scale = 1;
     uint16_t sprite_size = TAMA_SPRITE_W;
 
-    /* Simple: just a label for the critter + level (no canvas for now) */
+    /* Sprite canvas — 32x32, zoomed by LVGL for round display */
+    canvas = lv_canvas_create(parent);
+    lv_canvas_set_buffer(canvas, canvas_buf, TAMA_SPRITE_W, TAMA_SPRITE_H, LV_IMG_CF_TRUE_COLOR);
+    if (screen_w >= 240) {
+        lv_img_set_zoom(canvas, 384); /* 1.5x zoom */
+        lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -15);
+    } else {
+        lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -10);
+    }
+
+    /* Level/critter name label — below sprite */
     label_level = lv_label_create(parent);
+    lv_obj_set_style_text_font(label_level, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(label_level, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_set_style_text_align(label_level, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(label_level, "Lv1 egg");
-    lv_obj_set_style_text_color(label_level, lv_color_hex(0x00FF00), 0);
-    lv_obj_align(label_level, LV_ALIGN_CENTER, 0, 30);
+    lv_obj_align(label_level, LV_ALIGN_CENTER, 0, 25);
 
     created = true;
     ESP_LOGI(TAG, "Tama render created (scale=%d)", scale);
@@ -138,14 +150,13 @@ void tama_render_set_visible(bool visible)
 
 void tama_render_destroy(void)
 {
-    if (container) {
-        lv_obj_del(container);
-        container = NULL;
-        canvas = NULL;
-        bar_hunger = NULL;
-        bar_happy = NULL;
-        bar_energy = NULL;
-        label_level = NULL;
-        created = false;
-    }
+    /* Don't delete objects — LVGL clean handles that.
+       Just reset our pointers so create works again. */
+    container = NULL;
+    canvas = NULL;
+    bar_hunger = NULL;
+    bar_happy = NULL;
+    bar_energy = NULL;
+    label_level = NULL;
+    created = false;
 }
