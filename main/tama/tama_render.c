@@ -24,7 +24,7 @@ static uint8_t bounce_dir = 0;     /* 0=down, 1=up */
 
 #define ANIM_FRAME_MS   600   /* frame toggle speed */
 #define BOUNCE_STEP_MS  150   /* breathing bounce speed */
-#define BOUNCE_RANGE    3     /* pixels of bounce */
+#define BOUNCE_RANGE    2     /* pixels of bounce */
 
 /* Canvas buffer — keep small to avoid RAM issues with BLE stack */
 static lv_color_t canvas_buf[32 * 32]; /* no upscale in canvas, LVGL zoom handles it */
@@ -82,8 +82,8 @@ void tama_render_create(lv_obj_t *parent, uint16_t screen_w, uint16_t screen_h)
         lv_img_set_zoom(canvas, 512); /* 2x zoom (256=1x) → 64x64 */
         lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -20);
     } else {
-        /* OLED 128x64: sprite right side, below top bar (y=16) */
-        lv_obj_set_pos(canvas, 96, 16);
+        /* OLED 128x64: sprite right side (y=14, ends at y=46, above layer bar at y=48) */
+        lv_obj_set_pos(canvas, 96, 14);
     }
 
     /* Stat bars — below sprite (round) or left of sprite (OLED) */
@@ -131,7 +131,7 @@ void tama_render_create(lv_obj_t *parent, uint16_t screen_w, uint16_t screen_h)
         label_level = lv_label_create(parent);
         lv_obj_set_style_text_font(label_level, &lv_font_montserrat_14, 0);
         lv_label_set_text(label_level, "Lv1");
-        lv_obj_set_pos(label_level, 65, 34);
+        lv_obj_set_pos(label_level, 0, 34);
     }
 
     created = true;
@@ -202,7 +202,7 @@ void tama_render_update(tama2_state_t state, const tama2_stats_t *stats, uint8_t
         if (scr_w >= 240)
             lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -20 + bounce_offset);
         else
-            lv_obj_set_pos(canvas, 96, 16 + bounce_offset);
+            lv_obj_set_pos(canvas, 96, 14 + bounce_offset);
         lv_obj_invalidate(canvas);
     }
 
