@@ -8,6 +8,8 @@
 
 #include "round_ui.h"
 #include "tamagotchi.h"
+#include "tama_engine.h"
+#include "tama_render.h"
 #include "i2c_oled_display.h"
 #include "keyboard_config.h"
 #include "hid_bluetooth_manager.h"
@@ -224,9 +226,7 @@ static void create_main_ui(void)
     create_outer_arc(scr);
     create_status_icons(scr);
     
-    /* Initialize and draw Tamagotchi */
-    tamagotchi_init();
-    tamagotchi_draw(scr);
+    /* Old ASCII tama disabled — replaced by tama_engine + tama_render */
     
     create_layer_display(scr);
     create_kpm_label(scr);
@@ -327,6 +327,14 @@ void round_ui_init(void)
     
     if (lvgl_port_lock(200)) {
         create_main_ui();
+        /* DEBUG: direct label to test if UI creation works here */
+        {
+            lv_obj_t *scr = lv_scr_act();
+            lv_obj_t *test = lv_label_create(scr);
+            lv_label_set_text(test, "TAMA OK");
+            lv_obj_set_style_text_color(test, lv_color_hex(0xFF0000), 0);
+            lv_obj_align(test, LV_ALIGN_CENTER, 0, 40);
+        }
         ui_initialized = true;
         ui_sleeping = false;
         ui_showing_splash = false;
@@ -413,10 +421,13 @@ void round_ui_update(void)
             lv_obj_add_flag(mouse_indicator, LV_OBJ_FLAG_HIDDEN);
     }
 
+    /* Update Tamagotchi (inside LVGL lock) */
+    if (tama_engine_is_enabled()) {
+        tama_engine_keypress(current_kpm);
+        tama_render_update(tama_engine_get_state(), tama_engine_get_stats(), tama_engine_get_critter());
+    }
+
     lvgl_port_unlock();
-    
-    /* Update Tamagotchi state */
-    tamagotchi_update(current_kpm);
 }
 
 void round_ui_sleep(void)
@@ -476,10 +487,19 @@ void round_ui_refresh_all(void)
         kpm_label = NULL;
         
         create_main_ui();
+
+        /* Tama label after main UI rebuild */
+        {
+            lv_obj_t *test = lv_label_create(scr);
+            lv_label_set_text(test, "TAMA OK");
+            lv_obj_set_style_text_color(test, lv_color_hex(0xFF0000), 0);
+            lv_obj_align(test, LV_ALIGN_CENTER, 0, 40);
+        }
+
         ui_initialized = true;
         lvgl_port_unlock();
     }
-    
+
     round_ui_update_layer();
     update_connection_status(true);
 }
@@ -492,7 +512,6 @@ void round_ui_notify_mouse(void)
 void round_ui_notify_keypress(void)
 {
     keypress_count++;
-    tamagotchi_notify_keypress();
 }
 
 

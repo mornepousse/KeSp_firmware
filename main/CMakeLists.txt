@@ -50,6 +50,8 @@ idf_component_register(
         "input/matrix_scan.c"
         "input/key_stats.c"
         "input/keyboard_actions.c"
+        "tama/tama_engine.c"
+        "tama/tama_render.c"
 
         "${BOARD_DIR}/board_keymap.c"
         "${BOARD_DIR}/board_layout.c"
@@ -67,6 +69,7 @@ idf_component_register(
         "comm/usb"
         "comm/cdc"
         "comm/ble"
+        "tama"
         "input"
         "${BOARD_DIR}"
     PRIV_REQUIRES

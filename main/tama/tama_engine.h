@@ -8,7 +8,7 @@
 
 /* ── Stats ───────────────────────────────────────────────────────── */
 
-#define TAMA_STAT_MAX 1000
+#define TAMA2_STAT_MAX 1000
 
 typedef struct {
     uint16_t hunger;       /* 0 = starving, 1000 = full */
@@ -20,31 +20,31 @@ typedef struct {
     uint32_t max_kpm;      /* personal best KPM */
     uint16_t level;        /* evolution level (0-19) */
     uint16_t xp;           /* XP toward next level */
-} tama_stats_t;
+} tama2_stats_t;
 
 /* ── Emotional states ────────────────────────────────────────────── */
 
 typedef enum {
-    TAMA_IDLE,          /* no activity */
-    TAMA_HAPPY,         /* good KPM */
-    TAMA_EXCITED,       /* fast typing */
-    TAMA_EATING,        /* just fed */
-    TAMA_SLEEPY,        /* low energy */
-    TAMA_SLEEPING,      /* screen sleep / long inactivity */
-    TAMA_SICK,          /* health below 200 */
-    TAMA_SAD,           /* happiness below 200 */
-    TAMA_CELEBRATING,   /* milestone! */
-    TAMA_STATE_COUNT
-} tama_state_t;
+    TAMA2_IDLE,          /* no activity */
+    TAMA2_HAPPY,         /* good KPM */
+    TAMA2_EXCITED,       /* fast typing */
+    TAMA2_EATING,        /* just fed */
+    TAMA2_SLEEPY,        /* low energy */
+    TAMA2_SLEEPING,      /* screen sleep / long inactivity */
+    TAMA2_SICK,          /* health below 200 */
+    TAMA2_SAD,           /* happiness below 200 */
+    TAMA2_CELEBRATING,   /* milestone! */
+    TAMA2_STATE_COUNT
+} tama2_state_t;
 
 /* ── Actions (direct interactions) ───────────────────────────────── */
 
 typedef enum {
-    TAMA_ACTION_FEED,
-    TAMA_ACTION_PLAY,
-    TAMA_ACTION_SLEEP,
-    TAMA_ACTION_MEDICINE,
-} tama_action_t;
+    TAMA2_ACTION_FEED,
+    TAMA2_ACTION_PLAY,
+    TAMA2_ACTION_SLEEP,
+    TAMA2_ACTION_MEDICINE,
+} tama2_action_t;
 
 /* ── API ─────────────────────────────────────────────────────────── */
 
@@ -55,11 +55,11 @@ void tama_engine_init(void);
 void tama_engine_keypress(uint32_t current_kpm);
 
 /* Perform a direct action (from combo or layer) */
-void tama_engine_action(tama_action_t action);
+void tama_engine_action(tama2_action_t action);
 
 /* Get current state and stats */
-tama_state_t tama_engine_get_state(void);
-const tama_stats_t *tama_engine_get_stats(void);
+tama2_state_t tama_engine_get_state(void);
+const tama2_stats_t *tama_engine_get_stats(void);
 
 /* Check if engine is enabled */
 bool tama_engine_is_enabled(void);

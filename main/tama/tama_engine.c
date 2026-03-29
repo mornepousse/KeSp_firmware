@@ -7,8 +7,8 @@
 
 static const char *TAG = "TAMA";
 
-static tama_stats_t stats;
-static tama_state_t state = TAMA_IDLE;
+static tama2_stats_t stats;
+static tama2_state_t state = TAMA2_IDLE;
 static bool enabled = true;
 
 /* Keys between stat decay ticks */
@@ -25,9 +25,9 @@ static uint32_t keys_since_energy_tick = 0;
 
 static void clamp_stats(void)
 {
-    if (stats.hunger > TAMA_STAT_MAX) stats.hunger = TAMA_STAT_MAX;
-    if (stats.happiness > TAMA_STAT_MAX) stats.happiness = TAMA_STAT_MAX;
-    if (stats.energy > TAMA_STAT_MAX) stats.energy = TAMA_STAT_MAX;
+    if (stats.hunger > TAMA2_STAT_MAX) stats.hunger = TAMA2_STAT_MAX;
+    if (stats.happiness > TAMA2_STAT_MAX) stats.happiness = TAMA2_STAT_MAX;
+    if (stats.energy > TAMA2_STAT_MAX) stats.energy = TAMA2_STAT_MAX;
     stats.health = (stats.hunger + stats.happiness + stats.energy) / 3;
 }
 
@@ -35,19 +35,19 @@ static void update_state(uint32_t kpm)
 {
     /* Priority: sick > sad > sleeping > sleepy > eating > excited > happy > idle */
     if (stats.health < 200) {
-        state = TAMA_SICK;
+        state = TAMA2_SICK;
     } else if (stats.happiness < 200) {
-        state = TAMA_SAD;
+        state = TAMA2_SAD;
     } else if (stats.energy < 100) {
-        state = TAMA_SLEEPING;
+        state = TAMA2_SLEEPING;
     } else if (stats.energy < 300) {
-        state = TAMA_SLEEPY;
+        state = TAMA2_SLEEPY;
     } else if (kpm > 200) {
-        state = TAMA_EXCITED;
+        state = TAMA2_EXCITED;
     } else if (kpm > 80) {
-        state = TAMA_HAPPY;
+        state = TAMA2_HAPPY;
     } else {
-        state = TAMA_IDLE;
+        state = TAMA2_IDLE;
     }
 }
 
@@ -56,7 +56,7 @@ static void check_level_up(void)
     while (stats.xp >= XP_PER_LEVEL && stats.level < MAX_LEVEL) {
         stats.xp -= XP_PER_LEVEL;
         stats.level++;
-        state = TAMA_CELEBRATING;
+        state = TAMA2_CELEBRATING;
         ESP_LOGI(TAG, "Level up! Now level %d", stats.level);
     }
 }
@@ -69,8 +69,8 @@ void tama_engine_init(void)
     memset(&stats, 0, sizeof(stats));
     stats.hunger = 800;
     stats.happiness = 800;
-    stats.energy = TAMA_STAT_MAX;
-    stats.health = TAMA_STAT_MAX;
+    stats.energy = TAMA2_STAT_MAX;
+    stats.health = TAMA2_STAT_MAX;
 
     /* Try loading from NVS */
     uint32_t dummy = 0;
@@ -118,7 +118,7 @@ void tama_engine_keypress(uint32_t current_kpm)
     }
 
     /* Happiness boost from KPM */
-    if (current_kpm > 100 && stats.happiness < TAMA_STAT_MAX)
+    if (current_kpm > 100 && stats.happiness < TAMA2_STAT_MAX)
         stats.happiness += 1;
     else if (current_kpm < 20 && stats.happiness > 0)
         stats.happiness -= 1;
@@ -133,38 +133,38 @@ void tama_engine_keypress(uint32_t current_kpm)
     update_state(current_kpm);
 }
 
-void tama_engine_action(tama_action_t action)
+void tama_engine_action(tama2_action_t action)
 {
     if (!enabled) return;
 
     switch (action) {
-    case TAMA_ACTION_FEED:
-        stats.hunger = (stats.hunger + 300 > TAMA_STAT_MAX) ? TAMA_STAT_MAX : stats.hunger + 300;
-        state = TAMA_EATING;
+    case TAMA2_ACTION_FEED:
+        stats.hunger = (stats.hunger + 300 > TAMA2_STAT_MAX) ? TAMA2_STAT_MAX : stats.hunger + 300;
+        state = TAMA2_EATING;
         ESP_LOGI(TAG, "Fed! hunger=%d", stats.hunger);
         break;
-    case TAMA_ACTION_PLAY:
-        stats.happiness = (stats.happiness + 200 > TAMA_STAT_MAX) ? TAMA_STAT_MAX : stats.happiness + 200;
-        state = TAMA_HAPPY;
+    case TAMA2_ACTION_PLAY:
+        stats.happiness = (stats.happiness + 200 > TAMA2_STAT_MAX) ? TAMA2_STAT_MAX : stats.happiness + 200;
+        state = TAMA2_HAPPY;
         ESP_LOGI(TAG, "Played! happiness=%d", stats.happiness);
         break;
-    case TAMA_ACTION_SLEEP:
-        stats.energy = (stats.energy + 400 > TAMA_STAT_MAX) ? TAMA_STAT_MAX : stats.energy + 400;
-        state = TAMA_SLEEPING;
+    case TAMA2_ACTION_SLEEP:
+        stats.energy = (stats.energy + 400 > TAMA2_STAT_MAX) ? TAMA2_STAT_MAX : stats.energy + 400;
+        state = TAMA2_SLEEPING;
         ESP_LOGI(TAG, "Slept! energy=%d", stats.energy);
         break;
-    case TAMA_ACTION_MEDICINE:
-        stats.hunger = (stats.hunger + 100 > TAMA_STAT_MAX) ? TAMA_STAT_MAX : stats.hunger + 100;
-        stats.happiness = (stats.happiness + 100 > TAMA_STAT_MAX) ? TAMA_STAT_MAX : stats.happiness + 100;
-        stats.energy = (stats.energy + 100 > TAMA_STAT_MAX) ? TAMA_STAT_MAX : stats.energy + 100;
+    case TAMA2_ACTION_MEDICINE:
+        stats.hunger = (stats.hunger + 100 > TAMA2_STAT_MAX) ? TAMA2_STAT_MAX : stats.hunger + 100;
+        stats.happiness = (stats.happiness + 100 > TAMA2_STAT_MAX) ? TAMA2_STAT_MAX : stats.happiness + 100;
+        stats.energy = (stats.energy + 100 > TAMA2_STAT_MAX) ? TAMA2_STAT_MAX : stats.energy + 100;
         ESP_LOGI(TAG, "Medicine! health=%d", stats.health);
         break;
     }
     clamp_stats();
 }
 
-tama_state_t tama_engine_get_state(void) { return state; }
-const tama_stats_t *tama_engine_get_stats(void) { return &stats; }
+tama2_state_t tama_engine_get_state(void) { return state; }
+const tama2_stats_t *tama_engine_get_stats(void) { return &stats; }
 bool tama_engine_is_enabled(void) { return enabled; }
 void tama_engine_set_enabled(bool e) { enabled = e; }
 
@@ -179,7 +179,7 @@ void tama_engine_session_start(void)
 {
     stats.session_keys = 0;
     /* Recover some energy on new session (like sleeping between sessions) */
-    stats.energy = (stats.energy + 200 > TAMA_STAT_MAX) ? TAMA_STAT_MAX : stats.energy + 200;
+    stats.energy = (stats.energy + 200 > TAMA2_STAT_MAX) ? TAMA2_STAT_MAX : stats.energy + 200;
     clamp_stats();
 }
 
