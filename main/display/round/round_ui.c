@@ -418,9 +418,8 @@ void round_ui_update(void)
             lv_obj_add_flag(mouse_indicator, LV_OBJ_FLAG_HIDDEN);
     }
 
-    /* Update Tamagotchi (inside LVGL lock) */
+    /* Update Tamagotchi render only — keypresses fed separately via notify */
     if (tama_engine_is_enabled()) {
-        tama_engine_keypress(current_kpm);
         tama_render_update(tama_engine_get_state(), tama_engine_get_stats(), tama_engine_get_critter());
     }
 
@@ -501,6 +500,8 @@ void round_ui_notify_mouse(void)
 void round_ui_notify_keypress(void)
 {
     keypress_count++;
+    if (tama_engine_is_enabled())
+        tama_engine_keypress(current_kpm);
 }
 
 

@@ -31,23 +31,27 @@ static void clamp_stats(void)
     stats.health = (stats.hunger + stats.happiness + stats.energy) / 3;
 }
 
+static uint32_t state_hold_keys = 0; /* keys since last state change */
+#define STATE_HOLD_MIN 50  /* min keys before state can change again */
+
 static void update_state(uint32_t kpm)
 {
+    tama2_state_t new_state;
+
     /* Priority: sick > sad > sleeping > sleepy > eating > excited > happy > idle */
-    if (stats.health < 200) {
-        state = TAMA2_SICK;
-    } else if (stats.happiness < 200) {
-        state = TAMA2_SAD;
-    } else if (stats.energy < 100) {
-        state = TAMA2_SLEEPING;
-    } else if (stats.energy < 300) {
-        state = TAMA2_SLEEPY;
-    } else if (kpm > 200) {
-        state = TAMA2_EXCITED;
-    } else if (kpm > 80) {
-        state = TAMA2_HAPPY;
-    } else {
-        state = TAMA2_IDLE;
+    if (stats.health < 200)       new_state = TAMA2_SICK;
+    else if (stats.happiness < 200) new_state = TAMA2_SAD;
+    else if (stats.energy < 100)  new_state = TAMA2_SLEEPING;
+    else if (stats.energy < 300)  new_state = TAMA2_SLEEPY;
+    else if (kpm > 200)           new_state = TAMA2_EXCITED;
+    else if (kpm > 80)            new_state = TAMA2_HAPPY;
+    else                          new_state = TAMA2_IDLE;
+
+    state_hold_keys++;
+    /* Only change state after minimum keypresses to avoid flickering */
+    if (new_state != state && state_hold_keys >= STATE_HOLD_MIN) {
+        state = new_state;
+        state_hold_keys = 0;
     }
 }
 

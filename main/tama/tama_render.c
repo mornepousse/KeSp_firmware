@@ -79,19 +79,51 @@ void tama_render_create(lv_obj_t *parent, uint16_t screen_w, uint16_t screen_h)
     canvas = lv_canvas_create(parent);
     lv_canvas_set_buffer(canvas, canvas_buf, TAMA_SPRITE_W, TAMA_SPRITE_H, LV_IMG_CF_TRUE_COLOR);
     if (screen_w >= 240) {
-        lv_img_set_zoom(canvas, 384); /* 1.5x zoom */
+        lv_img_set_zoom(canvas, 640); /* 2.5x zoom (256=1x) */
         lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -15);
     } else {
         lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -10);
     }
 
-    /* Level/critter name label — below sprite */
+    /* Stat bars — below sprite */
+    int bar_w = (screen_w >= 240) ? 80 : 40;
+    int bar_h = (screen_w >= 240) ? 6 : 3;
+    int bar_y_start = (screen_w >= 240) ? 22 : 10;
+
+    bar_hunger = lv_bar_create(parent);
+    lv_obj_set_size(bar_hunger, bar_w, bar_h);
+    lv_bar_set_range(bar_hunger, 0, TAMA2_STAT_MAX);
+    lv_obj_set_style_bg_color(bar_hunger, lv_color_hex(0x222222), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar_hunger, lv_color_hex(0xFF8800), LV_PART_INDICATOR);
+    lv_obj_set_style_radius(bar_hunger, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(bar_hunger, 2, LV_PART_INDICATOR);
+    lv_obj_align(bar_hunger, LV_ALIGN_CENTER, 0, bar_y_start);
+
+    bar_happy = lv_bar_create(parent);
+    lv_obj_set_size(bar_happy, bar_w, bar_h);
+    lv_bar_set_range(bar_happy, 0, TAMA2_STAT_MAX);
+    lv_obj_set_style_bg_color(bar_happy, lv_color_hex(0x222222), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar_happy, lv_color_hex(0x00CC00), LV_PART_INDICATOR);
+    lv_obj_set_style_radius(bar_happy, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(bar_happy, 2, LV_PART_INDICATOR);
+    lv_obj_align(bar_happy, LV_ALIGN_CENTER, 0, bar_y_start + bar_h + 3);
+
+    bar_energy = lv_bar_create(parent);
+    lv_obj_set_size(bar_energy, bar_w, bar_h);
+    lv_bar_set_range(bar_energy, 0, TAMA2_STAT_MAX);
+    lv_obj_set_style_bg_color(bar_energy, lv_color_hex(0x222222), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar_energy, lv_color_hex(0x0088FF), LV_PART_INDICATOR);
+    lv_obj_set_style_radius(bar_energy, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(bar_energy, 2, LV_PART_INDICATOR);
+    lv_obj_align(bar_energy, LV_ALIGN_CENTER, 0, bar_y_start + (bar_h + 3) * 2);
+
+    /* Level/critter name label — below bars */
     label_level = lv_label_create(parent);
     lv_obj_set_style_text_font(label_level, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(label_level, lv_color_hex(0xCCCCCC), 0);
     lv_obj_set_style_text_align(label_level, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(label_level, "Lv1 egg");
-    lv_obj_align(label_level, LV_ALIGN_CENTER, 0, 25);
+    lv_obj_align(label_level, LV_ALIGN_CENTER, 0, bar_y_start + (bar_h + 3) * 3);
 
     created = true;
     ESP_LOGI(TAG, "Tama render created (scale=%d)", scale);
