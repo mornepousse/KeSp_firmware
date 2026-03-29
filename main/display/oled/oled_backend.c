@@ -40,6 +40,7 @@ static TickType_t last_mouse_activity = 0;
 static bool bt_blink_visible = true;
 static TickType_t bt_blink_last_tick = 0;
 static bool oled_initialized = false;
+static lv_obj_t *tama_label = NULL;
 
 static void oled_init_icons(void)
 {
@@ -48,31 +49,35 @@ static void oled_init_icons(void)
 
     lv_obj_t *scr = lv_scr_act();
 
-    /* ── Top bar: USB | BT | Layer name | version ─────────────── */
+    /* ── Top: version label ───────────────────────────────────── */
+
+    if (!label_version) {
+        label_version = lv_label_create(scr);
+        lv_label_set_text(label_version, "v" FW_VERSION);
+        lv_obj_set_style_text_font(label_version, &lv_font_montserrat_28, 0);
+        lv_obj_align(label_version, LV_ALIGN_TOP_MID, 0, 2);
+    }
+
+    /* ── Bottom bar: icons + layer name + mouse ───────────────── */
 
     icon_path = lv_img_create(scr);
     if (icon_path)
-        lv_obj_set_pos(icon_path, 0, 0);
+        lv_obj_set_pos(icon_path, 0, 48);
 
     icon_bt = lv_img_create(scr);
-    lv_obj_set_pos(icon_bt, 18, 0);
+    lv_obj_set_pos(icon_bt, 18, 48);
 
-    label_layer_name = lv_label_create(scr);
-    lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
-    lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
-    lv_obj_set_pos(label_layer_name, 38, 0);
-
-    /* ── Bottom bar: version + mouse indicator ────────────────── */
-
-    label_version = lv_label_create(scr);
-    lv_label_set_text(label_version, "v" FW_VERSION);
-    lv_obj_set_style_text_font(label_version, &lv_font_montserrat_14, 0);
-    lv_obj_set_pos(label_version, 0, 50);
+    if (!label_layer_name) {
+        label_layer_name = lv_label_create(scr);
+        lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
+        lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
+        lv_obj_set_pos(label_layer_name, 38, 48);
+    }
 
     indicator_mouse = lv_label_create(scr);
     lv_label_set_text(indicator_mouse, "M");
     lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0);
-    lv_obj_set_pos(indicator_mouse, 50, 50);
+    lv_obj_set_pos(indicator_mouse, 118, 48);
     lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -193,6 +198,7 @@ static void oled_update(void)
             else
                 lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
         }
+        /* Update tama */
         if (tama_engine_is_enabled())
             tama_render_update(tama_engine_get_state(), tama_engine_get_stats(), tama_engine_get_critter());
         lvgl_port_unlock();
@@ -201,11 +207,16 @@ static void oled_update(void)
 
 static void oled_refresh_all(void)
 {
-    tama_render_destroy();
     oled_prepare_ui(true);
     oled_update_layer();
     oled_update_connection_icons(true);
-    /* Tama canvas disabled on OLED — true color canvas breaks mono rendering */
+
+    /* Tama sprite canvas */
+    if (tama_engine_is_enabled() && lvgl_port_lock(50)) {
+        lv_obj_t *scr = lv_scr_act();
+        tama_render_create(scr, BOARD_DISPLAY_WIDTH, BOARD_DISPLAY_HEIGHT);
+        lvgl_port_unlock();
+    }
 }
 
 static void oled_sleep(void)
