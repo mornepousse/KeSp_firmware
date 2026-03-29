@@ -8,6 +8,8 @@
 #include "keyboard_config.h"
 #include "keymap.h"
 #include "version.h"
+#include "tama_engine.h"
+#include "tama_render.h"
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
@@ -46,34 +48,32 @@ static void oled_init_icons(void)
 
     lv_obj_t *scr = lv_scr_act();
 
-    icon_bt = lv_img_create(scr);
-    lv_obj_set_pos(icon_bt, 20 * UI_SCALE, 48 * UI_SCALE);
+    /* ── Top bar: USB | BT | Layer name | version ─────────────── */
 
     icon_path = lv_img_create(scr);
     if (icon_path)
-        lv_obj_set_pos(icon_path, 0, 48 * UI_SCALE);
+        lv_obj_set_pos(icon_path, 0, 0);
+
+    icon_bt = lv_img_create(scr);
+    lv_obj_set_pos(icon_bt, 18, 0);
+
+    label_layer_name = lv_label_create(scr);
+    lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
+    lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
+    lv_obj_set_pos(label_layer_name, 38, 0);
+
+    /* ── Bottom bar: version + mouse indicator ────────────────── */
+
+    label_version = lv_label_create(scr);
+    lv_label_set_text(label_version, "v" FW_VERSION);
+    lv_obj_set_style_text_font(label_version, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(label_version, 0, 50);
 
     indicator_mouse = lv_label_create(scr);
-    if (indicator_mouse) {
-        lv_label_set_text(indicator_mouse, "M");
-        lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0);
-        lv_obj_set_pos(indicator_mouse, 118 * UI_SCALE, 48 * UI_SCALE);
-        lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    if (!label_version) {
-        label_version = lv_label_create(scr);
-        lv_label_set_text(label_version, "v" FW_VERSION);
-        lv_obj_set_style_text_font(label_version, &lv_font_montserrat_28, 0);
-        lv_obj_align(label_version, LV_ALIGN_TOP_MID, 0, 2 * UI_SCALE);
-    }
-
-    if (!label_layer_name) {
-        label_layer_name = lv_label_create(scr);
-        lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
-        lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
-        lv_obj_set_pos(label_layer_name, 38 * UI_SCALE, 48 * UI_SCALE);
-    }
+    lv_label_set_text(indicator_mouse, "M");
+    lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0);
+    lv_obj_set_pos(indicator_mouse, 50, 50);
+    lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void oled_prepare_ui(bool clear_screen)
@@ -186,20 +186,26 @@ static void oled_update_layer(void)
 static void oled_update(void)
 {
     oled_update_connection_icons(false);
-    if (indicator_mouse && lvgl_port_lock(50)) {
-        if ((xTaskGetTickCount() - last_mouse_activity) < pdMS_TO_TICKS(MOUSE_INDICATOR_MS))
-            lv_obj_clear_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
-        else
-            lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
+    if (lvgl_port_lock(50)) {
+        if (indicator_mouse) {
+            if ((xTaskGetTickCount() - last_mouse_activity) < pdMS_TO_TICKS(MOUSE_INDICATOR_MS))
+                lv_obj_clear_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
+            else
+                lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (tama_engine_is_enabled())
+            tama_render_update(tama_engine_get_state(), tama_engine_get_stats(), tama_engine_get_critter());
         lvgl_port_unlock();
     }
 }
 
 static void oled_refresh_all(void)
 {
+    tama_render_destroy();
     oled_prepare_ui(true);
     oled_update_layer();
     oled_update_connection_icons(true);
+    /* Tama canvas disabled on OLED — true color canvas breaks mono rendering */
 }
 
 static void oled_sleep(void)
@@ -209,6 +215,7 @@ static void oled_sleep(void)
         icon_bt = NULL; icon_path = NULL; indicator_mouse = NULL;
         label_version = NULL; label_layer_name = NULL;
         last_bt_state = -1; last_path_state = -1;
+        tama_render_destroy();
         oled_initialized = false;
         lvgl_port_unlock();
     }
@@ -225,6 +232,12 @@ static void oled_notify_mouse(void)
     last_mouse_activity = xTaskGetTickCount();
 }
 
+static void oled_notify_keypress(void)
+{
+    if (tama_engine_is_enabled())
+        tama_engine_keypress(0); /* no KPM tracking on OLED */
+}
+
 static void oled_show_dfu(void)
 {
     display_clear_screen();
@@ -239,6 +252,6 @@ const display_backend_t oled_display_backend = {
     .sleep         = oled_sleep,
     .wake          = oled_wake,
     .notify_mouse    = oled_notify_mouse,
-    .notify_keypress = NULL,
+    .notify_keypress = oled_notify_keypress,
     .show_dfu        = oled_show_dfu,
 };

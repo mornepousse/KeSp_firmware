@@ -82,48 +82,58 @@ void tama_render_create(lv_obj_t *parent, uint16_t screen_w, uint16_t screen_h)
         lv_img_set_zoom(canvas, 512); /* 2x zoom (256=1x) → 64x64 */
         lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -20);
     } else {
-        lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -10);
+        /* OLED 128x64: sprite right side, below top bar (y=16) */
+        lv_obj_set_pos(canvas, 96, 16);
     }
 
-    /* Stat bars — below sprite */
-    int bar_w = (screen_w >= 240) ? 70 : 40;
+    /* Stat bars — below sprite (round) or left of sprite (OLED) */
+    int bar_w = (screen_w >= 240) ? 70 : 30;
     int bar_h = (screen_w >= 240) ? 5 : 3;
-    int bar_y_start = (screen_w >= 240) ? 20 : 10;
+    int bar_y_start = (screen_w >= 240) ? 20 : 0;
 
-    bar_hunger = lv_bar_create(parent);
-    lv_obj_set_size(bar_hunger, bar_w, bar_h);
-    lv_bar_set_range(bar_hunger, 0, TAMA2_STAT_MAX);
-    lv_obj_set_style_bg_color(bar_hunger, lv_color_hex(0x222222), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(bar_hunger, lv_color_hex(0xFF8800), LV_PART_INDICATOR);
-    lv_obj_set_style_radius(bar_hunger, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(bar_hunger, 2, LV_PART_INDICATOR);
-    lv_obj_align(bar_hunger, LV_ALIGN_CENTER, 0, bar_y_start);
+    if (screen_w >= 240) {
+        /* Round: bars centered below sprite */
+        bar_hunger = lv_bar_create(parent);
+        lv_obj_set_size(bar_hunger, bar_w, bar_h);
+        lv_bar_set_range(bar_hunger, 0, TAMA2_STAT_MAX);
+        lv_obj_set_style_bg_color(bar_hunger, lv_color_hex(0x222222), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(bar_hunger, lv_color_hex(0xFF8800), LV_PART_INDICATOR);
+        lv_obj_set_style_radius(bar_hunger, 2, LV_PART_MAIN);
+        lv_obj_set_style_radius(bar_hunger, 2, LV_PART_INDICATOR);
+        lv_obj_align(bar_hunger, LV_ALIGN_CENTER, 0, bar_y_start);
 
-    bar_happy = lv_bar_create(parent);
-    lv_obj_set_size(bar_happy, bar_w, bar_h);
-    lv_bar_set_range(bar_happy, 0, TAMA2_STAT_MAX);
-    lv_obj_set_style_bg_color(bar_happy, lv_color_hex(0x222222), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(bar_happy, lv_color_hex(0x00CC00), LV_PART_INDICATOR);
-    lv_obj_set_style_radius(bar_happy, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(bar_happy, 2, LV_PART_INDICATOR);
-    lv_obj_align(bar_happy, LV_ALIGN_CENTER, 0, bar_y_start + bar_h + 3);
+        bar_happy = lv_bar_create(parent);
+        lv_obj_set_size(bar_happy, bar_w, bar_h);
+        lv_bar_set_range(bar_happy, 0, TAMA2_STAT_MAX);
+        lv_obj_set_style_bg_color(bar_happy, lv_color_hex(0x222222), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(bar_happy, lv_color_hex(0x00CC00), LV_PART_INDICATOR);
+        lv_obj_set_style_radius(bar_happy, 2, LV_PART_MAIN);
+        lv_obj_set_style_radius(bar_happy, 2, LV_PART_INDICATOR);
+        lv_obj_align(bar_happy, LV_ALIGN_CENTER, 0, bar_y_start + bar_h + 3);
 
-    bar_energy = lv_bar_create(parent);
-    lv_obj_set_size(bar_energy, bar_w, bar_h);
-    lv_bar_set_range(bar_energy, 0, TAMA2_STAT_MAX);
-    lv_obj_set_style_bg_color(bar_energy, lv_color_hex(0x222222), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(bar_energy, lv_color_hex(0x0088FF), LV_PART_INDICATOR);
-    lv_obj_set_style_radius(bar_energy, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(bar_energy, 2, LV_PART_INDICATOR);
-    lv_obj_align(bar_energy, LV_ALIGN_CENTER, 0, bar_y_start + (bar_h + 3) * 2);
+        bar_energy = lv_bar_create(parent);
+        lv_obj_set_size(bar_energy, bar_w, bar_h);
+        lv_bar_set_range(bar_energy, 0, TAMA2_STAT_MAX);
+        lv_obj_set_style_bg_color(bar_energy, lv_color_hex(0x222222), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(bar_energy, lv_color_hex(0x0088FF), LV_PART_INDICATOR);
+        lv_obj_set_style_radius(bar_energy, 2, LV_PART_MAIN);
+        lv_obj_set_style_radius(bar_energy, 2, LV_PART_INDICATOR);
+        lv_obj_align(bar_energy, LV_ALIGN_CENTER, 0, bar_y_start + (bar_h + 3) * 2);
 
-    /* Level/critter name label — below bars */
-    label_level = lv_label_create(parent);
-    lv_obj_set_style_text_font(label_level, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(label_level, lv_color_hex(0xCCCCCC), 0);
-    lv_obj_set_style_text_align(label_level, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(label_level, "Lv1 egg");
-    lv_obj_align(label_level, LV_ALIGN_CENTER, 0, bar_y_start + (bar_h + 3) * 3);
+        label_level = lv_label_create(parent);
+        lv_obj_set_style_text_font(label_level, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(label_level, lv_color_hex(0xCCCCCC), 0);
+        lv_obj_set_style_text_align(label_level, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_text(label_level, "Lv1 egg");
+        lv_obj_align(label_level, LV_ALIGN_CENTER, 0, bar_y_start + (bar_h + 3) * 3);
+    } else {
+        /* OLED 128x64: level + critter name in middle-left zone */
+        label_level = lv_label_create(parent);
+        lv_obj_set_style_text_font(label_level, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(label_level, lv_color_hex(0xFFFFFF), 0);
+        lv_label_set_text(label_level, "Lv1 egg");
+        lv_obj_set_pos(label_level, 2, 28);
+    }
 
     created = true;
     ESP_LOGI(TAG, "Tama render created (scale=%d)", scale);
@@ -181,8 +191,9 @@ void tama_render_update(tama2_state_t state, const tama2_stats_t *stats, uint8_t
         default:               fg = lv_color_hex(0xFFFFFF); break;
         }
     } else {
-        bg = lv_color_hex(0x000000); /* OLED mono */
-        fg = lv_color_hex(0xFFFFFF);
+        /* OLED mono: invert — canvas white=on becomes black on screen */
+        bg = lv_color_hex(0xFFFFFF);
+        fg = lv_color_hex(0x000000);
     }
 
     draw_sprite(frame, fg, bg);
@@ -192,7 +203,7 @@ void tama_render_update(tama2_state_t state, const tama2_stats_t *stats, uint8_t
         if (scr_w >= 240)
             lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -20 + bounce_offset);
         else
-            lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -10 + bounce_offset);
+            lv_obj_set_pos(canvas, 96, 16 + bounce_offset);
         lv_obj_invalidate(canvas);
     }
 
