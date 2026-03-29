@@ -7,7 +7,6 @@
  */
 
 #include "round_ui.h"
-#include "tamagotchi.h"
 #include "tama_engine.h"
 #include "tama_render.h"
 #include "i2c_oled_display.h"

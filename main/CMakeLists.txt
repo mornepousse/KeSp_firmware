@@ -4,7 +4,6 @@ if(DISPLAY_BACKEND STREQUAL "round")
         "display/round/spi_round_display.c"
         "display/round/round_ui.c"
         "display/round/round_backend.c"
-        "display/round/tamagotchi.c"
     )
 else()
     set(DISPLAY_BACKEND_SRCS

@@ -127,11 +127,11 @@ void tama_render_create(lv_obj_t *parent, uint16_t screen_w, uint16_t screen_h)
         lv_label_set_text(label_level, "Lv1 egg");
         lv_obj_align(label_level, LV_ALIGN_CENTER, 0, bar_y_start + (bar_h + 3) * 3);
     } else {
-        /* OLED 128x64: level left of tama sprite */
+        /* OLED 128x64: level below version, left of tama */
         label_level = lv_label_create(parent);
         lv_obj_set_style_text_font(label_level, &lv_font_montserrat_14, 0);
         lv_label_set_text(label_level, "Lv1");
-        lv_obj_set_pos(label_level, 0, 34);
+        lv_obj_set_pos(label_level, 65, 34);
     }
 
     created = true;

@@ -19,6 +19,7 @@
 #include "display_backend.h"
 #include "cpu_time.h"
 #include "led_strip_anim.h"
+#include "tama_engine.h"
 
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for isolation testing */
 #ifndef SKIP_STATUS_DISPLAY
@@ -82,8 +83,23 @@ static void status_display_task(void *arg) {
 
     status_display_update();
     
-    /* Periodically check if key stats need saving */
+    /* Periodically save stats */
     key_stats_check_save();
+
+    /* Save tama every 60s if changed */
+    {
+      static uint32_t last_tama_save = 0;
+      static uint32_t last_tama_keys = 0;
+      const tama2_stats_t *ts = tama_engine_get_stats();
+      if (ts && ts->total_keys != last_tama_keys) {
+        uint32_t now = esp_timer_get_time() / 1000;
+        if (now - last_tama_save > 60000) {
+          tama_engine_save();
+          last_tama_save = now;
+          last_tama_keys = ts->total_keys;
+        }
+      }
+    }
     
     vTaskDelay(pdMS_TO_TICKS(100));  // 100ms polling — fast enough for UI, no keyboard lag
   }
