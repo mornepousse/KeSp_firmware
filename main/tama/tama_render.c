@@ -79,16 +79,16 @@ void tama_render_create(lv_obj_t *parent, uint16_t screen_w, uint16_t screen_h)
     canvas = lv_canvas_create(parent);
     lv_canvas_set_buffer(canvas, canvas_buf, TAMA_SPRITE_W, TAMA_SPRITE_H, LV_IMG_CF_TRUE_COLOR);
     if (screen_w >= 240) {
-        lv_img_set_zoom(canvas, 640); /* 2.5x zoom (256=1x) */
-        lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -15);
+        lv_img_set_zoom(canvas, 512); /* 2x zoom (256=1x) → 64x64 */
+        lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -20);
     } else {
         lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -10);
     }
 
     /* Stat bars — below sprite */
-    int bar_w = (screen_w >= 240) ? 80 : 40;
-    int bar_h = (screen_w >= 240) ? 6 : 3;
-    int bar_y_start = (screen_w >= 240) ? 22 : 10;
+    int bar_w = (screen_w >= 240) ? 70 : 40;
+    int bar_h = (screen_w >= 240) ? 5 : 3;
+    int bar_y_start = (screen_w >= 240) ? 20 : 10;
 
     bar_hunger = lv_bar_create(parent);
     lv_obj_set_size(bar_hunger, bar_w, bar_h);
@@ -190,7 +190,7 @@ void tama_render_update(tama2_state_t state, const tama2_stats_t *stats, uint8_t
     /* Apply breathing bounce to canvas position */
     if (canvas) {
         if (scr_w >= 240)
-            lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -15 + bounce_offset);
+            lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -20 + bounce_offset);
         else
             lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -10 + bounce_offset);
         lv_obj_invalidate(canvas);
