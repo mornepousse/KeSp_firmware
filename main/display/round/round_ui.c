@@ -440,9 +440,9 @@ void round_ui_sleep(void)
         status_icon = NULL;
         conn_icon = NULL;
         mouse_indicator = NULL;
-
         kpm_label = NULL;
-        
+        tama_render_destroy();
+
         ui_sleeping = true;
         ui_initialized = false;
         last_bt_state = -1;
