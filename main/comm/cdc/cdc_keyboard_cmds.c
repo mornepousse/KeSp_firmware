@@ -13,6 +13,7 @@
 #include "combo.h"
 #include "leader.h"
 #include "tama_engine.h"
+#include "key_features.h"
 #include "status_display.h"
 #include "version.h"
 
@@ -944,11 +945,35 @@ static void cmd_tama_action(const char *arg)
 	}
 }
 
+/* WPM? — get current words per minute */
+static void cmd_wpm_query(const char *arg)
+{
+	(void)arg;
+	char buf[32];
+	snprintf(buf, sizeof(buf), "WPM: %u", wpm_get());
+	cdc_send_line(buf);
+}
+
+/* TRILAYER layer1,layer2,result — configure tri-layer */
+static void cmd_trilayer(const char *arg)
+{
+	if (!arg) { cdc_send_line("ERR TRILAYER: layer1,layer2,result"); return; }
+	int l1, l2, res;
+	if (sscanf(arg, "%d,%d,%d", &l1, &l2, &res) != 3) {
+		cdc_send_line("ERR TRILAYER: format layer1,layer2,result");
+		return;
+	}
+	tri_layer_set((uint8_t)l1, (uint8_t)l2, (uint8_t)res);
+	char buf[48];
+	snprintf(buf, sizeof(buf), "TRILAYER: L%d+L%d=L%d", l1, l2, res);
+	cdc_send_line(buf);
+}
+
 /* FEATURES? — list supported advanced features */
 static void cmd_features(const char *arg)
 {
 	(void)arg;
-	cdc_send_line("MT,LT,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE,COMBO,LEADER");
+	cdc_send_line("MT,LT,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE,COMBO,LEADER,GESC,LAYER_LOCK,WPM,TRI_LAYER");
 }
 
 /* ── Command table ───────────────────────────────────────────────── */
@@ -984,6 +1009,9 @@ static const cdc_cmd_entry_t keyboard_cmd_table[] = {
 	/* Leader */
 	{ "LEADERSET",      9,  true,  cmd_leaderset },
 	{ "LEADER?",        7,  false, cmd_leaderlist },
+	/* WPM / Tri-Layer */
+	{ "WPM?",           4,  false, cmd_wpm_query },
+	{ "TRILAYER ",      9,  true,  cmd_trilayer },
 	/* Tama */
 	{ "TAMA?",          5,  false, cmd_tama_query },
 	{ "TAMA ",          5,  true,  cmd_tama_action },

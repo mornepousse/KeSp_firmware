@@ -151,10 +151,20 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
         tap_dance_on_press(K_TD_INDEX(kc), row, col);
         return 0;
     }
-    if (K_IS_OSL(kc)) { osl_arm(K_OSL_LAYER(kc)); return 0; }
+    if (K_IS_OSL(kc))      { osl_arm(K_OSL_LAYER(kc)); return 0; }
     if (kc == K_CAPS_WORD) { caps_word_toggle(); return 0; }
     if (kc == K_REPEAT)    { return repeat_key_get(); }
     if (kc == K_LEADER)    { leader_start(); return 0; }
+    if (kc == K_GESC) {
+        /* Check if any Shift/GUI is in current keycodes OR tap_hold mods */
+        uint8_t mods = tap_hold_get_active_mods();
+        for (uint8_t i = 0; i < 6; i++) {
+            if (keycodes[i] >= 0xE0 && keycodes[i] <= 0xE7)
+                mods |= (1 << (keycodes[i] - 0xE0));
+        }
+        return grave_esc_resolve(mods);
+    }
+    if (kc == K_LAYER_LOCK){ layer_lock_toggle(); return 0; }
     if (kc == K_TAMA_FEED)     { tama_engine_action(TAMA2_ACTION_FEED); return 0; }
     if (kc == K_TAMA_PLAY)     { tama_engine_action(TAMA2_ACTION_PLAY); return 0; }
     if (kc == K_TAMA_SLEEP)    { tama_engine_action(TAMA2_ACTION_SLEEP); return 0; }
@@ -270,9 +280,11 @@ void build_keycode_report(void)
         }
     }
 
-    /* Step 4: interrupt pending tap/holds if a normal key was pressed */
-    if (has_normal_press)
+    /* Step 4: interrupt pending tap/holds + track WPM */
+    if (has_normal_press) {
         tap_hold_interrupt();
+        wpm_record_keypress();
+    }
 
     /* Step 5: apply modifiers (tap/hold + one-shot) */
     uint8_t extra_mods = th_mods | osm_consume();

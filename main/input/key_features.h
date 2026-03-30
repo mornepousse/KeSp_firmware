@@ -46,3 +46,43 @@ void repeat_key_record(uint8_t keycode);
 
 /* Get the keycode to repeat (0 if nothing recorded) */
 uint8_t repeat_key_get(void);
+
+/* ── Grave Escape ───────────────────────────────────────────────── */
+
+/* Process grave escape: returns HID keycode based on active modifiers.
+   If Shift or GUI held → grave (0x35), otherwise → ESC (0x29). */
+uint8_t grave_esc_resolve(uint8_t active_mods);
+
+/* ── Layer Lock ─────────────────────────────────────────────────── */
+
+/* Toggle lock on the current momentary layer.
+   If a MO layer is active, lock it (stays when MO key released).
+   If already locked, unlock (return to base layer). */
+void layer_lock_toggle(void);
+
+/* Check if a layer is currently locked */
+bool layer_lock_is_locked(void);
+
+/* Get locked layer (-1 if none) */
+int8_t layer_lock_get(void);
+
+/* ── WPM Counter ────────────────────────────────────────────────── */
+
+/* Record a keypress timestamp for WPM calculation */
+void wpm_record_keypress(void);
+
+/* Get current WPM (rolling average) */
+uint16_t wpm_get(void);
+
+/* Tick WPM sampling (call every ~1 second) */
+void wpm_tick(void);
+
+/* ── Tri-Layer ──────────────────────────────────────────────────── */
+
+/* Configure tri-layer: when layer1 AND layer2 are both active, activate result_layer.
+   Set all to 0 to disable. */
+void tri_layer_set(uint8_t layer1, uint8_t layer2, uint8_t result_layer);
+
+/* Check tri-layer condition and return result layer, or -1 if not triggered.
+   Call after layer changes. */
+int8_t tri_layer_check(uint8_t active_layer, uint8_t last_layer);

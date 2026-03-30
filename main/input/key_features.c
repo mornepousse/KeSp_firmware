@@ -81,3 +81,93 @@ uint8_t repeat_key_get(void)
 {
     return last_keycode;
 }
+
+/* ── Grave Escape ───────────────────────────────────────────────── */
+
+uint8_t grave_esc_resolve(uint8_t active_mods)
+{
+    /* If Shift or GUI is held, send grave (`) instead of ESC */
+    if (active_mods & (MOD_LSFT | MOD_RSFT | MOD_LGUI | MOD_RGUI))
+        return 0x35; /* HID_KEY_GRAVE */
+    return 0x29; /* HID_KEY_ESCAPE */
+}
+
+/* ── Layer Lock ─────────────────────────────────────────────────── */
+
+static int8_t locked_layer = -1;
+
+void layer_lock_toggle(void)
+{
+    extern uint8_t current_layout;
+    extern uint8_t last_layer;
+    extern void layer_changed(void);
+
+    if (locked_layer >= 0) {
+        /* Unlock: return to base layer */
+        locked_layer = -1;
+        current_layout = 0;
+        last_layer = 0;
+        layer_changed();
+    } else if (current_layout != 0) {
+        /* Lock: keep current MO layer active */
+        locked_layer = (int8_t)current_layout;
+        last_layer = current_layout;
+        layer_changed();
+    }
+}
+
+bool layer_lock_is_locked(void)  { return locked_layer >= 0; }
+int8_t layer_lock_get(void)      { return locked_layer; }
+
+/* ── WPM Counter ────────────────────────────────────────────────── */
+
+#define WPM_WINDOW_SIZE 10   /* samples in rolling window */
+#define WPM_SAMPLE_MS   1000 /* 1 second per sample */
+#define WPM_CHARS_PER_WORD 5
+
+static uint16_t wpm_counts[WPM_WINDOW_SIZE] = {0};
+static uint8_t wpm_index = 0;
+static uint16_t wpm_current_count = 0;
+
+void wpm_record_keypress(void)
+{
+    wpm_current_count++;
+}
+
+void wpm_tick(void)
+{
+    /* Called every ~1 second — store current count and advance window */
+    wpm_counts[wpm_index] = wpm_current_count;
+    wpm_index = (wpm_index + 1) % WPM_WINDOW_SIZE;
+    wpm_current_count = 0;
+}
+
+uint16_t wpm_get(void)
+{
+    uint32_t total = 0;
+    for (int i = 0; i < WPM_WINDOW_SIZE; i++)
+        total += wpm_counts[i];
+    /* total chars in WPM_WINDOW_SIZE seconds → WPM */
+    return (uint16_t)(total * 60 / (WPM_WINDOW_SIZE * WPM_CHARS_PER_WORD));
+}
+
+/* ── Tri-Layer ──────────────────────────────────────────────────── */
+
+static uint8_t tri_l1 = 0, tri_l2 = 0, tri_result = 0;
+
+void tri_layer_set(uint8_t layer1, uint8_t layer2, uint8_t result_layer)
+{
+    tri_l1 = layer1;
+    tri_l2 = layer2;
+    tri_result = result_layer;
+}
+
+int8_t tri_layer_check(uint8_t active_layer, uint8_t last_layer)
+{
+    if (tri_result == 0) return -1; /* disabled */
+    /* If both trigger layers are "involved" (one active, one as last), activate result */
+    if ((active_layer == tri_l1 && last_layer == tri_l2) ||
+        (active_layer == tri_l2 && last_layer == tri_l1))
+        return (int8_t)tri_result;
+    return -1;
+}

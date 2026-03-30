@@ -20,6 +20,7 @@
 #include "cpu_time.h"
 #include "led_strip_anim.h"
 #include "tama_engine.h"
+#include "key_features.h"
 
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for isolation testing */
 #ifndef SKIP_STATUS_DISPLAY
@@ -83,8 +84,16 @@ static void status_display_task(void *arg) {
 
     status_display_update();
     
-    /* Periodically save stats */
+    /* Periodically save stats + tick WPM every second */
     key_stats_check_save();
+    {
+      static uint32_t last_wpm_tick = 0;
+      uint32_t now_wpm = esp_timer_get_time() / 1000;
+      if (now_wpm - last_wpm_tick > 1000) {
+        wpm_tick();
+        last_wpm_tick = now_wpm;
+      }
+    }
 
     /* Save tama every 60s if changed */
     {

@@ -395,6 +395,15 @@ static const uint16_t TO_L9 = 0x1400;
 #define K_TAMA_SLEEP                 0x3700
 #define K_TAMA_MEDICINE              0x3800
 
+/* Grave Escape: tap = ESC, Shift/GUI + tap = ` (grave) */
+#define K_GESC                       0x3900
+
+/* Layer Lock: lock current momentary layer */
+#define K_LAYER_LOCK                 0x3A00
+
+/* WPM query (internal, displayed on screen) */
+#define K_WPM                        0x3B00
+
 /* Layer-Tap: hold = activate layer, tap = send keycode */
 #define K_LT_BASE                    0x4000
 #define K_LT(layer, kc)             (K_LT_BASE | ((layer) << 8) | (kc))
