@@ -23,11 +23,11 @@ uint8_t keycodes[MAX_REPORT_KEYS];
 uint8_t current_press_row[MAX_REPORT_KEYS];
 uint8_t current_press_col[MAX_REPORT_KEYS];
 uint8_t current_press_stat[MAX_REPORT_KEYS];
-uint8_t stat_matrix_changed = 0;
+volatile uint8_t stat_matrix_changed = 0;
 uint8_t last_layer = 0;
 uint8_t current_layout = 0;
-uint8_t is_layer_changed = 0;
-uint32_t last_activity_time_ms = 0;
+volatile uint8_t is_layer_changed = 0;
+volatile uint32_t last_activity_time_ms = 0;
 
 static keyboard_btn_handle_t s_kbd = NULL;
 static uint8_t prev_matrix_state[MATRIX_ROWS][MATRIX_COLS];  /* For KPM: track new keypresses */

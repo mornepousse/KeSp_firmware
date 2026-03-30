@@ -33,6 +33,7 @@ static uint32_t now_ms(void)
 
 static void resolve_dance(uint8_t action_index)
 {
+    if (active.index >= TAP_DANCE_MAX_SLOTS) return;
     if (action_index < 4 && configs[active.index].actions[action_index] != 0) {
         resolved_keycode = configs[active.index].actions[action_index];
         resolved_flag = true;

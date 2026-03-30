@@ -352,16 +352,8 @@ static const uint16_t TO_L9 = 0x1400;
 #define EXTRA_MACRO_19                0x0100
 #define EXTRA_MACRO_20                0x0100
 
-// Bluetooth specific keycodes
-
-
-// #define BT_PAIRING_MODE               0x2900
-// #define BT_DISCONNECT                 0x2A00
-// #define BT_NEXT_DEVICE                0x2B00
-// #define BT_PREV_DEVICE                0x2C00
-// #define BT_RECONNECT_LAST             0x2D00
-
-#define BT_SWITCH_DEVICE              0x2E00 // switch wire to bluetooth or bluetooth to wire
+// Bluetooth keycodes
+#define BT_SWITCH_DEVICE              0x2E00
 #define BT_TOGGLE                     0x2F00
 
 /* ── Advanced keycodes (v3.5+) ───────────────────────────────────── */

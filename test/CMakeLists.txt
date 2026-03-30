@@ -19,6 +19,10 @@ add_executable(test_runner
     test_key_features.c
     test_tap_hold.c
     test_macro_seq.c
+    test_tap_dance.c
+    test_combo.c
+    test_leader.c
+    test_tama_engine.c
     test_main.c
 )
 

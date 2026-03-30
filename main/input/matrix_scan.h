@@ -22,11 +22,11 @@ extern uint8_t keycodes[6];
 extern uint8_t current_press_row[6];
 extern uint8_t current_press_col[6];
 extern uint8_t current_press_stat[6];
-extern uint8_t stat_matrix_changed;
+extern volatile uint8_t stat_matrix_changed; /* written in ISR, read in task */
 extern uint8_t last_layer;
 /* current_layout: declared in keyboard_config.h */
-extern uint8_t is_layer_changed;
-extern uint32_t last_activity_time_ms;
+extern volatile uint8_t is_layer_changed;    /* written in ISR, read in display task */
+extern volatile uint32_t last_activity_time_ms;
 
 
 /*

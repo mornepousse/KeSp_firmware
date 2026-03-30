@@ -174,8 +174,10 @@ void send_mouse_report(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
         .payload.mouse = { buttons, x, y, wheel }
     };
     if (hid_queue != NULL) {
-        if (xQueueSendToFront(hid_queue, &msg, pdMS_TO_TICKS(5)) != pdTRUE)
-            xQueueSendToFront(hid_queue, &msg, pdMS_TO_TICKS(50));
+        if (xQueueSendToFront(hid_queue, &msg, pdMS_TO_TICKS(5)) != pdTRUE) {
+            if (xQueueSendToFront(hid_queue, &msg, pdMS_TO_TICKS(50)) != pdTRUE)
+                ESP_LOGW(TAG, "Mouse report dropped (queue full)");
+        }
     } else {
         hid_send_mouse(buttons, x, y, wheel);
     }
@@ -193,8 +195,10 @@ void send_hid_kb_mouse(uint8_t modifier, const uint8_t kc[6],
     msg.payload.kb_mouse.wheel = wheel;
 
     if (hid_queue != NULL) {
-        if (xQueueSendToFront(hid_queue, &msg, pdMS_TO_TICKS(5)) != pdTRUE)
-            xQueueSendToFront(hid_queue, &msg, pdMS_TO_TICKS(50));
+        if (xQueueSendToFront(hid_queue, &msg, pdMS_TO_TICKS(5)) != pdTRUE) {
+            if (xQueueSendToFront(hid_queue, &msg, pdMS_TO_TICKS(50)) != pdTRUE)
+                ESP_LOGW(TAG, "KB+Mouse report dropped (queue full)");
+        }
     } else {
         hid_send_kb_mouse(modifier, msg.payload.kb_mouse.keycodes,
                           buttons, x, y, wheel);
