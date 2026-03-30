@@ -140,6 +140,7 @@ void app_main(void) {
   tap_dance_load();
   combo_load();
   leader_load();
+  key_override_load();
   tama_engine_init();
 
   ESP_LOGI(TAG, "display init");

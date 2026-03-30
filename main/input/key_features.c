@@ -1,6 +1,9 @@
 /* Advanced key features implementation */
 #include "key_features.h"
 #include "key_definitions.h"
+#include "keyboard_config.h"
+#include "nvs_utils.h"
+#include "esp_log.h"
 #include <string.h>
 
 /* ── One-Shot Modifier ───────────────────────────────────────────── */
@@ -149,6 +152,128 @@ uint16_t wpm_get(void)
         total += wpm_counts[i];
     /* total chars in WPM_WINDOW_SIZE seconds → WPM */
     return (uint16_t)(total * 60 / (WPM_WINDOW_SIZE * WPM_CHARS_PER_WORD));
+}
+
+/* ── Auto Shift ─────────────────────────────────────────────────── */
+
+#ifndef AUTO_SHIFT_TIMEOUT_MS
+#define AUTO_SHIFT_TIMEOUT_MS 150
+#endif
+
+static bool as_enabled = false;
+static bool as_pending = false;
+static bool as_resolved = false;
+static uint8_t as_keycode = 0;
+static uint8_t as_row = 0xFF, as_col = 0xFF;
+static uint32_t as_press_time = 0;
+static uint8_t as_result_key = 0;
+static uint8_t as_result_mod = 0;
+
+/* Only auto-shift alpha keys (A-Z = 0x04-0x1D) by default */
+static bool is_auto_shiftable(uint8_t kc) {
+    return (kc >= 0x04 && kc <= 0x1D); /* A-Z */
+}
+
+void auto_shift_toggle(void) { as_enabled = !as_enabled; }
+bool auto_shift_is_enabled(void) { return as_enabled; }
+
+bool auto_shift_on_press(uint8_t hid_keycode, uint8_t row, uint8_t col)
+{
+    if (!as_enabled || !is_auto_shiftable(hid_keycode)) return false;
+    if (as_pending) return false; /* already tracking one */
+
+    as_pending = true;
+    as_resolved = false;
+    as_keycode = hid_keycode;
+    as_row = row;
+    as_col = col;
+    as_press_time = 0; /* will be set by tick */
+    as_result_key = 0;
+    as_result_mod = 0;
+    return true; /* absorbed */
+}
+
+void auto_shift_on_release(uint8_t row, uint8_t col)
+{
+    if (!as_pending || row != as_row || col != as_col) return;
+    /* Released before timeout → normal (unshifted) tap */
+    as_result_key = as_keycode;
+    as_result_mod = 0;
+    as_resolved = true;
+    as_pending = false;
+}
+
+void auto_shift_tick(void)
+{
+    if (!as_pending) return;
+    as_press_time++;
+    /* Each tick ~10ms, timeout = AUTO_SHIFT_TIMEOUT_MS / 10 */
+    if (as_press_time >= (AUTO_SHIFT_TIMEOUT_MS / 10)) {
+        /* Held past timeout → shifted */
+        as_result_key = as_keycode;
+        as_result_mod = MOD_LSFT;
+        as_resolved = true;
+        as_pending = false;
+    }
+}
+
+uint8_t auto_shift_consume(uint8_t *out_mod)
+{
+    if (!as_resolved) return 0;
+    uint8_t kc = as_result_key;
+    if (out_mod) *out_mod = as_result_mod;
+    as_resolved = false;
+    as_result_key = 0;
+    as_result_mod = 0;
+    return kc;
+}
+
+bool auto_shift_just_resolved(void) { return as_resolved; }
+
+/* ── Key Override / Mod-Morph ───────────────────────────────────── */
+
+static key_override_t overrides[KEY_OVERRIDE_MAX_SLOTS];
+
+void key_override_init(void) {
+    memset(overrides, 0, sizeof(overrides));
+}
+
+void key_override_set(uint8_t index, const key_override_t *cfg) {
+    if (index < KEY_OVERRIDE_MAX_SLOTS)
+        overrides[index] = *cfg;
+}
+
+const key_override_t *key_override_get(uint8_t index) {
+    if (index >= KEY_OVERRIDE_MAX_SLOTS) return NULL;
+    return &overrides[index];
+}
+
+uint8_t key_override_check(uint8_t keycode, uint8_t active_mods, uint8_t *out_mod)
+{
+    for (int i = 0; i < KEY_OVERRIDE_MAX_SLOTS; i++) {
+        if (overrides[i].trigger_key == 0) continue;
+        if (overrides[i].trigger_key == keycode &&
+            (active_mods & overrides[i].trigger_mod) == overrides[i].trigger_mod) {
+            if (out_mod) *out_mod = overrides[i].result_mod;
+            return overrides[i].result_key;
+        }
+    }
+    return 0;
+}
+
+void key_override_save(void) {
+    uint8_t count = 0;
+    for (int i = 0; i < KEY_OVERRIDE_MAX_SLOTS; i++)
+        if (overrides[i].trigger_key != 0) count = i + 1;
+    esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "ko_cfg", overrides,
+                                              count * sizeof(key_override_t), "ko_cnt", count);
+    if (err != ESP_OK) ESP_LOGE("KEY_OVERRIDE", "Save failed: %s", esp_err_to_name(err));
+}
+
+void key_override_load(void) {
+    uint32_t count = 0;
+    nvs_load_blob_with_total(STORAGE_NAMESPACE, "ko_cfg", overrides,
+                              sizeof(overrides), "ko_cnt", &count);
 }
 
 /* ── Tri-Layer ──────────────────────────────────────────────────── */

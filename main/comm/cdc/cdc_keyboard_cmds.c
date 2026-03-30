@@ -945,6 +945,53 @@ static void cmd_tama_action(const char *arg)
 	}
 }
 
+/* AUTOSHIFT — toggle auto shift */
+static void cmd_autoshift(const char *arg)
+{
+	(void)arg;
+	auto_shift_toggle();
+	cdc_send_line(auto_shift_is_enabled() ? "AUTOSHIFT:ON" : "AUTOSHIFT:OFF");
+}
+
+/* KOSET index;trigger_key,trigger_mod,result_key,result_mod (all hex) */
+static void cmd_koset(const char *arg)
+{
+	if (!arg) { cdc_send_line("ERR KOSET: missing args"); return; }
+	char buf[CDC_CMD_MAX_LEN];
+	strncpy(buf, arg, sizeof(buf)); buf[sizeof(buf)-1] = '\0';
+	char *sep = strchr(buf, ';');
+	if (!sep) { cdc_send_line("ERR KOSET: format index;tk,tm,rk,rm"); return; }
+	*sep = '\0';
+	int idx = atoi(buf);
+	if (idx < 0 || idx >= KEY_OVERRIDE_MAX_SLOTS) { cdc_send_line("ERR KOSET: invalid index"); return; }
+	unsigned int tk, tm, rk, rm;
+	if (sscanf(sep + 1, "%x,%x,%x,%x", &tk, &tm, &rk, &rm) != 4) {
+		cdc_send_line("ERR KOSET: format trigger_key,trigger_mod,result_key,result_mod (hex)");
+		return;
+	}
+	key_override_t ko = { .trigger_key = tk, .trigger_mod = tm, .result_key = rk, .result_mod = rm };
+	key_override_set((uint8_t)idx, &ko);
+	key_override_save();
+	char resp[48];
+	snprintf(resp, sizeof(resp), "KOSET %d:OK", idx);
+	cdc_send_line(resp);
+}
+
+/* KO? — list key overrides */
+static void cmd_kolist(const char *arg)
+{
+	(void)arg;
+	char buf[64];
+	for (int i = 0; i < KEY_OVERRIDE_MAX_SLOTS; i++) {
+		const key_override_t *ko = key_override_get(i);
+		if (!ko || ko->trigger_key == 0) continue;
+		snprintf(buf, sizeof(buf), "KO%d: %02X+%02X->%02X+%02X",
+		         i, ko->trigger_key, ko->trigger_mod, ko->result_key, ko->result_mod);
+		cdc_send_line(buf);
+	}
+	cdc_send_line("OK");
+}
+
 /* WPM? — get current words per minute */
 static void cmd_wpm_query(const char *arg)
 {
@@ -1009,7 +1056,10 @@ static const cdc_cmd_entry_t keyboard_cmd_table[] = {
 	/* Leader */
 	{ "LEADERSET",      9,  true,  cmd_leaderset },
 	{ "LEADER?",        7,  false, cmd_leaderlist },
-	/* WPM / Tri-Layer */
+	/* Auto Shift / Key Override / WPM / Tri-Layer */
+	{ "AUTOSHIFT",     9,  false, cmd_autoshift },
+	{ "KOSET",          5,  true,  cmd_koset },
+	{ "KO?",            3,  false, cmd_kolist },
 	{ "WPM?",           4,  false, cmd_wpm_query },
 	{ "TRILAYER ",      9,  true,  cmd_trilayer },
 	/* Tama */

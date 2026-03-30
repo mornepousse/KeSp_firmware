@@ -155,6 +155,7 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
     if (kc == K_CAPS_WORD) { caps_word_toggle(); return 0; }
     if (kc == K_REPEAT)    { return repeat_key_get(); }
     if (kc == K_LEADER)    { leader_start(); return 0; }
+    if (kc == K_AUTO_SHIFT_TOGGLE) { auto_shift_toggle(); return 0; }
     if (kc == K_GESC) {
         /* Check if any Shift/GUI is in current keycodes OR tap_hold mods */
         uint8_t mods = tap_hold_get_active_mods();
@@ -198,6 +199,7 @@ static void detect_releases(void)
         if (!still_pressed) {
             tap_hold_on_release(prev_press_row[i], prev_press_col[i]);
             tap_dance_on_release(prev_press_row[i], prev_press_col[i]);
+            auto_shift_on_release(prev_press_row[i], prev_press_col[i]);
         }
     }
 }
@@ -274,6 +276,21 @@ void build_keycode_report(void)
             if (kc > 0xFF) {
                 extra_keycodes[i] = kc;
             } else {
+                /* Key override: check if modifier+key should be replaced */
+                uint8_t override_mod = 0;
+                uint8_t override_kc = key_override_check(kc, th_mods, &override_mod);
+                if (override_kc != 0) {
+                    kc = override_kc;
+                    /* TODO: apply override_mod */
+                }
+
+                /* Auto shift: absorb alpha keys for delayed shift detection */
+                if (auto_shift_is_enabled() && is_new_press(row, col) &&
+                    auto_shift_on_press(kc, row, col)) {
+                    extra_keycodes[i] = kc;
+                    continue;
+                }
+
                 keycodes[i] = kc;
                 has_normal_press = true;
             }

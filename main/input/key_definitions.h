@@ -404,6 +404,15 @@ static const uint16_t TO_L9 = 0x1400;
 /* WPM query (internal, displayed on screen) */
 #define K_WPM                        0x3B00
 
+/* Auto Shift: hold key slightly longer = shifted version */
+#define K_AUTO_SHIFT_TOGGLE          0x3C00
+
+/* Key Override / Mod-Morph: modifier+key = different key */
+#define K_OVERRIDE_BASE              0x3D00
+#define K_OVERRIDE(index)            (K_OVERRIDE_BASE | (index))
+#define K_IS_OVERRIDE(kc)            (((kc) & 0xFF00) == K_OVERRIDE_BASE)
+#define K_OVERRIDE_INDEX(kc)         ((kc) & 0xFF)
+
 /* Layer-Tap: hold = activate layer, tap = send keycode */
 #define K_LT_BASE                    0x4000
 #define K_LT(layer, kc)             (K_LT_BASE | ((layer) << 8) | (kc))

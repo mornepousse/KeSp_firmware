@@ -9,6 +9,7 @@
 #include "tap_dance.h"
 #include "combo.h"
 #include "leader.h"
+#include "key_features.h"
 #include "keymap.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -50,11 +51,20 @@ void vTaskKeyboard(void *pvParameters)
         /* Tick timers — even without matrix change */
         tap_hold_tick();
         tap_dance_tick();
+        auto_shift_tick();
 
         /* Hold just activated → rebuild and send */
         if (tap_hold_hold_just_activated()) {
             build_keycode_report();
             send_hid_key();
+        }
+
+        /* Auto shift resolved → send tap with optional shift */
+        if (auto_shift_just_resolved()) {
+            uint8_t mod = 0;
+            uint8_t kc = auto_shift_consume(&mod);
+            if (kc != 0)
+                send_tap(kc, mod);
         }
 
         /* Tap dance resolved → send tap */
@@ -114,6 +124,7 @@ void keyboard_manager_init(void)
     tap_dance_init();
     combo_init();
     leader_init();
+    key_override_init();
     hid_report_init();
     keyboard_worker_init();
 }
