@@ -209,11 +209,17 @@ uint8_t keyboard_get_usb_bl_state(void) { return usb_bl_state; }
 
 void hid_report_init(void)
 {
-    if (!hid_queue)
+    if (!hid_queue) {
         hid_queue = xQueueCreate(32, sizeof(hid_msg_t));
-    if (!hid_report_mutex)
+        if (!hid_queue) ESP_LOGE(TAG, "Failed to create HID queue");
+    }
+    if (!hid_report_mutex) {
         hid_report_mutex = xSemaphoreCreateMutex();
-    if (!hid_sender_task_handle)
-        xTaskCreatePinnedToCore(hid_sender_task, "hid_sender", 4096, NULL, 4, &hid_sender_task_handle, 0);
+        if (!hid_report_mutex) ESP_LOGE(TAG, "Failed to create HID mutex");
+    }
+    if (!hid_sender_task_handle) {
+        BaseType_t ret = xTaskCreatePinnedToCore(hid_sender_task, "hid_sender", 4096, NULL, 4, &hid_sender_task_handle, 0);
+        if (ret != pdPASS) ESP_LOGE(TAG, "Failed to create HID sender task");
+    }
     ESP_LOGI(TAG, "HID report queue initialized");
 }

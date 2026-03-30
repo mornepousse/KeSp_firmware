@@ -175,8 +175,10 @@ void tama_engine_set_enabled(bool e) { enabled = e; }
 void tama_engine_save(void)
 {
     uint32_t ver = 1;
-    nvs_save_blob_with_total(STORAGE_NAMESPACE, "tama_stats", &stats,
-                              sizeof(stats), "tama_ver", ver);
+    esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "tama_stats", &stats,
+                                              sizeof(stats), "tama_ver", ver);
+    if (err != ESP_OK)
+        ESP_LOGE(TAG, "Failed to save tama stats: %s", esp_err_to_name(err));
 }
 
 void tama_engine_session_start(void)

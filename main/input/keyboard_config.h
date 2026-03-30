@@ -37,5 +37,3 @@ extern uint8_t current_layout;
 
 #define MAX_LAYOUT_NAME_LENGTH 15
 extern char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH];
-
-extern TaskHandle_t xKeyreportTask;

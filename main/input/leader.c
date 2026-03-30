@@ -139,9 +139,12 @@ void leader_save(void)
     uint8_t count = 0;
     for (int i = 0; i < LEADER_MAX_ENTRIES; i++)
         if (entries[i].result != 0) count = i + 1;
-    nvs_save_blob_with_total(STORAGE_NAMESPACE, "leader_cfg", entries,
+    esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "leader_cfg", entries,
                               count * sizeof(leader_entry_t), "leader_cnt", count);
-    ESP_LOGI(TAG, "Leader sequences saved (%d)", count);
+    if (err != ESP_OK)
+        ESP_LOGE(TAG, "Failed to save leader: %s", esp_err_to_name(err));
+    else
+        ESP_LOGI(TAG, "Leader sequences saved (%d)", count);
 }
 
 void leader_load(void)

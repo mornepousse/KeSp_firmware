@@ -161,9 +161,12 @@ void tap_dance_save(void)
             if (configs[i].actions[j] != 0) { count = i + 1; break; }
         }
     }
-    nvs_save_blob_with_total(STORAGE_NAMESPACE, "td_configs", configs,
-                              count * sizeof(tap_dance_config_t), "td_count", count);
-    ESP_LOGI(TAG, "Tap dance saved (%d slots)", count);
+    esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "td_configs", configs,
+                                              count * sizeof(tap_dance_config_t), "td_count", count);
+    if (err != ESP_OK)
+        ESP_LOGE(TAG, "Failed to save tap dance: %s", esp_err_to_name(err));
+    else
+        ESP_LOGI(TAG, "Tap dance saved (%d slots)", count);
 }
 
 void tap_dance_load(void)

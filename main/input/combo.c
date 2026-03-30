@@ -81,9 +81,12 @@ void combo_save(void)
     for (int i = 0; i < COMBO_MAX_SLOTS; i++) {
         if (configs[i].result != 0) count = i + 1;
     }
-    nvs_save_blob_with_total(STORAGE_NAMESPACE, "combo_cfg", configs,
-                              count * sizeof(combo_config_t), "combo_cnt", count);
-    ESP_LOGI(TAG, "Combos saved (%d slots)", count);
+    esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "combo_cfg", configs,
+                                              count * sizeof(combo_config_t), "combo_cnt", count);
+    if (err != ESP_OK)
+        ESP_LOGE(TAG, "Failed to save combos: %s", esp_err_to_name(err));
+    else
+        ESP_LOGI(TAG, "Combos saved (%d slots)", count);
 }
 
 void combo_load(void)
