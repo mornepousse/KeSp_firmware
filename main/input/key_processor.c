@@ -298,14 +298,18 @@ void build_keycode_report(void)
     {
         uint8_t tap_kc;
         while ((tap_kc = tap_hold_consume_tap()) != 0) {
+            bool injected = false;
             for (uint8_t i = 0; i < 6; i++) {
                 if (keycodes[i] == 0) {
                     keycodes[i] = tap_kc;
                     tap_injected_slots |= (1 << i);
                     has_normal_press = true;
+                    injected = true;
                     break;
                 }
             }
+            if (!injected)
+                ESP_LOGW(TAG, "Tap 0x%02X dropped (all slots full)", tap_kc);
         }
     }
 

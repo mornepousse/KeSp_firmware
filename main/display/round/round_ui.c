@@ -9,7 +9,7 @@
 #include "round_ui.h"
 #include "tama_engine.h"
 #include "tama_render.h"
-#include "i2c_oled_display.h"
+#include "status_display.h"
 #include "keyboard_config.h"
 #include "hid_bluetooth_manager.h"
 #include "keyboard_task.h"

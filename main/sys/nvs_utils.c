@@ -33,6 +33,16 @@ esp_err_t nvs_load_blob_with_total(const char *ns, const char *blob_key, void *b
     esp_err_t err = nvs_open(ns, NVS_READONLY, &h);
     if (err != ESP_OK) return err;
 
+    /* Check stored size first — reject if mismatched (struct layout changed) */
+    size_t stored_sz = 0;
+    esp_err_t sz_err = nvs_get_blob(h, blob_key, NULL, &stored_sz);
+    if (sz_err == ESP_OK && stored_sz != blob_size) {
+        ESP_LOGW(TAG_NVS, "%s size mismatch (stored=%u, expected=%u), using defaults",
+                 blob_key, (unsigned)stored_sz, (unsigned)blob_size);
+        nvs_close(h);
+        return ESP_ERR_NVS_INVALID_LENGTH;
+    }
+
     size_t sz = blob_size;
     err = nvs_get_blob(h, blob_key, blob, &sz);
     if (err == ESP_OK) {
