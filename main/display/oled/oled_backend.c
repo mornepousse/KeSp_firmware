@@ -25,6 +25,17 @@
 #define MOUSE_INDICATOR_MS      200
 #endif
 
+/* OLED layout constants (128x64 display) */
+#define OLED_ICON_PATH_X    0
+#define OLED_ICON_BT_X      18
+#define OLED_BT_SLOT_X      34
+#define OLED_MOUSE_X        50
+#define OLED_LAYER_X        0
+#define OLED_LAYER_Y        20
+#define OLED_LAYER_MAX_W    90   /* tama sprite starts at x=96 */
+#define OLED_VERSION_X      0
+#define OLED_VERSION_Y      50
+
 static int last_bt_state = -1;
 static int last_path_state = -1;
 static lv_obj_t *icon_bt = NULL;
@@ -36,7 +47,6 @@ static TickType_t last_mouse_activity = 0;
 static bool bt_blink_visible = true;
 static TickType_t bt_blink_last_tick = 0;
 static bool oled_initialized = false;
-static lv_obj_t *tama_label = NULL;
 static lv_obj_t *bt_slot_label = NULL;
 
 static void oled_init_icons(void)
@@ -49,31 +59,32 @@ static void oled_init_icons(void)
     if (!label_version) {
         label_version = lv_label_create(scr);
         lv_label_set_text(label_version, "v" FW_VERSION);
-        lv_obj_set_style_text_font(label_version, &lv_font_montserrat_14, 0);
-        lv_obj_set_pos(label_version, 0, 50);
+        lv_obj_set_style_text_font(label_version, UI_FONT, 0);
+        lv_obj_set_pos(label_version, OLED_VERSION_X, OLED_VERSION_Y);
     }
 
     icon_path = lv_img_create(scr);
-    lv_obj_set_pos(icon_path, 0, 0);
+    lv_obj_set_pos(icon_path, OLED_ICON_PATH_X, 0);
 
     icon_bt = lv_img_create(scr);
-    lv_obj_set_pos(icon_bt, 18, 0);
+    lv_obj_set_pos(icon_bt, OLED_ICON_BT_X, 0);
 
     bt_slot_label = lv_label_create(scr);
     lv_obj_set_style_text_font(bt_slot_label, UI_FONT, 0);
     lv_label_set_text(bt_slot_label, "");
-    lv_obj_set_pos(bt_slot_label, 34, 0);
+    lv_obj_set_pos(bt_slot_label, OLED_BT_SLOT_X, 0);
 
     label_layer_name = lv_label_create(scr);
     lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
     lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
-    lv_obj_set_pos(label_layer_name, 0, 20);
-    lv_obj_set_width(label_layer_name, 90);
+    lv_obj_set_pos(label_layer_name, OLED_LAYER_X, OLED_LAYER_Y);
+    lv_obj_set_width(label_layer_name, OLED_LAYER_MAX_W);
     lv_label_set_long_mode(label_layer_name, LV_LABEL_LONG_DOT);
+
     indicator_mouse = lv_label_create(scr);
     lv_label_set_text(indicator_mouse, "M");
     lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0);
-    lv_obj_set_pos(indicator_mouse, 50, 0);
+    lv_obj_set_pos(indicator_mouse, OLED_MOUSE_X, 0);
     lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
 }
 
