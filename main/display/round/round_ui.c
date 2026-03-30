@@ -56,6 +56,7 @@ static lv_obj_t *outer_arc = NULL;
 static lv_obj_t *layer_label = NULL;
 static lv_obj_t *status_icon = NULL;
 static lv_obj_t *conn_icon = NULL;
+static lv_obj_t *bt_slot_label = NULL;
 static lv_obj_t *mouse_indicator = NULL;
 /* Animation */
 static lv_anim_t arc_anim;
@@ -161,6 +162,13 @@ static void create_status_icons(lv_obj_t *parent)
     lv_label_set_text(status_icon, LV_SYMBOL_BLUETOOTH);
     lv_obj_align(status_icon, LV_ALIGN_TOP_MID, 25, 28);
     lv_obj_add_flag(status_icon, LV_OBJ_FLAG_HIDDEN);
+
+    /* BT slot number (shows "1" "2" "3" next to BT icon) */
+    bt_slot_label = lv_label_create(parent);
+    lv_obj_set_style_text_font(bt_slot_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(bt_slot_label, COLOR_SECONDARY, 0);
+    lv_label_set_text(bt_slot_label, "");
+    lv_obj_align(bt_slot_label, LV_ALIGN_TOP_MID, 42, 28);
 }
 
 /**
@@ -308,9 +316,19 @@ static void update_connection_status(bool force)
         }
     }
     
+    /* Update BT slot number */
+    if (bt_slot_label) {
+        if (bt_state > 0) {
+            lv_label_set_text_fmt(bt_slot_label, "%d", bt_get_active_slot() + 1);
+            lv_obj_clear_flag(bt_slot_label, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(bt_slot_label, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     last_bt_state = bt_state;
     last_path_state = path_state;
-    
+
     lvgl_port_unlock();
 }
 
@@ -438,6 +456,7 @@ void round_ui_sleep(void)
         layer_label = NULL;
         status_icon = NULL;
         conn_icon = NULL;
+        bt_slot_label = NULL;
         mouse_indicator = NULL;
         kpm_label = NULL;
         tama_render_destroy();
@@ -477,6 +496,7 @@ void round_ui_refresh_all(void)
         layer_label = NULL;
         status_icon = NULL;
         conn_icon = NULL;
+        bt_slot_label = NULL;
         mouse_indicator = NULL;
         kpm_label = NULL;
         tama_render_destroy(); /* reset tama render state before rebuild */

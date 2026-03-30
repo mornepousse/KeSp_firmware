@@ -41,6 +41,7 @@ static bool bt_blink_visible = true;
 static TickType_t bt_blink_last_tick = 0;
 static bool oled_initialized = false;
 static lv_obj_t *tama_label = NULL;
+static lv_obj_t *bt_slot_label = NULL;
 
 static void oled_init_icons(void)
 {
@@ -62,6 +63,12 @@ static void oled_init_icons(void)
 
     icon_bt = lv_img_create(scr);
     lv_obj_set_pos(icon_bt, 18, 0);
+
+    bt_slot_label = lv_label_create(scr);
+    lv_obj_set_style_text_font(bt_slot_label, UI_FONT, 0);
+    lv_label_set_text(bt_slot_label, "");
+    lv_obj_set_pos(bt_slot_label, 34, 0);
+
     label_layer_name = lv_label_create(scr);
     lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
     lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
@@ -141,6 +148,14 @@ static void oled_update_connection_icons(bool force)
     if (path_state == 0) lv_img_set_src(icon_path, &flash);
     else                  lv_img_set_src(icon_path, &bluetooth_16px);
 
+    /* BT slot number */
+    if (bt_slot_label) {
+        if (bt_state > 0)
+            lv_label_set_text_fmt(bt_slot_label, "%d", bt_get_active_slot() + 1);
+        else
+            lv_label_set_text(bt_slot_label, "");
+    }
+
     last_bt_state = bt_state;
     last_path_state = path_state;
     lvgl_port_unlock();
@@ -216,7 +231,7 @@ static void oled_sleep(void)
     if (lvgl_port_lock(100)) {
         display_clear_screen();
         icon_bt = NULL; icon_path = NULL; indicator_mouse = NULL;
-        label_version = NULL; label_layer_name = NULL;
+        label_version = NULL; label_layer_name = NULL; bt_slot_label = NULL;
         last_bt_state = -1; last_path_state = -1;
         tama_render_destroy();
         oled_initialized = false;
