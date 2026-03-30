@@ -11,13 +11,22 @@ All hex values in CDC commands use **hex format** (e.g. `29` = 0x29 = ESC).
 | `0x0100-0x0A00` | Momentary Layer (MO) | `0x0100 + layer * 0x100` | `MO_L2` = `0x0300` |
 | `0x0B00-0x1400` | Toggle Layer (TO) | `0x0B00 + layer * 0x100` | `TO_L1` = `0x0C00` |
 | `0x1500-0x2800` | Macro | `0x1500 + index * 0x100` | `MACRO_3` = `0x1700` |
-| `0x2E00` | BT Switch | USB / BLE toggle | |
-| `0x2F00` | BT Toggle | Enable/disable BLE | |
+| `0x2900` | BT Next | Switch to next BT slot | `K_BT_NEXT` |
+| `0x2A00` | BT Previous | Switch to previous BT slot | `K_BT_PREV` |
+| `0x2B00` | BT Pair | Enter pairing mode | `K_BT_PAIR` |
+| `0x2C00` | BT Disconnect | Disconnect current device | `K_BT_DISCONNECT` |
+| `0x2E00` | BT Switch | USB / BLE toggle | `BT_SWITCH_DEVICE` |
+| `0x2F00` | BT Toggle | Enable/disable BLE | `BT_TOGGLE` |
 | `0x3000-0x30FF` | One-Shot Modifier (OSM) | `0x3000 \| mod_mask` | `K_OSM(Shift)` = `0x3002` |
 | `0x3100-0x310F` | One-Shot Layer (OSL) | `0x3100 \| layer` | `K_OSL(2)` = `0x3102` |
 | `0x3200` | Caps Word | Toggle caps-word mode | |
 | `0x3300` | Repeat Key | Repeat last keypress | |
-| `0x3400` | Leader Key | Start leader sequence | |
+| `0x3400` | Leader Key | Start leader sequence | `K_LEADER` |
+| `0x3500-0x3800` | Tama Actions | Feed/Play/Sleep/Medicine | `K_TAMA_*` |
+| `0x3900` | Grave Escape | Tap=ESC, Shift+tap=\` | `K_GESC` |
+| `0x3A00` | Layer Lock | Lock/unlock current MO layer | `K_LAYER_LOCK` |
+| `0x3C00` | Auto Shift Toggle | Toggle auto-shift on/off | `K_AUTO_SHIFT_TOGGLE` |
+| `0x3D00-0x3DFF` | Key Override | Trigger key override slot | `K_OVERRIDE(n)` |
 | `0x4000-0x4FFF` | Layer-Tap (LT) | `0x4000 \| (layer << 8) \| keycode` | `K_LT(2, Space)` = `0x422C` |
 | `0x5000-0x5FFF` | Mod-Tap (MT) | `0x5000 \| (mod << 8) \| keycode` | `K_MT(Shift, A)` = `0x5204` |
 | `0x6000-0x6FFF` | Tap Dance (TD) | `0x6000 \| (index << 8)` | `K_TD(0)` = `0x6000` |

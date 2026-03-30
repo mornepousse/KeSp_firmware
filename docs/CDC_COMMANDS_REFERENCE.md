@@ -130,6 +130,57 @@ Sequence keys and result are HID keycodes in hex. Mod is modifier mask.
 
 ---
 
+## Bluetooth Multi-Device
+
+| Command | Response | Description |
+|---------|----------|-------------|
+| `BT?` | Slot list + status | Show all 3 BT slots with addresses |
+| `BT SWITCH <n>` | `BT:SWITCHING` | Switch to slot n (0-2) |
+| `BT PAIR` | `BT:PAIRING` | Enter pairing mode on active slot |
+| `BT DISCONNECT` | `BT:DISCONNECTED` | Disconnect current device |
+| `BT NEXT` | `BT:NEXT` | Switch to next slot |
+| `BT PREV` | `BT:PREV` | Switch to previous slot |
+
+**BT? response example:**
+```
+BT: slot=0 init=1 conn=1 name=iPhone
+  SLOT0: AA:BB:CC:DD:EE:FF iPhone *
+  SLOT1: 11:22:33:44:55:66 MacBook
+  SLOT2: empty
+OK
+```
+
+### Bluetooth Keycodes
+
+| Keycode | Value | Description |
+|---------|-------|-------------|
+| `BT_SWITCH_DEVICE` | `0x2E00` | Toggle USB ↔ BLE |
+| `BT_TOGGLE` | `0x2F00` | Enable/disable BLE |
+| `K_BT_NEXT` | `0x2900` | Switch to next BT slot |
+| `K_BT_PREV` | `0x2A00` | Switch to previous BT slot |
+| `K_BT_PAIR` | `0x2B00` | Enter pairing mode |
+| `K_BT_DISCONNECT` | `0x2C00` | Disconnect current device |
+
+**Map via SETKEY:** `SETKEY 0,4,0,2900` (ESC = BT Next)
+
+---
+
+## Auto Shift / Key Override / WPM / Tri-Layer
+
+| Command | Response | Description |
+|---------|----------|-------------|
+| `AUTOSHIFT` | `AUTOSHIFT:ON/OFF` | Toggle auto-shift |
+| `KOSET` | `KOSET n:OK` | Configure key override: `index;trigger_key,trigger_mod,result_key,result_mod` (hex) |
+| `KO?` | List overrides | Show all configured key overrides |
+| `WPM?` | `WPM: 42` | Current words-per-minute |
+| `TRILAYER` | `TRILAYER: L1+L2=L3` | Configure tri-layer: `layer1,layer2,result_layer` |
+
+**KOSET example:** `KOSET 0;2A,02,4C,00` → Shift+Backspace = Delete
+
+**TRILAYER example:** `TRILAYER 1,2,3` → Layer1+Layer2 active = activate Layer3
+
+---
+
 ## Tamagotchi
 
 | Command | Response | Description |
