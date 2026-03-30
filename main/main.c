@@ -141,6 +141,7 @@ void app_main(void) {
   combo_load();
   leader_load();
   key_override_load();
+  bt_devices_load();
   tama_engine_init();
 
   ESP_LOGI(TAG, "display init");

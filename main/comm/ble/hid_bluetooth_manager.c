@@ -22,6 +22,11 @@ static bool mem_released = false;
 #define HID_BT_TAG HID_DEMO_TAG
 #define CHAR_DECLARATION_SIZE   (sizeof(uint8_t))
 
+/* ── Multi-device state ──────────────────────────────────────────── */
+static bt_device_slot_t bt_slots[BT_MAX_DEVICES];
+static uint8_t bt_active_slot = 0;
+static bool bt_pairing_mode = false;
+
 #include "version.h"
 #define HIDD_DEVICE_NAME            GATTS_TAG
 #define HID_DEMO_TAG "HID_BL"
@@ -130,12 +135,21 @@ void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
         esp_ble_gap_security_rsp(param->ble_security.ble_req.bd_addr, true);
 	 break;
      case ESP_GAP_BLE_AUTH_CMPL_EVT:
-        sec_conn = true;
-        esp_bd_addr_t bd_addr;
-        memcpy(bd_addr, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t));
-        (void)bd_addr;
         if(!param->ble_security.auth_cmpl.success) {
             ESP_LOGE(HID_DEMO_TAG, "BLE auth fail reason = 0x%x", param->ble_security.auth_cmpl.fail_reason);
+            sec_conn = false;
+        } else {
+            sec_conn = true;
+            /* Store connected device address in active slot */
+            memcpy(bt_slots[bt_active_slot].addr, param->ble_security.auth_cmpl.bd_addr, 6);
+            bt_slots[bt_active_slot].valid = true;
+            bt_pairing_mode = false;
+            ESP_LOGI(HID_DEMO_TAG, "BLE bonded to slot %d: %02X:%02X:%02X:%02X:%02X:%02X",
+                     bt_active_slot,
+                     bt_slots[bt_active_slot].addr[0], bt_slots[bt_active_slot].addr[1],
+                     bt_slots[bt_active_slot].addr[2], bt_slots[bt_active_slot].addr[3],
+                     bt_slots[bt_active_slot].addr[4], bt_slots[bt_active_slot].addr[5]);
+            bt_devices_save();
         }
         break;
     default:
@@ -319,9 +333,122 @@ bool load_bt_state(void) {
     err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &my_handle);
     if (err != ESP_OK) {
         ESP_LOGW(HID_DEMO_TAG, "Error (%s) opening NVS handle! Using default (enabled)", esp_err_to_name(err));
-        return true; 
+        return true;
     }
     err = nvs_get_u8(my_handle, "bt_enabled", &enabled);
     nvs_close(my_handle);
     return (enabled != 0);
+}
+
+/* ── Multi-device management ─────────────────────────────────────── */
+
+uint8_t bt_get_active_slot(void) { return bt_active_slot; }
+
+const bt_device_slot_t *bt_get_slot(uint8_t slot) {
+    if (slot >= BT_MAX_DEVICES) return NULL;
+    return &bt_slots[slot];
+}
+
+const char *bt_get_connected_name(void) {
+    if (!sec_conn) return "";
+    if (bt_slots[bt_active_slot].name[0] != '\0')
+        return bt_slots[bt_active_slot].name;
+    /* Format address as fallback name */
+    static char addr_str[18];
+    snprintf(addr_str, sizeof(addr_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+             bt_slots[bt_active_slot].addr[0], bt_slots[bt_active_slot].addr[1],
+             bt_slots[bt_active_slot].addr[2], bt_slots[bt_active_slot].addr[3],
+             bt_slots[bt_active_slot].addr[4], bt_slots[bt_active_slot].addr[5]);
+    return addr_str;
+}
+
+void bt_disconnect(void) {
+    if (!bt_initialized) return;
+    if (hid_bluetooth_is_connected()) {
+        ESP_LOGI(HID_BT_TAG, "Disconnecting BLE slot %d", bt_active_slot);
+        esp_ble_gatts_close(hid_conn_id, 0);
+        sec_conn = false;
+    }
+    esp_ble_gap_stop_advertising();
+}
+
+void bt_start_pairing(void) {
+    if (!bt_initialized) return;
+    bt_disconnect();
+    bt_pairing_mode = true;
+    /* Clear current slot to accept new device */
+    ESP_LOGI(HID_BT_TAG, "Pairing mode on slot %d", bt_active_slot);
+    memset(&bt_slots[bt_active_slot], 0, sizeof(bt_device_slot_t));
+    /* Start undirected advertising (any device can connect) */
+    esp_ble_gap_start_advertising(&hidd_adv_params);
+}
+
+void bt_switch_slot(uint8_t slot) {
+    if (slot >= BT_MAX_DEVICES) return;
+    if (slot == bt_active_slot && sec_conn) return; /* already on this slot */
+
+    ESP_LOGI(HID_BT_TAG, "Switching to BT slot %d", slot);
+    bt_disconnect();
+    bt_active_slot = slot;
+
+    if (bt_slots[slot].valid) {
+        /* Reconnect to known device via directed advertising */
+        esp_ble_adv_params_t directed_params = hidd_adv_params;
+        directed_params.adv_type = ADV_TYPE_DIRECT_IND_HIGH;
+        memcpy(directed_params.peer_addr, bt_slots[slot].addr, 6);
+        directed_params.peer_addr_type = BLE_ADDR_TYPE_PUBLIC;
+        esp_ble_gap_start_advertising(&directed_params);
+
+        /* Fallback to undirected after short timeout if directed fails */
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        if (!sec_conn) {
+            ESP_LOGW(HID_BT_TAG, "Directed adv failed, falling back to undirected");
+            esp_ble_gap_start_advertising(&hidd_adv_params);
+        }
+    } else {
+        /* No bond on this slot — go to pairing mode */
+        bt_start_pairing();
+    }
+
+    /* Save active slot */
+    nvs_handle_t h;
+    if (nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "bt_slot", bt_active_slot);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+void bt_next_device(void) {
+    uint8_t next = (bt_active_slot + 1) % BT_MAX_DEVICES;
+    bt_switch_slot(next);
+}
+
+void bt_prev_device(void) {
+    uint8_t prev = (bt_active_slot == 0) ? BT_MAX_DEVICES - 1 : bt_active_slot - 1;
+    bt_switch_slot(prev);
+}
+
+void bt_devices_save(void) {
+    nvs_handle_t h;
+    if (nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_blob(h, "bt_slots", bt_slots, sizeof(bt_slots));
+        nvs_set_u8(h, "bt_slot", bt_active_slot);
+        nvs_commit(h);
+        nvs_close(h);
+        ESP_LOGI(HID_BT_TAG, "BT device slots saved");
+    }
+}
+
+void bt_devices_load(void) {
+    memset(bt_slots, 0, sizeof(bt_slots));
+    nvs_handle_t h;
+    if (nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
+        size_t sz = sizeof(bt_slots);
+        nvs_get_blob(h, "bt_slots", bt_slots, &sz);
+        nvs_get_u8(h, "bt_slot", &bt_active_slot);
+        if (bt_active_slot >= BT_MAX_DEVICES) bt_active_slot = 0;
+        nvs_close(h);
+        ESP_LOGI(HID_BT_TAG, "BT slots loaded, active=%d", bt_active_slot);
+    }
 }

@@ -14,6 +14,7 @@
 #include "leader.h"
 #include "tama_engine.h"
 #include "key_features.h"
+#include "hid_bluetooth_manager.h"
 #include "status_display.h"
 #include "version.h"
 
@@ -945,6 +946,66 @@ static void cmd_tama_action(const char *arg)
 	}
 }
 
+/* BT? — query bluetooth status */
+static void cmd_bt_query(const char *arg)
+{
+	(void)arg;
+	char buf[128];
+	snprintf(buf, sizeof(buf), "BT: slot=%d init=%d conn=%d name=%s",
+	         bt_get_active_slot(),
+	         hid_bluetooth_is_initialized(),
+	         hid_bluetooth_is_connected(),
+	         bt_get_connected_name());
+	cdc_send_line(buf);
+	/* List all slots */
+	for (int i = 0; i < BT_MAX_DEVICES; i++) {
+		const bt_device_slot_t *s = bt_get_slot(i);
+		if (s && s->valid) {
+			snprintf(buf, sizeof(buf), "  SLOT%d: %02X:%02X:%02X:%02X:%02X:%02X %s%s",
+			         i, s->addr[0], s->addr[1], s->addr[2],
+			         s->addr[3], s->addr[4], s->addr[5],
+			         s->name[0] ? s->name : "(unnamed)",
+			         (i == bt_get_active_slot()) ? " *" : "");
+			cdc_send_line(buf);
+		} else {
+			snprintf(buf, sizeof(buf), "  SLOT%d: empty%s", i,
+			         (i == bt_get_active_slot()) ? " *" : "");
+			cdc_send_line(buf);
+		}
+	}
+	cdc_send_line("OK");
+}
+
+/* BT SWITCH/PAIR/DISCONNECT/NEXT/PREV */
+static void cmd_bt_action(const char *arg)
+{
+	if (!arg) { cdc_send_line("ERR BT: missing action"); return; }
+	char buf[32];
+	strncpy(buf, arg, sizeof(buf)); buf[sizeof(buf)-1] = '\0';
+	trim_spaces(buf);
+
+	if (strncasecmp(buf, "SWITCH ", 7) == 0) {
+		int slot = atoi(buf + 7);
+		if (slot < 0 || slot >= BT_MAX_DEVICES) { cdc_send_line("ERR BT: slot 0-2"); return; }
+		bt_switch_slot((uint8_t)slot);
+		cdc_send_line("BT:SWITCHING");
+	} else if (strcasecmp(buf, "PAIR") == 0) {
+		bt_start_pairing();
+		cdc_send_line("BT:PAIRING");
+	} else if (strcasecmp(buf, "DISCONNECT") == 0) {
+		bt_disconnect();
+		cdc_send_line("BT:DISCONNECTED");
+	} else if (strcasecmp(buf, "NEXT") == 0) {
+		bt_next_device();
+		cdc_send_line("BT:NEXT");
+	} else if (strcasecmp(buf, "PREV") == 0) {
+		bt_prev_device();
+		cdc_send_line("BT:PREV");
+	} else {
+		cdc_send_line("ERR BT: SWITCH <n>|PAIR|DISCONNECT|NEXT|PREV");
+	}
+}
+
 /* AUTOSHIFT — toggle auto shift */
 static void cmd_autoshift(const char *arg)
 {
@@ -1056,6 +1117,9 @@ static const cdc_cmd_entry_t keyboard_cmd_table[] = {
 	/* Leader */
 	{ "LEADERSET",      9,  true,  cmd_leaderset },
 	{ "LEADER?",        7,  false, cmd_leaderlist },
+	/* Bluetooth */
+	{ "BT?",            3,  false, cmd_bt_query },
+	{ "BT ",            3,  true,  cmd_bt_action },
 	/* Auto Shift / Key Override / WPM / Tri-Layer */
 	{ "AUTOSHIFT",     9,  false, cmd_autoshift },
 	{ "KOSET",          5,  true,  cmd_koset },

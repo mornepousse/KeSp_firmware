@@ -15,7 +15,7 @@
 #include "keymap.h"
 #include "keyboard_actions.h"
 #include "keyboard_task.h"
-#include "hid_bluetooth_manager.h"
+#include "hid_bluetooth_manager.h" /* bt_next/prev/pair/disconnect */
 #include "tap_hold.h"
 #include "tap_dance.h"
 #include "combo.h"
@@ -87,6 +87,22 @@ static void dispatch_internal_function(void)
         break;
     case BT_TOGGLE:
         km_post_bt_toggle();
+        break;
+    case K_BT_NEXT:
+        bt_next_device();
+        km_post_display_update();
+        break;
+    case K_BT_PREV:
+        bt_prev_device();
+        km_post_display_update();
+        break;
+    case K_BT_PAIR:
+        bt_start_pairing();
+        km_post_display_update();
+        break;
+    case K_BT_DISCONNECT:
+        bt_disconnect();
+        km_post_display_update();
         break;
     }
 }

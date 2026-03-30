@@ -355,6 +355,10 @@ static const uint16_t TO_L9 = 0x1400;
 // Bluetooth keycodes
 #define BT_SWITCH_DEVICE              0x2E00
 #define BT_TOGGLE                     0x2F00
+#define K_BT_NEXT                     0x2900
+#define K_BT_PREV                     0x2A00
+#define K_BT_PAIR                     0x2B00
+#define K_BT_DISCONNECT               0x2C00
 
 /* ── Advanced keycodes (v3.5+) ───────────────────────────────────── */
 /* See docs/KEYCODE_MAP.md for full encoding specification            */
