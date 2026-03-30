@@ -256,7 +256,12 @@ static void oled_notify_keypress(void)
 static void oled_show_dfu(void)
 {
     display_clear_screen();
-    write_text_to_display_centre("DFU Mode", 0, 0);
+    if (lvgl_port_lock(0)) {
+        lv_obj_t *label = lv_label_create(lv_scr_act());
+        lv_label_set_text(label, "DFU Mode");
+        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+        lvgl_port_unlock();
+    }
 }
 
 const display_backend_t oled_display_backend = {

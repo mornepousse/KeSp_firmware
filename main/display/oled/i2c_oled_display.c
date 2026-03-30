@@ -50,26 +50,6 @@ const display_hw_config_t *display_get_hw_config(void)
 #define DISPL_LCD_CMD_BITS 8
 #define DISPL_LCD_PARAM_BITS 8
 
-void display_test_text(char *text)
-{
-    if(display_available == false) return;
-    ESP_LOGD(TAG_DISP, "Displaying test text on OLED");
-
-    // Lock the mutex due to the LVGL APIs are not thread-safe
-    if (lvgl_port_lock(0))
-    {
-        lv_obj_t *label = lv_label_create(lv_scr_act());
-        lv_label_set_text(label, text);
-        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
-
-        // Release the mutex
-        lvgl_port_unlock();
-    }
-    else
-    {
-        ESP_LOGE(TAG_DISP, "Failed to lock LVGL port");
-    }
-}
 
 void display_clear_screen(void)
 {
@@ -191,7 +171,12 @@ void init_display(void)
 
     ESP_LOGI(TAG_DISP, "I2C OLED display initialized");
     display_available = true;
-    display_test_text(PRODUCT_NAME);
+    if (lvgl_port_lock(0)) {
+        lv_obj_t *label = lv_label_create(lv_scr_act());
+        lv_label_set_text(label, PRODUCT_NAME);
+        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+        lvgl_port_unlock();
+    }
 }
 
 /* Quick OLED presence test (SSD1306) before full init.
@@ -217,7 +202,6 @@ bool test_oled_presence(void)
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG_DISP, "I2C bus creation failed: %s", esp_err_to_name(err));
-        display_available = false;
         return false;
     }
 
@@ -232,7 +216,6 @@ bool test_oled_presence(void)
     {
         ESP_LOGW(TAG_DISP, "Add OLED device (0x%02X) failed: %s", cfg->i2c.address, esp_err_to_name(err));
         i2c_del_master_bus(bus);
-        display_available = false;
         return false;
     }
 
@@ -253,90 +236,6 @@ bool test_oled_presence(void)
     i2c_master_bus_rm_device(dev);
     i2c_del_master_bus(bus);
 
-    display_available = ok;
     return ok;
 }
 
-void erase_rectangle(lv_obj_t *rect)
-{
-    if(display_available == false) return;
-    ESP_LOGI(TAG_DISP, "Erasing rectangle");
-    if (lvgl_port_lock(0))
-    {
-        lv_obj_del(rect);
-        lvgl_port_unlock();
-    }
-    else
-    {
-        ESP_LOGE(TAG_DISP, "Failed to lock LVGL port");
-    }
-}
-
-void write_text_to_display_centre(const char *text, int x, int y)
-{
-    if(display_available == false) return;
-    ESP_LOGI(TAG_DISP, "Writing text to display: %s", text);
-    if (lvgl_port_lock(0))
-    {
-        lv_obj_t *label = lv_label_create(lv_scr_act());
-        lv_label_set_text(label, text);
-        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
-        lvgl_port_unlock();
-    }
-    else
-    {
-        ESP_LOGE(TAG_DISP, "Failed to lock LVGL port");
-    }
-}
-void write_text_to_display(const char *text, int x, int y)
-{
-    if(display_available == false) return;
-    ESP_LOGI(TAG_DISP, "Writing text to display: %s", text);
-    if (lvgl_port_lock(0))
-    {
-        lv_obj_t *label = lv_label_create(lv_scr_act());
-        lv_label_set_text(label, text);
-        lv_obj_set_pos(label, x, y);
-        lvgl_port_unlock();
-    }
-    else
-    {
-        ESP_LOGE(TAG_DISP, "Failed to lock LVGL port");
-    }
-}
-
-void draw_rectangle(int x, int y, int w, int h)
-{
-    if(display_available == false) return;
-    ESP_LOGI(TAG_DISP, "Drawing rectangle at (%d,%d) size %dx%d", x, y, w, h);
-    if (lvgl_port_lock(0))
-    {
-        lv_obj_t *rect = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(rect, w, h);
-        lv_obj_set_pos(rect, x, y);
-        lv_obj_set_style_bg_color(rect, lv_color_white(), 0); // Black background 
-        lvgl_port_unlock();
-    }
-    else
-    {
-        ESP_LOGE(TAG_DISP, "Failed to lock LVGL port");
-    }
-}
-
-void draw_rectangle_White(int x, int y, int w, int h)
-{
-    if(display_available == false) return;
-    ESP_LOGI(TAG_DISP, "Drawing rectangle at (%d,%d) size %dx%d", x, y, w, h);
-    if (lvgl_port_lock(0))
-    {
-        lv_obj_t *rect = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(rect, w, h);
-        lv_obj_set_pos(rect, x, y);
-        lv_obj_set_style_bg_color(rect, lv_color_black(), 0); // Black background 
-        lvgl_port_unlock();
-    }
-    else
-    {
-        ESP_LOGE(TAG_DISP, "Failed to lock LVGL port");
-    }
-}
