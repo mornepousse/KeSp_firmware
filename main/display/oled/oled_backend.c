@@ -16,11 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "assets/img_bluetooth.c"
-#include "assets/img_usb.c"
-#include "assets/img_signal.c"
-
-LV_FONT_DECLARE(lv_font_montserrat_28);
+#include "imgs.h"
 
 #ifndef BT_BLINK_INTERVAL_MS
 #define BT_BLINK_INTERVAL_MS    500
@@ -57,7 +53,6 @@ static void oled_init_icons(void)
         lv_obj_set_pos(label_version, 0, 50);
     }
 
-    /* Unhide one by one to find phantom line source */
     icon_path = lv_img_create(scr);
     lv_obj_set_pos(icon_path, 0, 0);
 
@@ -73,6 +68,8 @@ static void oled_init_icons(void)
     lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
     lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
     lv_obj_set_pos(label_layer_name, 0, 20);
+    lv_obj_set_width(label_layer_name, 90);
+    lv_label_set_long_mode(label_layer_name, LV_LABEL_LONG_DOT);
     indicator_mouse = lv_label_create(scr);
     lv_label_set_text(indicator_mouse, "M");
     lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0);

@@ -58,10 +58,6 @@ static lv_obj_t *status_icon = NULL;
 static lv_obj_t *conn_icon = NULL;
 static lv_obj_t *bt_slot_label = NULL;
 static lv_obj_t *mouse_indicator = NULL;
-/* Animation */
-static lv_anim_t arc_anim;
-static bool is_animating = false;
-
 /* State tracking */
 static bool ui_initialized = false;
 static bool ui_sleeping = false;
@@ -92,7 +88,6 @@ static lv_obj_t *kpm_label = NULL;  /* Label to show KPM value */
 /* Forward declarations */
 static void create_main_ui(void);
 static void update_connection_status(bool force);
-static void arc_anim_cb(void *var, int32_t val);
 
 /* Font declarations */
 LV_FONT_DECLARE(lv_font_montserrat_28);
@@ -370,8 +365,6 @@ void round_ui_update_layer(void)
     
     if (layer_label && lvgl_port_lock(100)) {
         lv_label_set_text(layer_label, default_layout_names[current_layout]);
-        lv_obj_invalidate(layer_label);
-        lv_refr_now(NULL);
         lvgl_port_unlock();
     }
 }
