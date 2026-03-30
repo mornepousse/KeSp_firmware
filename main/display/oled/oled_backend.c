@@ -7,7 +7,6 @@
 #include "hid_report.h"
 #include "keyboard_config.h"
 #include "keymap.h"
-#include "version.h"
 #include "tama_engine.h"
 #include "tama_render.h"
 #include "lvgl.h"
@@ -18,6 +17,8 @@
 
 #include "imgs.h"
 
+LV_FONT_DECLARE(lv_font_montserrat_28);
+
 #ifndef BT_BLINK_INTERVAL_MS
 #define BT_BLINK_INTERVAL_MS    500
 #endif
@@ -25,16 +26,28 @@
 #define MOUSE_INDICATOR_MS      200
 #endif
 
-/* OLED layout constants (128x64 display) */
-#define OLED_ICON_PATH_X    0
-#define OLED_ICON_BT_X      18
-#define OLED_BT_SLOT_X      34
-#define OLED_MOUSE_X        50
-#define OLED_LAYER_X        0
-#define OLED_LAYER_Y        20
-#define OLED_LAYER_MAX_W    90   /* tama sprite starts at x=96 */
-#define OLED_VERSION_X      0
-#define OLED_VERSION_Y      50
+/* OLED layout constants (128x64 display)
+ *
+ * Status row (y=0..15): icons + BT slot + mouse indicator
+ * Content area (y=16..63, 48px):
+ *   - tama ON : layer name (font_14) centred in content area, left of tama (x<96)
+ *   - tama OFF: layer name (font_28) centred in full content area, full width
+ *
+ * Tama sprite: x=96..127, y=16..47 (32x32, centred vertically)
+ */
+#define OLED_ICON_PATH_X        0
+#define OLED_ICON_BT_X          18
+#define OLED_BT_SLOT_X          34
+#define OLED_MOUSE_X            50
+#define OLED_STATUS_H           16   /* height of the status row */
+
+/* Layer name — tama active: font_14 centred in content area, left zone */
+#define OLED_LAYER_X            0
+#define OLED_LAYER_Y_TAMA       33   /* 16 + (48-14)/2 */
+#define OLED_LAYER_MAX_W_TAMA   90   /* tama sprite starts at x=96 */
+
+/* Layer name — tama inactive: font_28 centred in content area, full width */
+#define OLED_LAYER_Y_FULL       26   /* 16 + (48-28)/2 */
 
 static int last_bt_state = -1;
 static int last_path_state = -1;
@@ -42,7 +55,6 @@ static lv_obj_t *icon_bt = NULL;
 static lv_obj_t *icon_path = NULL;
 static lv_obj_t *indicator_mouse = NULL;
 static lv_obj_t *label_layer_name = NULL;
-static lv_obj_t *label_version = NULL;
 static TickType_t last_mouse_activity = 0;
 static bool bt_blink_visible = true;
 static TickType_t bt_blink_last_tick = 0;
@@ -55,14 +67,9 @@ static void oled_init_icons(void)
     if (icon_bt != NULL || icon_path != NULL) return;
 
     lv_obj_t *scr = lv_scr_act();
+    bool tama_on = tama_engine_is_enabled();
 
-    if (!label_version) {
-        label_version = lv_label_create(scr);
-        lv_label_set_text(label_version, "v" FW_VERSION);
-        lv_obj_set_style_text_font(label_version, UI_FONT, 0);
-        lv_obj_set_pos(label_version, OLED_VERSION_X, OLED_VERSION_Y);
-    }
-
+    /* Status row */
     icon_path = lv_img_create(scr);
     lv_obj_set_pos(icon_path, OLED_ICON_PATH_X, 0);
 
@@ -74,18 +81,26 @@ static void oled_init_icons(void)
     lv_label_set_text(bt_slot_label, "");
     lv_obj_set_pos(bt_slot_label, OLED_BT_SLOT_X, 0);
 
-    label_layer_name = lv_label_create(scr);
-    lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
-    lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
-    lv_obj_set_pos(label_layer_name, OLED_LAYER_X, OLED_LAYER_Y);
-    lv_obj_set_width(label_layer_name, OLED_LAYER_MAX_W);
-    lv_label_set_long_mode(label_layer_name, LV_LABEL_LONG_DOT);
-
     indicator_mouse = lv_label_create(scr);
     lv_label_set_text(indicator_mouse, "M");
     lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0);
     lv_obj_set_pos(indicator_mouse, OLED_MOUSE_X, 0);
     lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
+
+    /* Layer name — size and position adapt to tama state */
+    label_layer_name = lv_label_create(scr);
+    lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
+    lv_label_set_long_mode(label_layer_name, LV_LABEL_LONG_DOT);
+
+    if (tama_on) {
+        lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
+        lv_obj_set_pos(label_layer_name, OLED_LAYER_X, OLED_LAYER_Y_TAMA);
+        lv_obj_set_width(label_layer_name, OLED_LAYER_MAX_W_TAMA);
+    } else {
+        lv_obj_set_style_text_font(label_layer_name, &lv_font_montserrat_28, 0);
+        lv_obj_set_pos(label_layer_name, OLED_LAYER_X, OLED_LAYER_Y_FULL);
+        lv_obj_set_width(label_layer_name, BOARD_DISPLAY_WIDTH);
+    }
 }
 
 static void oled_prepare_ui(bool clear_screen)
@@ -98,8 +113,8 @@ static void oled_prepare_ui(bool clear_screen)
         icon_bt = NULL;
         icon_path = NULL;
         indicator_mouse = NULL;
-        label_version = NULL;
         label_layer_name = NULL;
+        bt_slot_label = NULL;
         last_bt_state = -1;
         last_path_state = -1;
         bt_blink_visible = true;
@@ -213,7 +228,7 @@ static void oled_update(void)
             else
                 lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
         }
-        /* Update tama */
+        /* Update tama — must be called with lock held */
         if (tama_engine_is_enabled())
             tama_render_update(tama_engine_get_state(), tama_engine_get_stats(), tama_engine_get_critter());
         lvgl_port_unlock();
@@ -239,7 +254,7 @@ static void oled_sleep(void)
     if (lvgl_port_lock(100)) {
         display_clear_screen();
         icon_bt = NULL; icon_path = NULL; indicator_mouse = NULL;
-        label_version = NULL; label_layer_name = NULL; bt_slot_label = NULL;
+        label_layer_name = NULL; bt_slot_label = NULL;
         last_bt_state = -1; last_path_state = -1;
         tama_render_destroy();
         oled_initialized = false;
@@ -269,7 +284,8 @@ static void oled_show_dfu(void)
     display_clear_screen();
     if (lvgl_port_lock(0)) {
         lv_obj_t *label = lv_label_create(lv_scr_act());
-        lv_label_set_text(label, "DFU Mode");
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_28, 0);
+        lv_label_set_text(label, "DFU");
         lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
         lvgl_port_unlock();
     }
