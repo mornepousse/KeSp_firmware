@@ -28,45 +28,57 @@ LV_FONT_DECLARE(lv_font_montserrat_28);
 #endif
 
 /*
- * OLED layout (128×64, SSD1306)
+ * OLED layout D — "Card" (128×64, SSD1306)
  *
- *  Y=0..13   status row  (14px — icons + BT slot + mouse indicator)
- *  Y=14      separator   (1px horizontal line)
- *  Y=15..57  content     (42px — layer name, dominant element)
- *  Y=58..63  KPM bar     (6px — typing speed progress)
+ *  Y=0..15   status card  (16px — rounded border box)
+ *              ╭──────────────────────────────────────╮
+ *              │  ⚡  ᯡ  1                        M   │
+ *              ╰──────────────────────────────────────╯
  *
- * With tama ON the right zone x=96..127 is reserved for the 32×32 sprite.
- * The separator and KPM bar stop at x=96 so the tama has a clean column.
+ *  Y=16..57  content (42px)
+ *              left 94px: layer name (font_28 or font_14)
+ *              right 32px: tama sprite inside a square box
+ *                          ┌───────┐
+ *                          │  🐣   │
+ *                          │ 32×32 │
+ *                          └───────┘
  *
- * Layer name font selection (content area = 42px tall):
- *   tama OFF               → font_28, Y=22, W=128, centred
- *   tama ON, name ≤ 3 chars → font_28, Y=22, W=92,  centred
- *   tama ON, name ≥ 4 chars → font_14, Y=29, W=92,  centred
+ *  Y=59..62  KPM bar (4px)
+ *
+ * With tama OFF the full 128px are used for layer name and KPM bar.
+ *
+ * Layer name font selection:
+ *   tama OFF  or  name ≤ 3 chars → font_28, centred in available width
+ *   tama ON   and name ≥ 4 chars → font_14, centred in left zone
  */
 
-/* Status row */
-#define OLED_ICON_PATH_X        0
-#define OLED_ICON_BT_X          20
-#define OLED_BT_SLOT_X          40
-#define OLED_MOUSE_X_FULL       108   /* tama OFF — right-flush at 128-20 */
-#define OLED_MOUSE_X_TAMA       80    /* tama ON  — right-flush at 96-16  */
+/* Status card */
+#define OLED_STATUS_H           16
+#define OLED_STATUS_RADIUS      3
+#define OLED_ICON_PATH_X        4
+#define OLED_ICON_BT_X          22
+#define OLED_BT_SLOT_X          42
+#define OLED_MOUSE_X            106   /* right of status card: 128 − 14 − 8 */
+#define OLED_MOUSE_Y            1
 
-/* Separator */
-#define OLED_SEP_Y              14
-#define OLED_SEP_W_TAMA         96    /* stops before tama zone */
+/* Tama card (square border around the 32×32 sprite at x=96, y=16) */
+#define OLED_TAMA_CARD_X        95
+#define OLED_TAMA_CARD_Y        15
+#define OLED_TAMA_CARD_W        33
+#define OLED_TAMA_CARD_H        43
 
 /* Content area */
 #define OLED_LAYER_X            0
 #define OLED_LAYER_W_FULL       128
-#define OLED_LAYER_W_TAMA       92    /* left zone with tama */
-#define OLED_LAYER_Y_BIG        22    /* font_28 centre: 15+(42-28)/2 */
-#define OLED_LAYER_Y_SMALL      29    /* font_14 centre: 15+(42-14)/2 */
-#define OLED_LAYER_SHORT_LEN    3     /* names ≤ 3 chars keep font_28 with tama */
+#define OLED_LAYER_W_TAMA       94
+#define OLED_LAYER_Y_BIG        23    /* font_28 centred: 16+(42-28)/2 */
+#define OLED_LAYER_Y_SMALL      30    /* font_14 centred: 16+(42-14)/2 */
+#define OLED_LAYER_SHORT_LEN    3
 
 /* KPM bar */
-#define OLED_KPM_BAR_Y          59    /* 1px gap below content */
+#define OLED_KPM_BAR_Y          59
 #define OLED_KPM_BAR_H          4
-#define OLED_KPM_BAR_W_TAMA     96
+#define OLED_KPM_BAR_W_TAMA     94
 #define OLED_KPM_MAX            400
 
 /* KPM rolling window */
@@ -75,33 +87,51 @@ LV_FONT_DECLARE(lv_font_montserrat_28);
 
 /* ── Module state ────────────────────────────────────────────────── */
 
-static int         last_bt_state    = -1;
-static int         last_path_state  = -1;
-static lv_obj_t   *icon_bt          = NULL;
-static lv_obj_t   *icon_path        = NULL;
-static lv_obj_t   *indicator_mouse  = NULL;
-static lv_obj_t   *label_layer_name = NULL;
-static lv_obj_t   *kpm_bar          = NULL;
-static lv_obj_t   *bt_slot_label    = NULL;
+static int         last_bt_state      = -1;
+static int         last_path_state    = -1;
+static lv_obj_t   *status_card        = NULL;
+static lv_obj_t   *tama_card          = NULL;
+static lv_obj_t   *icon_bt            = NULL;
+static lv_obj_t   *icon_path          = NULL;
+static lv_obj_t   *indicator_mouse    = NULL;
+static lv_obj_t   *label_layer_name   = NULL;
+static lv_obj_t   *kpm_bar            = NULL;
+static lv_obj_t   *bt_slot_label      = NULL;
 static TickType_t  last_mouse_activity = 0;
-static bool        bt_blink_visible = true;
+static bool        bt_blink_visible   = true;
 static TickType_t  bt_blink_last_tick = 0;
-static bool        oled_initialized = false;
+static bool        oled_initialized   = false;
 
-static uint32_t    oled_kpm_count   = 0;
+static uint32_t    oled_kpm_count     = 0;
 static uint32_t    oled_kpm_history[OLED_KPM_WINDOW];
-static int         oled_kpm_idx     = 0;
-static uint32_t    oled_current_kpm = 0;
+static int         oled_kpm_idx       = 0;
+static uint32_t    oled_current_kpm   = 0;
 static TickType_t  oled_last_kpm_sample = 0;
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
+
+/* Helper: create a card-style lv_obj (rounded or square border, transparent bg).
+   Must be called with lvgl_port_lock held. */
+static lv_obj_t *make_card(lv_obj_t *parent, int x, int y, int w, int h, int radius)
+{
+    lv_obj_t *card = lv_obj_create(parent);
+    lv_obj_set_size(card, w, h);
+    lv_obj_set_pos(card, x, y);
+    lv_obj_set_style_bg_opa(card, LV_OPA_0, 0);
+    lv_obj_set_style_border_color(card, lv_color_white(), 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_border_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(card, radius, 0);
+    lv_obj_set_style_pad_all(card, 0, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    return card;
+}
 
 /* Apply font/position to layer label based on tama state and name length.
    Must be called with lvgl_port_lock held. */
 static void apply_layer_style(bool tama_on, const char *name)
 {
     if (!label_layer_name) return;
-
     bool short_name = (strlen(name) <= OLED_LAYER_SHORT_LEN);
 
     if (!tama_on || short_name) {
@@ -125,7 +155,11 @@ static void oled_init_icons(void)
     lv_obj_t *scr = lv_scr_act();
     bool tama_on  = tama_engine_is_enabled();
 
-    /* — Status row — */
+    /* — Status card (rounded box, full width) — */
+    status_card = make_card(scr, 0, 0, BOARD_DISPLAY_WIDTH, OLED_STATUS_H,
+                            OLED_STATUS_RADIUS);
+
+    /* — Icons: direct screen children, positioned inside the card area — */
     icon_path = lv_img_create(scr);
     lv_obj_set_pos(icon_path, OLED_ICON_PATH_X, 0);
 
@@ -135,24 +169,19 @@ static void oled_init_icons(void)
     bt_slot_label = lv_label_create(scr);
     lv_obj_set_style_text_font(bt_slot_label, UI_FONT, 0);
     lv_label_set_text(bt_slot_label, "");
-    lv_obj_set_pos(bt_slot_label, OLED_BT_SLOT_X, 0);
+    lv_obj_set_pos(bt_slot_label, OLED_BT_SLOT_X, OLED_MOUSE_Y);
 
     indicator_mouse = lv_label_create(scr);
     lv_label_set_text(indicator_mouse, "M");
     lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0);
-    lv_obj_set_pos(indicator_mouse, tama_on ? OLED_MOUSE_X_TAMA : OLED_MOUSE_X_FULL, 0);
+    lv_obj_set_pos(indicator_mouse, OLED_MOUSE_X, OLED_MOUSE_Y);
     lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
 
-    /* — Separator line — */
-    lv_obj_t *sep = lv_obj_create(scr);
-    lv_obj_set_size(sep, tama_on ? OLED_SEP_W_TAMA : BOARD_DISPLAY_WIDTH, 1);
-    lv_obj_set_pos(sep, 0, OLED_SEP_Y);
-    lv_obj_set_style_bg_color(sep, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(sep, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(sep, 0, 0);
-    lv_obj_set_style_pad_all(sep, 0, 0);
-    lv_obj_set_style_radius(sep, 0, 0);
-    lv_obj_clear_flag(sep, LV_OBJ_FLAG_SCROLLABLE);
+    /* — Tama card (square border around tama sprite, only when active) — */
+    if (tama_on) {
+        tama_card = make_card(scr, OLED_TAMA_CARD_X, OLED_TAMA_CARD_Y,
+                              OLED_TAMA_CARD_W, OLED_TAMA_CARD_H, 0);
+    }
 
     /* — Layer name — */
     const char *name = default_layout_names[current_layout];
@@ -162,19 +191,17 @@ static void oled_init_icons(void)
     lv_obj_set_style_text_align(label_layer_name, LV_TEXT_ALIGN_CENTER, 0);
     apply_layer_style(tama_on, name);
 
-    /* — KPM bar — */
+    /* — KPM bar (transparent bg, white fill) — */
     int kpm_w = tama_on ? OLED_KPM_BAR_W_TAMA : BOARD_DISPLAY_WIDTH;
     kpm_bar = lv_bar_create(scr);
     lv_obj_set_size(kpm_bar, kpm_w, OLED_KPM_BAR_H);
     lv_obj_set_pos(kpm_bar, 0, OLED_KPM_BAR_Y);
     lv_bar_set_range(kpm_bar, 0, OLED_KPM_MAX);
     lv_bar_set_value(kpm_bar, 0, LV_ANIM_OFF);
-    /* BG: transparent (OLED screen is already black) */
     lv_obj_set_style_bg_opa(kpm_bar, LV_OPA_0, LV_PART_MAIN);
     lv_obj_set_style_border_width(kpm_bar, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(kpm_bar, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(kpm_bar, 0, LV_PART_MAIN);
-    /* Fill: white */
     lv_obj_set_style_bg_color(kpm_bar, lv_color_white(), LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(kpm_bar, LV_OPA_COVER, LV_PART_INDICATOR);
     lv_obj_set_style_radius(kpm_bar, 0, LV_PART_INDICATOR);
@@ -187,6 +214,8 @@ static void oled_prepare_ui(bool clear_screen)
 
     if (clear_screen) {
         display_clear_screen();
+        status_card      = NULL;
+        tama_card        = NULL;
         icon_bt          = NULL;
         icon_path        = NULL;
         indicator_mouse  = NULL;
@@ -197,9 +226,8 @@ static void oled_prepare_ui(bool clear_screen)
         last_path_state  = -1;
         bt_blink_visible = true;
         bt_blink_last_tick = xTaskGetTickCount();
-        /* Reset KPM state on full redraw */
-        oled_kpm_count = 0;
-        oled_kpm_idx   = 0;
+        oled_kpm_count   = 0;
+        oled_kpm_idx     = 0;
         oled_current_kpm = 0;
         memset(oled_kpm_history, 0, sizeof(oled_kpm_history));
         oled_last_kpm_sample = xTaskGetTickCount();
@@ -225,7 +253,7 @@ static void oled_update_connection_icons(bool force)
     if (bt_state == 2 && !force) {
         TickType_t now = xTaskGetTickCount();
         if ((now - bt_blink_last_tick) >= pdMS_TO_TICKS(BT_BLINK_INTERVAL_MS)) {
-            bt_blink_visible  = !bt_blink_visible;
+            bt_blink_visible   = !bt_blink_visible;
             bt_blink_last_tick = now;
             blink_toggled      = true;
         }
@@ -265,7 +293,7 @@ static void oled_update_connection_icons(bool force)
             lv_label_set_text(bt_slot_label, "");
     }
 
-    last_bt_state  = bt_state;
+    last_bt_state   = bt_state;
     last_path_state = path_state;
     lvgl_port_unlock();
 }
@@ -275,16 +303,16 @@ static void oled_update_connection_icons(bool force)
 static bool oled_init(void)
 {
     display_hw_config_t cfg = {
-        .bus_type  = BOARD_DISPLAY_BUS,
-        .width     = BOARD_DISPLAY_WIDTH,
-        .height    = BOARD_DISPLAY_HEIGHT,
+        .bus_type       = BOARD_DISPLAY_BUS,
+        .width          = BOARD_DISPLAY_WIDTH,
+        .height         = BOARD_DISPLAY_HEIGHT,
         .pixel_clock_hz = BOARD_DISPLAY_CLK_HZ,
-        .reset_pin = BOARD_DISPLAY_RESET,
+        .reset_pin      = BOARD_DISPLAY_RESET,
         .i2c = {
-            .host   = BOARD_DISPLAY_I2C_HOST,
-            .sda    = BOARD_DISPLAY_I2C_SDA,
-            .scl    = BOARD_DISPLAY_I2C_SCL,
-            .address = BOARD_DISPLAY_I2C_ADDR,
+            .host                   = BOARD_DISPLAY_I2C_HOST,
+            .sda                    = BOARD_DISPLAY_I2C_SDA,
+            .scl                    = BOARD_DISPLAY_I2C_SCL,
+            .address                = BOARD_DISPLAY_I2C_ADDR,
             .enable_internal_pullups = BOARD_DISPLAY_I2C_PULLUPS,
         },
     };
@@ -362,6 +390,8 @@ static void oled_sleep(void)
 {
     if (lvgl_port_lock(100)) {
         display_clear_screen();
+        status_card      = NULL;
+        tama_card        = NULL;
         icon_bt          = NULL;
         icon_path        = NULL;
         indicator_mouse  = NULL;
@@ -378,7 +408,6 @@ static void oled_sleep(void)
 
 static void oled_wake(void)
 {
-    /* Defer to display task via request_wake_request flag */
     request_wake_request = true;
 }
 
