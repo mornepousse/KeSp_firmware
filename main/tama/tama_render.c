@@ -26,8 +26,12 @@ static uint8_t bounce_dir = 0;     /* 0=down, 1=up */
 #define BOUNCE_STEP_MS  150   /* breathing bounce speed */
 #define BOUNCE_RANGE    2     /* pixels of bounce */
 
-/* Canvas buffer — keep small to avoid RAM issues with BLE stack */
-static lv_color_t canvas_buf[32 * 32]; /* no upscale in canvas, LVGL zoom handles it */
+/* Canvas buffer for round display (true-color) */
+static lv_color_t canvas_buf[32 * 32];
+
+/* Mono image buffer for OLED (1-bit, avoids canvas artifacts) */
+static uint8_t mono_buf[4 + 32 * 4]; /* LVGL header (4 bytes) + 32 rows × 4 bytes */
+static lv_img_dsc_t mono_img_dsc;
 
 static uint16_t scr_w = 0, scr_h = 0;
 static uint8_t scale = 1; /* pixel upscale factor */
@@ -76,14 +80,25 @@ void tama_render_create(lv_obj_t *parent, uint16_t screen_w, uint16_t screen_h)
     scale = 1;
 
     /* Sprite canvas — 32x32, zoomed by LVGL for round display */
-    canvas = lv_canvas_create(parent);
-    lv_canvas_set_buffer(canvas, canvas_buf, TAMA_SPRITE_W, TAMA_SPRITE_H, LV_IMG_CF_TRUE_COLOR);
     if (screen_w >= 240) {
-        lv_img_set_zoom(canvas, 512); /* 2x zoom (256=1x) → 64x64 */
+        /* Round: true-color canvas with zoom */
+        canvas = lv_canvas_create(parent);
+        lv_canvas_set_buffer(canvas, canvas_buf, TAMA_SPRITE_W, TAMA_SPRITE_H, LV_IMG_CF_TRUE_COLOR);
+        lv_img_set_zoom(canvas, 512);
         lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -20);
     } else {
-        /* OLED 128x64: sprite right side (y=14, ends at y=46, above layer bar at y=48) */
-        lv_obj_set_pos(canvas, 96, 14);
+        /* OLED mono: use lv_img with 1-bit buffer (no canvas artifacts) */
+        mono_img_dsc.header.always_zero = 0;
+        mono_img_dsc.header.w = TAMA_SPRITE_W;
+        mono_img_dsc.header.h = TAMA_SPRITE_H;
+        mono_img_dsc.header.cf = LV_IMG_CF_ALPHA_1BIT;
+        mono_img_dsc.data_size = TAMA_SPRITE_BYTES;
+        mono_img_dsc.data = mono_buf;
+        memset(mono_buf, 0, sizeof(mono_buf));
+
+        container = lv_img_create(parent);
+        lv_img_set_src(container, &mono_img_dsc);
+        lv_obj_set_pos(container, 96, 16);
     }
 
     /* Stat bars — below sprite (round) or left of sprite (OLED) */
@@ -127,11 +142,7 @@ void tama_render_create(lv_obj_t *parent, uint16_t screen_w, uint16_t screen_h)
         lv_label_set_text(label_level, "Lv1 egg");
         lv_obj_align(label_level, LV_ALIGN_CENTER, 0, bar_y_start + (bar_h + 3) * 3);
     } else {
-        /* OLED 128x64: level below version, left of tama */
-        label_level = lv_label_create(parent);
-        lv_obj_set_style_text_font(label_level, &lv_font_montserrat_14, 0);
-        lv_label_set_text(label_level, "Lv1");
-        lv_obj_set_pos(label_level, 0, 34);
+        /* OLED: no stat bars, no level label (too small) */
     }
 
     created = true;
@@ -190,20 +201,22 @@ void tama_render_update(tama2_state_t state, const tama2_stats_t *stats, uint8_t
         default:               fg = lv_color_hex(0xFFFFFF); break;
         }
     } else {
-        /* OLED mono: invert — canvas white=on becomes black on screen */
-        bg = lv_color_hex(0xFFFFFF);
-        fg = lv_color_hex(0x000000);
+        /* OLED mono: black bg (OFF), white creature (ON) */
+        bg = lv_color_hex(0x000000);
+        fg = lv_color_hex(0xFFFFFF);
     }
 
-    draw_sprite(frame, fg, bg);
-
-    /* Apply breathing bounce to canvas position */
     if (canvas) {
-        if (scr_w >= 240)
-            lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -20 + bounce_offset);
-        else
-            lv_obj_set_pos(canvas, 96, 14 + bounce_offset);
+        /* Round: draw on true-color canvas */
+        draw_sprite(frame, fg, bg);
+        lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -20 + bounce_offset);
         lv_obj_invalidate(canvas);
+    } else if (container) {
+        /* OLED: copy sprite bits to mono buffer */
+        memcpy(mono_buf, frame, TAMA_SPRITE_BYTES);
+        lv_img_set_src(container, &mono_img_dsc);
+        lv_obj_set_pos(container, 96, 16 + bounce_offset);
+        lv_obj_invalidate(container);
     }
 
     /* Update bars */

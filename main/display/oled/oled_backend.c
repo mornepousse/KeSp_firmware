@@ -49,35 +49,27 @@ static void oled_init_icons(void)
 
     lv_obj_t *scr = lv_scr_act();
 
-    /* ── Top: version label ───────────────────────────────────── */
-
     if (!label_version) {
         label_version = lv_label_create(scr);
         lv_label_set_text(label_version, "v" FW_VERSION);
-        lv_obj_set_style_text_font(label_version, &lv_font_montserrat_28, 0);
-        lv_obj_align(label_version, LV_ALIGN_TOP_MID, 0, 2);
+        lv_obj_set_style_text_font(label_version, &lv_font_montserrat_14, 0);
+        lv_obj_set_pos(label_version, 0, 50);
     }
 
-    /* ── Bottom bar: icons + layer name + mouse ───────────────── */
-
+    /* Unhide one by one to find phantom line source */
     icon_path = lv_img_create(scr);
-    if (icon_path)
-        lv_obj_set_pos(icon_path, 0, 48);
+    lv_obj_set_pos(icon_path, 0, 0);
 
     icon_bt = lv_img_create(scr);
-    lv_obj_set_pos(icon_bt, 18, 48);
-
-    if (!label_layer_name) {
-        label_layer_name = lv_label_create(scr);
-        lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
-        lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
-        lv_obj_set_pos(label_layer_name, 38, 48);
-    }
-
+    lv_obj_set_pos(icon_bt, 18, 0);
+    label_layer_name = lv_label_create(scr);
+    lv_label_set_text(label_layer_name, default_layout_names[current_layout]);
+    lv_obj_set_style_text_font(label_layer_name, UI_FONT, 0);
+    lv_obj_set_pos(label_layer_name, 0, 20);
     indicator_mouse = lv_label_create(scr);
     lv_label_set_text(indicator_mouse, "M");
     lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0);
-    lv_obj_set_pos(indicator_mouse, 118, 48);
+    lv_obj_set_pos(indicator_mouse, 50, 0);
     lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -211,7 +203,7 @@ static void oled_refresh_all(void)
     oled_update_layer();
     oled_update_connection_icons(true);
 
-    /* Tama sprite canvas */
+    /* Tama */
     if (tama_engine_is_enabled() && lvgl_port_lock(50)) {
         lv_obj_t *scr = lv_scr_act();
         tama_render_create(scr, BOARD_DISPLAY_WIDTH, BOARD_DISPLAY_HEIGHT);
