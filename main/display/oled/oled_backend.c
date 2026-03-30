@@ -52,9 +52,10 @@ LV_FONT_DECLARE(lv_font_montserrat_28);
  *   tama ON   and name ≥ 4 chars → font_14, centred in left zone
  */
 
-/* Status card */
+/* Status bar (inverted: lit fill, dark icons/text)
+ * On this OLED: lv_color_black()=pixel ON (lit), lv_color_white()=pixel OFF (dark) */
 #define OLED_STATUS_H           16
-#define OLED_STATUS_RADIUS      3
+#define OLED_STATUS_RADIUS      0     /* no rounding at screen edge */
 #define OLED_ICON_PATH_X        4
 #define OLED_ICON_BT_X          22
 #define OLED_BT_SLOT_X          42
@@ -118,7 +119,7 @@ static lv_obj_t *make_card(lv_obj_t *parent, int x, int y, int w, int h, int rad
     lv_obj_set_size(card, w, h);
     lv_obj_set_pos(card, x, y);
     lv_obj_set_style_bg_opa(card, LV_OPA_0, 0);
-    lv_obj_set_style_border_color(card, lv_color_white(), 0);
+    lv_obj_set_style_border_color(card, lv_color_black(), 0); /* black = pixel ON = lit */
     lv_obj_set_style_border_width(card, 1, 0);
     lv_obj_set_style_border_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(card, radius, 0);
@@ -155,25 +156,39 @@ static void oled_init_icons(void)
     lv_obj_t *scr = lv_scr_act();
     bool tama_on  = tama_engine_is_enabled();
 
-    /* — Status card (rounded box, full width) — */
-    status_card = make_card(scr, 0, 0, BOARD_DISPLAY_WIDTH, OLED_STATUS_H,
-                            OLED_STATUS_RADIUS);
+    /* — Status bar: lit (inverted) rectangle —
+     * lv_color_black() = pixel ON = lit on this SSD1306 setup */
+    status_card = lv_obj_create(scr);
+    lv_obj_set_size(status_card, BOARD_DISPLAY_WIDTH, OLED_STATUS_H);
+    lv_obj_set_pos(status_card, 0, 0);
+    lv_obj_set_style_bg_color(status_card, lv_color_black(), 0); /* pixel ON = lit */
+    lv_obj_set_style_bg_opa(status_card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(status_card, 0, 0);
+    lv_obj_set_style_pad_all(status_card, 0, 0);
+    lv_obj_set_style_radius(status_card, OLED_STATUS_RADIUS, 0);
+    lv_obj_clear_flag(status_card, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* — Icons: direct screen children, positioned inside the card area — */
+    /* — Icons: white recolor = pixel OFF = dark on lit bar — */
     icon_path = lv_img_create(scr);
     lv_obj_set_pos(icon_path, OLED_ICON_PATH_X, 0);
+    lv_obj_set_style_img_recolor(icon_path, lv_color_white(), 0);
+    lv_obj_set_style_img_recolor_opa(icon_path, LV_OPA_COVER, 0);
 
     icon_bt = lv_img_create(scr);
     lv_obj_set_pos(icon_bt, OLED_ICON_BT_X, 0);
+    lv_obj_set_style_img_recolor(icon_bt, lv_color_white(), 0);
+    lv_obj_set_style_img_recolor_opa(icon_bt, LV_OPA_COVER, 0);
 
     bt_slot_label = lv_label_create(scr);
     lv_obj_set_style_text_font(bt_slot_label, UI_FONT, 0);
+    lv_obj_set_style_text_color(bt_slot_label, lv_color_white(), 0); /* pixel OFF = dark on lit bar */
     lv_label_set_text(bt_slot_label, "");
     lv_obj_set_pos(bt_slot_label, OLED_BT_SLOT_X, OLED_MOUSE_Y);
 
     indicator_mouse = lv_label_create(scr);
     lv_label_set_text(indicator_mouse, "M");
     lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0);
+    lv_obj_set_style_text_color(indicator_mouse, lv_color_white(), 0); /* pixel OFF = dark on lit bar */
     lv_obj_set_pos(indicator_mouse, OLED_MOUSE_X, OLED_MOUSE_Y);
     lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
 
@@ -202,7 +217,7 @@ static void oled_init_icons(void)
     lv_obj_set_style_border_width(kpm_bar, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(kpm_bar, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(kpm_bar, 0, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(kpm_bar, lv_color_white(), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(kpm_bar, lv_color_black(), LV_PART_INDICATOR); /* pixel ON = lit */
     lv_obj_set_style_bg_opa(kpm_bar, LV_OPA_COVER, LV_PART_INDICATOR);
     lv_obj_set_style_radius(kpm_bar, 0, LV_PART_INDICATOR);
 }
