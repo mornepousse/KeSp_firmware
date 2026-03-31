@@ -62,6 +62,8 @@ static void apply_toggle_layer(uint16_t keycode)
     }
 }
 
+static bool is_new_press(uint8_t row, uint8_t col);
+
 /* ── Legacy internal function dispatch ───────────────────────────── */
 
 static bool detect_internal_function(int16_t keycode)
@@ -182,10 +184,10 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
         return grave_esc_resolve(mods);
     }
     if (kc == K_LAYER_LOCK){ layer_lock_toggle(); return 0; }
-    if (kc == K_TAMA_FEED)     { tama_engine_action(TAMA2_ACTION_FEED); return 0; }
-    if (kc == K_TAMA_PLAY)     { tama_engine_action(TAMA2_ACTION_PLAY); return 0; }
-    if (kc == K_TAMA_SLEEP)    { tama_engine_action(TAMA2_ACTION_SLEEP); return 0; }
-    if (kc == K_TAMA_MEDICINE) { tama_engine_action(TAMA2_ACTION_MEDICINE); return 0; }
+    if (kc == K_TAMA_FEED)     { if (is_new_press(row, col)) tama_engine_action(TAMA2_ACTION_FEED); return 0; }
+    if (kc == K_TAMA_PLAY)     { if (is_new_press(row, col)) tama_engine_action(TAMA2_ACTION_PLAY); return 0; }
+    if (kc == K_TAMA_SLEEP)    { if (is_new_press(row, col)) tama_engine_action(TAMA2_ACTION_SLEEP); return 0; }
+    if (kc == K_TAMA_MEDICINE) { if (is_new_press(row, col)) tama_engine_action(TAMA2_ACTION_MEDICINE); return 0; }
     return 0;
 }
 

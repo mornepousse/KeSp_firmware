@@ -74,3 +74,6 @@ void tama_engine_session_end(void);
 
 /* Get critter index for current level (0-19) */
 uint8_t tama_engine_get_critter(void);
+
+/* Get last action performed (returns action + timestamp, or -1 if none recent) */
+int tama_engine_get_last_action(uint32_t *age_ms);

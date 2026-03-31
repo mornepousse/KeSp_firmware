@@ -20,6 +20,8 @@ static bool enabled = true;
 
 static uint32_t keys_since_hunger_tick = 0;
 static uint32_t keys_since_energy_tick = 0;
+static int last_action = -1;
+static uint32_t last_action_ms = 0;
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
@@ -165,6 +167,9 @@ void tama_engine_action(tama2_action_t action)
         break;
     }
     clamp_stats();
+    state_hold_keys = 0; /* hold action state for STATE_HOLD_MIN keypresses */
+    last_action = (int)action;
+    last_action_ms = (uint32_t)(esp_timer_get_time() / 1000);
 }
 
 tama2_state_t tama_engine_get_state(void) { return state; }
@@ -192,6 +197,14 @@ void tama_engine_session_start(void)
 void tama_engine_session_end(void)
 {
     tama_engine_save();
+}
+
+int tama_engine_get_last_action(uint32_t *age_ms)
+{
+    if (last_action < 0) return -1;
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (age_ms) *age_ms = now - last_action_ms;
+    return last_action;
 }
 
 uint8_t tama_engine_get_critter(void)
