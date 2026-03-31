@@ -255,7 +255,8 @@ def test_legacy_coexistence(t: TestRunner):
         t.failed += 1
         print(f'  FAIL  Legacy VERSION? → "{resp}"')
 
-    # Binary after legacy
+    # Binary after legacy — small delay to let serial settle
+    time.sleep(0.5)
     t.expect("PING (after legacy)", 0x04)
 
 # ── Main ─────────────────────────────────────────────────────────
