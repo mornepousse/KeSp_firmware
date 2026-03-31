@@ -24,7 +24,7 @@ static void km_worker_task(void *pvParameters) {
             uint64_t t0 = esp_timer_get_time();
             switch (ev) {
                 case KM_EVENT_DISPLAY_UPDATE:
-                    status_display_update();
+                    status_display_refresh_all();
                     break;
                 case KM_EVENT_BT_TOGGLE:
                     ESP_LOGI(KW_TAG, "Processing KM_EVENT_BT_TOGGLE");
@@ -37,7 +37,7 @@ static void km_worker_task(void *pvParameters) {
                         init_hid_bluetooth();
                         save_bt_state(true);
                     }
-                    status_display_update();
+                    status_display_refresh_all();
                     break;
                 default:
                     break;

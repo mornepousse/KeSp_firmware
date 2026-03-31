@@ -38,6 +38,9 @@ void bt_prev_device(void);
 /* Enter pairing mode (undirected advertising for new device) */
 void bt_start_pairing(void);
 
+/* Check if currently in pairing mode */
+bool hid_bluetooth_is_pairing(void);
+
 /* Disconnect current device */
 void bt_disconnect(void);
 

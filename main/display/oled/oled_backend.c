@@ -52,21 +52,21 @@ LV_FONT_DECLARE(lv_font_montserrat_28);
  *   tama ON   and name ≥ 4 chars → font_14, centred in left zone
  */
 
-/* Status bar (inverted: lit fill, dark icons/text)
+/* Status bar (card: transparent bg, lit border — Layout D)
  * On this OLED: lv_color_black()=pixel ON (lit), lv_color_white()=pixel OFF (dark) */
 #define OLED_STATUS_H           16
-#define OLED_STATUS_RADIUS      0     /* no rounding at screen edge */
+#define OLED_STATUS_RADIUS      4     /* rounded corners — visible on 128px */
 #define OLED_ICON_PATH_X        4
 #define OLED_ICON_BT_X          22
 #define OLED_BT_SLOT_X          42
 #define OLED_MOUSE_X            106   /* right of status card: 128 − 14 − 8 */
 #define OLED_MOUSE_Y            1
 
-/* Tama card (square border around the 32×32 sprite at x=96, y=16) */
+/* Tama card (square border around the 32×32 sprite) */
 #define OLED_TAMA_CARD_X        95
-#define OLED_TAMA_CARD_Y        15
+#define OLED_TAMA_CARD_Y        18    /* 2px gap after status bar border (y=15) */
 #define OLED_TAMA_CARD_W        33
-#define OLED_TAMA_CARD_H        43
+#define OLED_TAMA_CARD_H        39    /* y=18..56 */
 
 /* Content area */
 #define OLED_LAYER_X            0
@@ -90,6 +90,7 @@ LV_FONT_DECLARE(lv_font_montserrat_28);
 
 static int         last_bt_state      = -1;
 static int         last_path_state    = -1;
+static int         last_pairing_state = -1;
 static lv_obj_t   *status_card        = NULL;
 static lv_obj_t   *tama_card          = NULL;
 static lv_obj_t   *icon_bt            = NULL;
@@ -156,39 +157,24 @@ static void oled_init_icons(void)
     lv_obj_t *scr = lv_scr_act();
     bool tama_on  = tama_engine_is_enabled();
 
-    /* — Status bar: lit (inverted) rectangle —
-     * lv_color_black() = pixel ON = lit on this SSD1306 setup */
-    status_card = lv_obj_create(scr);
-    lv_obj_set_size(status_card, BOARD_DISPLAY_WIDTH, OLED_STATUS_H);
-    lv_obj_set_pos(status_card, 0, 0);
-    lv_obj_set_style_bg_color(status_card, lv_color_black(), 0); /* pixel ON = lit */
-    lv_obj_set_style_bg_opa(status_card, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(status_card, 0, 0);
-    lv_obj_set_style_pad_all(status_card, 0, 0);
-    lv_obj_set_style_radius(status_card, OLED_STATUS_RADIUS, 0);
-    lv_obj_clear_flag(status_card, LV_OBJ_FLAG_SCROLLABLE);
+    /* — Status bar: card with rounded lit border, transparent bg (Layout D) — */
+    status_card = make_card(scr, 0, 0, BOARD_DISPLAY_WIDTH, OLED_STATUS_H, OLED_STATUS_RADIUS);
 
-    /* — Icons: white recolor = pixel OFF = dark on lit bar — */
+    /* — Icons: inherit lit text_color from screen theme (no recolor needed) — */
     icon_path = lv_img_create(scr);
     lv_obj_set_pos(icon_path, OLED_ICON_PATH_X, 0);
-    lv_obj_set_style_img_recolor(icon_path, lv_color_white(), 0);
-    lv_obj_set_style_img_recolor_opa(icon_path, LV_OPA_COVER, 0);
 
     icon_bt = lv_img_create(scr);
     lv_obj_set_pos(icon_bt, OLED_ICON_BT_X, 0);
-    lv_obj_set_style_img_recolor(icon_bt, lv_color_white(), 0);
-    lv_obj_set_style_img_recolor_opa(icon_bt, LV_OPA_COVER, 0);
 
     bt_slot_label = lv_label_create(scr);
     lv_obj_set_style_text_font(bt_slot_label, UI_FONT, 0);
-    lv_obj_set_style_text_color(bt_slot_label, lv_color_white(), 0); /* pixel OFF = dark on lit bar */
     lv_label_set_text(bt_slot_label, "");
     lv_obj_set_pos(bt_slot_label, OLED_BT_SLOT_X, OLED_MOUSE_Y);
 
     indicator_mouse = lv_label_create(scr);
     lv_label_set_text(indicator_mouse, "M");
     lv_obj_set_style_text_font(indicator_mouse, UI_FONT, 0);
-    lv_obj_set_style_text_color(indicator_mouse, lv_color_white(), 0); /* pixel OFF = dark on lit bar */
     lv_obj_set_pos(indicator_mouse, OLED_MOUSE_X, OLED_MOUSE_Y);
     lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
 
@@ -237,8 +223,9 @@ static void oled_prepare_ui(bool clear_screen)
         label_layer_name = NULL;
         kpm_bar          = NULL;
         bt_slot_label    = NULL;
-        last_bt_state    = -1;
-        last_path_state  = -1;
+        last_bt_state      = -1;
+        last_path_state    = -1;
+        last_pairing_state = -1;
         bt_blink_visible = true;
         bt_blink_last_tick = xTaskGetTickCount();
         oled_kpm_count   = 0;
@@ -263,6 +250,7 @@ static void oled_update_connection_icons(bool force)
     else                                       bt_state = 2;
 
     int path_state = (keyboard_get_usb_bl_state() == 0) ? 0 : 1;
+    int pairing_state = hid_bluetooth_is_pairing() ? 1 : 0;
 
     bool blink_toggled = false;
     if (bt_state == 2 && !force) {
@@ -274,7 +262,8 @@ static void oled_update_connection_icons(bool force)
         }
     }
 
-    if (!force && bt_state == last_bt_state && path_state == last_path_state && !blink_toggled)
+    if (!force && bt_state == last_bt_state && path_state == last_path_state
+        && pairing_state == last_pairing_state && !blink_toggled)
         return;
 
     if (!lvgl_port_lock(50)) return;
@@ -300,16 +289,20 @@ static void oled_update_connection_icons(bool force)
         }
     }
 
-    /* BT slot number */
+    /* BT slot: always show slot number when BT on, "P" only in true pairing mode.
+     * The blinking icon_bt already indicates "not connected / searching". */
     if (bt_slot_label) {
-        if (bt_state > 0)
+        if (bt_state > 0 && hid_bluetooth_is_pairing())
+            lv_label_set_text(bt_slot_label, "P");
+        else if (bt_state > 0)
             lv_label_set_text_fmt(bt_slot_label, "%d", bt_get_active_slot() + 1);
         else
             lv_label_set_text(bt_slot_label, "");
     }
 
-    last_bt_state   = bt_state;
-    last_path_state = path_state;
+    last_bt_state      = bt_state;
+    last_path_state    = path_state;
+    last_pairing_state = pairing_state;
     lvgl_port_unlock();
 }
 
@@ -413,8 +406,9 @@ static void oled_sleep(void)
         label_layer_name = NULL;
         kpm_bar          = NULL;
         bt_slot_label    = NULL;
-        last_bt_state    = -1;
-        last_path_state  = -1;
+        last_bt_state      = -1;
+        last_path_state    = -1;
+        last_pairing_state = -1;
         tama_render_destroy();
         oled_initialized = false;
         lvgl_port_unlock();

@@ -298,9 +298,12 @@ static void update_connection_status(bool force)
         }
     }
 
-    /* BT slot number */
+    /* BT slot: always show slot number when BT on, "P" only in true pairing mode */
     if (bt_slot_label) {
-        if (bt_state > 0) {
+        if (bt_state > 0 && hid_bluetooth_is_pairing()) {
+            lv_label_set_text(bt_slot_label, "P");
+            lv_obj_clear_flag(bt_slot_label, LV_OBJ_FLAG_HIDDEN);
+        } else if (bt_state > 0) {
             lv_label_set_text_fmt(bt_slot_label, "%d", bt_get_active_slot() + 1);
             lv_obj_clear_flag(bt_slot_label, LV_OBJ_FLAG_HIDDEN);
         } else {

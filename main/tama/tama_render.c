@@ -98,7 +98,7 @@ void tama_render_create(lv_obj_t *parent, uint16_t screen_w, uint16_t screen_h)
 
         container = lv_img_create(parent);
         lv_img_set_src(container, &mono_img_dsc);
-        lv_obj_set_pos(container, 96, 16);
+        lv_obj_set_pos(container, 96, 20); /* centered in content zone, safe from status bar */
     }
 
     /* Stat bars — below sprite (round) or left of sprite (OLED) */
@@ -215,7 +215,7 @@ void tama_render_update(tama2_state_t state, const tama2_stats_t *stats, uint8_t
         /* OLED: copy sprite bits to mono buffer */
         memcpy(mono_buf, frame, TAMA_SPRITE_BYTES);
         lv_img_set_src(container, &mono_img_dsc);
-        lv_obj_set_pos(container, 96, 16 + bounce_offset);
+        lv_obj_set_pos(container, 96, 20 + bounce_offset);
         lv_obj_invalidate(container);
     }
 

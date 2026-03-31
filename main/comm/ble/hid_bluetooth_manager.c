@@ -383,6 +383,8 @@ void bt_start_pairing(void) {
     esp_ble_gap_start_advertising(&hidd_adv_params);
 }
 
+bool hid_bluetooth_is_pairing(void) { return bt_pairing_mode; }
+
 void bt_switch_slot(uint8_t slot) {
     if (slot >= BT_MAX_DEVICES) return;
     if (slot == bt_active_slot && sec_conn) return; /* already on this slot */

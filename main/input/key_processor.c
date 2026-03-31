@@ -153,7 +153,7 @@ static bool is_advanced_keycode(uint16_t kc)
     if (kc <= 0xFF) return false;
     if (kc >= MO_L0 && kc <= TO_L9) return false;
     if (kc >= MACRO_1 && kc <= MACRO_20) return false;
-    if (kc == BT_SWITCH_DEVICE || kc == BT_TOGGLE) return false;
+    if (kc >= K_BT_NEXT && kc <= BT_TOGGLE) return false; /* all BT keycodes: 0x2900..0x2F00 */
     return true;
 }
 
