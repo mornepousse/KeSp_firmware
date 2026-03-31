@@ -99,7 +99,6 @@ static lv_obj_t   *indicator_mouse    = NULL;
 static lv_obj_t   *label_layer_name   = NULL;
 static lv_obj_t   *kpm_bar            = NULL;
 static lv_obj_t   *bt_slot_label      = NULL;
-static lv_obj_t   *tama_action_label  = NULL;
 static TickType_t  last_mouse_activity = 0;
 static bool        bt_blink_visible   = true;
 static TickType_t  bt_blink_last_tick = 0;
@@ -193,15 +192,6 @@ static void oled_init_icons(void)
     lv_obj_set_style_text_align(label_layer_name, LV_TEXT_ALIGN_CENTER, 0);
     apply_layer_style(tama_on, name);
 
-    /* — Tama action label (hidden by default, shown briefly on action) — */
-    if (tama_on) {
-        tama_action_label = lv_label_create(scr);
-        lv_obj_set_style_text_font(tama_action_label, UI_FONT, 0);
-        lv_label_set_text(tama_action_label, "");
-        lv_obj_set_pos(tama_action_label, 0, 46); /* below layer name */
-        lv_obj_add_flag(tama_action_label, LV_OBJ_FLAG_HIDDEN);
-    }
-
     /* — KPM bar (transparent bg, white fill) — */
     int kpm_w = tama_on ? OLED_KPM_BAR_W_TAMA : BOARD_DISPLAY_WIDTH;
     kpm_bar = lv_bar_create(scr);
@@ -233,7 +223,6 @@ static void oled_prepare_ui(bool clear_screen)
         label_layer_name  = NULL;
         kpm_bar           = NULL;
         bt_slot_label     = NULL;
-        tama_action_label = NULL;
         last_bt_state      = -1;
         last_path_state    = -1;
         last_pairing_state = -1;
@@ -389,20 +378,6 @@ static void oled_update(void)
     if (tama_engine_is_enabled())
         tama_render_update(tama_engine_get_state(), tama_engine_get_stats(), tama_engine_get_critter());
 
-    /* Tama action label — show briefly after action */
-    if (tama_action_label) {
-        uint32_t age_ms;
-        int action = tama_engine_get_last_action(&age_ms);
-        if (action >= 0 && age_ms < 2000) {
-            static const char *action_names[] = { "FEED", "PLAY", "SLEEP", "HEAL" };
-            if ((unsigned)action < 4)
-                lv_label_set_text(tama_action_label, action_names[action]);
-            lv_obj_clear_flag(tama_action_label, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(tama_action_label, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-
     lvgl_port_unlock();
 }
 
@@ -431,7 +406,6 @@ static void oled_sleep(void)
         label_layer_name  = NULL;
         kpm_bar           = NULL;
         bt_slot_label     = NULL;
-        tama_action_label = NULL;
         last_bt_state      = -1;
         last_path_state    = -1;
         last_pairing_state = -1;
