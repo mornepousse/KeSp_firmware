@@ -123,6 +123,12 @@ void app_main(void) {
   kase_tinyusb_init();
   init_cdc_commands();
 
+  /* Register binary CDC protocol handlers */
+  {
+    extern void cdc_binary_cmds_init(void);
+    cdc_binary_cmds_init();
+  }
+
   /* Register keyboard-specific CDC commands */
   cdc_keyboard_cmds_init();
   keymap_init_nvs();

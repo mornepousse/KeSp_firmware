@@ -181,6 +181,15 @@ void receive_data(const char *data, uint16_t len)
 		return;
 	}
 
+	/* Try binary protocol first — if first bytes are KS magic, consume them */
+	uint16_t bin_consumed = ks_rx_feed(data, len);
+	if (bin_consumed > 0) {
+		data += bin_consumed;
+		len  -= bin_consumed;
+		if (len == 0) return;
+	}
+
+	/* Legacy text line assembly for remaining bytes */
 	static bool last_was_cr = false;
 	static bool overflowed = false;
 	for (size_t i = 0; i < len; ++i) {
@@ -224,6 +233,9 @@ void cdc_process_commands_task(void *arg)
 			vTaskDelay(pdMS_TO_TICKS(10));
 			continue;
 		}
+		/* Process binary commands first, then text */
+		while (ks_process_one())
+			;
 		while (cdc_cmd_pop(&cmd))
 			parse_and_execute(cmd.line);
 		vTaskDelay(pdMS_TO_TICKS(50));

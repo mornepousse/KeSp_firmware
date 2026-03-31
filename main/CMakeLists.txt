@@ -32,6 +32,8 @@ idf_component_register(
         "comm/cdc/cdc_acm_com.c"
         "comm/cdc/cdc_keyboard_cmds.c"
         "comm/cdc/cdc_ota.c"
+        "comm/cdc/cdc_binary_protocol.c"
+        "comm/cdc/cdc_binary_cmds.c"
         "comm/ble/esp_hidd_prf_api.c"
         "comm/ble/hid_dev.c"
         "comm/ble/hid_device_le_prf.c"

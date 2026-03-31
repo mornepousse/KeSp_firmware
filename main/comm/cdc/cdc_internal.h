@@ -33,6 +33,9 @@ extern volatile bool ota_chunk_ready;
 extern volatile uint32_t ota_last_activity_ms;
 
 void cmd_ota_start(const char *arg);
+
+/* ── Binary protocol (defined in cdc_binary_protocol.c) ──────────── */
+#include "cdc_binary_protocol.h"
 void ota_abort(const char *reason);
 void ota_process_chunk(void);
 void ota_receive_bytes(const char *data, uint16_t len);
