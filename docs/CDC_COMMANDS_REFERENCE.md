@@ -1,4 +1,6 @@
-# KaSe CDC Command Reference
+# KaSe CDC Command Reference (Legacy ASCII)
+
+> **New: Binary protocol available.** See [`CDC_BINARY_PROTOCOL.md`](CDC_BINARY_PROTOCOL.md) for the KS/KR binary frame format with CRC-8 protection. The binary protocol is faster, more robust, and supports all commands listed here. The ASCII protocol below remains fully functional for backward compatibility.
 
 Complete list of all CDC serial commands. Connect to the keyboard's CDC ACM port (ttyACM0) at any baud rate.
 Commands are text lines terminated by `\r\n`. Responses end with `\r\n`.
