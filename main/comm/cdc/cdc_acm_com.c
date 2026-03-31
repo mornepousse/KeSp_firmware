@@ -176,7 +176,7 @@ void trim_spaces(char *str)
 
 void receive_data(const char *data, uint16_t len)
 {
-	if (ota_state == OTA_RECEIVING) {
+	if (ota_state == OTA_RECEIVING && !ota_binary_mode) {
 		ota_receive_bytes(data, len);
 		return;
 	}
@@ -229,7 +229,9 @@ void cdc_process_commands_task(void *arg)
 	cdc_cmd_t cmd;
 	for (;;) {
 		if (ota_state == OTA_RECEIVING) {
-			ota_process_chunk();
+			if (ota_binary_mode)
+				while (ks_process_one()) ; /* dispatch KS frames (OTA_DATA, OTA_ABORT) */
+			ota_process_chunk(); /* legacy chunk write + timeout check */
 			vTaskDelay(pdMS_TO_TICKS(10));
 			continue;
 		}

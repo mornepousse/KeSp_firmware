@@ -16,6 +16,7 @@
 #include "status_display.h"
 #include "version.h"
 #include "esp_app_desc.h"
+#include "esp_system.h"
 
 #if BOARD_HAS_POSITION_MAP
 #include "board_position_map.h"
@@ -750,6 +751,75 @@ static void bin_cmd_layout_json(uint8_t cmd, const uint8_t *p, uint16_t l)
     ks_respond(cmd, KS_STATUS_OK, (const uint8_t *)board_layout_json, jlen);
 }
 
+/* ── OTA ────────────────────────────────────────────────────────── */
+
+/* OTA_START: payload [size:u32 LE] → response OK + [chunk_size:u16 LE] */
+static void bin_cmd_ota_start(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    if (l < 4) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
+    uint32_t size = p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    if (size == 0 || size > 0x200000) { ks_respond_err(cmd, KS_STATUS_ERR_RANGE); return; }
+
+    esp_err_t err = ota_bin_begin(size);
+    if (err != ESP_OK) {
+        ks_respond_err(cmd, KS_STATUS_ERR_BUSY);
+        return;
+    }
+    uint8_t resp[2];
+    pack_u16_le(resp, OTA_CHUNK_SIZE);
+    ks_respond(cmd, KS_STATUS_OK, resp, 2);
+}
+
+/* OTA_DATA: payload = raw firmware chunk → response OK + [received:u32 LE][total:u32 LE] */
+static void bin_cmd_ota_data(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    if (ota_state != OTA_RECEIVING || !ota_binary_mode) {
+        ks_respond_err(cmd, KS_STATUS_ERR_INVALID);
+        return;
+    }
+
+    esp_err_t err = ota_bin_write(p, l);
+    if (err != ESP_OK) {
+        ota_bin_abort();
+        ks_respond_err(cmd, KS_STATUS_ERR_BUSY);
+        return;
+    }
+
+    if (ota_received >= ota_total_size) {
+        /* All data received — finalize */
+        err = ota_bin_finish();
+        if (err != ESP_OK) {
+            ota_bin_abort();
+            ks_respond_err(cmd, KS_STATUS_ERR_BUSY);
+            return;
+        }
+        uint8_t resp[8];
+        pack_u32_le(resp, (uint32_t)ota_received);
+        pack_u32_le(resp + 4, (uint32_t)ota_total_size);
+        ks_respond(cmd, KS_STATUS_OK, resp, 8);
+        ESP_LOGI(TAG_CDC, "Binary OTA complete, rebooting...");
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+    } else {
+        uint8_t resp[8];
+        pack_u32_le(resp, (uint32_t)ota_received);
+        pack_u32_le(resp + 4, (uint32_t)ota_total_size);
+        ks_respond(cmd, KS_STATUS_OK, resp, 8);
+    }
+}
+
+/* OTA_ABORT: cancel in-progress OTA */
+static void bin_cmd_ota_abort(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    (void)p; (void)l;
+    if (ota_state == OTA_RECEIVING && ota_binary_mode) {
+        ota_bin_abort();
+        ks_respond_ok(cmd);
+    } else {
+        ks_respond_err(cmd, KS_STATUS_ERR_INVALID);
+    }
+}
+
 /* ── Command table ──────────────────────────────────────────────── */
 
 static const ks_bin_cmd_entry_t bin_cmd_table[] = {
@@ -811,6 +881,10 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     /* Key Override */
     { KS_CMD_KO_SET,            bin_cmd_ko_set },
     { KS_CMD_KO_LIST,           bin_cmd_ko_list },
+    /* OTA */
+    { KS_CMD_OTA_START,         bin_cmd_ota_start },
+    { KS_CMD_OTA_DATA,          bin_cmd_ota_data },
+    { KS_CMD_OTA_ABORT,         bin_cmd_ota_abort },
 };
 
 void cdc_binary_cmds_init(void)

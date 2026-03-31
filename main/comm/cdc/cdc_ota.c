@@ -5,6 +5,7 @@
 
 /* ── OTA state (shared via cdc_internal.h) ───────────────────────── */
 volatile ota_state_t ota_state = OTA_IDLE;
+volatile bool ota_binary_mode = false;
 static esp_ota_handle_t ota_handle = 0;
 static const esp_partition_t *ota_partition = NULL;
 size_t ota_total_size = 0;
@@ -18,11 +19,59 @@ void ota_abort(const char *reason)
 {
 	esp_ota_abort(ota_handle);
 	ota_state = OTA_IDLE;
+	ota_binary_mode = false;
 	ota_handle = 0;
 	ESP_LOGE(TAG_CDC, "OTA aborted: %s", reason);
 	char msg[64];
 	snprintf(msg, sizeof(msg), "OTA_FAIL %s", reason);
 	cdc_send_line(msg);
+}
+
+/* ── Binary OTA helpers (called from cdc_binary_cmds.c) ──────────── */
+
+esp_err_t ota_bin_begin(uint32_t size)
+{
+	ota_partition = esp_ota_get_next_update_partition(NULL);
+	if (!ota_partition) return ESP_ERR_NOT_FOUND;
+
+	esp_err_t err = esp_ota_begin(ota_partition, size, &ota_handle);
+	if (err != ESP_OK) return err;
+
+	ota_total_size = size;
+	ota_received = 0;
+	ota_buf_pos = 0;
+	ota_chunk_ready = false;
+	ota_binary_mode = true;
+	ota_last_activity_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+	ota_state = OTA_RECEIVING;
+	return ESP_OK;
+}
+
+esp_err_t ota_bin_write(const uint8_t *data, uint16_t len)
+{
+	ota_last_activity_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+	esp_err_t err = esp_ota_write(ota_handle, data, len);
+	if (err == ESP_OK) ota_received += len;
+	return err;
+}
+
+esp_err_t ota_bin_finish(void)
+{
+	esp_err_t err = esp_ota_end(ota_handle);
+	if (err != ESP_OK) return err;
+	err = esp_ota_set_boot_partition(ota_partition);
+	if (err != ESP_OK) return err;
+	ota_state = OTA_IDLE;
+	ota_binary_mode = false;
+	return ESP_OK;
+}
+
+void ota_bin_abort(void)
+{
+	esp_ota_abort(ota_handle);
+	ota_state = OTA_IDLE;
+	ota_binary_mode = false;
+	ota_handle = 0;
 }
 
 void cmd_ota_start(const char *arg)
