@@ -131,6 +131,12 @@ void ks_respond(uint8_t cmd_id, uint8_t status, const uint8_t *payload, uint16_t
 void ks_respond_ok(uint8_t cmd_id);
 void ks_respond_err(uint8_t cmd_id, uint8_t status);
 
+/* Streaming response: for large payloads without full buffering.
+ * Computes CRC incrementally as data is written. */
+void ks_respond_begin(uint8_t cmd_id, uint8_t status, uint16_t total_len);
+void ks_respond_write(const uint8_t *data, uint16_t len);
+void ks_respond_end(void);
+
 /* ── CRC-8 ──────────────────────────────────────────────────────── */
 
 uint8_t ks_crc8(const uint8_t *data, uint16_t len);

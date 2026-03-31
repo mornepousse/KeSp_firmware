@@ -73,6 +73,38 @@ void ks_respond_err(uint8_t cmd_id, uint8_t status)
     ks_respond(cmd_id, status, NULL, 0);
 }
 
+/* ── Streaming response ─────────────────────────────────────────── */
+
+static uint8_t stream_crc;
+
+void ks_respond_begin(uint8_t cmd_id, uint8_t status, uint16_t total_len)
+{
+    uint8_t hdr[6] = {
+        KS_MAGIC_0, KR_MAGIC_1,
+        cmd_id, status,
+        (uint8_t)(total_len & 0xFF), (uint8_t)((total_len >> 8) & 0xFF)
+    };
+    tinyusb_cdcacm_write_queue(CDC_ITF, hdr, 6);
+    stream_crc = 0x00;
+}
+
+void ks_respond_write(const uint8_t *data, uint16_t len)
+{
+    tinyusb_cdcacm_write_queue(CDC_ITF, data, len);
+    /* Update CRC incrementally */
+    for (uint16_t i = 0; i < len; i++) {
+        stream_crc ^= data[i];
+        for (uint8_t bit = 0; bit < 8; bit++)
+            stream_crc = (stream_crc & 0x80) ? (stream_crc << 1) ^ 0x31 : (stream_crc << 1);
+    }
+}
+
+void ks_respond_end(void)
+{
+    tinyusb_cdcacm_write_queue(CDC_ITF, &stream_crc, 1);
+    tinyusb_cdcacm_write_flush(CDC_ITF, 0);
+}
+
 /* ── Receive-side state machine ─────────────────────────────────── */
 
 /* Single-entry binary command buffer (host waits for response before next) */
