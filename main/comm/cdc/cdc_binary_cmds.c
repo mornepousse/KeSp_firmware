@@ -556,6 +556,200 @@ static void bin_cmd_ko_list(uint8_t cmd, const uint8_t *p, uint16_t l)
     ks_respond_end();
 }
 
+/* ── Macros ─────────────────────────────────────────────────────── */
+
+static uint16_t macro_kc_from_index(size_t idx)
+{
+    return (uint16_t)(MACRO_1 + (idx * 0x0100));
+}
+
+/* LIST_MACROS: → [count:u8][{idx:u8, kc:u16 LE, name_len:u8, name[], keys_len:u8, keys[],
+ *                            step_count:u8, steps[]{kc:u8,mod:u8}}...] */
+static void bin_cmd_list_macros(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    (void)p; (void)l;
+    /* Pre-compute total size */
+    uint8_t count = 0;
+    uint16_t total = 1; /* count byte */
+    for (int i = 0; i < MAX_MACROS; i++) {
+        if (macros_list[i].name[0] == '\0') continue;
+        count++;
+        uint8_t nlen = (uint8_t)strlen(macros_list[i].name);
+        uint8_t klen = 0;
+        for (int k = 0; k < 6; k++) if (macros_list[i].keys[k]) klen++;
+        uint8_t scount = 0;
+        for (int s = 0; s < MACRO_MAX_STEPS; s++) if (macros_list[i].steps[s].keycode) scount++;
+        total += 1 + 2 + 1 + nlen + 1 + klen + 1 + scount * 2; /* idx+kc+nlen+name+klen+keys+scount+steps */
+    }
+
+    ks_respond_begin(cmd, KS_STATUS_OK, total);
+    ks_respond_write(&count, 1);
+
+    for (int i = 0; i < MAX_MACROS; i++) {
+        if (macros_list[i].name[0] == '\0') continue;
+        uint8_t idx = (uint8_t)i;
+        uint16_t kc = macro_kc_from_index(i);
+        uint8_t kc_bytes[2]; pack_u16_le(kc_bytes, kc);
+        uint8_t nlen = (uint8_t)strlen(macros_list[i].name);
+        ks_respond_write(&idx, 1);
+        ks_respond_write(kc_bytes, 2);
+        ks_respond_write(&nlen, 1);
+        ks_respond_write((const uint8_t *)macros_list[i].name, nlen);
+
+        /* Legacy keys */
+        uint8_t klen = 0;
+        uint8_t keys_compact[6];
+        for (int k = 0; k < 6; k++)
+            if (macros_list[i].keys[k]) keys_compact[klen++] = macros_list[i].keys[k];
+        ks_respond_write(&klen, 1);
+        if (klen) ks_respond_write(keys_compact, klen);
+
+        /* Sequence steps */
+        uint8_t scount = 0;
+        for (int s = 0; s < MACRO_MAX_STEPS; s++)
+            if (macros_list[i].steps[s].keycode) scount++;
+        ks_respond_write(&scount, 1);
+        for (int s = 0; s < MACRO_MAX_STEPS && macros_list[i].steps[s].keycode; s++) {
+            uint8_t step[2] = { macros_list[i].steps[s].keycode, macros_list[i].steps[s].modifier };
+            ks_respond_write(step, 2);
+        }
+    }
+    ks_respond_end();
+}
+
+/* MACRO_ADD: payload [slot:u8][name_len:u8][name...][keys: 6 bytes] */
+static void bin_cmd_macro_add(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    if (l < 9) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; } /* min: slot+nlen+1char+6keys */
+    uint8_t slot = p[0];
+    if (slot >= MAX_MACROS) { ks_respond_err(cmd, KS_STATUS_ERR_RANGE); return; }
+    uint8_t nlen = p[1];
+    if (l < (uint16_t)(2 + nlen + 6)) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
+
+    if (nlen >= MAX_MACRO_NAME_LENGTH) nlen = MAX_MACRO_NAME_LENGTH - 1;
+    memcpy(macros_list[slot].name, p + 2, nlen);
+    macros_list[slot].name[nlen] = '\0';
+    memcpy(macros_list[slot].keys, p + 2 + nlen, 6);
+    memset(macros_list[slot].steps, 0, sizeof(macros_list[slot].steps));
+    macros_list[slot].key_definition = macro_kc_from_index(slot);
+    if ((size_t)(slot + 1) > macros_count) macros_count = slot + 1;
+    save_macros(macros_list, macros_count);
+    ks_respond_ok(cmd);
+}
+
+/* MACRO_ADD_SEQ: payload [slot:u8][name_len:u8][name...][step_count:u8][steps: count*2 (kc,mod)] */
+static void bin_cmd_macro_add_seq(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    if (l < 4) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
+    uint8_t slot = p[0];
+    if (slot >= MAX_MACROS) { ks_respond_err(cmd, KS_STATUS_ERR_RANGE); return; }
+    uint8_t nlen = p[1];
+    if (l < (uint16_t)(2 + nlen + 1)) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
+
+    uint8_t step_count = p[2 + nlen];
+    if (step_count > MACRO_MAX_STEPS) step_count = MACRO_MAX_STEPS;
+    if (l < (uint16_t)(2 + nlen + 1 + step_count * 2)) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
+
+    if (nlen >= MAX_MACRO_NAME_LENGTH) nlen = MAX_MACRO_NAME_LENGTH - 1;
+    memcpy(macros_list[slot].name, p + 2, nlen);
+    macros_list[slot].name[nlen] = '\0';
+    memset(macros_list[slot].keys, 0, sizeof(macros_list[slot].keys));
+    memset(macros_list[slot].steps, 0, sizeof(macros_list[slot].steps));
+
+    const uint8_t *steps_data = p + 2 + nlen + 1;
+    for (uint8_t i = 0; i < step_count; i++) {
+        macros_list[slot].steps[i].keycode = steps_data[i * 2];
+        macros_list[slot].steps[i].modifier = steps_data[i * 2 + 1];
+    }
+
+    macros_list[slot].key_definition = macro_kc_from_index(slot);
+    if ((size_t)(slot + 1) > macros_count) macros_count = slot + 1;
+    save_macros(macros_list, macros_count);
+    ks_respond_ok(cmd);
+}
+
+/* MACRO_DELETE: payload [slot:u8] */
+static void bin_cmd_macro_delete(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    if (l < 1) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
+    uint8_t slot = p[0];
+    if (slot >= MAX_MACROS) { ks_respond_err(cmd, KS_STATUS_ERR_RANGE); return; }
+    macros_list[slot].name[0] = '\0';
+    memset(macros_list[slot].keys, 0, sizeof(macros_list[slot].keys));
+    memset(macros_list[slot].steps, 0, sizeof(macros_list[slot].steps));
+    macros_list[slot].key_definition = macro_kc_from_index(slot);
+    recalc_macros_count();
+    save_macros(macros_list, macros_count);
+    ks_respond_ok(cmd);
+}
+
+/* ── Bigrams ────────────────────────────────────────────────────── */
+
+/* BIGRAMS_BIN: → [module_id:u8][num_keys:u8][total:u32 LE][max:u16 LE][n_entries:u16 LE]
+ *               [{prev:u8, curr:u8, count:u16 LE}...] (top 256, sorted desc) */
+static void bin_cmd_bigrams_bin(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    (void)p; (void)l;
+    typedef struct { uint8_t prev; uint8_t curr; uint16_t count; } bg_t;
+    #define BG_MAX 256
+    bg_t *entries = malloc(BG_MAX * sizeof(bg_t));
+    if (!entries) { ks_respond_err(cmd, KS_STATUS_ERR_BUSY); return; }
+
+    uint16_t n = 0;
+    uint16_t min_in = 0;
+    for (int i = 0; i < NUM_KEYS; i++) {
+        for (int j = 0; j < NUM_KEYS; j++) {
+            if (bigram_stats[i][j] == 0) continue;
+            if (n < BG_MAX) {
+                entries[n].prev = (uint8_t)i; entries[n].curr = (uint8_t)j;
+                entries[n].count = bigram_stats[i][j]; n++;
+                if (bigram_stats[i][j] < min_in || min_in == 0) min_in = bigram_stats[i][j];
+            } else if (bigram_stats[i][j] > min_in) {
+                uint16_t mi = 0;
+                for (uint16_t k = 1; k < BG_MAX; k++) if (entries[k].count < entries[mi].count) mi = k;
+                entries[mi].prev = (uint8_t)i; entries[mi].curr = (uint8_t)j;
+                entries[mi].count = bigram_stats[i][j];
+                min_in = entries[0].count;
+                for (uint16_t k = 1; k < BG_MAX; k++) if (entries[k].count < min_in) min_in = entries[k].count;
+            }
+        }
+    }
+    /* Sort descending */
+    for (uint16_t i = 1; i < n; i++) {
+        bg_t tmp = entries[i]; int j = i - 1;
+        while (j >= 0 && entries[j].count < tmp.count) { entries[j+1] = entries[j]; j--; }
+        entries[j+1] = tmp;
+    }
+
+    uint16_t total_payload = 8 + n * 4;
+    ks_respond_begin(cmd, KS_STATUS_OK, total_payload);
+    uint8_t hdr[8];
+    hdr[0] = MODULE_ID;
+    hdr[1] = (uint8_t)NUM_KEYS;
+    pack_u32_le(hdr + 2, bigram_total);
+    pack_u16_le(hdr + 6, get_bigram_stats_max());
+    ks_respond_write(hdr, 8);
+
+    for (uint16_t i = 0; i < n; i++) {
+        uint8_t e[4] = { entries[i].prev, entries[i].curr, 0, 0 };
+        pack_u16_le(e + 2, entries[i].count);
+        ks_respond_write(e, 4);
+    }
+    ks_respond_end();
+    free(entries);
+    #undef BG_MAX
+}
+
+/* ── Layout JSON ────────────────────────────────────────────────── */
+
+static void bin_cmd_layout_json(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    (void)p; (void)l;
+    extern const char board_layout_json[];
+    uint16_t jlen = (uint16_t)strlen(board_layout_json);
+    ks_respond(cmd, KS_STATUS_OK, (const uint8_t *)board_layout_json, jlen);
+}
+
 /* ── Command table ──────────────────────────────────────────────── */
 
 static const ks_bin_cmd_entry_t bin_cmd_table[] = {
@@ -574,6 +768,7 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     /* Layout */
     { KS_CMD_LIST_LAYOUTS,      bin_cmd_list_layouts },
     { KS_CMD_SET_LAYOUT_NAME,   bin_cmd_set_layout_name },
+    { KS_CMD_GET_LAYOUT_JSON,   bin_cmd_layout_json },
     /* Bluetooth */
     { KS_CMD_BT_QUERY,          bin_cmd_bt_query },
     { KS_CMD_BT_SWITCH,         bin_cmd_bt_switch },
@@ -594,9 +789,15 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     { KS_CMD_AUTOSHIFT_TOGGLE,  bin_cmd_autoshift },
     { KS_CMD_WPM_QUERY,         bin_cmd_wpm },
     { KS_CMD_TRILAYER_SET,      bin_cmd_trilayer },
+    /* Macros */
+    { KS_CMD_LIST_MACROS,       bin_cmd_list_macros },
+    { KS_CMD_MACRO_ADD,         bin_cmd_macro_add },
+    { KS_CMD_MACRO_ADD_SEQ,     bin_cmd_macro_add_seq },
+    { KS_CMD_MACRO_DELETE,      bin_cmd_macro_delete },
     /* Stats */
     { KS_CMD_KEYSTATS_BIN,      bin_cmd_keystats_bin },
     { KS_CMD_KEYSTATS_RESET,    bin_cmd_keystats_reset },
+    { KS_CMD_BIGRAMS_BIN,       bin_cmd_bigrams_bin },
     { KS_CMD_BIGRAMS_RESET,     bin_cmd_bigrams_reset },
     /* Tap Dance */
     { KS_CMD_TD_SET,            bin_cmd_td_set },
