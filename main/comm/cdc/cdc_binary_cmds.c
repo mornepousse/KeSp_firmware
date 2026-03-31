@@ -748,7 +748,18 @@ static void bin_cmd_layout_json(uint8_t cmd, const uint8_t *p, uint16_t l)
     (void)p; (void)l;
     extern const char board_layout_json[];
     uint16_t jlen = (uint16_t)strlen(board_layout_json);
-    ks_respond(cmd, KS_STATUS_OK, (const uint8_t *)board_layout_json, jlen);
+    const uint8_t *data = (const uint8_t *)board_layout_json;
+
+    /* Stream in 256-byte chunks to avoid USB buffer overflow */
+    ks_respond_begin(cmd, KS_STATUS_OK, jlen);
+    while (jlen > 0) {
+        uint16_t chunk = (jlen > 256) ? 256 : jlen;
+        ks_respond_write(data, chunk);
+        tinyusb_cdcacm_write_flush(CDC_ITF, pdMS_TO_TICKS(100));
+        data += chunk;
+        jlen -= chunk;
+    }
+    ks_respond_end();
 }
 
 /* ── OTA ────────────────────────────────────────────────────────── */
