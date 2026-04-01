@@ -1,5 +1,6 @@
 /.cache
 /build
+/build_v2d
 /build.clang
 /test/build
 /managed_components
