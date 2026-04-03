@@ -231,7 +231,14 @@ void build_keycode_report(void)
     /* Step 1: detect releases and resolve pending tap/holds */
     detect_releases();
 
-    /* Step 2: determine active layer */
+    /* Step 2: first pass — resolve MO layers so active_layer is correct for all keys */
+    for (uint8_t i = 0; i < 6; i++) {
+        if (current_press_col[i] == INVALID_KEY_POS) continue;
+        uint16_t kc = keymaps[current_layout][current_press_row[i]][current_press_col[i]];
+        apply_momentary_layer(kc, i);
+    }
+
+    /* Step 3: determine active layer */
     uint8_t active_layer = current_layout;
     int8_t lt_layer = tap_hold_get_active_layer();
     if (lt_layer >= 0) active_layer = (uint8_t)lt_layer;
@@ -241,7 +248,7 @@ void build_keycode_report(void)
     uint8_t th_mods = tap_hold_get_active_mods();
     bool has_normal_press = false;
 
-    /* Step 3: process each pressed key */
+    /* Step 4: process each pressed key */
     for (uint8_t i = 0; i < 6; i++) {
         if (current_press_col[i] == INVALID_KEY_POS) {
             keycodes[i] = 0;
@@ -281,8 +288,7 @@ void build_keycode_report(void)
             continue;
         }
 
-        /* Legacy: MO layers, TO layers, macros, BT, internal functions */
-        apply_momentary_layer(kc, i);
+        /* Legacy: macros, BT, internal functions (MO/TO already resolved in first pass) */
         detect_internal_function(kc);
         expand_macro(kc);
 

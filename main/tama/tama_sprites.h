@@ -1412,25 +1412,30 @@ static const uint8_t sprite_zeta_idle[128] = {
 /* Critter lookup: [index] = { main_sprite, idle_sprite, name } */
 typedef struct { const uint8_t *main_frame; const uint8_t *idle_frame; const char *name; } tama_critter_t;
 
+/* Ordered by OpenCritter evolution stages:
+   0     = egg
+   1-3   = babies  (goob, wibbur, xorby)
+   4-9   = teens   (snek, shansy, moops, hwooty, flip, lugerd)
+   10-19 = adults  (culu, shent, slorp, zeta, butters, tribbur, corine, pyre, rajur, crosh) */
 static const tama_critter_t tama_critters[TAMA_CRITTER_COUNT] = {
-    { sprite_butters_main, sprite_butters_idle, "butters" },
-    { sprite_corine_main, sprite_corine_idle, "corine" },
-    { sprite_crosh_main, sprite_crosh_idle, "crosh" },
-    { sprite_culu_main, sprite_culu_idle, "culu" },
-    { sprite_egg_main, sprite_egg_idle, "egg" },
-    { sprite_flip_main, sprite_flip_idle, "flip" },
-    { sprite_goob_main, sprite_goob_idle, "goob" },
-    { sprite_hwooty_main, sprite_hwooty_idle, "hwooty" },
-    { sprite_lugerd_main, sprite_lugerd_idle, "lugerd" },
-    { sprite_moops_main, sprite_moops_idle, "moops" },
-    { sprite_pyre_main, sprite_pyre_idle, "pyre" },
-    { sprite_rajur_main, sprite_rajur_idle, "rajur" },
-    { sprite_shansy_main, sprite_shansy_idle, "shansy" },
-    { sprite_shent_main, sprite_shent_idle, "shent" },
-    { sprite_slorp_main, sprite_slorp_idle, "slorp" },
-    { sprite_snek_main, sprite_snek_idle, "snek" },
-    { sprite_tribbur_main, sprite_tribbur_idle, "tribbur" },
-    { sprite_wibbur_main, sprite_wibbur_idle, "wibbur" },
-    { sprite_xorby_main, sprite_xorby_idle, "xorby" },
-    { sprite_zeta_main, sprite_zeta_idle, "zeta" },
+    /* 0  Egg   */ { sprite_egg_main,     sprite_egg_idle,     "egg" },
+    /* 1  Baby  */ { sprite_goob_main,    sprite_goob_idle,    "goob" },
+    /* 2  Baby  */ { sprite_wibbur_main,  sprite_wibbur_idle,  "wibbur" },
+    /* 3  Baby  */ { sprite_xorby_main,   sprite_xorby_idle,   "xorby" },
+    /* 4  Teen  */ { sprite_snek_main,    sprite_snek_idle,    "snek" },
+    /* 5  Teen  */ { sprite_shansy_main,  sprite_shansy_idle,  "shansy" },
+    /* 6  Teen  */ { sprite_moops_main,   sprite_moops_idle,   "moops" },
+    /* 7  Teen  */ { sprite_hwooty_main,  sprite_hwooty_idle,  "hwooty" },
+    /* 8  Teen  */ { sprite_flip_main,    sprite_flip_idle,    "flip" },
+    /* 9  Teen  */ { sprite_lugerd_main,  sprite_lugerd_idle,  "lugerd" },
+    /* 10 Adult */ { sprite_culu_main,    sprite_culu_idle,    "culu" },
+    /* 11 Adult */ { sprite_shent_main,   sprite_shent_idle,   "shent" },
+    /* 12 Adult */ { sprite_slorp_main,   sprite_slorp_idle,   "slorp" },
+    /* 13 Adult */ { sprite_zeta_main,    sprite_zeta_idle,    "zeta" },
+    /* 14 Adult */ { sprite_butters_main, sprite_butters_idle, "butters" },
+    /* 15 Adult */ { sprite_tribbur_main, sprite_tribbur_idle, "tribbur" },
+    /* 16 Adult */ { sprite_corine_main,  sprite_corine_idle,  "corine" },
+    /* 17 Adult */ { sprite_pyre_main,    sprite_pyre_idle,    "pyre" },
+    /* 18 Adult */ { sprite_rajur_main,   sprite_rajur_idle,   "rajur" },
+    /* 19 Adult */ { sprite_crosh_main,   sprite_crosh_idle,   "crosh" },
 };

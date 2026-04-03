@@ -12,14 +12,16 @@ static tama2_state_t state = TAMA2_IDLE;
 static bool enabled = true;
 
 /* Keys between stat decay ticks */
-#define HUNGER_DECAY_KEYS   500   /* lose 10 hunger every 500 keys */
-#define ENERGY_DECAY_KEYS   800   /* lose 10 energy every 800 keys */
-#define XP_PER_1000_KEYS    100   /* gain 100 XP per 1000 keys */
-#define XP_PER_LEVEL        500   /* XP needed to level up */
+#define HUNGER_DECAY_KEYS    500   /* lose 10 hunger every 500 keys */
+#define ENERGY_DECAY_KEYS    800   /* lose 10 energy every 800 keys */
+#define HAPPINESS_DECAY_KEYS 600   /* lose 10 happiness every 600 keys */
+#define XP_PER_1000_KEYS     50   /* gain 50 XP per 1000 keys */
+#define XP_BASE_PER_LEVEL   500   /* XP for level 0→1 */
 #define MAX_LEVEL            19   /* 20 critters (0-19) */
 
 static uint32_t keys_since_hunger_tick = 0;
 static uint32_t keys_since_energy_tick = 0;
+static uint32_t keys_since_happiness_tick = 0;
 static int last_action = -1;
 static uint32_t last_action_ms = 0;
 
@@ -57,13 +59,21 @@ static void update_state(uint32_t kpm)
     }
 }
 
+/* XP needed scales with level: 500, 750, 1000, ... (+250 per level) */
+static uint16_t xp_for_level(uint16_t level)
+{
+    return XP_BASE_PER_LEVEL + level * 250;
+}
+
 static void check_level_up(void)
 {
-    while (stats.xp >= XP_PER_LEVEL && stats.level < MAX_LEVEL) {
-        stats.xp -= XP_PER_LEVEL;
+    uint16_t needed = xp_for_level(stats.level);
+    while (stats.xp >= needed && stats.level < MAX_LEVEL) {
+        stats.xp -= needed;
         stats.level++;
         state = TAMA2_CELEBRATING;
-        ESP_LOGI(TAG, "Level up! Now level %d", stats.level);
+        ESP_LOGI(TAG, "Level up! Now level %d (next: %d XP)", stats.level, xp_for_level(stats.level));
+        needed = xp_for_level(stats.level);
     }
 }
 
@@ -123,11 +133,19 @@ void tama_engine_keypress(uint32_t current_kpm)
             stats.energy = 0;
     }
 
-    /* Happiness boost from KPM */
-    if (current_kpm > 100 && stats.happiness < TAMA2_STAT_MAX)
-        stats.happiness += 1;
-    else if (current_kpm < 20 && stats.happiness > 0)
-        stats.happiness -= 1;
+    /* Happiness decay (same tick system as hunger/energy) */
+    keys_since_happiness_tick++;
+    if (keys_since_happiness_tick >= HAPPINESS_DECAY_KEYS) {
+        keys_since_happiness_tick = 0;
+        if (stats.happiness > 10)
+            stats.happiness -= 10;
+        else
+            stats.happiness = 0;
+    }
+
+    /* Happiness boost from fast typing */
+    if (current_kpm > 80 && stats.happiness < TAMA2_STAT_MAX)
+        stats.happiness += 2;
 
     /* XP gain */
     if ((stats.total_keys % 1000) == 0) {
