@@ -55,7 +55,7 @@ const char board_layout_json[] =
         "]}},"
 
         /* Col 3 — 10° */
-        "{\"Line\":{\"Margin\":\"10,5,0,0\","
+        "{\"Line\":{\"Margin\":\"15,5,0,0\","
           "\"RenderTransform\":{\"RotateTransform\":{\"Angle\":10}},"
           "\"Children\":["
             "{\"Keycap\":{\"Column\":3,\"Row\":0}},"
@@ -65,7 +65,7 @@ const char board_layout_json[] =
         "]}},"
 
         /* Col 4 — 10° */
-        "{\"Line\":{\"Margin\":\"0,25,0,0\","
+        "{\"Line\":{\"Margin\":\"5,25,0,0\","
           "\"RenderTransform\":{\"RotateTransform\":{\"Angle\":10}},"
           "\"Children\":["
             "{\"Keycap\":{\"Column\":4,\"Row\":0}},"
@@ -92,12 +92,12 @@ const char board_layout_json[] =
       "]}},"  /* end left main columns Line */
 
       /* ── Left thumb cluster ── */
-      "{\"Keycap\":{\"Column\":2,\"Row\":4,\"Width\":60,\"Margin\":\"110,228,0,0\"}},"
+      "{\"Keycap\":{\"Column\":2,\"Row\":4,\"Width\":60,\"Margin\":\"110,235,0,0\"}},"
       "{\"Keycap\":{\"Column\":3,\"Row\":4,"
-        "\"Margin\":\"174,225,0,0\","
+        "\"Margin\":\"174,230,0,0\","
         "\"RenderTransform\":{\"RotateTransform\":{\"Angle\":10}}}},"
       "{\"Keycap\":{\"Column\":4,\"Row\":4,"
-        "\"Margin\":\"228,240,0,0\","
+        "\"Margin\":\"235,245,0,0\","
         "\"RenderTransform\":{\"RotateTransform\":{\"Angle\":20}}}},"
       "{\"Keycap\":{\"Column\":5,\"Row\":4,"
         "\"Margin\":\"280,270,0,0\","
@@ -111,11 +111,11 @@ const char board_layout_json[] =
     /* ═══════════════════════════════════════════════════════════ */
     /*                       RIGHT HALF                           */
     /* ═══════════════════════════════════════════════════════════ */
-    "{\"Group\":{\"Margin\":\"420,0,0,0\",\"HorizontalAlignment\":\"Right\",\"Children\":["
+    "{\"Group\":{\"Margin\":\"20,0,0,0\",\"HorizontalAlignment\":\"Right\",\"Children\":["
 
       /* Inner thumb pair — -40° */
       "{\"Line\":{\"Orientation\":\"Horizontal\","
-        "\"Margin\":\"0,290,0,0\","
+        "\"Margin\":\"0,305,0,0\","
         "\"RenderTransform\":{\"RotateTransform\":{\"Angle\":-40}},"
         "\"Children\":["
           "{\"Keycap\":{\"Column\":6,\"Row\":3}},"
@@ -129,7 +129,7 @@ const char board_layout_json[] =
       "{\"Keycap\":{\"Column\":9,\"Row\":4,"
         "\"Margin\":\"145,230,0,0\","
         "\"RenderTransform\":{\"RotateTransform\":{\"Angle\":-10}}}},"
-      "{\"Keycap\":{\"Column\":10,\"Row\":4,\"Width\":60,\"Margin\":\"200,228,0,0\"}},"
+      "{\"Keycap\":{\"Column\":10,\"Row\":4,\"Width\":60,\"Margin\":\"200,235,0,0\"}},"
 
       /* ── Right main key columns ── */
       "{\"Line\":{\"Orientation\":\"Horizontal\",\"Children\":["
@@ -160,7 +160,7 @@ const char board_layout_json[] =
         "]}},"
 
         /* Col 9 — -10° */
-        "{\"Line\":{\"Margin\":\"0,5,10,0\","
+        "{\"Line\":{\"Margin\":\"0,5,0,0\","
           "\"RenderTransform\":{\"RotateTransform\":{\"Angle\":-10}},"
           "\"Children\":["
             "{\"Keycap\":{\"Column\":9,\"Row\":0}},"
@@ -170,7 +170,7 @@ const char board_layout_json[] =
         "]}},"
 
         /* Col 10 — -5° */
-        "{\"Line\":{\"Margin\":\"0,25,8,0\","
+        "{\"Line\":{\"Margin\":\"5,20,0,0\","
           "\"RenderTransform\":{\"RotateTransform\":{\"Angle\":-5}},"
           "\"Children\":["
             "{\"Keycap\":{\"Column\":10,\"Row\":0}},"
@@ -180,7 +180,8 @@ const char board_layout_json[] =
         "]}},"
 
         /* Col 11 — no rotation */
-        "{\"Line\":{\"Children\":["
+        "{\"Line\":{\"Margin\":\"10,0,0,0\","
+          "\"Children\":["
           "{\"Keycap\":{\"Column\":11,\"Row\":4}},"
           "{\"Keycap\":{\"Column\":11,\"Row\":0}},"
           "{\"Keycap\":{\"Column\":11,\"Row\":1}},"

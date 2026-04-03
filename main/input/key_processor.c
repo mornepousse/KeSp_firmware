@@ -315,6 +315,17 @@ void build_keycode_report(void)
                     continue;
                 }
 
+                /* Combo deferral: hold back combo candidate keys */
+                if (is_new_press(row, col) && combo_should_defer(row, col)) {
+                    combo_defer_key(row, col, (uint8_t)kc);
+                    extra_keycodes[i] = kc; /* track as held, not in HID report */
+                    continue;
+                }
+                if (combo_is_suppressed(row, col)) {
+                    extra_keycodes[i] = kc; /* deferred or active combo, don't emit */
+                    continue;
+                }
+
                 keycodes[i] = kc;
                 has_normal_press = true;
             }
@@ -366,14 +377,26 @@ void build_keycode_report(void)
         }
     }
 
-    /* Step 9: check combos */
+    /* Step 9: check combos (with deferral) */
     combo_process(current_press_row, current_press_col);
     {
-        uint8_t combo_kc;
-        while ((combo_kc = combo_consume()) != 0) {
+        /* Inject combo results */
+        uint8_t combo_kc, r1, c1, r2, c2;
+        while ((combo_kc = combo_consume(&r1, &c1, &r2, &c2)) != 0) {
             for (uint8_t i = 0; i < 6; i++) {
                 if (keycodes[i] == 0) {
                     keycodes[i] = combo_kc;
+                    has_normal_press = true;
+                    break;
+                }
+            }
+        }
+        /* Inject expired deferred keys (no combo matched within timeout) */
+        uint8_t exp_kc;
+        while ((exp_kc = combo_consume_expired()) != 0) {
+            for (uint8_t i = 0; i < 6; i++) {
+                if (keycodes[i] == 0) {
+                    keycodes[i] = exp_kc;
                     has_normal_press = true;
                     break;
                 }
