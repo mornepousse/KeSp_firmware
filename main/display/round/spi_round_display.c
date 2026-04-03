@@ -106,14 +106,14 @@ bool spi_display_init(const display_hw_config_t *cfg)
     };
     lvgl_port_init(&lvgl_cfg);
 
-    /* Half-screen buffer: 2 flushes per frame instead of 6 */
-    uint32_t buf_size = cfg->width * 120;
+    /* Quarter-screen buffer: saves RAM for BLE stack */
+    uint32_t buf_size = cfg->width * 60;
 
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = io_handle,
         .panel_handle = panel_handle,
         .buffer_size = buf_size,
-        .double_buffer = true,
+        .double_buffer = false,
         .hres = cfg->width,
         .vres = cfg->height,
         .monochrome = false,

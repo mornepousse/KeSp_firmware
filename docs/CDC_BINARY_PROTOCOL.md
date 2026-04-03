@@ -239,6 +239,11 @@ Configure un tap dance.
 - Request: `[index:u8][a1:u8][a2:u8][a3:u8][a4:u8]`
 - Response: OK
 
+#### TD_DELETE (0x52)
+Supprime un tap dance.
+- Request: `[index:u8]`
+- Response: OK
+
 ---
 
 ### Combos (0x60–0x6F)
@@ -254,6 +259,11 @@ Configure un combo.
 - Response: OK
 - Note: positions en coordonnees V1 internes
 
+#### COMBO_DELETE (0x62)
+Supprime un combo.
+- Request: `[index:u8]`
+- Response: OK
+
 ---
 
 ### Leader Key (0x70–0x7F)
@@ -268,6 +278,11 @@ Configure une sequence leader.
 - Request: `[index:u8][seq_len:u8][seq...][result:u8][result_mod:u8]`
 - Response: OK
 - La sequence est une suite de HID keycodes (max 4), result_mod = modifier mask
+
+#### LEADER_DELETE (0x72)
+Supprime une sequence leader.
+- Request: `[index:u8]`
+- Response: OK
 
 ---
 
@@ -324,12 +339,17 @@ Liste les key overrides.
 - Request: payload vide
 - Response: `[count:u8][{idx:u8, trigger_key:u8, trigger_mod:u8, result_key:u8, result_mod:u8}...]`
 
-#### WPM_QUERY (0x93)
+#### KO_DELETE (0x93)
+Supprime un key override.
+- Request: `[index:u8]`
+- Response: OK
+
+#### WPM_QUERY (0x94)
 Mots par minute actuels.
 - Request: payload vide
 - Response: `[wpm:u16 LE]`
 
-#### TRILAYER_SET (0x94)
+#### TRILAYER_SET (0x95)
 Configure le tri-layer.
 - Request: `[layer1:u8][layer2:u8][result:u8]`
 - Response: OK

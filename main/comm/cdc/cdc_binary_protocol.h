@@ -61,14 +61,17 @@ typedef enum {
     /* Tap Dance (0x50-0x5F) */
     KS_CMD_TD_SET           = 0x50,
     KS_CMD_TD_LIST          = 0x51,
+    KS_CMD_TD_DELETE        = 0x52,
 
     /* Combos (0x60-0x6F) */
     KS_CMD_COMBO_SET        = 0x60,
     KS_CMD_COMBO_LIST       = 0x61,
+    KS_CMD_COMBO_DELETE     = 0x62,
 
     /* Leader (0x70-0x7F) */
     KS_CMD_LEADER_SET       = 0x70,
     KS_CMD_LEADER_LIST      = 0x71,
+    KS_CMD_LEADER_DELETE    = 0x72,
 
     /* Bluetooth (0x80-0x8F) */
     KS_CMD_BT_QUERY         = 0x80,
@@ -82,8 +85,9 @@ typedef enum {
     KS_CMD_AUTOSHIFT_TOGGLE = 0x90,
     KS_CMD_KO_SET           = 0x91,
     KS_CMD_KO_LIST          = 0x92,
-    KS_CMD_WPM_QUERY        = 0x93,
-    KS_CMD_TRILAYER_SET     = 0x94,
+    KS_CMD_KO_DELETE        = 0x93,
+    KS_CMD_WPM_QUERY        = 0x94,
+    KS_CMD_TRILAYER_SET     = 0x95,
 
     /* Tamagotchi (0xA0-0xAF) */
     KS_CMD_TAMA_QUERY       = 0xA0,

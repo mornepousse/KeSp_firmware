@@ -34,8 +34,17 @@ esp_err_t ota_bin_begin(uint32_t size)
 	ota_partition = esp_ota_get_next_update_partition(NULL);
 	if (!ota_partition) return ESP_ERR_NOT_FOUND;
 
+	/* Cancel any previous incomplete OTA */
+	if (ota_handle != 0) {
+		esp_ota_abort(ota_handle);
+		ota_handle = 0;
+	}
+
 	esp_err_t err = esp_ota_begin(ota_partition, size, &ota_handle);
-	if (err != ESP_OK) return err;
+	if (err != ESP_OK) {
+		ESP_LOGE(TAG_CDC, "OTA bin begin failed: %s", esp_err_to_name(err));
+		return err;
+	}
 
 	ota_total_size = size;
 	ota_received = 0;
@@ -92,10 +101,18 @@ void cmd_ota_start(const char *arg)
 		return;
 	}
 
+	/* Cancel any previous incomplete OTA */
+	if (ota_handle != 0) {
+		esp_ota_abort(ota_handle);
+		ota_handle = 0;
+	}
+
 	esp_err_t err = esp_ota_begin(ota_partition, size, &ota_handle);
 	if (err != ESP_OK) {
 		ESP_LOGE(TAG_CDC, "OTA begin failed: %s", esp_err_to_name(err));
-		cdc_send_line("OTA_ERROR begin failed");
+		char err_msg[64];
+		snprintf(err_msg, sizeof(err_msg), "OTA_ERROR begin failed: %s", esp_err_to_name(err));
+		cdc_send_line(err_msg);
 		return;
 	}
 

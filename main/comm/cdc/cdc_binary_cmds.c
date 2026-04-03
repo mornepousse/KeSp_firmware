@@ -427,6 +427,17 @@ static void bin_cmd_td_list(uint8_t cmd, const uint8_t *p, uint16_t l)
     ks_respond_end();
 }
 
+/* TD_DELETE: payload [index:u8] */
+static void bin_cmd_td_delete(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    if (l < 1) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
+    if (p[0] >= TAP_DANCE_MAX_SLOTS) { ks_respond_err(cmd, KS_STATUS_ERR_RANGE); return; }
+    uint8_t zero[4] = {0};
+    tap_dance_set(p[0], zero);
+    tap_dance_save();
+    ks_respond_ok(cmd);
+}
+
 /* ── Combos ─────────────────────────────────────────────────────── */
 
 /* COMBO_SET: payload [index:u8][r1:u8][c1:u8][r2:u8][c2:u8][result:u8] */
@@ -461,6 +472,17 @@ static void bin_cmd_combo_list(uint8_t cmd, const uint8_t *p, uint16_t l)
         ks_respond_write(entry, 6);
     }
     ks_respond_end();
+}
+
+/* COMBO_DELETE: payload [index:u8] */
+static void bin_cmd_combo_delete(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    if (l < 1) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
+    if (p[0] >= COMBO_MAX_SLOTS) { ks_respond_err(cmd, KS_STATUS_ERR_RANGE); return; }
+    combo_config_t zero = {0};
+    combo_set(p[0], &zero);
+    combo_save();
+    ks_respond_ok(cmd);
 }
 
 /* ── Leader ─────────────────────────────────────────────────────── */
@@ -519,6 +541,17 @@ static void bin_cmd_leader_list(uint8_t cmd, const uint8_t *p, uint16_t l)
     ks_respond_end();
 }
 
+/* LEADER_DELETE: payload [index:u8] */
+static void bin_cmd_leader_delete(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    if (l < 1) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
+    if (p[0] >= LEADER_MAX_ENTRIES) { ks_respond_err(cmd, KS_STATUS_ERR_RANGE); return; }
+    leader_entry_t zero = {0};
+    leader_set(p[0], &zero);
+    leader_save();
+    ks_respond_ok(cmd);
+}
+
 /* ── Key Override ───────────────────────────────────────────────── */
 
 /* KO_SET: payload [index:u8][trig_key:u8][trig_mod:u8][res_key:u8][res_mod:u8] */
@@ -555,6 +588,17 @@ static void bin_cmd_ko_list(uint8_t cmd, const uint8_t *p, uint16_t l)
         ks_respond_write(entry, 5);
     }
     ks_respond_end();
+}
+
+/* KO_DELETE: payload [index:u8] */
+static void bin_cmd_ko_delete(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    if (l < 1) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
+    if (p[0] >= KEY_OVERRIDE_MAX_SLOTS) { ks_respond_err(cmd, KS_STATUS_ERR_RANGE); return; }
+    key_override_t zero = {0};
+    key_override_set(p[0], &zero);
+    key_override_save();
+    ks_respond_ok(cmd);
 }
 
 /* ── Macros ─────────────────────────────────────────────────────── */
@@ -883,15 +927,19 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     /* Tap Dance */
     { KS_CMD_TD_SET,            bin_cmd_td_set },
     { KS_CMD_TD_LIST,           bin_cmd_td_list },
+    { KS_CMD_TD_DELETE,         bin_cmd_td_delete },
     /* Combos */
     { KS_CMD_COMBO_SET,         bin_cmd_combo_set },
     { KS_CMD_COMBO_LIST,        bin_cmd_combo_list },
+    { KS_CMD_COMBO_DELETE,      bin_cmd_combo_delete },
     /* Leader */
     { KS_CMD_LEADER_SET,        bin_cmd_leader_set },
     { KS_CMD_LEADER_LIST,       bin_cmd_leader_list },
+    { KS_CMD_LEADER_DELETE,     bin_cmd_leader_delete },
     /* Key Override */
     { KS_CMD_KO_SET,            bin_cmd_ko_set },
     { KS_CMD_KO_LIST,           bin_cmd_ko_list },
+    { KS_CMD_KO_DELETE,         bin_cmd_ko_delete },
     /* OTA */
     { KS_CMD_OTA_START,         bin_cmd_ota_start },
     { KS_CMD_OTA_DATA,          bin_cmd_ota_data },

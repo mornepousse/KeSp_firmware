@@ -797,6 +797,20 @@ static void cmd_tdlist(const char *arg)
 	cdc_send_line("OK");
 }
 
+/* TDDEL <index> — delete a tap dance slot */
+static void cmd_tddelete(const char *arg)
+{
+	if (!arg) { cdc_send_line("ERR TDDEL: missing index"); return; }
+	int idx = atoi(arg);
+	if (idx < 0 || idx >= TAP_DANCE_MAX_SLOTS) { cdc_send_line("ERR TDDEL: invalid index"); return; }
+	uint8_t zero[4] = {0};
+	tap_dance_set((uint8_t)idx, zero);
+	tap_dance_save();
+	char resp[32];
+	snprintf(resp, sizeof(resp), "TD %d deleted", idx);
+	cdc_send_line(resp);
+}
+
 /* COMBOSET <index>;<r1>,<c1>,<r2>,<c2>,<result> — configure a combo (V1 coords) */
 static void cmd_comboset(const char *arg)
 {
@@ -838,6 +852,20 @@ static void cmd_combolist(const char *arg)
 		cdc_send_line(buf);
 	}
 	cdc_send_line("OK");
+}
+
+/* COMBODEL <index> — delete a combo */
+static void cmd_combodelete(const char *arg)
+{
+	if (!arg) { cdc_send_line("ERR COMBODEL: missing index"); return; }
+	int idx = atoi(arg);
+	if (idx < 0 || idx >= COMBO_MAX_SLOTS) { cdc_send_line("ERR COMBODEL: invalid index"); return; }
+	combo_config_t zero = {0};
+	combo_set((uint8_t)idx, &zero);
+	combo_save();
+	char resp[32];
+	snprintf(resp, sizeof(resp), "COMBO %d deleted", idx);
+	cdc_send_line(resp);
 }
 
 /* LEADERSET <index>;<seq_hex>;<result_hex>,<mod_hex> */
@@ -898,6 +926,20 @@ static void cmd_leaderlist(const char *arg)
 		cdc_send_line(buf);
 	}
 	cdc_send_line("OK");
+}
+
+/* LEADERDEL <index> — delete a leader entry */
+static void cmd_leaderdelete(const char *arg)
+{
+	if (!arg) { cdc_send_line("ERR LEADERDEL: missing index"); return; }
+	int idx = atoi(arg);
+	if (idx < 0 || idx >= LEADER_MAX_ENTRIES) { cdc_send_line("ERR LEADERDEL: invalid index"); return; }
+	leader_entry_t zero = {0};
+	leader_set((uint8_t)idx, &zero);
+	leader_save();
+	char resp[32];
+	snprintf(resp, sizeof(resp), "LEADER %d deleted", idx);
+	cdc_send_line(resp);
 }
 
 /* TAMA? — query tama stats */
@@ -1053,6 +1095,20 @@ static void cmd_kolist(const char *arg)
 	cdc_send_line("OK");
 }
 
+/* KODEL <index> — delete a key override */
+static void cmd_kodelete(const char *arg)
+{
+	if (!arg) { cdc_send_line("ERR KODEL: missing index"); return; }
+	int idx = atoi(arg);
+	if (idx < 0 || idx >= KEY_OVERRIDE_MAX_SLOTS) { cdc_send_line("ERR KODEL: invalid index"); return; }
+	key_override_t zero = {0};
+	key_override_set((uint8_t)idx, &zero);
+	key_override_save();
+	char resp[32];
+	snprintf(resp, sizeof(resp), "KO %d deleted", idx);
+	cdc_send_line(resp);
+}
+
 /* WPM? — get current words per minute */
 static void cmd_wpm_query(const char *arg)
 {
@@ -1110,12 +1166,15 @@ static const cdc_cmd_entry_t keyboard_cmd_table[] = {
 	{ "BIGRAMS",        7,  false, cmd_bigrams_bin },
 	/* Tap Dance */
 	{ "TDSET",          5,  true,  cmd_tdset },
+	{ "TDDEL",          5,  true,  cmd_tddelete },
 	{ "TD?",            3,  false, cmd_tdlist },
 	/* Combos */
 	{ "COMBOSET",       8,  true,  cmd_comboset },
+	{ "COMBODEL",       8,  true,  cmd_combodelete },
 	{ "COMBO?",         6,  false, cmd_combolist },
 	/* Leader */
 	{ "LEADERSET",      9,  true,  cmd_leaderset },
+	{ "LEADERDEL",      9,  true,  cmd_leaderdelete },
 	{ "LEADER?",        7,  false, cmd_leaderlist },
 	/* Bluetooth */
 	{ "BT?",            3,  false, cmd_bt_query },
@@ -1123,6 +1182,7 @@ static const cdc_cmd_entry_t keyboard_cmd_table[] = {
 	/* Auto Shift / Key Override / WPM / Tri-Layer */
 	{ "AUTOSHIFT",     9,  false, cmd_autoshift },
 	{ "KOSET",          5,  true,  cmd_koset },
+	{ "KODEL",          5,  true,  cmd_kodelete },
 	{ "KO?",            3,  false, cmd_kolist },
 	{ "WPM?",           4,  false, cmd_wpm_query },
 	{ "TRILAYER ",      9,  true,  cmd_trilayer },

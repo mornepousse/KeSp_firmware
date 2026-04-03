@@ -101,6 +101,7 @@ See `CDC_KEYSTATS_PROTOCOL.md` for binary format details.
 |---------|--------|-------------|
 | `TD?` | — | List configured dances |
 | `TDSET` | `index;a1,a2,a3,a4` | Configure dance (all hex) |
+| `TDDEL` | `index` | Delete a tap dance |
 
 **TDSET example:** `TDSET 0;04,05,06,29` → 1-tap=A, 2-tap=B, 3-tap=C, hold=ESC
 
@@ -112,6 +113,7 @@ See `CDC_KEYSTATS_PROTOCOL.md` for binary format details.
 |---------|--------|-------------|
 | `COMBO?` | — | List configured combos |
 | `COMBOSET` | `index;r1,c1,r2,c2,result_hex` | Configure combo |
+| `COMBODEL` | `index` | Delete a combo |
 
 **COMBOSET example:** `COMBOSET 0;3,3,3,4,29` → J+K = ESC
 
@@ -125,6 +127,7 @@ See `CDC_KEYSTATS_PROTOCOL.md` for binary format details.
 |---------|--------|-------------|
 | `LEADER?` | — | List leader sequences |
 | `LEADERSET` | `index;seq_hex;result_hex,mod_hex` | Configure sequence |
+| `LEADERDEL` | `index` | Delete a leader sequence |
 
 **LEADERSET example:** `LEADERSET 0;09,16;16,01` → Leader + F + S = Ctrl+S
 
@@ -173,6 +176,7 @@ OK
 |---------|----------|-------------|
 | `AUTOSHIFT` | `AUTOSHIFT:ON/OFF` | Toggle auto-shift |
 | `KOSET` | `KOSET n:OK` | Configure key override: `index;trigger_key,trigger_mod,result_key,result_mod` (hex) |
+| `KODEL` | `KO n deleted` | Delete a key override |
 | `KO?` | List overrides | Show all configured key overrides |
 | `WPM?` | `WPM: 42` | Current words-per-minute |
 | `TRILAYER` | `TRILAYER: L1+L2=L3` | Configure tri-layer: `layer1,layer2,result_layer` |
