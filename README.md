@@ -39,10 +39,10 @@ Open-source keyboard firmware framework for ESP32-S3, designed for custom mechan
   - "Tama time" = keypresses (pauses when inactive, no penalty)
 
 ### CDC Serial Protocol
-- **Pluggable command framework** — Generic CDC dispatch, easy to extend
+- **Binary-only protocol** — KS/KR frames with CRC-8, no ASCII fallback
 - **Full configuration** — Keymaps, macros, tap dance, combos, leader, tama
-- **Statistics** — Binary heatmap data + text debug output
-- **Feature query** — `FEATURES?` command for software capability detection
+- **Statistics** — Binary heatmap data + text format via binary frames
+- **OTA firmware update** — Binary OTA over CDC with chunked transfer
 
 ---
 
@@ -50,7 +50,7 @@ Open-source keyboard firmware framework for ESP32-S3, designed for custom mechan
 
 ```
 boards/
-  kase_v1/              # Round SPI display, LED strip, position mapping
+  kase_v1/              # Round SPI display, LED strip
   kase_v2/              # I2C OLED
   kase_v2_debug/        # V2 with debug GPIO overrides
 main/
@@ -146,29 +146,36 @@ Full encoding spec: [`docs/KEYCODE_MAP.md`](docs/KEYCODE_MAP.md)
 
 ---
 
-## CDC serial protocol
+## CDC binary protocol
 
-The keyboard exposes a USB CDC serial port for configuration. All commands are text-based (`\r\n` terminated).
+The keyboard exposes a USB CDC serial port for configuration using a binary frame protocol (KS/KR).
 
-```bash
-# Query version
-echo -en "VERSION?\r\n" > /dev/ttyACM0
-
-# Query features
-echo -en "FEATURES?\r\n" > /dev/ttyACM0
-# → MT,LT,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE,COMBO,LEADER
-
-# Set a key to Mod-Tap(Shift, ESC)
-echo -en "SETKEY 0,4,0,5229\r\n" > /dev/ttyACM0
-
-# Create a macro: Ctrl+C, 100ms, Ctrl+V
-echo -en "MACROSEQ 0;CopyPaste;06:01,FF:0A,19:01\r\n" > /dev/ttyACM0
-
-# Query tama stats
-echo -en "TAMA?\r\n" > /dev/ttyACM0
+```
+Request:  [0x4B][0x53][cmd:u8][len:u16 LE][payload...][crc8]
+Response: [0x4B][0x52][cmd:u8][status:u8][len:u16 LE][payload...][crc8]
 ```
 
-Full command reference: [`docs/CDC_COMMANDS_REFERENCE.md`](docs/CDC_COMMANDS_REFERENCE.md)
+```python
+import serial, struct
+
+def crc8(data):
+    crc = 0
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x31) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+    return crc
+
+ser = serial.Serial("/dev/ttyACM0", timeout=2)
+
+# Ping
+ser.write(bytes([0x4B, 0x53, 0x04, 0, 0, 0]))
+
+# Get version (cmd 0x01)
+ser.write(bytes([0x4B, 0x53, 0x01, 0, 0, 0]))
+```
+
+Full protocol reference: [`docs/CDC_BINARY_PROTOCOL.md`](docs/CDC_BINARY_PROTOCOL.md)
 
 ---
 
@@ -187,9 +194,9 @@ See `boards/kase_v2/board.h` for a minimal example, `CONTRIBUTING.md` for conven
 | Document | Description |
 |----------|-------------|
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Development guide, architecture, conventions |
-| [`docs/CDC_COMMANDS_REFERENCE.md`](docs/CDC_COMMANDS_REFERENCE.md) | Complete CDC command reference |
+| [`docs/CDC_BINARY_PROTOCOL.md`](docs/CDC_BINARY_PROTOCOL.md) | Binary protocol reference (all commands) |
 | [`docs/KEYCODE_MAP.md`](docs/KEYCODE_MAP.md) | Keycode encoding specification |
-| [`docs/CDC_KEYSTATS_PROTOCOL.md`](docs/CDC_KEYSTATS_PROTOCOL.md) | Binary stats/bigrams/OTA protocol |
+| [`docs/CDC_KEYSTATS_PROTOCOL.md`](docs/CDC_KEYSTATS_PROTOCOL.md) | Stats/bigrams binary format details |
 | [`docs/TAMA_SPRITE_GUIDE.md`](docs/TAMA_SPRITE_GUIDE.md) | Sprite design guide for artists |
 
 ---
