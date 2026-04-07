@@ -868,7 +868,7 @@ static void bin_cmd_ota_start(uint8_t cmd, const uint8_t *p, uint16_t l)
 /* OTA_DATA: payload = raw firmware chunk → response OK + [received:u32 LE][total:u32 LE] */
 static void bin_cmd_ota_data(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
-    if (ota_state != OTA_RECEIVING || !ota_binary_mode) {
+    if (ota_state != OTA_RECEIVING) {
         ks_respond_err(cmd, KS_STATUS_ERR_INVALID);
         return;
     }
@@ -907,7 +907,7 @@ static void bin_cmd_ota_data(uint8_t cmd, const uint8_t *p, uint16_t l)
 static void bin_cmd_ota_abort(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
     (void)p; (void)l;
-    if (ota_state == OTA_RECEIVING && ota_binary_mode) {
+    if (ota_state == OTA_RECEIVING) {
         ota_bin_abort();
         ks_respond_ok(cmd);
     } else {

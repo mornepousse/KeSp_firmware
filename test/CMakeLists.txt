@@ -12,7 +12,6 @@ add_executable(test_runner
     test_board_config.c
     test_matrix_constants.c
     test_led_anim_constants.c
-    test_cdc_parsing.c
     test_keymap_nvs.c
     test_keycodes.c
     test_key_features.c

@@ -3,7 +3,6 @@
  */
 #include <stdint.h>
 #include "cdc_acm_com.h"
-#include "cdc_keyboard_cmds.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_ota_ops.h"
@@ -59,7 +58,6 @@ static void status_display_task(void *arg) {
       is_layer_changed = 0;
       last_displayed_layer = current_layout;
       status_display_update_layer_name();
-      cdc_send_layer(current_layout);
     }
 
     /* Display sleep: turn off after inactivity, wake on next keypress */
@@ -129,8 +127,6 @@ void app_main(void) {
     cdc_binary_cmds_init();
   }
 
-  /* Register keyboard-specific CDC commands */
-  cdc_keyboard_cmds_init();
   keymap_init_nvs();
   load_keymaps((uint16_t *)keymaps, LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
   load_layout_names(default_layout_names, LAYERS);

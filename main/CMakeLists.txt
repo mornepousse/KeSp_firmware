@@ -30,7 +30,6 @@ idf_component_register(
         "comm/usb/usb_hid.c"
         "comm/hid_transport.c"
         "comm/cdc/cdc_acm_com.c"
-        "comm/cdc/cdc_keyboard_cmds.c"
         "comm/cdc/cdc_ota.c"
         "comm/cdc/cdc_binary_protocol.c"
         "comm/cdc/cdc_binary_cmds.c"
