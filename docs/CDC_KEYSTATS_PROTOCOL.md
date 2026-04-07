@@ -260,7 +260,7 @@ Response: `BIGRAMS_RESET:OK\r\n`
 
 Send: `LAYOUT?\r\n`
 
-Returns a JSON string describing the physical key positions in a hierarchical tree format. The response is sent in 256-byte chunks via `cdc_send_large()`.
+Returns a JSON string describing the physical key positions. Use binary command `KS_CMD_GET_LAYOUT_JSON` (0x22) — response is streamed in 256-byte chunks.
 
 The JSON contains:
 - `name`: product name

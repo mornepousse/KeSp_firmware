@@ -59,9 +59,10 @@ main/
 ├── comm/
 │   ├── hid_transport.c/h            — USB/BLE routing (reusable)
 │   ├── cdc/
-│   │   ├── cdc_acm_com.c/h          — Generic CDC framework (reusable)
-│   │   ├── cdc_keyboard_cmds.c/h    — KaSe-specific commands
-│   │   └── cdc_ota.c                — OTA via CDC (reusable)
+│   │   ├── cdc_acm_com.c/h          — CDC core (binary protocol dispatch)
+│   │   ├── cdc_binary_protocol.c/h  — KS/KR frame parser, CRC-8
+│   │   ├── cdc_binary_cmds.c        — All command handlers
+│   │   └── cdc_ota.c                — OTA via binary CDC
 │   ├── usb/usb_hid.c                — USB HID
 │   └── ble/                          — BLE HID stack
 ├── display/
@@ -101,8 +102,8 @@ To add a new display: create `display/new_type/new_backend.c` and register in `m
 
 ### CDC command system
 
-Generic framework with pluggable commands via `cdc_register_commands()`.
-KaSe-specific commands in `cdc_keyboard_cmds.c`. See `docs/CDC_KEYSTATS_PROTOCOL.md`.
+Binary-only protocol (KS/KR frames with CRC-8). All commands in `cdc_binary_cmds.c`.
+See `docs/CDC_BINARY_PROTOCOL.md` for frame format and command reference.
 
 ## Conventions
 

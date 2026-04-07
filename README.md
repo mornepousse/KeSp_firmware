@@ -68,9 +68,10 @@ main/
   comm/
     hid_transport.c     # USB/BLE routing abstraction
     cdc/
-      cdc_acm_com.c     # Generic CDC framework (reusable)
-      cdc_keyboard_cmds.c  # KaSe-specific commands
-      cdc_ota.c         # OTA firmware update
+      cdc_acm_com.c     # CDC core (binary protocol dispatch)
+      cdc_binary_cmds.c # All command handlers (KS/KR protocol)
+      cdc_binary_protocol.c # Frame parser, CRC-8, response helpers
+      cdc_ota.c         # OTA firmware update (binary only)
     ble/                # Bluetooth HID stack
     usb/                # USB HID (TinyUSB)
   display/
