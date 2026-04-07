@@ -5,7 +5,6 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -g -DTEST_HOST")
 
 add_executable(test_runner
-    test_position_mapping.c
     test_ghost_filter.c
     test_key_stats.c
     test_bigram.c

@@ -125,7 +125,7 @@ Keymap d'un layer specifique.
 Modifie une touche. Sauvegarde immediate en NVS.
 - Request: `[layer:u8][row:u8][col:u8][value:u16 LE]`
 - Response: OK
-- Note: coordonnees V2 (traduites en V1 si BOARD_HAS_POSITION_MAP)
+- Note: coordonnees natives du board (chaque variante a son propre layout)
 
 #### SETLAYER (0x10)
 Remplace un layer entier. Sauvegarde immediate.
@@ -197,10 +197,21 @@ Supprime une macro.
 ### Statistics (0x40–0x4F)
 
 #### KEYSTATS_BIN (0x40)
-Compteurs de touches par position.
+Compteurs de touches par position (format binaire structure).
 - Request: payload vide
 - Response: `[rows:u8][cols:u8][counts: rows*cols * u32 LE]`
 - Note: coordonnees V2
+
+#### KEYSTATS_TEXT (0x41)
+Compteurs de touches par position (format texte lisible).
+- Request: payload vide
+- Response: payload = texte UTF-8 multi-lignes
+```
+Key Statistics - Total: 12345, Max: 678
+R0:   123   456   789 ...
+R1:    42    99   301 ...
+...
+```
 
 #### KEYSTATS_RESET (0x42)
 Remet les compteurs a zero.
@@ -208,7 +219,7 @@ Remet les compteurs a zero.
 - Response: OK
 
 #### BIGRAMS_BIN (0x43)
-Top 256 bigrammes tries par frequence.
+Top 256 bigrammes tries par frequence (format binaire structure).
 - Request: payload vide
 - Response:
 ```
@@ -217,6 +228,17 @@ Top 256 bigrammes tries par frequence.
 [total:u32 LE]
 [max:u16 LE]
 [{prev:u8, curr:u8, count:u16 LE}...]  — top entries sorted desc
+```
+
+#### BIGRAMS_TEXT (0x44)
+Top 20 bigrammes (format texte lisible).
+- Request: payload vide
+- Response: payload = texte UTF-8 multi-lignes
+```
+Bigram Statistics - Total: 5678, Max: 42
+  R1C3 -> R0C5 : 42
+  R0C2 -> R0C3 : 38
+  ...
 ```
 
 #### BIGRAMS_RESET (0x45)

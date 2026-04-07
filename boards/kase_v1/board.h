@@ -62,9 +62,6 @@
 #define BOARD_MATRIX_SETTLING_US       20
 #define BOARD_MATRIX_RECOVERY_US       50
 
-/* ── Position mapping (V1 <-> V2 translation for CDC) ──────── */
-#define BOARD_HAS_POSITION_MAP    1
-
 /* ── USB identification ────────────────────────────────────── */
 #define BOARD_USB_VID             0xCafe
 #define BOARD_USB_PID             0x4001

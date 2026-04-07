@@ -296,9 +296,9 @@ bool hid_bluetooth_is_connected(void)
     return sec_conn;
 }
 
-void send_hid_bl_key(uint8_t modifier, uint8_t keycodes[6])
+void send_hid_bl_key(uint8_t modifier, const uint8_t keycodes[6])
 {
-    esp_hidd_send_keyboard_value(hid_conn_id, modifier, keycodes, 6);
+    esp_hidd_send_keyboard_value(hid_conn_id, modifier, (uint8_t *)keycodes, 6);
 }
 
 void send_hid_bl_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)

@@ -137,7 +137,6 @@ void test_board_led_strip_config(void) {
 /* Test: feature flags are 0 or 1 */
 void test_board_feature_flags(void) {
     TEST_ASSERT(BOARD_HAS_LED_STRIP == 0 || BOARD_HAS_LED_STRIP == 1, "BOARD_HAS_LED_STRIP is boolean");
-    TEST_ASSERT(BOARD_HAS_POSITION_MAP == 0 || BOARD_HAS_POSITION_MAP == 1, "BOARD_HAS_POSITION_MAP is boolean");
 }
 
 /* Test: matrix delays are non-negative */

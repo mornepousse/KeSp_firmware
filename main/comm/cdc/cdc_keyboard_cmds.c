@@ -18,10 +18,6 @@
 #include "status_display.h"
 #include "version.h"
 
-#if BOARD_HAS_POSITION_MAP
-#include "board_position_map.h"
-#endif
-
 /* Binary response type IDs (KaSe protocol, used by start_command_queue) */
 enum {
 	CDC_RESP_NONE = 0,
@@ -109,13 +105,7 @@ static void cmd_setlayer_command(const char *arg)
 		for (size_t v2_col = 0; v2_col < MATRIX_COLS; ++v2_col)
 		{
 			size_t pos = v2_row * MATRIX_COLS + v2_col;
-#if BOARD_HAS_POSITION_MAP
-			int v1_row, v1_col;
-			v2_to_v1_pos(v2_row, v2_col, &v1_row, &v1_col);
-			keymaps[idx][v1_row][v1_col] = parsed[pos];
-#else
 			keymaps[idx][v2_row][v2_col] = parsed[pos];
-#endif
 		}
 	}
 
@@ -207,13 +197,7 @@ static void cmd_get_keymap_by_layer(uint8_t layer)
 	{
 		for (int v2_col = 0; v2_col < MATRIX_COLS; v2_col++)
 		{
-#if BOARD_HAS_POSITION_MAP
-			int v1_row, v1_col;
-			v2_to_v1_pos(v2_row, v2_col, &v1_row, &v1_col);
-			uint16_t code = keymaps[layer][v1_row][v1_col];
-#else
 			uint16_t code = keymaps[layer][v2_row][v2_col];
-#endif
 			bytes[0] = (unsigned char)(code & 0xFF);
 			bytes[1] = (unsigned char)((code >> 8) & 0xFF);
 			tinyusb_cdcacm_write_queue(CDC_ITF, (const uint8_t *)bytes, 2);
@@ -236,16 +220,8 @@ static void cmd_set_key(const char *arg)
 		ESP_LOGW(TAG_CDC, "SETKEY: index out of range");
 		return;
 	}
-#if BOARD_HAS_POSITION_MAP
-	int internal_row, internal_col;
-	v2_to_v1_pos(row, col, &internal_row, &internal_col);
-#else
-	int internal_row = row;
-	int internal_col = col;
-#endif
-
-	keymaps[layer][internal_row][internal_col] = (uint16_t)value;
-	ESP_LOGI(TAG_CDC, "SETKEY: [%d][%d][%d] = 0x%04X (v2: r%d,c%d)", layer, internal_row, internal_col, value, row, col);
+	keymaps[layer][row][col] = (uint16_t)value;
+	ESP_LOGI(TAG_CDC, "SETKEY: [%d][%d][%d] = 0x%04X", layer, row, col, value);
 	size_t total_elements = (size_t)LAYERS * MATRIX_ROWS * MATRIX_COLS;
 	save_keymaps((uint16_t *)keymaps, total_elements * sizeof(uint16_t));
 }
@@ -557,13 +533,7 @@ static void cmd_get_keystats(bool binary)
 		size_t offset = 19;
 		for (int r = 0; r < MATRIX_ROWS; r++) {
 			for (int c = 0; c < MATRIX_COLS; c++) {
-#if BOARD_HAS_POSITION_MAP
-				int v1_row, v1_col;
-				v2_to_v1_pos(r, c, &v1_row, &v1_col);
-				uint32_t count = key_stats[v1_row][v1_col];
-#else
 				uint32_t count = key_stats[r][c];
-#endif
 				pack_u32_le(&payload[offset], count);
 				offset += 4;
 			}

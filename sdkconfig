@@ -2404,6 +2404,13 @@ CONFIG_TINYUSB_MODE_DMA=y
 # end of TinyUSB DCD
 
 #
+# TinyUSB callbacks
+#
+# CONFIG_TINYUSB_SUSPEND_CALLBACK is not set
+# CONFIG_TINYUSB_RESUME_CALLBACK is not set
+# end of TinyUSB callbacks
+
+#
 # Descriptor configuration
 #
 
@@ -2420,10 +2427,10 @@ CONFIG_TINYUSB_DESC_CDC_STRING="KaSe V2 CDC Device"
 # end of Descriptor configuration
 
 #
-# Massive Storage Class (MSC)
+# Mass Storage Class (MSC)
 #
 # CONFIG_TINYUSB_MSC_ENABLED is not set
-# end of Massive Storage Class (MSC)
+# end of Mass Storage Class (MSC)
 
 #
 # Communication Device Class (CDC)

@@ -65,9 +65,6 @@
 #define BOARD_MATRIX_SETTLING_US       0
 #define BOARD_MATRIX_RECOVERY_US       0
 
-/* ── Position mapping ──────────────────────────────────────── */
-#define BOARD_HAS_POSITION_MAP    0
-
 /* ── USB identification ────────────────────────────────────── */
 #define BOARD_USB_VID             0xCafe
 #define BOARD_USB_PID             0x4001

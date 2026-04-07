@@ -18,10 +18,6 @@
 #include "esp_app_desc.h"
 #include "esp_system.h"
 
-#if BOARD_HAS_POSITION_MAP
-#include "board_position_map.h"
-#endif
-
 /* ── System ─────────────────────────────────────────────────────── */
 
 static void bin_cmd_ping(uint8_t cmd, const uint8_t *p, uint16_t l)
@@ -87,15 +83,8 @@ static void bin_cmd_keymap_get(uint8_t cmd, const uint8_t *p, uint16_t l)
 
     for (int r = 0; r < MATRIX_ROWS; r++) {
         for (int c = 0; c < MATRIX_COLS; c++) {
-#if BOARD_HAS_POSITION_MAP
-            int ir, ic;
-            v2_to_v1_pos(r, c, &ir, &ic);
-            uint16_t code = keymaps[layer][ir][ic];
-#else
-            uint16_t code = keymaps[layer][r][c];
-#endif
             uint8_t b[2];
-            pack_u16_le(b, code);
+            pack_u16_le(b, keymaps[layer][r][c]);
             ks_respond_write(b, 2);
         }
     }
@@ -114,13 +103,7 @@ static void bin_cmd_setkey(uint8_t cmd, const uint8_t *p, uint16_t l)
         return;
     }
 
-#if BOARD_HAS_POSITION_MAP
-    int ir, ic;
-    v2_to_v1_pos(row, col, &ir, &ic);
-#else
-    int ir = row, ic = col;
-#endif
-    keymaps[layer][ir][ic] = value;
+    keymaps[layer][row][col] = value;
     save_keymaps((uint16_t *)keymaps,
                  (size_t)LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
     ks_respond_ok(cmd);
@@ -140,13 +123,7 @@ static void bin_cmd_setlayer(uint8_t cmd, const uint8_t *p, uint16_t l)
         for (int c = 0; c < MATRIX_COLS; c++) {
             size_t off = (r * MATRIX_COLS + c) * 2;
             uint16_t val = data[off] | ((uint16_t)data[off + 1] << 8);
-#if BOARD_HAS_POSITION_MAP
-            int ir, ic;
-            v2_to_v1_pos(r, c, &ir, &ic);
-            keymaps[layer][ir][ic] = val;
-#else
             keymaps[layer][r][c] = val;
-#endif
         }
     }
     save_keymaps((uint16_t *)keymaps,
@@ -387,6 +364,69 @@ static void bin_cmd_keystats_bin(uint8_t cmd, const uint8_t *p, uint16_t l)
         }
     }
     ks_respond_end();
+}
+
+/* KEYSTATS_TEXT: → human-readable text in binary frame */
+static void bin_cmd_keystats_text(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    (void)p; (void)l;
+    char text[1024];
+    int pos = 0;
+    pos += snprintf(text + pos, sizeof(text) - pos,
+                    "Key Statistics - Total: %lu, Max: %lu\n",
+                    (unsigned long)key_stats_total, (unsigned long)get_key_stats_max());
+    for (int r = 0; r < MATRIX_ROWS && pos < (int)sizeof(text) - 128; r++) {
+        pos += snprintf(text + pos, sizeof(text) - pos, "R%d:", r);
+        for (int c = 0; c < MATRIX_COLS; c++)
+            pos += snprintf(text + pos, sizeof(text) - pos, " %5lu", (unsigned long)key_stats[r][c]);
+        pos += snprintf(text + pos, sizeof(text) - pos, "\n");
+    }
+    ks_respond(cmd, KS_STATUS_OK, (const uint8_t *)text, (uint16_t)pos);
+}
+
+/* BIGRAMS_TEXT: → human-readable top-20 bigrams in binary frame */
+static void bin_cmd_bigrams_text(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    (void)p; (void)l;
+    typedef struct { uint8_t prev; uint8_t curr; uint16_t count; } bg_t;
+    bg_t top[20] = {0};
+    uint8_t n = 0;
+
+    for (int i = 0; i < NUM_KEYS; i++) {
+        for (int j = 0; j < NUM_KEYS; j++) {
+            if (bigram_stats[i][j] == 0) continue;
+            if (n < 20) {
+                top[n].prev = i; top[n].curr = j;
+                top[n].count = bigram_stats[i][j]; n++;
+            } else {
+                uint8_t mi = 0;
+                for (uint8_t k = 1; k < 20; k++)
+                    if (top[k].count < top[mi].count) mi = k;
+                if (bigram_stats[i][j] > top[mi].count) {
+                    top[mi].prev = i; top[mi].curr = j;
+                    top[mi].count = bigram_stats[i][j];
+                }
+            }
+        }
+    }
+    for (uint8_t i = 1; i < n; i++) {
+        bg_t tmp = top[i]; int j = i - 1;
+        while (j >= 0 && top[j].count < tmp.count) { top[j+1] = top[j]; j--; }
+        top[j+1] = tmp;
+    }
+
+    char text[1024];
+    int pos = 0;
+    pos += snprintf(text + pos, sizeof(text) - pos,
+                    "Bigram Statistics - Total: %lu, Max: %u\n",
+                    (unsigned long)bigram_total, get_bigram_stats_max());
+    for (uint8_t i = 0; i < n && pos < (int)sizeof(text) - 64; i++) {
+        uint8_t pr = top[i].prev / MATRIX_COLS, pc = top[i].prev % MATRIX_COLS;
+        uint8_t cr = top[i].curr / MATRIX_COLS, cc = top[i].curr % MATRIX_COLS;
+        pos += snprintf(text + pos, sizeof(text) - pos,
+                        "  R%dC%d -> R%dC%d : %u\n", pr, pc, cr, cc, top[i].count);
+    }
+    ks_respond(cmd, KS_STATUS_OK, (const uint8_t *)text, (uint16_t)pos);
 }
 
 /* ── Tap Dance ──────────────────────────────────────────────────── */
@@ -921,8 +961,10 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     { KS_CMD_MACRO_DELETE,      bin_cmd_macro_delete },
     /* Stats */
     { KS_CMD_KEYSTATS_BIN,      bin_cmd_keystats_bin },
+    { KS_CMD_KEYSTATS_TEXT,     bin_cmd_keystats_text },
     { KS_CMD_KEYSTATS_RESET,    bin_cmd_keystats_reset },
     { KS_CMD_BIGRAMS_BIN,       bin_cmd_bigrams_bin },
+    { KS_CMD_BIGRAMS_TEXT,      bin_cmd_bigrams_text },
     { KS_CMD_BIGRAMS_RESET,     bin_cmd_bigrams_reset },
     /* Tap Dance */
     { KS_CMD_TD_SET,            bin_cmd_td_set },

@@ -91,7 +91,7 @@ MACROADD 0;Copy;E0,06
 | `BIGRAMS?` | Text | Human-readable top 20 bigrams |
 | `BIGRAMS_RESET` | `BIGRAMS_RESET:OK` | Reset bigram stats |
 
-See `CDC_KEYSTATS_PROTOCOL.md` for binary format details.
+Binary equivalents: `KEYSTATS_BIN` (0x40), `KEYSTATS_TEXT` (0x41), `KEYSTATS_RESET` (0x42), `BIGRAMS_BIN` (0x43), `BIGRAMS_TEXT` (0x44), `BIGRAMS_RESET` (0x45). See `CDC_BINARY_PROTOCOL.md`.
 
 ---
 
