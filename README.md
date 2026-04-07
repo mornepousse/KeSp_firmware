@@ -204,7 +204,7 @@ See `boards/kase_v2/board.h` for a minimal example, `CONTRIBUTING.md` for conven
 ## Related projects
 
 - **KaSe PCB** — Hardware, schematics, mechanical design: https://github.com/mornepousse/KaSe_PCB
-- **KaSe Soft** — Desktop configuration tool: https://github.com/mornepousse/KaSe_soft
+- **KeSp Controller** — Desktop remapping software: https://github.com/mornepousse/KeSp_controller
 
 ---
 
