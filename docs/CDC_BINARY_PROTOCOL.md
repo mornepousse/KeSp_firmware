@@ -94,7 +94,7 @@ Retourne la version firmware.
 #### FEATURES (0x02)
 Liste des features supportees.
 - Request: payload vide
-- Response: payload = liste CSV (ex: `MT,LT,OSM,OSL,CAPS_WORD,...`)
+- Response: payload = liste CSV (ex: `MT,LT,LM,OSM,OSL,CAPS_WORD,...`)
 
 #### DFU (0x03)
 Reboot en mode DFU. Reponse OK envoyee avant reboot.

@@ -134,6 +134,7 @@ All keycodes are 16-bit, configurable via CDC serial or the remapping software.
 |---------|---------|----------|
 | Mod-Tap | `K_MT(mod, key)` | Hold = modifier, Tap = keycode |
 | Layer-Tap | `K_LT(layer, key)` | Hold = layer, Tap = keycode |
+| Layer-Mod | `K_LM(layer, mods)` | Hold = layer + modifiers |
 | One-Shot Mod | `K_OSM(mod)` | Tap = next key gets modifier |
 | One-Shot Layer | `K_OSL(layer)` | Next key uses that layer |
 | Caps Word | `K_CAPS_WORD` | Auto-shift letters until space |

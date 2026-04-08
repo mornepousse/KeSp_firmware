@@ -31,6 +31,7 @@ static const char *TAG = "KEY_PROC";
 uint16_t keypress_internal_function = 0;
 uint8_t current_row_layer_changer = INVALID_KEY_POS;
 uint8_t current_col_layer_changer = INVALID_KEY_POS;
+static uint8_t lm_active_mods = 0;  /* modifier mask held by LM key */
 uint16_t extra_keycodes[6] = {0};
 
 static uint8_t prev_press_row[6] = {INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS,
@@ -41,11 +42,22 @@ static uint8_t tap_injected_slots = 0;
 
 /* ── Legacy layer switching ──────────────────────────────────────── */
 
-static void apply_momentary_layer(int16_t keycode, uint8_t key_idx)
+static void apply_momentary_layer(uint16_t keycode, uint8_t key_idx)
 {
+    uint8_t layer = 0xFF;
+    uint8_t mods = 0;
+
     if (keycode >= MO_L0 && keycode <= MO_L9) {
+        layer = (keycode - MO_L0) / 256;
+    } else if (K_IS_LM(keycode)) {
+        layer = K_LM_LAYER(keycode);
+        mods = K_LM_MODS(keycode);
+    }
+
+    if (layer <= 9) {
         last_layer = current_layout;
-        current_layout = (keycode - MO_L0) / 256;
+        current_layout = layer;
+        lm_active_mods = mods;
         layer_changed();
         current_row_layer_changer = current_press_row[key_idx];
         current_col_layer_changer = current_press_col[key_idx];
@@ -114,23 +126,42 @@ static void dispatch_internal_function(void)
 /* Pending macro sequence to play (set by expand_macro, consumed by keyboard_task) */
 static int16_t pending_macro_idx = -1;
 
+static uint8_t macro_hold_mods = 0;  /* modifier mask from held no-delay macro */
+
 static void expand_macro(uint16_t keycode)
 {
     if (keycode < MACRO_1 || keycode > MACRO_20) return;
     int16_t idx = (keycode - MACRO_1) / 256;
     if (idx >= MAX_MACROS || macros_list[idx].name[0] == '\0') return;
 
-    /* New: if macro has steps, queue it for sequential playback */
-    if (macros_list[idx].steps[0].keycode != 0) {
-        pending_macro_idx = idx;
+    const macro_step_t *steps = macros_list[idx].steps;
+    if (steps[0].keycode == 0) {
+        /* Legacy fallback: simultaneous keys */
+        uint8_t j = 0;
+        for (uint8_t i = 0; i < 6 && j < 6; i++) {
+            if (keycodes[i] == 0)
+                keycodes[i] = macros_list[idx].keys[j++];
+        }
         return;
     }
 
-    /* Legacy fallback: simultaneous keys */
-    uint8_t j = 0;
-    for (uint8_t i = 0; i < 6 && j < 6; i++) {
-        if (keycodes[i] == 0)
-            keycodes[i] = macros_list[idx].keys[j++];
+    /* Check if macro has any delay steps */
+    bool has_delay = false;
+    for (int s = 0; s < MACRO_MAX_STEPS && steps[s].keycode != 0; s++) {
+        if (steps[s].keycode == MACRO_DELAY_MARKER) { has_delay = true; break; }
+    }
+
+    if (has_delay) {
+        /* Sequential: queue for keyboard_task playback */
+        pending_macro_idx = idx;
+    } else {
+        /* Hold: inject keycodes + mods into current report while key is held */
+        for (int s = 0; s < MACRO_MAX_STEPS && steps[s].keycode != 0; s++) {
+            for (uint8_t i = 0; i < 6; i++) {
+                if (keycodes[i] == 0) { keycodes[i] = steps[s].keycode; break; }
+            }
+            macro_hold_mods |= steps[s].modifier;
+        }
     }
 }
 
@@ -227,6 +258,7 @@ static void detect_releases(void)
 void build_keycode_report(void)
 {
     tap_injected_slots = 0;
+    macro_hold_mods = 0;
 
     /* Step 1: detect releases and resolve pending tap/holds */
     detect_releases();
@@ -338,8 +370,8 @@ void build_keycode_report(void)
         wpm_record_keypress();
     }
 
-    /* Step 5: apply modifiers (tap/hold + one-shot) */
-    uint8_t extra_mods = th_mods | osm_consume();
+    /* Step 5: apply modifiers (tap/hold + one-shot + LM + macro hold) */
+    uint8_t extra_mods = th_mods | osm_consume() | lm_active_mods | macro_hold_mods;
 
     /* Step 6: caps word + repeat key tracking */
     for (uint8_t i = 0; i < 6; i++) {
@@ -420,6 +452,7 @@ void build_keycode_report(void)
         }
         if (!changer_held) {
             current_layout = last_layer;
+            lm_active_mods = 0;
             layer_changed();
             current_col_layer_changer = INVALID_KEY_POS;
             current_row_layer_changer = INVALID_KEY_POS;

@@ -30,8 +30,9 @@ All hex values in CDC commands use **hex format** (e.g. `29` = 0x29 = ESC).
 | `0x4000-0x4FFF` | Layer-Tap (LT) | `0x4000 \| (layer << 8) \| keycode` | `K_LT(2, Space)` = `0x422C` |
 | `0x5000-0x5FFF` | Mod-Tap (MT) | `0x5000 \| (mod << 8) \| keycode` | `K_MT(Shift, A)` = `0x5204` |
 | `0x6000-0x6FFF` | Tap Dance (TD) | `0x6000 \| (index << 8)` | `K_TD(0)` = `0x6000` |
+| `0x7000-0x7FFF` | Layer-Modifier (LM) | `0x7000 \| (mods << 4) \| layer` | `K_LM(2, Shift)` = `0x7022` |
 
-## Modifier Mask (for OSM and MT)
+## Modifier Mask (for OSM, MT, and LM)
 
 | Bit | Value | Modifier |
 |-----|-------|----------|
@@ -51,6 +52,16 @@ All hex values in CDC commands use **hex format** (e.g. `29` = 0x29 = ESC).
 - **Tap** (press + release < 200ms, no interrupt): sends the tap keycode
 - **Hold** (> 200ms OR another key pressed while held): activates modifier/layer
 - OSM tap: arms one-shot modifier for next key. OSM hold: regular modifier.
+
+### Layer-Modifier (LM)
+
+Hold = activate layer AND apply modifier mask simultaneously. Release = restore layer and release modifiers. Supports multiple modifiers combined.
+
+```
+K_LM(2, 0x02)  → 0x7022  — layer 2 + LShift
+K_LM(1, 0x03)  → 0x7031  — layer 1 + LCtrl + LShift
+K_LM(3, 0x44)  → 0x7443  — layer 3 + LAlt + RAlt
+```
 
 ### One-Shot Layer (OSL)
 
@@ -83,7 +94,7 @@ sequences and emits result keycode + modifier. 1000ms timeout between keys.
 
 | Command | Response | Description |
 |---------|----------|-------------|
-| `FEATURES?` | `MT,LT,OSM,OSL,...` | List supported features |
+| `FEATURES?` | `MT,LT,LM,OSM,OSL,...` | List supported features |
 | `VERSION?` | `KaSe V1 v3.4` | Firmware version |
 | `TD?` | `TD0: 04,05,06,29` | List tap dance configs |
 | `COMBO?` | `COMBO0: r3c3+r3c4=29` | List combo configs |

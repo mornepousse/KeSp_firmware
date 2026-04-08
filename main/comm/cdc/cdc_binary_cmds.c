@@ -36,7 +36,7 @@ static void bin_cmd_version(uint8_t cmd, const uint8_t *p, uint16_t l)
 static void bin_cmd_features(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
     (void)p; (void)l;
-    static const char feat[] = "MT,LT,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE,COMBO,LEADER,GESC,LAYER_LOCK,WPM,TRI_LAYER";
+    static const char feat[] = "MT,LT,LM,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE,COMBO,LEADER,GESC,LAYER_LOCK,WPM,TRI_LAYER";
     ks_respond(cmd, KS_STATUS_OK, (const uint8_t *)feat, (uint16_t)strlen(feat));
 }
 

@@ -437,6 +437,13 @@ static const uint16_t TO_L9 = 0x1400;
 #define K_IS_TD(kc)                 (((kc) & 0xF000) == K_TD_BASE)
 #define K_TD_INDEX(kc)              (((kc) >> 8) & 0x0F)
 
+/* Layer-Modifier: momentary layer + modifier mask held simultaneously */
+#define K_LM_BASE                    0x7000
+#define K_LM(layer, mods)           (K_LM_BASE | ((mods) << 4) | ((layer) & 0x0F))
+#define K_IS_LM(kc)                 (((kc) & 0xF000) == K_LM_BASE)
+#define K_LM_LAYER(kc)              ((kc) & 0x0F)
+#define K_LM_MODS(kc)               (((kc) >> 4) & 0xFF)
+
 /* Check if a keycode is an advanced (non-HID) keycode */
 #define K_IS_ADVANCED(kc)           ((kc) > 0x00FF)
 

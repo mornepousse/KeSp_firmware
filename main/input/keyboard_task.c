@@ -11,6 +11,7 @@
 #include "leader.h"
 #include "key_features.h"
 #include "keymap.h"
+#include "hid_transport.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -24,18 +25,12 @@ uint8_t usb_bl_state = 0;
 /* Send a keycode as a quick press+release tap */
 static void send_tap(uint8_t kc, uint8_t mod)
 {
-    memset(keycodes, 0, 6);
-    keycodes[0] = kc;
-    /* Inject modifier keycodes */
-    uint8_t slot = 1;
-    for (uint8_t b = 0; b < 8 && slot < 6; b++) {
-        if (mod & (1 << b))
-            keycodes[slot++] = 0xE0 + b;
-    }
-    send_hid_key();
-    vTaskDelay(pdMS_TO_TICKS(10));
-    memset(keycodes, 0, 6);
-    send_hid_key();
+    uint8_t buf[6] = { kc };
+    hid_send_keyboard(mod, buf);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    memset(buf, 0, 6);
+    hid_send_keyboard(0, buf);
+    vTaskDelay(pdMS_TO_TICKS(20));
 }
 
 void vTaskKeyboard(void *pvParameters)
@@ -82,19 +77,18 @@ void vTaskKeyboard(void *pvParameters)
                 send_tap(kc, mod);
         }
 
-        /* Macro sequence pending → play step by step */
+        /* Macro sequence pending → play */
         if (key_processor_has_pending_macro()) {
             int16_t idx = key_processor_consume_macro();
             if (idx >= 0 && idx < MAX_MACROS) {
                 const macro_step_t *steps = macros_list[idx].steps;
+
+                /* Sequential playback (only macros with delays reach here) */
                 for (int s = 0; s < MACRO_MAX_STEPS && steps[s].keycode != 0; s++) {
-                    if (steps[s].keycode == MACRO_DELAY_MARKER) {
-                        /* Delay step */
+                    if (steps[s].keycode == MACRO_DELAY_MARKER)
                         vTaskDelay(pdMS_TO_TICKS(steps[s].modifier * 10));
-                    } else {
-                        /* Key tap with optional modifier */
+                    else
                         send_tap(steps[s].keycode, steps[s].modifier);
-                    }
                 }
             }
         }
