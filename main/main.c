@@ -6,6 +6,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_ota_ops.h"
+#include "nvs_flash.h"
+#include "esp_attr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hid_bluetooth_manager.h"
@@ -112,11 +114,32 @@ static void status_display_task(void *arg) {
   }
 }
 
+/* Boot crash detection: RTC memory survives soft reboot but not power cycle */
+static RTC_NOINIT_ATTR uint32_t boot_crash_count;
+static RTC_NOINIT_ATTR uint32_t boot_crash_magic;
+#define BOOT_CRASH_MAGIC 0xB007FA11
+#define BOOT_CRASH_LIMIT 3
+
+static bool safe_mode = false;
+
 void app_main(void) {
   ESP_LOGI(TAG, "--------------- KeSp [%s] ----------------", PRODUCT_NAME);
 
-  /* Confirm this firmware is valid (prevents rollback to factory on next reboot) */
-  esp_ota_mark_app_valid_cancel_rollback();
+  /* Crash-loop detection */
+  if (boot_crash_magic != BOOT_CRASH_MAGIC) {
+      boot_crash_magic = BOOT_CRASH_MAGIC;
+      boot_crash_count = 0;
+  }
+  boot_crash_count++;
+  ESP_LOGI(TAG, "Boot count: %lu", (unsigned long)boot_crash_count);
+
+  if (boot_crash_count > BOOT_CRASH_LIMIT) {
+      ESP_LOGW(TAG, "Crash loop detected (%lu boots) — SAFE MODE", (unsigned long)boot_crash_count);
+      safe_mode = true;
+      /* Erase NVS to clear potentially corrupted config */
+      nvs_flash_erase();
+      boot_crash_count = 0;
+  }
 
   kase_tinyusb_init();
   init_cdc_commands();
@@ -128,71 +151,84 @@ void app_main(void) {
   }
 
   keymap_init_nvs();
-  load_keymaps((uint16_t *)keymaps, LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
-  load_layout_names(default_layout_names, LAYERS);
-  load_macros(macros_list, MAX_MACROS);
-  load_key_stats();
-  load_bigram_stats();
 
-  /* Load advanced feature configs */
-  extern void tap_dance_load(void);
-  extern void combo_load(void);
-  extern void leader_load(void);
-  extern void tama_engine_init(void);
-  tap_dance_load();
-  combo_load();
-  leader_load();
-  key_override_load();
-  bt_devices_load();
-  tama_engine_init();
+  if (!safe_mode) {
+    load_keymaps((uint16_t *)keymaps, LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
+    load_layout_names(default_layout_names, LAYERS);
+    load_macros(macros_list, MAX_MACROS);
+    load_key_stats();
+    load_bigram_stats();
 
-  ESP_LOGI(TAG, "display init");
-#if !SKIP_STATUS_DISPLAY
-  /* Register the display backend for this board */
-  {
-    extern const display_backend_t
-#ifdef BOARD_DISPLAY_BACKEND_ROUND
-      round_display_backend;
-    display_set_backend(&round_display_backend);
-#else
-      oled_display_backend;
-    display_set_backend(&oled_display_backend);
-#endif
+    /* Load advanced feature configs */
+    extern void tap_dance_load(void);
+    extern void combo_load(void);
+    extern void leader_load(void);
+    extern void tama_engine_init(void);
+    tap_dance_load();
+    combo_load();
+    leader_load();
+    key_override_load();
+    bt_devices_load();
+    tama_engine_init();
+  } else {
+    ESP_LOGW(TAG, "Safe mode: skipping NVS config loading");
   }
-  status_display_start();
-  // Start status display task on core 1 to avoid interfering with keyboard
-  xTaskCreatePinnedToCore(status_display_task, "status_disp", 6144, NULL, 2, &status_display_task_handle, 1);
+
+  if (!safe_mode) {
+    ESP_LOGI(TAG, "display init");
+#if !SKIP_STATUS_DISPLAY
+    {
+      extern const display_backend_t
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
+        round_display_backend;
+      display_set_backend(&round_display_backend);
 #else
-  ESP_LOGW(TAG, "SKIP_STATUS_DISPLAY enabled: display task not started");
+        oled_display_backend;
+      display_set_backend(&oled_display_backend);
 #endif
-  // Reset the rtc GPIOS
+    }
+    status_display_start();
+    xTaskCreatePinnedToCore(status_display_task, "status_disp", 6144, NULL, 2, &status_display_task_handle, 1);
+#endif
+  } else {
+    ESP_LOGW(TAG, "Safe mode: skipping display");
+  }
+
   rtc_matrix_deinit();
   ESP_LOGI(TAG, "Matrix setup init");
   matrix_setup();
 
+  ESP_LOGI(TAG, "Keyboard manager init");
+  keyboard_manager_init();
+
   ESP_LOGI(TAG, "Task Matrix init");
   TaskHandle_t xHandleMatrixKeyboard = NULL;
   static uint8_t ucParameterToPass;
-  // Keyboard on CPU 0, priority 3 (below LVGL=4)
-  /* Increase keyboard task stack to reduce stack pressure (was 4096) */
   xTaskCreatePinnedToCore(vTaskKeyboard, "Matrix_Keyboard", 6144, &ucParameterToPass,
               3, &xHandleMatrixKeyboard, 0);
-  ESP_LOGI(TAG, "bluetooth init check");
-  if (load_bt_state()) {
-      ESP_LOGI(TAG, "Starting bluetooth (saved state: ON)");
-      init_hid_bluetooth();
-  } else {
-      ESP_LOGI(TAG, "Bluetooth disabled (saved state: OFF)");
-  }
+
+  if (!safe_mode) {
+    ESP_LOGI(TAG, "bluetooth init check");
+    if (load_bt_state()) {
+        ESP_LOGI(TAG, "Starting bluetooth (saved state: ON)");
+        init_hid_bluetooth();
+    } else {
+        ESP_LOGI(TAG, "Bluetooth disabled (saved state: OFF)");
+    }
 
 #if BOARD_HAS_LED_STRIP
-  ESP_LOGI(TAG, "LED Strip init");
-  led_strip_test();
-  led_strip_start_task();
+    ESP_LOGI(TAG, "LED Strip init");
+    led_strip_test();
+    led_strip_start_task();
 #endif
+  }
 
-  // Start periodic CPU usage logger on core 1 (avoid interfering with keyboard task on core 0)
   xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL, 1);
+
+  /* Boot succeeded — reset crash counter and validate OTA */
+  boot_crash_count = 0;
+  esp_ota_mark_app_valid_cancel_rollback();
+  ESP_LOGI(TAG, "Boot OK%s", safe_mode ? " (SAFE MODE)" : "");
 
   for (;;) {
     // keep main light; display handled in its own task

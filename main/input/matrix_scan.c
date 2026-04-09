@@ -35,6 +35,7 @@ static uint8_t prev_matrix_state[MATRIX_ROWS][MATRIX_COLS];  /* For KPM: track n
 
 static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_report_t kbd_report, void *user_data)
 {
+    ESP_LOGI(TAG, "CB: pressed=%lu", (unsigned long)kbd_report.key_pressed_num);
     // Clear matrix state
     memset(MATRIX_STATE, 0, sizeof(MATRIX_STATE));
     // Reset current press arrays
@@ -59,7 +60,6 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
             // by not recording ghost-filtered keys in MATRIX_STATE.
             
             valid_count++;
-            ESP_LOGI(TAG, "  Key[%d]: row=%d col=%d", valid_count, in_idx, out_idx);
             if (in_idx < MATRIX_ROWS && out_idx < MATRIX_COLS) {
                 MATRIX_STATE[in_idx][out_idx] = 1;
                 /* Count NEW keypresses (wasn't pressed before) */
@@ -111,9 +111,13 @@ void matrix_setup(void)
     static int output_gpios[MATRIX_COLS];
     static int input_gpios[MATRIX_ROWS];
 #if defined(BOARD_MATRIX_COL2ROW)
-    // outputs = cols, inputs = rows
     const int cols_map[MATRIX_COLS] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
     const int rows_map[MATRIX_ROWS] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+
+    /* Reset all matrix GPIOs — clears any function set by ROM bootloader
+       (e.g. UART0 on GPIO43/44 which conflicts with V2 cols 7/8) */
+    for (int i = 0; i < MATRIX_COLS; i++) gpio_reset_pin(cols_map[i]);
+    for (int i = 0; i < MATRIX_ROWS; i++) gpio_reset_pin(rows_map[i]);
 #else
     const int cols_map[MATRIX_COLS] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
     const int rows_map[MATRIX_ROWS] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };

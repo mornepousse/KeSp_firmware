@@ -1,6 +1,8 @@
 # This file was generated using idf.py save-defconfig. It can be edited manually.
 # Espressif IoT Development Framework (ESP-IDF) Project Minimal Configuration
 #
+# Disable UART console — frees GPIO43/44 (UART0) used by V2 matrix
+CONFIG_ESP_CONSOLE_NONE=y
 CONFIG_TINYUSB_HID_COUNT=1
 CONFIG_BT_ENABLED=y
 CONFIG_BT_CLASSIC_ENABLED=y
