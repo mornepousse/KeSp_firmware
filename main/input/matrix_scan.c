@@ -114,10 +114,14 @@ void matrix_setup(void)
     const int cols_map[MATRIX_COLS] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
     const int rows_map[MATRIX_ROWS] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
 
-    /* Reset all matrix GPIOs — clears any function set by ROM bootloader
-       (e.g. UART0 on GPIO43/44 which conflicts with V2 cols 7/8) */
-    for (int i = 0; i < MATRIX_COLS; i++) gpio_reset_pin(cols_map[i]);
-    for (int i = 0; i < MATRIX_ROWS; i++) gpio_reset_pin(rows_map[i]);
+    /* Reset UART0 GPIOs that the ROM bootloader may have claimed.
+       Only reset specific pins — gpio_reset_pin on SPI-related GPIOs
+       (e.g. GPIO37=SPIDQS) can reattach flash functions and break scanning. */
+    for (int i = 0; i < MATRIX_COLS; i++) {
+        int g = cols_map[i];
+        if (g == 43 || g == 44 || g == 16)
+            gpio_reset_pin(g);
+    }
 #else
     const int cols_map[MATRIX_COLS] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
     const int rows_map[MATRIX_ROWS] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
