@@ -17,6 +17,7 @@
 #include "version.h"
 #include "esp_app_desc.h"
 #include "esp_system.h"
+#include "matrix_scan.h"
 
 /* ── System ─────────────────────────────────────────────────────── */
 
@@ -36,7 +37,7 @@ static void bin_cmd_version(uint8_t cmd, const uint8_t *p, uint16_t l)
 static void bin_cmd_features(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
     (void)p; (void)l;
-    static const char feat[] = "MT,LT,LM,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE,COMBO,LEADER,GESC,LAYER_LOCK,WPM,TRI_LAYER";
+    static const char feat[] = "MT,LT,LM,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE,COMBO,LEADER,GESC,LAYER_LOCK,WPM,TRI_LAYER,MATRIX_TEST";
     ks_respond(cmd, KS_STATUS_OK, (const uint8_t *)feat, (uint16_t)strlen(feat));
 }
 
@@ -915,6 +916,20 @@ static void bin_cmd_ota_abort(uint8_t cmd, const uint8_t *p, uint16_t l)
     }
 }
 
+/* ── Matrix test ───────────────────────────────────────────────── */
+
+/* MATRIX_TEST: toggle test mode on/off.
+   When ON: scan callback sends KR [0xB0] [row,col,state] on each change.
+   When OFF: normal keyboard operation resumes.
+   Response: [enabled:u8][rows:u8][cols:u8] */
+static void bin_cmd_matrix_test(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    (void)p; (void)l;
+    matrix_test_mode = !matrix_test_mode;
+    uint8_t resp[3] = { matrix_test_mode ? 1 : 0, MATRIX_ROWS, MATRIX_COLS };
+    ks_respond(cmd, KS_STATUS_OK, resp, 3);
+}
+
 /* ── Command table ──────────────────────────────────────────────── */
 
 static const ks_bin_cmd_entry_t bin_cmd_table[] = {
@@ -982,6 +997,8 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     { KS_CMD_KO_SET,            bin_cmd_ko_set },
     { KS_CMD_KO_LIST,           bin_cmd_ko_list },
     { KS_CMD_KO_DELETE,         bin_cmd_ko_delete },
+    /* Diagnostics */
+    { KS_CMD_MATRIX_TEST,       bin_cmd_matrix_test },
     /* OTA */
     { KS_CMD_OTA_START,         bin_cmd_ota_start },
     { KS_CMD_OTA_DATA,          bin_cmd_ota_data },

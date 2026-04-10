@@ -54,4 +54,8 @@ void layer_changed(void);
 
 uint32_t get_last_activity_time_ms(void);
 
+/* Matrix test mode: when true, scan callback sends key events
+   via CDC binary protocol instead of filling HID reports */
+extern volatile bool matrix_test_mode;
+
 

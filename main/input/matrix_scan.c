@@ -2,6 +2,7 @@
 #include "keyboard_task.h"
 #include "key_stats.h"
 #include "keyboard_config.h"
+#include "cdc_binary_protocol.h"
 #include <esp_log.h>
 #include <stdint.h>
 #include <string.h>
@@ -12,6 +13,9 @@
 #include "status_display.h"
 
 #define TAG "MATRIX_SCAN"
+
+/* ── Matrix test mode ──────────────────────────────────────────── */
+volatile bool matrix_test_mode = false;
 
 // Define variables expected by other code
 uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
@@ -35,10 +39,36 @@ static uint8_t prev_matrix_state[MATRIX_ROWS][MATRIX_COLS];  /* For KPM: track n
 
 static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_report_t kbd_report, void *user_data)
 {
-    ESP_LOGI(TAG, "CB: pressed=%lu", (unsigned long)kbd_report.key_pressed_num);
-    // Clear matrix state
-    memset(MATRIX_STATE, 0, sizeof(MATRIX_STATE));
-    // Reset current press arrays
+    /* Build current matrix state from report */
+    uint8_t new_state[MATRIX_ROWS][MATRIX_COLS];
+    memset(new_state, 0, sizeof(new_state));
+    if (kbd_report.key_pressed_num > 0 && kbd_report.key_data) {
+        for (uint32_t i = 0; i < kbd_report.key_pressed_num; i++) {
+            uint8_t out_idx = kbd_report.key_data[i].output_index;
+            uint8_t in_idx = kbd_report.key_data[i].input_index;
+            if (in_idx < MATRIX_ROWS && out_idx < MATRIX_COLS)
+                new_state[in_idx][out_idx] = 1;
+        }
+    }
+
+    /* ── Test mode: send change events, skip HID ── */
+    if (matrix_test_mode) {
+        for (int r = 0; r < MATRIX_ROWS; r++) {
+            for (int c = 0; c < MATRIX_COLS; c++) {
+                if (new_state[r][c] != prev_matrix_state[r][c]) {
+                    uint8_t evt[3] = { (uint8_t)r, (uint8_t)c, new_state[r][c] };
+                    ks_respond(KS_CMD_MATRIX_TEST, KS_STATUS_OK, evt, 3);
+                }
+            }
+        }
+        memcpy(prev_matrix_state, new_state, sizeof(prev_matrix_state));
+        last_activity_time_ms = esp_timer_get_time() / 1000;
+        return;
+    }
+
+    /* ── Normal mode ── */
+    memcpy(MATRIX_STATE, new_state, sizeof(MATRIX_STATE));
+
     for (int i = 0; i < MAX_REPORT_KEYS; i++) {
         current_press_row[i] = INVALID_KEY_POS;
         current_press_col[i] = INVALID_KEY_POS;
@@ -46,23 +76,13 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
         keycodes[i] = 0;
     }
 
-    // Fill from key_data (pressed keys), filtering ghosts
     uint8_t filled = 0;
-    uint8_t valid_count = 0;
-    uint8_t new_keypresses = 0;  /* Count new keys for KPM */
+    uint8_t new_keypresses = 0;
     if (kbd_report.key_pressed_num > 0 && kbd_report.key_data) {
         for (uint32_t i = 0; i < kbd_report.key_pressed_num && filled < MAX_REPORT_KEYS; i++) {
             uint8_t out_idx = kbd_report.key_data[i].output_index;
             uint8_t in_idx = kbd_report.key_data[i].input_index;
-            
-            // Ghost filtering disabled: each key has its own diode,
-            // so ghosting cannot occur. The filter caused stuck keys
-            // by not recording ghost-filtered keys in MATRIX_STATE.
-            
-            valid_count++;
             if (in_idx < MATRIX_ROWS && out_idx < MATRIX_COLS) {
-                MATRIX_STATE[in_idx][out_idx] = 1;
-                /* Count NEW keypresses (wasn't pressed before) */
                 if (!prev_matrix_state[in_idx][out_idx]) {
                     new_keypresses++;
                     key_stats_record_press(in_idx, out_idx);
@@ -74,22 +94,16 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
             }
         }
     }
-    
-    /* Notify display of new keypresses (for KPM tracking) */
-    for (uint8_t k = 0; k < new_keypresses; k++) {
-        status_display_notify_keypress();
-    }
-    
-    /* Save current state for next comparison */
-    memcpy(prev_matrix_state, MATRIX_STATE, sizeof(MATRIX_STATE));
 
+    for (uint8_t k = 0; k < new_keypresses; k++)
+        status_display_notify_keypress();
+
+    memcpy(prev_matrix_state, new_state, sizeof(prev_matrix_state));
     stat_matrix_changed = 1;
     last_activity_time_ms = esp_timer_get_time() / 1000;
 
-    /* keyboard_task_handle declared in keyboard_task.h */
-    if (keyboard_task_handle != NULL) {
+    if (keyboard_task_handle != NULL)
         xTaskNotifyGive(keyboard_task_handle);
-    }
 }
 
 void rtc_matrix_deinit(void)

@@ -414,6 +414,52 @@ Force la sauvegarde en NVS.
 
 ---
 
+### Diagnostics (0xB0–0xBF)
+
+#### MATRIX_TEST (0xB0)
+Toggle le mode test matrice. En mode test, le clavier arrete d'envoyer les rapports HID et envoie a la place des evenements de changement d'etat des touches via des frames KR non-sollicitees.
+
+- Request: payload vide (toggle on/off)
+- Response: `[enabled:u8][rows:u8][cols:u8]`
+  - `enabled`: 1 = mode test actif, 0 = mode normal
+  - `rows`, `cols`: dimensions de la matrice
+
+**Evenements (firmware → host, non-sollicites) :**
+
+Quand le mode test est actif, chaque changement d'etat d'une touche genere une frame :
+```
+KR [0xB0] [OK] [3 bytes] [row:u8][col:u8][state:u8] [crc]
+```
+- `row`, `col`: position dans la matrice
+- `state`: 1 = presse, 0 = relache
+
+**Flux typique :**
+```
+Host                          Firmware
+ │                               │
+ │  KS [B0] (toggle ON)         │
+ ├──────────────────────────────>│
+ │  KR [B0] OK [01,05,0D]       │  ← enabled=1, 5 rows, 13 cols
+ │<──────────────────────────────┤
+ │                               │
+ │  KR [B0] OK [02,03,01]       │  ← row 2 col 3 pressed
+ │<──────────────────────────────┤
+ │  KR [B0] OK [02,03,00]       │  ← row 2 col 3 released
+ │<──────────────────────────────┤
+ │  KR [B0] OK [00,05,01]       │  ← row 0 col 5 pressed
+ │<──────────────────────────────┤
+ │  ...                          │
+ │                               │
+ │  KS [B0] (toggle OFF)        │
+ ├──────────────────────────────>│
+ │  KR [B0] OK [00,05,0D]       │  ← enabled=0, back to normal
+ │<──────────────────────────────┤
+```
+
+**Usage** : equivalent du [QMK Key Tester](https://config.qmk.fm/#/test). Permet de verifier que chaque touche physique fonctionne et d'identifier les colonnes/rows defectueuses.
+
+---
+
 ### OTA (0xF0–0xFF)
 
 #### OTA_START (0xF0)

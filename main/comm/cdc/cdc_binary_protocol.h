@@ -99,6 +99,9 @@ typedef enum {
     KS_CMD_TAMA_MEDICINE    = 0xA6,
     KS_CMD_TAMA_SAVE        = 0xA7,
 
+    /* Diagnostics (0xB0-0xBF) */
+    KS_CMD_MATRIX_TEST      = 0xB0,
+
     /* OTA (0xF0-0xFF) */
     KS_CMD_OTA_START        = 0xF0,
     KS_CMD_OTA_DATA         = 0xF1,
