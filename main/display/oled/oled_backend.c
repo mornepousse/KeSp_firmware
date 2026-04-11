@@ -8,6 +8,7 @@
 #include "keyboard_config.h"
 #include "keymap.h"
 #include "tama_engine.h"
+#include "usb_hid.h"
 #include "tama_render.h"
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
@@ -96,6 +97,7 @@ static lv_obj_t   *tama_card          = NULL;
 static lv_obj_t   *icon_bt            = NULL;
 static lv_obj_t   *icon_path          = NULL;
 static lv_obj_t   *indicator_mouse    = NULL;
+static lv_obj_t   *indicator_caps     = NULL;
 static lv_obj_t   *label_layer_name   = NULL;
 static lv_obj_t   *kpm_bar            = NULL;
 static lv_obj_t   *bt_slot_label      = NULL;
@@ -178,6 +180,12 @@ static void oled_init_icons(void)
     lv_obj_set_pos(indicator_mouse, OLED_MOUSE_X, OLED_MOUSE_Y);
     lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
 
+    indicator_caps = lv_label_create(scr);
+    lv_label_set_text(indicator_caps, "CAP");
+    lv_obj_set_style_text_font(indicator_caps, UI_FONT, 0);
+    lv_obj_set_pos(indicator_caps, OLED_MOUSE_X - 28, OLED_MOUSE_Y);
+    lv_obj_add_flag(indicator_caps, LV_OBJ_FLAG_HIDDEN);
+
     /* — Tama card (square border around tama sprite, only when active) — */
     if (tama_on) {
         tama_card = make_card(scr, OLED_TAMA_CARD_X, OLED_TAMA_CARD_Y,
@@ -220,6 +228,7 @@ static void oled_prepare_ui(bool clear_screen)
         icon_bt          = NULL;
         icon_path        = NULL;
         indicator_mouse  = NULL;
+        indicator_caps   = NULL;
         label_layer_name  = NULL;
         kpm_bar           = NULL;
         bt_slot_label     = NULL;
@@ -368,6 +377,14 @@ static void oled_update(void)
             lv_obj_add_flag(indicator_mouse, LV_OBJ_FLAG_HIDDEN);
     }
 
+    /* Caps Lock indicator */
+    if (indicator_caps) {
+        if (hid_led_state & HID_LED_CAPS_LOCK)
+            lv_obj_clear_flag(indicator_caps, LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_add_flag(indicator_caps, LV_OBJ_FLAG_HIDDEN);
+    }
+
     /* KPM bar */
     if (kpm_bar) {
         uint32_t v = oled_current_kpm > OLED_KPM_MAX ? OLED_KPM_MAX : oled_current_kpm;
@@ -403,6 +420,7 @@ static void oled_sleep(void)
         icon_bt          = NULL;
         icon_path        = NULL;
         indicator_mouse  = NULL;
+        indicator_caps   = NULL;
         label_layer_name  = NULL;
         kpm_bar           = NULL;
         bt_slot_label     = NULL;

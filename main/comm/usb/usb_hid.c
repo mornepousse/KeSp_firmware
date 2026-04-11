@@ -8,6 +8,7 @@
 #include "keyboard_config.h"
 
 static const char *TAG_UD = "USB_DESCRIPTORS";
+volatile uint8_t hid_led_state = 0;
 
 /* TinyUSB descriptors for CDC ACM + HID keyboard combo.
  * Windows-compatible configuration (avoids STATUS_DEVICE_DATA_ERROR). */
@@ -109,7 +110,14 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
 // received data on OUT endpoint ( Report ID = 0, Type = 0 )
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
                            hid_report_type_t report_type, uint8_t const *buffer,
-                           uint16_t bufsize) {}
+                           uint16_t bufsize)
+{
+    if (report_type == HID_REPORT_TYPE_OUTPUT && bufsize >= 1) {
+        /* LED report: bit0=NumLock, bit1=CapsLock, bit2=ScrollLock */
+        extern volatile uint8_t hid_led_state;
+        hid_led_state = buffer[0];
+    }
+}
 
 /********* Application ***************/
 

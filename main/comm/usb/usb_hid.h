@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 
 
 enum
@@ -12,3 +13,7 @@ enum
 };
  
 void kase_tinyusb_init(void);
+
+/* LED state from host (SET_REPORT): bit0=NumLock, bit1=CapsLock, bit2=ScrollLock */
+extern volatile uint8_t hid_led_state;
+#define HID_LED_CAPS_LOCK  (1 << 1)
