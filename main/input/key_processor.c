@@ -93,7 +93,7 @@ static void dispatch_internal_function(void)
 {
     switch (keypress_internal_function) {
     case BT_SWITCH_DEVICE:
-        if (usb_bl_state == 0 && hid_bluetooth_is_initialized() && hid_bluetooth_is_connected())
+        if (usb_bl_state == 0 && hid_bluetooth_is_initialized())
             usb_bl_state = 1;
         else
             usb_bl_state = 0;

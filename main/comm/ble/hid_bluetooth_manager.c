@@ -96,13 +96,15 @@ void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param)
         case ESP_HIDD_EVENT_DEINIT_FINISH:
 	     break;
 		case ESP_HIDD_EVENT_BLE_CONNECT: {
-            ESP_LOGI(HID_DEMO_TAG, "ESP_HIDD_EVENT_BLE_CONNECT");
+            ESP_LOGI(HID_DEMO_TAG, "ESP_HIDD_EVENT_BLE_CONNECT conn_id=%d", param->connect.conn_id);
             hid_conn_id = param->connect.conn_id;
+            sec_conn = true;
             break;
         }
         case ESP_HIDD_EVENT_BLE_DISCONNECT: {
             sec_conn = false;
-            ESP_LOGI(HID_DEMO_TAG, "ESP_HIDD_EVENT_BLE_DISCONNECT");
+            hid_conn_id = 0;
+            ESP_LOGI(HID_DEMO_TAG, "ESP_HIDD_EVENT_BLE_DISCONNECT — re-advertising");
             esp_ble_gap_start_advertising(&hidd_adv_params);
             break;
         }
@@ -279,9 +281,10 @@ void deinit_hid_bluetooth(void)
     }
 
     bt_initialized = false;
+    sec_conn = false;
+    hid_conn_id = 0;
 
     ESP_LOGI(HID_BT_TAG, "BLE HID disabled");
-    sec_conn = false;
     uint64_t _t1 = esp_timer_get_time();
     ESP_LOGW(HID_BT_TAG, "deinit_hid_bluetooth finished in %llu ms", (unsigned long long)((_t1-_t0)/1000));
 }

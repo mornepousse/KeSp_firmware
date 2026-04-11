@@ -212,6 +212,7 @@ void tama_render_update(tama2_state_t state, const tama2_stats_t *stats, uint8_t
         lv_obj_align(canvas, LV_ALIGN_CENTER, 0, -20 + bounce_offset);
         lv_obj_invalidate(canvas);
     } else if (container) {
+        if (!lv_obj_is_valid(container)) { container = NULL; return; }
         /* OLED: copy sprite bits to mono buffer */
         memcpy(mono_buf, frame, TAMA_SPRITE_BYTES);
         lv_img_set_src(container, &mono_img_dsc);
@@ -220,6 +221,9 @@ void tama_render_update(tama2_state_t state, const tama2_stats_t *stats, uint8_t
     }
 
     /* Update bars */
+    if (bar_hunger && !lv_obj_is_valid(bar_hunger)) bar_hunger = NULL;
+    if (bar_happy  && !lv_obj_is_valid(bar_happy))  bar_happy = NULL;
+    if (bar_energy && !lv_obj_is_valid(bar_energy)) bar_energy = NULL;
     if (bar_hunger) lv_bar_set_value(bar_hunger, stats->hunger, LV_ANIM_ON);
     if (bar_happy)  lv_bar_set_value(bar_happy, stats->happiness, LV_ANIM_ON);
     if (bar_energy) lv_bar_set_value(bar_energy, stats->energy, LV_ANIM_ON);

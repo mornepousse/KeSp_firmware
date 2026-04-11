@@ -222,6 +222,7 @@ static void oled_prepare_ui(bool clear_screen)
     if (!lvgl_port_lock(200)) return;
 
     if (clear_screen) {
+        tama_render_destroy();
         display_clear_screen();
         status_card      = NULL;
         tama_card        = NULL;
@@ -245,6 +246,10 @@ static void oled_prepare_ui(bool clear_screen)
     }
 
     oled_init_icons();
+    if (clear_screen && tama_engine_is_enabled()) {
+        lv_obj_t *scr = lv_scr_act();
+        tama_render_create(scr, BOARD_DISPLAY_WIDTH, BOARD_DISPLAY_HEIGHT);
+    }
     oled_initialized = true;
     lvgl_port_unlock();
 }
