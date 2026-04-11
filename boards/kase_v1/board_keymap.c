@@ -8,16 +8,16 @@
 
 // array to hold names of layouts for oled
 char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH] = {
-    "DVORAK",
-    "EXTRA",
-    "QWERTY",
-    "EXTRA",
-    "EXTRA",
-    "EXTRA",
-    "EXTRA",
-    "EXTRA",
-    "EXTRA",
-    "EXTRA",
+    "MAIN",
+    "NAV",
+    "LAYER 2",
+    "LAYER 3",
+    "LAYER 4",
+    "LAYER 5",
+    "LAYER 6",
+    "LAYER 7",
+    "LAYER 8",
+    "LAYER 9",
 };
 
 // Fillers to make layering more clear
@@ -26,17 +26,12 @@ char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH] = {
 
 uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
-    {// dvorak sous qwerty inter
-     {K_ESC, K_ENT, /**/ K_2, K_3, K_4, K_5, K_6, K_7, K_8, K_9, /**/ TO_L2,
-      K_INT3, /**/ K_LBRC},
-     {K_DEL, K_1, K_COMM, K_DOT, K_P, K_Y, K_F, K_G, K_C, K_R, K_0, K_EQUAL,
-      /**/ MO_L1},
-     {K_TAB, K_QUOT, K_O, K_E, K_U, K_I, K_D, K_H, K_T, K_N, K_L, K_SLSH,
-      /**/ K_RBRC},
-     {K_RALT, K_A, K_Q, K_J, K_K, K_X, K_B, K_M, K_W, K_V, K_S, K_MINUS,
-      /**/ K_RSHIFT},
-     {K_LCTRL, K_SCLN, K_LALT, K_LWIN, K_LSHIFT, K_SPACE, K_BSPACE, K_ENTER,
-      K_BSLSH, K_Z, K_Z, K_GRV, /**/ K_NO}},
+    {// QWERTY (V1 matrix coordinates)
+     {K_ESC,   K_ENT,  K_2,    K_3,    K_4,      K_5,     K_6,     K_7,     K_8,     K_9,     TO_L2,  K_NO,   K_LBRC},
+     {K_DEL,   K_1,    K_W,    K_E,    K_R,      K_T,     K_Y,     K_U,     K_I,     K_O,     K_0,    K_EQL,  MO_L1},
+     {K_TAB,   K_Q,    K_S,    K_D,    K_F,      K_G,     K_H,     K_J,     K_K,     K_L,     K_P,    K_SLSH, K_RBRC},
+     {K_RALT,  K_A,    K_X,    K_C,    K_V,      K_B,     K_N,     K_M,     K_COMM,  K_DOT,   K_SCLN, K_MINUS,K_RSHIFT},
+     {K_LCTRL, K_Z,    K_LALT, K_LWIN, K_LSHIFT, K_SPACE, K_BSPACE,K_ENT,   K_BSLSH, K_QUOT,  K_QUOT, K_GRV,  K_NO}},
     {{K_NO, K_NO, K_F2, K_F3, K_F4, K_F5, K_F6, K_F7, K_F8, K_F9, K_NO, K_NO,
       K_L_PARENTHESIS},
      {K_NO, K_F1, K_HOME, K_NO, K_END, K_NO, K_NO, K_NO, K_NO, K_NO, K_F10, K_F11,
@@ -47,16 +42,8 @@ uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
       K_NO},
      {K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO,
       K_NO}},
-    {// dvorak sous layeur custom pour windows/macos
-     {K_ESC, K_ENT, /**/ K_2, K_3, K_4, K_5, K_6,
-      K_7, K_8, K_9, /**/ TO_L0, K_INT3, /**/ K_MINUS},
-     /////////////////
-     /////////////////////////////////////////////
-     {K_DEL, K_1, K_W, K_E, K_R, K_T, K_Y,
-      K_U, K_I, K_O, K_0, K_RBRC, /**/ MO_L1},
-     {K_TAB, K_Q, K_S, K_D, K_F, K_G, K_H,
-      K_J, K_K, K_L, K_P, K_LBRC, /**/ K_EQUAL},
-     {K_RALT, K_A, K_X, K_C, K_V, K_B, K_N,
-      K_M, K_COMM, K_DOT, K_SCLN, K_QUOT, /**/ K_RSHIFT},
-     {K_LCTRL, K_Z, K_LALT, K_LWIN, K_LSHIFT, K_SPACE, K_BSPACE, K_ENTER, K_BSLSH,
-      K_DELETE, K_SLSH, K_GRV, /**/ K_NO}}};
+    {{K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO},
+     {K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO},
+     {K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO},
+     {K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO},
+     {K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO, K_NO}}};
