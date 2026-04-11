@@ -17,6 +17,7 @@
 #include "version.h"
 #include "esp_app_desc.h"
 #include "esp_system.h"
+#include "nvs_flash.h"
 #include "matrix_scan.h"
 
 /* ── System ─────────────────────────────────────────────────────── */
@@ -930,6 +931,46 @@ static void bin_cmd_matrix_test(uint8_t cmd, const uint8_t *p, uint16_t l)
     ks_respond(cmd, KS_STATUS_OK, resp, 3);
 }
 
+/* NVS_RESET: erase all saved config, reboot with defaults.
+   Payload [mask:u8]:
+     bit 0 = keymaps + layout names
+     bit 1 = macros
+     bit 2 = stats (keystats + bigrams)
+     bit 3 = advanced (tap dance, combos, leader, key override)
+     bit 4 = bluetooth
+     bit 5 = tamagotchi
+     0xFF  = erase everything
+   Response: OK then reboot */
+static void bin_cmd_nvs_reset(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    uint8_t mask = (l >= 1) ? p[0] : 0xFF;
+
+    nvs_handle_t h;
+    if (nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) {
+        ks_respond_err(cmd, KS_STATUS_ERR_BUSY);
+        return;
+    }
+
+    if (mask & 0x01) { nvs_erase_key(h, "keymaps"); nvs_erase_key(h, "layout_names"); }
+    if (mask & 0x02) { nvs_erase_key(h, "macros"); }
+    if (mask & 0x04) { nvs_erase_key(h, "key_stats"); nvs_erase_key(h, "key_stats_tot");
+                       nvs_erase_key(h, "bigram_stats"); nvs_erase_key(h, "bigram_total"); }
+    if (mask & 0x08) { nvs_erase_key(h, "td_configs"); nvs_erase_key(h, "td_count");
+                       nvs_erase_key(h, "combo_cfg"); nvs_erase_key(h, "combo_cnt");
+                       nvs_erase_key(h, "leader_cfg"); nvs_erase_key(h, "leader_cnt");
+                       nvs_erase_key(h, "ko_cfg"); nvs_erase_key(h, "ko_cnt"); }
+    if (mask & 0x10) { nvs_erase_key(h, "bt_slots"); nvs_erase_key(h, "bt_active");
+                       nvs_erase_key(h, "bt_enabled"); }
+    if (mask & 0x20) { nvs_erase_key(h, "tama_stats"); }
+
+    nvs_commit(h);
+    nvs_close(h);
+
+    ks_respond_ok(cmd);
+    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_restart();
+}
+
 /* ── Command table ──────────────────────────────────────────────── */
 
 static const ks_bin_cmd_entry_t bin_cmd_table[] = {
@@ -999,6 +1040,7 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     { KS_CMD_KO_DELETE,         bin_cmd_ko_delete },
     /* Diagnostics */
     { KS_CMD_MATRIX_TEST,       bin_cmd_matrix_test },
+    { KS_CMD_NVS_RESET,         bin_cmd_nvs_reset },
     /* OTA */
     { KS_CMD_OTA_START,         bin_cmd_ota_start },
     { KS_CMD_OTA_DATA,          bin_cmd_ota_data },

@@ -1,9 +1,6 @@
 #include "../kase_v2/board.h"
 
 /* Override GPIOs that differ on the debug board */
-#undef COLS2
-#define COLS2  GPIO_NUM_3
-
 #undef COLS7
 #define COLS7  GPIO_NUM_21
 

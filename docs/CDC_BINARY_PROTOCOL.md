@@ -458,6 +458,31 @@ Host                          Firmware
 
 **Usage** : equivalent du [QMK Key Tester](https://config.qmk.fm/#/test). Permet de verifier que chaque touche physique fonctionne et d'identifier les colonnes/rows defectueuses.
 
+#### NVS_RESET (0xB1)
+Efface les configurations sauvegardees en NVS et reboot avec les valeurs par defaut.
+
+- Request: `[mask:u8]` — bitmask de ce qu'il faut effacer
+- Response: OK puis reboot
+
+**Bitmask :**
+
+| Bit | Valeur | Donnees effacees |
+|-----|--------|------------------|
+| 0 | 0x01 | Keymaps + noms de layers |
+| 1 | 0x02 | Macros |
+| 2 | 0x04 | Statistiques (keystats + bigrams) |
+| 3 | 0x08 | Tap Dance, Combos, Leader, Key Override |
+| 4 | 0x10 | Bluetooth (slots, etat) |
+| 5 | 0x20 | Tamagotchi |
+| all | 0xFF | Tout effacer |
+
+**Exemples :**
+- `KS [B1] [01] [crc]` → efface keymaps uniquement, reboot
+- `KS [B1] [09] [crc]` → efface keymaps + features avancees, reboot
+- `KS [B1] [FF] [crc]` → factory reset complet, reboot
+
+**Usage** : utile apres un changement de board variant (V2 ↔ V2D) ou quand les keymaps NVS ne correspondent plus au layout physique.
+
 ---
 
 ### OTA (0xF0–0xFF)

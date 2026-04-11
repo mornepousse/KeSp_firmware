@@ -23,7 +23,7 @@
 
 #define COLS0  GPIO_NUM_9
 #define COLS1  GPIO_NUM_46
-#define COLS2  GPIO_NUM_37
+#define COLS2  GPIO_NUM_3
 #define COLS3  GPIO_NUM_8
 #define COLS4  GPIO_NUM_18
 #define COLS5  GPIO_NUM_17
