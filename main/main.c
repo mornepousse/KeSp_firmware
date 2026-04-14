@@ -125,8 +125,9 @@ static bool safe_mode = false;
 void app_main(void) {
   ESP_LOGI(TAG, "--------------- KeSp [%s] ----------------", PRODUCT_NAME);
 
-  /* Crash-loop detection */
-  if (boot_crash_magic != BOOT_CRASH_MAGIC) {
+  /* Crash-loop detection — RTC memory is random on first power-on,
+     so we validate with a magic number AND a reasonable count range */
+  if (boot_crash_magic != BOOT_CRASH_MAGIC || boot_crash_count > 100) {
       boot_crash_magic = BOOT_CRASH_MAGIC;
       boot_crash_count = 0;
   }
@@ -136,9 +137,9 @@ void app_main(void) {
   if (boot_crash_count > BOOT_CRASH_LIMIT) {
       ESP_LOGW(TAG, "Crash loop detected (%lu boots) — SAFE MODE", (unsigned long)boot_crash_count);
       safe_mode = true;
-      /* Erase NVS to clear potentially corrupted config */
-      nvs_flash_erase();
       boot_crash_count = 0;
+      /* Don't erase NVS — user data is precious.
+         Safe mode just skips display/BLE/NVS loading. */
   }
 
   kase_tinyusb_init();
