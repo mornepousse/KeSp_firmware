@@ -154,81 +154,42 @@ uint16_t wpm_get(void)
     return (uint16_t)(total * 60 / (WPM_WINDOW_SIZE * WPM_CHARS_PER_WORD));
 }
 
-/* ── Auto Shift ─────────────────────────────────────────────────── */
+/* ── Double-Tap Shift → Caps Lock ──────────────────────────────── */
 
-#ifndef AUTO_SHIFT_TIMEOUT_MS
-#define AUTO_SHIFT_TIMEOUT_MS 150
-#endif
+#define SHIFT_DTAP_TIMEOUT_TICKS  20  /* 20 × 10ms = 200ms window */
 
-static bool as_enabled = false;
-static bool as_pending = false;
-static bool as_resolved = false;
-static uint8_t as_keycode = 0;
-static uint8_t as_row = 0xFF, as_col = 0xFF;
-static uint32_t as_press_time = 0;
-static uint8_t as_result_key = 0;
-static uint8_t as_result_mod = 0;
+static uint8_t sdt_ticks = 0;
+static bool    sdt_waiting = false;
+static bool    sdt_caps_pending = false;
 
-/* Only auto-shift alpha keys (A-Z = 0x04-0x1D) by default */
-static bool is_auto_shiftable(uint8_t kc) {
-    return (kc >= 0x04 && kc <= 0x1D); /* A-Z */
+bool shift_double_tap_press(void)
+{
+    if (sdt_waiting && sdt_ticks < SHIFT_DTAP_TIMEOUT_TICKS) {
+        sdt_waiting = false;
+        sdt_ticks = 0;
+        sdt_caps_pending = true;
+        return true;
+    }
+    sdt_waiting = true;
+    sdt_ticks = 0;
+    return false;
 }
 
-void auto_shift_toggle(void) { as_enabled = !as_enabled; }
-bool auto_shift_is_enabled(void) { return as_enabled; }
-
-bool auto_shift_on_press(uint8_t hid_keycode, uint8_t row, uint8_t col)
+void shift_double_tap_tick(void)
 {
-    if (!as_enabled || !is_auto_shiftable(hid_keycode)) return false;
-    if (as_pending) return false; /* already tracking one */
-
-    as_pending = true;
-    as_resolved = false;
-    as_keycode = hid_keycode;
-    as_row = row;
-    as_col = col;
-    as_press_time = 0; /* will be set by tick */
-    as_result_key = 0;
-    as_result_mod = 0;
-    return true; /* absorbed */
-}
-
-void auto_shift_on_release(uint8_t row, uint8_t col)
-{
-    if (!as_pending || row != as_row || col != as_col) return;
-    /* Released before timeout → normal (unshifted) tap */
-    as_result_key = as_keycode;
-    as_result_mod = 0;
-    as_resolved = true;
-    as_pending = false;
-}
-
-void auto_shift_tick(void)
-{
-    if (!as_pending) return;
-    as_press_time++;
-    /* Each tick ~10ms, timeout = AUTO_SHIFT_TIMEOUT_MS / 10 */
-    if (as_press_time >= (AUTO_SHIFT_TIMEOUT_MS / 10)) {
-        /* Held past timeout → shifted */
-        as_result_key = as_keycode;
-        as_result_mod = MOD_LSFT;
-        as_resolved = true;
-        as_pending = false;
+    if (sdt_waiting) {
+        sdt_ticks++;
+        if (sdt_ticks >= SHIFT_DTAP_TIMEOUT_TICKS)
+            sdt_waiting = false;
     }
 }
 
-uint8_t auto_shift_consume(uint8_t *out_mod)
+bool shift_double_tap_consume(void)
 {
-    if (!as_resolved) return 0;
-    uint8_t kc = as_result_key;
-    if (out_mod) *out_mod = as_result_mod;
-    as_resolved = false;
-    as_result_key = 0;
-    as_result_mod = 0;
-    return kc;
+    if (!sdt_caps_pending) return false;
+    sdt_caps_pending = false;
+    return true;
 }
-
-bool auto_shift_just_resolved(void) { return as_resolved; }
 
 /* ── Key Override / Mod-Morph ───────────────────────────────────── */
 

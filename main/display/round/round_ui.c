@@ -1,5 +1,6 @@
 /* Round display UI — GC9A01 240×240 */
 #include "round_ui.h"
+#include "usb_hid.h"
 #include "tama_engine.h"
 #include "tama_render.h"
 #include "status_display.h"
@@ -68,6 +69,7 @@ static lv_obj_t *status_icon     = NULL;
 static lv_obj_t *conn_icon       = NULL;
 static lv_obj_t *bt_slot_label   = NULL;
 static lv_obj_t *mouse_indicator = NULL;
+static lv_obj_t *caps_indicator  = NULL;
 static lv_obj_t *kpm_label       = NULL;
 
 /* State */
@@ -212,6 +214,13 @@ static void create_mouse_indicator(lv_obj_t *parent)
     lv_label_set_text(mouse_indicator, LV_SYMBOL_EYE_OPEN);
     lv_obj_align(mouse_indicator, LV_ALIGN_BOTTOM_MID, -55, -48);
     lv_obj_add_flag(mouse_indicator, LV_OBJ_FLAG_HIDDEN);
+
+    caps_indicator = lv_label_create(parent);
+    lv_obj_set_style_text_font(caps_indicator, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(caps_indicator, COLOR_WARNING, 0);
+    lv_label_set_text(caps_indicator, "CAPS");
+    lv_obj_align(caps_indicator, LV_ALIGN_BOTTOM_MID, 55, -48);
+    lv_obj_add_flag(caps_indicator, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void create_main_ui(void)
@@ -398,6 +407,14 @@ void round_ui_update(void)
             lv_obj_add_flag(mouse_indicator, LV_OBJ_FLAG_HIDDEN);
     }
 
+    /* Caps Lock indicator */
+    if (caps_indicator) {
+        if (hid_led_state & HID_LED_CAPS_LOCK)
+            lv_obj_clear_flag(caps_indicator, LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_add_flag(caps_indicator, LV_OBJ_FLAG_HIDDEN);
+    }
+
     /* Tama */
     if (tama_on)
         tama_render_update(tama_engine_get_state(), tama_engine_get_stats(), tama_engine_get_critter());
@@ -417,6 +434,7 @@ void round_ui_sleep(void)
         conn_icon       = NULL;
         bt_slot_label   = NULL;
         mouse_indicator = NULL;
+        caps_indicator  = NULL;
         kpm_label       = NULL;
         tama_render_destroy();
         ui_sleeping    = true;
@@ -450,6 +468,7 @@ void round_ui_refresh_all(void)
         conn_icon       = NULL;
         bt_slot_label   = NULL;
         mouse_indicator = NULL;
+        caps_indicator  = NULL;
         kpm_label       = NULL;
         tama_render_destroy();
         create_main_ui();

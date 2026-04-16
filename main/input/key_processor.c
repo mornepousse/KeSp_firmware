@@ -204,7 +204,7 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
     if (kc == K_CAPS_WORD) { caps_word_toggle(); return 0; }
     if (kc == K_REPEAT)    { return repeat_key_get(); }
     if (kc == K_LEADER)    { leader_start(); return 0; }
-    if (kc == K_AUTO_SHIFT_TOGGLE) { auto_shift_toggle(); return 0; }
+    if (kc == K_AUTO_SHIFT_TOGGLE) { return 0; } /* deprecated, kept for compat */
     if (kc == K_GESC) {
         /* Check if any Shift/GUI is in current keycodes OR tap_hold mods */
         uint8_t mods = tap_hold_get_active_mods();
@@ -248,7 +248,6 @@ static void detect_releases(void)
         if (!still_pressed) {
             tap_hold_on_release(prev_press_row[i], prev_press_col[i]);
             tap_dance_on_release(prev_press_row[i], prev_press_col[i]);
-            auto_shift_on_release(prev_press_row[i], prev_press_col[i]);
         }
     }
 }
@@ -340,11 +339,13 @@ void build_keycode_report(void)
                     /* TODO: apply override_mod */
                 }
 
-                /* Auto shift: absorb alpha keys for delayed shift detection */
-                if (auto_shift_is_enabled() && is_new_press(row, col) &&
-                    auto_shift_on_press(kc, row, col)) {
-                    extra_keycodes[i] = kc;
-                    continue;
+                /* Double-tap Shift → Caps Lock (tap sent by keyboard_task) */
+                if (is_new_press(row, col) &&
+                    (kc == HID_KEY_SHIFT_LEFT || kc == HID_KEY_SHIFT_RIGHT)) {
+                    if (shift_double_tap_press()) {
+                        extra_keycodes[i] = kc; /* suppress Shift from report */
+                        continue;
+                    }
                 }
 
                 /* Combo deferral: hold back combo candidate keys */

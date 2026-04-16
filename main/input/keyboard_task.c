@@ -46,7 +46,7 @@ void vTaskKeyboard(void *pvParameters)
         /* Tick timers — even without matrix change */
         tap_hold_tick();
         tap_dance_tick();
-        auto_shift_tick();
+        shift_double_tap_tick();
 
         /* Hold just activated → rebuild and send */
         if (tap_hold_hold_just_activated()) {
@@ -54,13 +54,9 @@ void vTaskKeyboard(void *pvParameters)
             send_hid_key();
         }
 
-        /* Auto shift resolved → send tap with optional shift */
-        if (auto_shift_just_resolved()) {
-            uint8_t mod = 0;
-            uint8_t kc = auto_shift_consume(&mod);
-            if (kc != 0)
-                send_tap(kc, mod);
-        }
+        /* Double-tap Shift → Caps Lock tap */
+        if (shift_double_tap_consume())
+            send_tap(0x39, 0);  /* HID_KEY_CAPS_LOCK = 0x39 */
 
         /* Tap dance resolved → send tap */
         if (tap_dance_just_resolved()) {

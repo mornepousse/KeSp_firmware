@@ -77,22 +77,17 @@ uint16_t wpm_get(void);
 /* Tick WPM sampling (call every ~1 second) */
 void wpm_tick(void);
 
-/* ── Auto Shift ─────────────────────────────────────────────────── */
+/* ── Double-Tap Shift → Caps Lock ──────────────────────────────── */
 
-/* Toggle auto shift on/off */
-void auto_shift_toggle(void);
+/* Call when a Shift key is newly pressed (LShift 0xE1 or RShift 0xE5).
+   Returns true if double-tap detected → Caps Lock tap should be sent. */
+bool shift_double_tap_press(void);
 
-/* Check if auto shift is enabled */
-bool auto_shift_is_enabled(void);
+/* Tick the double-tap timer (call every ~10ms from keyboard task) */
+void shift_double_tap_tick(void);
 
-/* Process a keycode through auto shift.
-   Returns true if the key should be handled by auto shift (absorbed).
-   The resolved key (shifted or not) is obtained via auto_shift_consume(). */
-bool auto_shift_on_press(uint8_t hid_keycode, uint8_t row, uint8_t col);
-void auto_shift_on_release(uint8_t row, uint8_t col);
-void auto_shift_tick(void);
-uint8_t auto_shift_consume(uint8_t *out_mod);
-bool auto_shift_just_resolved(void);
+/* Check and consume pending Caps Lock tap (call from keyboard task) */
+bool shift_double_tap_consume(void);
 
 /* ── Key Override / Mod-Morph ───────────────────────────────────── */
 

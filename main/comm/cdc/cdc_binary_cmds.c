@@ -319,8 +319,8 @@ static void bin_cmd_tama_save(uint8_t cmd, const uint8_t *p, uint16_t l)
 static void bin_cmd_autoshift(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
     (void)p; (void)l;
-    auto_shift_toggle();
-    uint8_t state = auto_shift_is_enabled() ? 1 : 0;
+    /* Deprecated — auto shift replaced by double-tap Shift → Caps Lock */
+    uint8_t state = 0;
     ks_respond(cmd, KS_STATUS_OK, &state, 1);
 }
 
