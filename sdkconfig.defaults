@@ -1,14 +1,28 @@
-# This file was generated using idf.py save-defconfig. It can be edited manually.
-# Espressif IoT Development Framework (ESP-IDF) Project Minimal Configuration
-#
-# Disable UART console — frees GPIO43/44 (UART0) used by V2 matrix
+# KaSe firmware defaults — source of truth for sdkconfig.
+# Generated via `idf.py save-defconfig` + manual additions.
+
+# Disable UART console — frees GPIO43/44/16 (UART0) used by V2 matrix
 CONFIG_ESP_CONSOLE_NONE=y
+
+# TinyUSB: keyboard + mouse HID, CDC ACM with generous buffers
 CONFIG_TINYUSB_HID_COUNT=1
+CONFIG_TINYUSB_CDC_RX_BUFSIZE=512
+CONFIG_TINYUSB_CDC_TX_BUFSIZE=512
+CONFIG_TINYUSB_CDC_EP_BUFSIZE=512
+
+# Flash size + custom partition table
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Bluetooth: BLE HID only (no Classic)
 CONFIG_BT_ENABLED=y
-CONFIG_BT_CLASSIC_ENABLED=y
 CONFIG_BT_BLE_ENABLED=y
 CONFIG_BT_HID_ENABLED=y
 CONFIG_BT_HID_DEVICE_ENABLED=y
+
+# LVGL: 16-bit color, required fonts
 CONFIG_LV_COLOR_16_SWAP=y
 CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_28=y

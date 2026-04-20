@@ -36,24 +36,20 @@ void hid_send_kb_mouse(uint8_t modifier, const uint8_t kb[6],
 {
     if (usb_bl_state == 0) {
         send_usb_kb_mouse(modifier, kb, buttons, x, y, wheel);
-    } else if (hid_bluetooth_is_initialized()) {
+    } else if (hid_bluetooth_is_initialized() && hid_bluetooth_is_connected()) {
         send_hid_bl_key(modifier, kb);
         send_hid_bl_mouse(buttons, x, y, wheel);
-    } else {
-        usb_bl_state = 0;
-        send_usb_kb_mouse(modifier, kb, buttons, x, y, wheel);
     }
+    /* BLE requested but not connected → drop report silently (no USB fallback
+       since user explicitly toggled to BLE mode) */
 }
 
 void hid_send_keyboard(uint8_t modifier, const uint8_t kb[6])
 {
     if (usb_bl_state == 0) {
         send_usb_keyboard(modifier, kb);
-    } else if (hid_bluetooth_is_initialized()) {
+    } else if (hid_bluetooth_is_initialized() && hid_bluetooth_is_connected()) {
         send_hid_bl_key(modifier, kb);
-    } else {
-        usb_bl_state = 0;
-        send_usb_keyboard(modifier, kb);
     }
 }
 
@@ -61,10 +57,7 @@ void hid_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
 {
     if (usb_bl_state == 0) {
         send_usb_mouse(buttons, x, y, wheel);
-    } else if (hid_bluetooth_is_initialized()) {
+    } else if (hid_bluetooth_is_initialized() && hid_bluetooth_is_connected()) {
         send_hid_bl_mouse(buttons, x, y, wheel);
-    } else {
-        usb_bl_state = 0;
-        send_usb_mouse(buttons, x, y, wheel);
     }
 }

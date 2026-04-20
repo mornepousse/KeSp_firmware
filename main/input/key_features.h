@@ -83,6 +83,9 @@ void wpm_tick(void);
    Returns true if double-tap detected → Caps Lock tap should be sent. */
 bool shift_double_tap_press(void);
 
+/* Call when a Shift key is released — arms the window for a second tap. */
+void shift_double_tap_release(void);
+
 /* Tick the double-tap timer (call every ~10ms from keyboard task) */
 void shift_double_tap_tick(void);
 

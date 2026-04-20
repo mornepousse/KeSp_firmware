@@ -140,7 +140,7 @@ void leader_save(void)
     for (int i = 0; i < LEADER_MAX_ENTRIES; i++)
         if (entries[i].result != 0) count = i + 1;
     esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "leader_cfg", entries,
-                              count * sizeof(leader_entry_t), "leader_cnt", count);
+                              sizeof(entries), "leader_cnt", count);
     if (err != ESP_OK)
         ESP_LOGE(TAG, "Failed to save leader: %s", esp_err_to_name(err));
     else

@@ -13,6 +13,7 @@
 #include "keymap.h"
 #include "hid_transport.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -47,6 +48,17 @@ void vTaskKeyboard(void *pvParameters)
         tap_hold_tick();
         tap_dance_tick();
         shift_double_tap_tick();
+
+        /* Matrix test mode auto-exit (runs even if no key pressed) */
+        extern volatile bool matrix_test_mode;
+        extern volatile uint32_t matrix_test_last_activity_ms;
+        if (matrix_test_mode) {
+            uint32_t now = esp_timer_get_time() / 1000;
+            if (now - matrix_test_last_activity_ms > 30000) {
+                matrix_test_mode = false;
+                ESP_LOGW(TAG, "matrix test mode timeout — auto-exit");
+            }
+        }
 
         /* Hold just activated → rebuild and send */
         if (tap_hold_hold_just_activated()) {

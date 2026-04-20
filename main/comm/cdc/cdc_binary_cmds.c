@@ -14,7 +14,6 @@
 #include "key_features.h"
 #include "hid_bluetooth_manager.h"
 #include "status_display.h"
-#include "version.h"
 #include "esp_app_desc.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
@@ -926,7 +925,10 @@ static void bin_cmd_ota_abort(uint8_t cmd, const uint8_t *p, uint16_t l)
 static void bin_cmd_matrix_test(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
     (void)p; (void)l;
+    extern volatile uint32_t matrix_test_last_activity_ms;
     matrix_test_mode = !matrix_test_mode;
+    if (matrix_test_mode)
+        matrix_test_last_activity_ms = esp_timer_get_time() / 1000;
     uint8_t resp[3] = { matrix_test_mode ? 1 : 0, MATRIX_ROWS, MATRIX_COLS };
     ks_respond(cmd, KS_STATUS_OK, resp, 3);
 }
@@ -943,7 +945,16 @@ static void bin_cmd_matrix_test(uint8_t cmd, const uint8_t *p, uint16_t l)
    Response: OK then reboot */
 static void bin_cmd_nvs_reset(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
-    uint8_t mask = (l >= 1) ? p[0] : 0xFF;
+    /* Reject empty payload — prevent accidental factory reset */
+    if (l < 1) {
+        ks_respond_err(cmd, KS_STATUS_ERR_INVALID);
+        return;
+    }
+    uint8_t mask = p[0];
+    if (mask == 0) {
+        ks_respond_err(cmd, KS_STATUS_ERR_INVALID);
+        return;
+    }
 
     nvs_handle_t h;
     if (nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) {

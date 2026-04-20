@@ -36,6 +36,12 @@ esp_err_t ota_bin_begin(uint32_t size)
 
 esp_err_t ota_bin_write(const uint8_t *data, uint16_t len)
 {
+    /* Reject writes that exceed declared total_size */
+    if (ota_received + len > ota_total_size) {
+        ESP_LOGE(TAG_CDC, "OTA write exceeds declared size (%u+%u > %u)",
+                 (unsigned)ota_received, (unsigned)len, (unsigned)ota_total_size);
+        return ESP_ERR_INVALID_SIZE;
+    }
     esp_err_t err = esp_ota_write(ota_handle, data, len);
     if (err == ESP_OK) ota_received += len;
     return err;
@@ -43,17 +49,23 @@ esp_err_t ota_bin_write(const uint8_t *data, uint16_t len)
 
 esp_err_t ota_bin_finish(void)
 {
+    /* esp_ota_end consumes the handle regardless of success/failure */
     esp_err_t err = esp_ota_end(ota_handle);
-    if (err != ESP_OK) return err;
+    ota_handle = 0;
+    if (err != ESP_OK) {
+        ota_state = OTA_IDLE;
+        return err;
+    }
     err = esp_ota_set_boot_partition(ota_partition);
-    if (err != ESP_OK) return err;
     ota_state = OTA_IDLE;
-    return ESP_OK;
+    return err;
 }
 
 void ota_bin_abort(void)
 {
-    esp_ota_abort(ota_handle);
+    if (ota_handle != 0) {
+        esp_ota_abort(ota_handle);
+        ota_handle = 0;
+    }
     ota_state = OTA_IDLE;
-    ota_handle = 0;
 }

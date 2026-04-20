@@ -159,28 +159,39 @@ uint16_t wpm_get(void)
 #define SHIFT_DTAP_TIMEOUT_TICKS  20  /* 20 × 10ms = 200ms window */
 
 static uint8_t sdt_ticks = 0;
-static bool    sdt_waiting = false;
+static bool    sdt_first_released = false;  /* first tap released, window active */
+static bool    sdt_first_pressed = false;   /* first tap press seen, not yet released */
 static bool    sdt_caps_pending = false;
 
 bool shift_double_tap_press(void)
 {
-    if (sdt_waiting && sdt_ticks < SHIFT_DTAP_TIMEOUT_TICKS) {
-        sdt_waiting = false;
+    /* If first tap was released and we're still in the window → this is tap 2 */
+    if (sdt_first_released) {
+        sdt_first_released = false;
         sdt_ticks = 0;
         sdt_caps_pending = true;
         return true;
     }
-    sdt_waiting = true;
-    sdt_ticks = 0;
+    /* Otherwise, this is tap 1 — track until release */
+    sdt_first_pressed = true;
     return false;
+}
+
+void shift_double_tap_release(void)
+{
+    if (sdt_first_pressed) {
+        sdt_first_pressed = false;
+        sdt_first_released = true;
+        sdt_ticks = 0;
+    }
 }
 
 void shift_double_tap_tick(void)
 {
-    if (sdt_waiting) {
+    if (sdt_first_released) {
         sdt_ticks++;
         if (sdt_ticks >= SHIFT_DTAP_TIMEOUT_TICKS)
-            sdt_waiting = false;
+            sdt_first_released = false;
     }
 }
 
@@ -227,7 +238,7 @@ void key_override_save(void) {
     for (int i = 0; i < KEY_OVERRIDE_MAX_SLOTS; i++)
         if (overrides[i].trigger_key != 0) count = i + 1;
     esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "ko_cfg", overrides,
-                                              count * sizeof(key_override_t), "ko_cnt", count);
+                                              sizeof(overrides), "ko_cnt", count);
     if (err != ESP_OK) ESP_LOGE("KEY_OVERRIDE", "Save failed: %s", esp_err_to_name(err));
 }
 

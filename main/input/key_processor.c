@@ -254,10 +254,30 @@ static void detect_releases(void)
 
 /* ── Main report builder ─────────────────────────────────────────── */
 
+/* Track Shift release for double-tap Caps Lock */
+static bool prev_shift_pressed = false;
+
+static bool any_shift_pressed_now(void)
+{
+    for (uint8_t i = 0; i < 6; i++) {
+        if (current_press_col[i] == INVALID_KEY_POS) continue;
+        uint16_t kc = keymaps[current_layout][current_press_row[i]][current_press_col[i]];
+        if (kc == HID_KEY_SHIFT_LEFT || kc == HID_KEY_SHIFT_RIGHT)
+            return true;
+    }
+    return false;
+}
+
 void build_keycode_report(void)
 {
     tap_injected_slots = 0;
     macro_hold_mods = 0;
+
+    /* Shift release detection for double-tap Caps Lock */
+    bool shift_now = any_shift_pressed_now();
+    if (prev_shift_pressed && !shift_now)
+        shift_double_tap_release();
+    prev_shift_pressed = shift_now;
 
     /* Step 1: detect releases and resolve pending tap/holds */
     detect_releases();

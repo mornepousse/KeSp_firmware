@@ -1,5 +1,5 @@
 #include "i2c_oled_display.h"
-#include "version.h"
+#include "board.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"

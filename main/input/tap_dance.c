@@ -162,7 +162,7 @@ void tap_dance_save(void)
         }
     }
     esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "td_configs", configs,
-                                              count * sizeof(tap_dance_config_t), "td_count", count);
+                                              sizeof(configs), "td_count", count);
     if (err != ESP_OK)
         ESP_LOGE(TAG, "Failed to save tap dance: %s", esp_err_to_name(err));
     else

@@ -27,7 +27,6 @@ static bt_device_slot_t bt_slots[BT_MAX_DEVICES];
 static uint8_t bt_active_slot = 0;
 static bool bt_pairing_mode = false;
 
-#include "version.h"
 #define HIDD_DEVICE_NAME            GATTS_TAG
 #define HID_DEMO_TAG "HID_BL"
 
@@ -114,8 +113,10 @@ void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param)
             break;
         }
         case ESP_HIDD_EVENT_BLE_LED_REPORT_WRITE_EVT: {
-            ESP_LOGI(HID_DEMO_TAG, "ESP_HIDD_EVENT_BLE_LED_REPORT_WRITE_EVT");
-            ESP_LOG_BUFFER_HEX(HID_DEMO_TAG, param->led_write.data, param->led_write.length);
+            if (param->led_write.length >= 1) {
+                extern volatile uint8_t hid_led_state;
+                hid_led_state = param->led_write.data[0];
+            }
             break;
         }
         default:

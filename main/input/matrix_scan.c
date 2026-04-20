@@ -16,6 +16,8 @@
 
 /* ── Matrix test mode ──────────────────────────────────────────── */
 volatile bool matrix_test_mode = false;
+volatile uint32_t matrix_test_last_activity_ms = 0;
+#define MATRIX_TEST_TIMEOUT_MS 30000  /* 30s auto-exit */
 
 // Define variables expected by other code
 uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
@@ -53,17 +55,26 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
 
     /* ── Test mode: send change events, skip HID ── */
     if (matrix_test_mode) {
-        for (int r = 0; r < MATRIX_ROWS; r++) {
-            for (int c = 0; c < MATRIX_COLS; c++) {
-                if (new_state[r][c] != prev_matrix_state[r][c]) {
-                    uint8_t evt[3] = { (uint8_t)r, (uint8_t)c, new_state[r][c] };
-                    ks_respond(KS_CMD_MATRIX_TEST, KS_STATUS_OK, evt, 3);
+        uint32_t now = esp_timer_get_time() / 1000;
+        /* Auto-exit if no CDC activity or USB disconnected for > 30s */
+        if (now - matrix_test_last_activity_ms > MATRIX_TEST_TIMEOUT_MS) {
+            matrix_test_mode = false;
+            ESP_LOGW(TAG, "matrix test mode timeout — auto-exit");
+        } else {
+            for (int r = 0; r < MATRIX_ROWS; r++) {
+                for (int c = 0; c < MATRIX_COLS; c++) {
+                    if (new_state[r][c] != prev_matrix_state[r][c]) {
+                        uint8_t evt[3] = { (uint8_t)r, (uint8_t)c, new_state[r][c] };
+                        matrix_test_last_activity_ms = now;
+                        ks_respond(KS_CMD_MATRIX_TEST, KS_STATUS_OK, evt, 3);
+                    }
                 }
             }
+            memcpy(prev_matrix_state, new_state, sizeof(prev_matrix_state));
+            last_activity_time_ms = now;
+            return;
         }
-        memcpy(prev_matrix_state, new_state, sizeof(prev_matrix_state));
-        last_activity_time_ms = esp_timer_get_time() / 1000;
-        return;
+        /* Fallthrough to normal mode if just auto-exited */
     }
 
     /* ── Normal mode ── */
