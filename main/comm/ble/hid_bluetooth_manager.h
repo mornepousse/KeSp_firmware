@@ -14,6 +14,10 @@ bool hid_bluetooth_is_connected(void);
 void save_bt_state(bool enabled);
 bool load_bt_state(void);
 
+/* HID output mode persistence: 0 = USB, 1 = BLE */
+void save_io_mode(uint8_t mode);
+uint8_t load_io_mode(void);
+
 /* ── Multi-device management ─────────────────────────────────────── */
 
 #define BT_MAX_DEVICES 3

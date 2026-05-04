@@ -1,2 +1,22 @@
+# Configuration clangd pour ESP-IDF
+# https://clangd.llvm.org/config
+
 CompileFlags:
-    Remove: [-f*, -m*]
+  # Indique à clangd où trouver compile_commands.json
+  CompilationDatabase: build
+
+  # Retire les flags GCC inconnus de clang
+  Remove:
+    - -mlongcalls
+    - -fno-tree-switch-conversion
+    - -fstrict-volatile-bitfields
+    - -fno-shrink-wrap
+    - -fno-jump-tables
+    - -mtext-section-literals
+    - -fno-printf-return-value
+
+Diagnostics:
+  # Cache les warnings sur arguments unknown du driver Xtensa/RISC-V
+  Suppress:
+    - drv_unknown_argument
+    - drv_unsupported_option_argument

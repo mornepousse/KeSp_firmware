@@ -91,12 +91,24 @@ void vTaskKeyboard(void *pvParameters)
             if (idx >= 0 && idx < MAX_MACROS) {
                 const macro_step_t *steps = macros_list[idx].steps;
 
-                /* Sequential playback (only macros with delays reach here) */
+                /* Sequential playback (only macros with delays reach here).
+                   Fold modifier keycodes (0xE0-0xE7) into the next step's mod
+                   so [LSFT, ;] plays as Shift+; instead of two separate taps. */
+                uint8_t pending_mod = 0;
                 for (int s = 0; s < MACRO_MAX_STEPS && steps[s].keycode != 0; s++) {
-                    if (steps[s].keycode == MACRO_DELAY_MARKER)
-                        vTaskDelay(pdMS_TO_TICKS(steps[s].modifier * 10));
-                    else
-                        send_tap(steps[s].keycode, steps[s].modifier);
+                    uint8_t kc  = steps[s].keycode;
+                    uint8_t mod = steps[s].modifier;
+
+                    if (kc == MACRO_DELAY_MARKER) {
+                        vTaskDelay(pdMS_TO_TICKS(mod * 10));
+                        continue;
+                    }
+                    if (kc >= 0xE0 && kc <= 0xE7) {
+                        pending_mod |= (1 << (kc - 0xE0));
+                        continue;
+                    }
+                    send_tap(kc, mod | pending_mod);
+                    pending_mod = 0;
                 }
             }
         }

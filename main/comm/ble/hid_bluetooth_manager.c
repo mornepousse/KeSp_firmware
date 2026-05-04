@@ -95,15 +95,15 @@ void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param)
         case ESP_HIDD_EVENT_DEINIT_FINISH:
 	     break;
 		case ESP_HIDD_EVENT_BLE_CONNECT: {
-            ESP_LOGI(HID_DEMO_TAG, "ESP_HIDD_EVENT_BLE_CONNECT conn_id=%d", param->connect.conn_id);
+            ESP_LOGI(HID_DEMO_TAG, "BLE_CONNECT conn_id=%d", param->connect.conn_id);
             hid_conn_id = param->connect.conn_id;
             sec_conn = true;
             break;
         }
         case ESP_HIDD_EVENT_BLE_DISCONNECT: {
+            ESP_LOGW(HID_DEMO_TAG, "BLE_DISCONNECT — re-advertising");
             sec_conn = false;
             hid_conn_id = 0;
-            ESP_LOGI(HID_DEMO_TAG, "ESP_HIDD_EVENT_BLE_DISCONNECT — re-advertising");
             esp_ble_gap_start_advertising(&hidd_adv_params);
             break;
         }
@@ -302,6 +302,10 @@ bool hid_bluetooth_is_connected(void)
 
 void send_hid_bl_key(uint8_t modifier, const uint8_t keycodes[6])
 {
+    /* esp_hidd_send_keyboard_value has no return value; errors are silent.
+       The underlying esp_ble_gatts_send_indicate will silently drop the report
+       if the host has not yet written CCCDs (before AUTH_CMPL). sec_conn guards
+       this at the transport layer — never call this before AUTH_CMPL_EVT. */
     esp_hidd_send_keyboard_value(hid_conn_id, modifier, (uint8_t *)keycodes, 6);
 }
 
@@ -342,6 +346,23 @@ bool load_bt_state(void) {
     err = nvs_get_u8(my_handle, "bt_enabled", &enabled);
     nvs_close(my_handle);
     return (enabled != 0);
+}
+
+void save_io_mode(uint8_t mode) {
+    nvs_handle_t h;
+    if (nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u8(h, "io_mode", mode);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+uint8_t load_io_mode(void) {
+    nvs_handle_t h;
+    uint8_t mode = 0;  /* default: USB */
+    if (nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return 0;
+    nvs_get_u8(h, "io_mode", &mode);
+    nvs_close(h);
+    return mode;
 }
 
 /* ── Multi-device management ─────────────────────────────────────── */
@@ -398,19 +419,11 @@ void bt_switch_slot(uint8_t slot) {
     bt_active_slot = slot;
 
     if (bt_slots[slot].valid) {
-        /* Reconnect to known device via directed advertising */
-        esp_ble_adv_params_t directed_params = hidd_adv_params;
-        directed_params.adv_type = ADV_TYPE_DIRECT_IND_HIGH;
-        memcpy(directed_params.peer_addr, bt_slots[slot].addr, 6);
-        directed_params.peer_addr_type = BLE_ADDR_TYPE_PUBLIC;
-        esp_ble_gap_start_advertising(&directed_params);
-
-        /* Fallback to undirected after short timeout if directed fails */
-        vTaskDelay(pdMS_TO_TICKS(3000));
-        if (!sec_conn) {
-            ESP_LOGW(HID_BT_TAG, "Directed adv failed, falling back to undirected");
-            esp_ble_gap_start_advertising(&hidd_adv_params);
-        }
+        /* Use undirected advertising — the bonded host will reconnect on its own.
+           ADV_TYPE_DIRECT_IND_HIGH auto-stops after 1.28s (BLE spec) and the
+           blocking vTaskDelay fallback was stalling the keyboard task for 3s. */
+        ESP_LOGI(HID_BT_TAG, "Slot %d has bonded device, starting undirected adv", slot);
+        esp_ble_gap_start_advertising(&hidd_adv_params);
     } else {
         /* No bond on this slot — go to pairing mode */
         bt_start_pairing();

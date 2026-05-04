@@ -1,29 +1,30 @@
 /*
  * KeSp — keyboard firmware framework
  */
-#include <stdint.h>
 #include "cdc_acm_com.h"
-#include "esp_log.h"
-#include "esp_timer.h"
-#include "esp_ota_ops.h"
-#include "nvs_flash.h"
+#include "cpu_time.h"
+#include "display_backend.h"
 #include "esp_attr.h"
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hid_bluetooth_manager.h"
+#include "key_features.h"
+#include "key_stats.h"
 #include "keyboard_task.h"
 #include "keymap.h"
-#include "matrix_scan.h"
-#include "key_stats.h"
-#include "usb_hid.h"
-#include "status_display.h"
-#include "display_backend.h"
-#include "cpu_time.h"
 #include "led_strip_anim.h"
+#include "matrix_scan.h"
+#include "nvs_flash.h"
+#include "status_display.h"
 #include "tama_engine.h"
-#include "key_features.h"
+#include "usb_hid.h"
+#include <stdint.h>
 
-/* Runtime debug/experimental flags: set to 1 to skip starting the component for isolation testing */
+/* Runtime debug/experimental flags: set to 1 to skip starting the component for
+ * isolation testing */
 #ifndef SKIP_STATUS_DISPLAY
 #define SKIP_STATUS_DISPLAY 0
 #endif
@@ -49,7 +50,8 @@ static void cpu_time_logger_task(void *arg) {
 }
 
 // Task handling status display updates, sleep/wake and layer change handling.
-static uint8_t last_displayed_layer = 255;  // Track what layer is currently shown
+static uint8_t last_displayed_layer =
+    255; // Track what layer is currently shown
 
 static void status_display_task(void *arg) {
   (void)arg;
@@ -83,7 +85,7 @@ static void status_display_task(void *arg) {
     }
 
     status_display_update();
-    
+
     /* Periodically save stats + tick WPM every second */
     key_stats_check_save();
     {
@@ -109,8 +111,9 @@ static void status_display_task(void *arg) {
         }
       }
     }
-    
-    vTaskDelay(pdMS_TO_TICKS(100));  // 100ms polling — fast enough for UI, no keyboard lag
+
+    vTaskDelay(pdMS_TO_TICKS(
+        100)); // 100ms polling — fast enough for UI, no keyboard lag
   }
 }
 
@@ -128,18 +131,19 @@ void app_main(void) {
   /* Crash-loop detection — RTC memory is random on first power-on,
      so we validate with a magic number AND a reasonable count range */
   if (boot_crash_magic != BOOT_CRASH_MAGIC || boot_crash_count > 100) {
-      boot_crash_magic = BOOT_CRASH_MAGIC;
-      boot_crash_count = 0;
+    boot_crash_magic = BOOT_CRASH_MAGIC;
+    boot_crash_count = 0;
   }
   boot_crash_count++;
   ESP_LOGI(TAG, "Boot count: %lu", (unsigned long)boot_crash_count);
 
   if (boot_crash_count > BOOT_CRASH_LIMIT) {
-      ESP_LOGW(TAG, "Crash loop detected (%lu boots) — SAFE MODE", (unsigned long)boot_crash_count);
-      safe_mode = true;
-      boot_crash_count = 0;
-      /* Don't erase NVS — user data is precious.
-         Safe mode just skips display/BLE/NVS loading. */
+    ESP_LOGW(TAG, "Crash loop detected (%lu boots) — SAFE MODE",
+             (unsigned long)boot_crash_count);
+    safe_mode = true;
+    boot_crash_count = 0;
+    /* Don't erase NVS — user data is precious.
+       Safe mode just skips display/BLE/NVS loading. */
   }
 
   kase_tinyusb_init();
@@ -154,7 +158,8 @@ void app_main(void) {
   keymap_init_nvs();
 
   if (!safe_mode) {
-    load_keymaps((uint16_t *)keymaps, LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
+    load_keymaps((uint16_t *)keymaps,
+                 LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
     load_layout_names(default_layout_names, LAYERS);
     load_macros(macros_list, MAX_MACROS);
     load_key_stats();
@@ -181,15 +186,16 @@ void app_main(void) {
     {
       extern const display_backend_t
 #ifdef BOARD_DISPLAY_BACKEND_ROUND
-        round_display_backend;
+          round_display_backend;
       display_set_backend(&round_display_backend);
 #else
-        oled_display_backend;
+          oled_display_backend;
       display_set_backend(&oled_display_backend);
 #endif
     }
     status_display_start();
-    xTaskCreatePinnedToCore(status_display_task, "status_disp", 6144, NULL, 2, &status_display_task_handle, 1);
+    xTaskCreatePinnedToCore(status_display_task, "status_disp", 6144, NULL, 2,
+                            &status_display_task_handle, 1);
 #endif
   } else {
     ESP_LOGW(TAG, "Safe mode: skipping display");
@@ -205,16 +211,22 @@ void app_main(void) {
   ESP_LOGI(TAG, "Task Matrix init");
   TaskHandle_t xHandleMatrixKeyboard = NULL;
   static uint8_t ucParameterToPass;
-  xTaskCreatePinnedToCore(vTaskKeyboard, "Matrix_Keyboard", 6144, &ucParameterToPass,
-              3, &xHandleMatrixKeyboard, 0);
+  xTaskCreatePinnedToCore(vTaskKeyboard, "Matrix_Keyboard", 6144,
+                          &ucParameterToPass, 3, &xHandleMatrixKeyboard, 0);
 
   if (!safe_mode) {
     ESP_LOGI(TAG, "bluetooth init check");
     if (load_bt_state()) {
-        ESP_LOGI(TAG, "Starting bluetooth (saved state: ON)");
-        init_hid_bluetooth();
+      ESP_LOGI(TAG, "Starting bluetooth (saved state: ON)");
+      init_hid_bluetooth();
+      /* Restore last HID output mode (USB/BLE) so BT works on battery boot */
+      uint8_t saved_mode = load_io_mode();
+      if (saved_mode == 1 && hid_bluetooth_is_initialized()) {
+        usb_bl_state = 1;
+        ESP_LOGI(TAG, "Restored HID output mode: BLE");
+      }
     } else {
-        ESP_LOGI(TAG, "Bluetooth disabled (saved state: OFF)");
+      ESP_LOGI(TAG, "Bluetooth disabled (saved state: OFF)");
     }
 
 #if BOARD_HAS_LED_STRIP
@@ -224,7 +236,8 @@ void app_main(void) {
 #endif
   }
 
-  xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL,
+                          1);
 
   /* Boot succeeded — reset crash counter and validate OTA */
   boot_crash_count = 0;

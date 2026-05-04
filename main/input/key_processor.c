@@ -97,6 +97,7 @@ static void dispatch_internal_function(void)
             usb_bl_state = 1;
         else
             usb_bl_state = 0;
+        save_io_mode(usb_bl_state);
         km_post_display_update();
         break;
     case BT_TOGGLE:
@@ -389,6 +390,8 @@ void build_keycode_report(void)
     if (has_normal_press) {
         tap_hold_interrupt();
         wpm_record_keypress();
+        /* Re-read mods: tap_hold_interrupt() may have just activated a MT hold */
+        th_mods = tap_hold_get_active_mods();
     }
 
     /* Step 5: apply modifiers (tap/hold + one-shot + LM + macro hold) */
