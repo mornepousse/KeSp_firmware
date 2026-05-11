@@ -16,6 +16,7 @@
 #include "status_display.h"
 #include "esp_app_desc.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "matrix_scan.h"
 

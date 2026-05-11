@@ -38,7 +38,7 @@ dependencies:
       type: service
     version: 2.7.2
   espressif/esp_tinyusb:
-    component_hash: fa0c96d7bdc3fe37383d735e2839a9007200a0b6bc039458d45d004b50146e81
+    component_hash: 8e57a14ac14d8e4d4588b5b9222977b96475323bcebae3c838919bb4e8587887
     dependencies:
     - name: idf
       require: private
@@ -55,7 +55,8 @@ dependencies:
     - esp32s3
     - esp32p4
     - esp32h4
-    version: 2.1.1
+    - esp32s31
+    version: 2.2.0
   espressif/keyboard_button:
     dependencies: []
     source:
@@ -73,7 +74,7 @@ dependencies:
       type: service
     version: 3.0.3
   espressif/tinyusb:
-    component_hash: 5ea9d3b6d6b0734a0a0b3491967aa0e1bece2974132294dbda5dd2839b247bfa
+    component_hash: a40b7f67df6ac254a4afd96c6401cc56f2059ae747d6d7e66b568bca53ad0edc
     dependencies:
     - name: idf
       require: private
@@ -86,13 +87,14 @@ dependencies:
     - esp32s3
     - esp32p4
     - esp32h4
-    version: 0.19.0~2
+    - esp32s31
+    version: 0.19.0~3
   idf:
     source:
       type: idf
     version: 5.5.2
   joltwallet/littlefs:
-    component_hash: dcea25bcef2de023f089f5f01e8d8c46ad1b8ffef75861ad5ffb4098555839df
+    component_hash: 29eff7921c4e8bce021aeb7fff2723bfcafed661756de700646ea0f6223c2a32
     dependencies:
     - name: idf
       require: private
@@ -100,7 +102,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.20.4
+    version: 1.21.1
   lvgl/lvgl:
     component_hash: d7c1ac037ae6e85d94897f807d6e7ba0946a83e720074fc95a4f6241da9f9f53
     dependencies: []
@@ -118,6 +120,6 @@ direct_dependencies:
 - idf
 - joltwallet/littlefs
 - lvgl/lvgl
-manifest_hash: b35f7d5d3c48bec7925299315da60821802ba62117e56cf86ec0c2e19f887364
+manifest_hash: dba3f78565b98b1eb710d860f3adf0b22a67c7865393cbfcf90a938faad13615
 target: esp32s3
 version: 2.0.0

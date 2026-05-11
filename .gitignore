@@ -8,3 +8,5 @@
 sdkconfig.old
 build_v1
 build_v2
+/build_dongle
+/build_v2_debug

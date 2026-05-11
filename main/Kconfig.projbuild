@@ -1,0 +1,61 @@
+menu "KaSe firmware"
+
+choice KASE_DEVICE_ROLE
+    prompt "Device role"
+    default KASE_DEVICE_ROLE_KEYBOARD
+    help
+        Selects the type of device this firmware runs on.
+        KEYBOARD = standalone keyboard with local matrix (V1, V2, V2D).
+        DONGLE   = USB receiver dongle for split wireless setup.
+
+config KASE_DEVICE_ROLE_KEYBOARD
+    bool "Keyboard (V1/V2/V2D)"
+
+config KASE_DEVICE_ROLE_DONGLE
+    bool "Dongle (RX from halves)"
+
+endchoice
+
+config KASE_HAS_LOCAL_MATRIX
+    bool
+    default y if KASE_DEVICE_ROLE_KEYBOARD
+    default n
+    help
+        Compiles matrix_scan.c and keyboard_task.c local-scan path.
+
+config KASE_HAS_DISPLAY
+    bool
+    default y if KASE_DEVICE_ROLE_KEYBOARD
+    default n
+    help
+        Compiles display backends and status display task.
+
+config KASE_HAS_BLE
+    bool
+    default y if KASE_DEVICE_ROLE_KEYBOARD
+    default n
+    help
+        Compiles BLE HID stack (ESP-IDF Bluedroid).
+
+config KASE_HAS_TAMA
+    bool
+    default y if KASE_DEVICE_ROLE_KEYBOARD
+    default n
+    help
+        Compiles Tamagotchi virtual pet.
+
+config KASE_HAS_RF_RX
+    bool
+    default y if KASE_DEVICE_ROLE_DONGLE
+    default n
+    help
+        Compiles NRF24L01+ RX driver and rf_rx_task (Plan 2).
+
+config KASE_HAS_ESPNOW
+    bool
+    default y if KASE_DEVICE_ROLE_DONGLE
+    default n
+    help
+        Compiles ESP-NOW cold path stack (Plan 5).
+
+endmenu

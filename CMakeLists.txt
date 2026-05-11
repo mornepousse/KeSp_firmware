@@ -13,6 +13,19 @@ if(NOT EXISTS "${BOARD_DIR}/board.h")
     message(FATAL_ERROR "Board '${BOARD}' not found: ${BOARD_DIR}/board.h does not exist")
 endif()
 
+# Per-board sdkconfig defaults: load <repo>/sdkconfig.defaults.<short> on top of
+# base sdkconfig.defaults if present. Note: sdkconfig itself is shared across
+# all boards (existing project convention) — when switching boards, run
+# `rm sdkconfig` first or the previous board's settings will leak in.
+string(REGEX REPLACE "^kase_" "" _BOARD_SHORT "${BOARD}")
+set(_PER_BOARD_DEFAULTS "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults.${_BOARD_SHORT}")
+if(EXISTS "${_PER_BOARD_DEFAULTS}")
+    set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults" "${_PER_BOARD_DEFAULTS}")
+    message(STATUS "Using per-board sdkconfig defaults: ${_PER_BOARD_DEFAULTS}")
+else()
+    set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults")
+endif()
+
 # Detect display backend from board.h
 file(READ "${BOARD_DIR}/board.h" _board_h_content)
 if(_board_h_content MATCHES "BOARD_DISPLAY_BACKEND_ROUND")

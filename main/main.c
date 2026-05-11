@@ -3,25 +3,28 @@
  */
 #include "cdc_acm_com.h"
 #include "cpu_time.h"
-#include "display_backend.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "hid_bluetooth_manager.h"
 #include "key_features.h"
 #include "key_stats.h"
-#include "keyboard_task.h"
 #include "keymap.h"
-#include "led_strip_anim.h"
-#include "matrix_scan.h"
 #include "nvs_flash.h"
-#include "status_display.h"
-#include "tama_engine.h"
 #include "usb_hid.h"
 #include <stdint.h>
+
+#if !CONFIG_KASE_DEVICE_ROLE_DONGLE
+#include "display_backend.h"
+#include "hid_bluetooth_manager.h"
+#include "keyboard_task.h"
+#include "led_strip_anim.h"
+#include "matrix_scan.h"
+#include "status_display.h"
+#include "tama_engine.h"
+#endif
 
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for
  * isolation testing */
@@ -49,6 +52,7 @@ static void cpu_time_logger_task(void *arg) {
   }
 }
 
+#if !CONFIG_KASE_DEVICE_ROLE_DONGLE
 // Task handling status display updates, sleep/wake and layer change handling.
 static uint8_t last_displayed_layer =
     255; // Track what layer is currently shown
@@ -116,6 +120,7 @@ static void status_display_task(void *arg) {
         100)); // 100ms polling — fast enough for UI, no keyboard lag
   }
 }
+#endif /* !CONFIG_KASE_DEVICE_ROLE_DONGLE */
 
 /* Boot crash detection: RTC memory survives soft reboot but not power cycle */
 static RTC_NOINIT_ATTR uint32_t boot_crash_count;
@@ -169,17 +174,21 @@ void app_main(void) {
     extern void tap_dance_load(void);
     extern void combo_load(void);
     extern void leader_load(void);
-    extern void tama_engine_init(void);
     tap_dance_load();
     combo_load();
     leader_load();
     key_override_load();
+#if !CONFIG_KASE_DEVICE_ROLE_DONGLE
+    extern void tama_engine_init(void);
     bt_devices_load();
     tama_engine_init();
+#endif
   } else {
     ESP_LOGW(TAG, "Safe mode: skipping NVS config loading");
   }
 
+#if !CONFIG_KASE_DEVICE_ROLE_DONGLE
+  /* --- Keyboard-only init: display, matrix, BLE, LED strip --- */
   if (!safe_mode) {
     ESP_LOGI(TAG, "display init");
 #if !SKIP_STATUS_DISPLAY
@@ -235,6 +244,13 @@ void app_main(void) {
     led_strip_start_task();
 #endif
   }
+#else  /* CONFIG_KASE_DEVICE_ROLE_DONGLE */
+  /* --- Dongle role: no matrix, no display, no BLE.
+   *     Plan 2 will add NRF init + rf_rx_task here.
+   *     Plan 5 will add ESP-NOW init.
+   *     For now: just announce we're alive. --- */
+  ESP_LOGI(TAG, "Dongle role: matrix/display/BLE skipped, awaiting RF stack (Plan 2)");
+#endif /* CONFIG_KASE_DEVICE_ROLE_DONGLE */
 
   xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL,
                           1);

@@ -1,0 +1,34 @@
+# KaSe dongle board overrides — merged on top of sdkconfig.defaults
+
+# --- Device role ---
+CONFIG_KASE_DEVICE_ROLE_DONGLE=y
+
+# --- Bluetooth disabled (saves ~80KB heap, no BLE on dongle) ---
+CONFIG_BT_ENABLED=n
+
+# --- WiFi enabled for ESP-NOW (Plan 5), STA mode no AP ---
+CONFIG_ESP_WIFI_ENABLED=y
+CONFIG_ESP_WIFI_NVS_ENABLED=n
+
+# --- Power management off (USB powered, no battery) ---
+CONFIG_PM_ENABLE=n
+
+# --- FreeRTOS tick = 1ms (matches latency budget in spec Section 3) ---
+CONFIG_FREERTOS_HZ=1000
+
+# --- Network stack minimal (no TCP/IP needed) ---
+CONFIG_LWIP_TCP_ENABLED=n
+CONFIG_LWIP_UDP_ENABLED=n
+CONFIG_LWIP_IPV6=n
+
+# --- Logs : default level WARN in prod ---
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+
+# --- TinyUSB : descriptors specific to dongle (CDC/HID enable in base defaults) ---
+CONFIG_TINYUSB_DESC_USE_ESPRESSIF_VID=y
+CONFIG_TINYUSB_DESC_USE_DEFAULT_PID=y
+CONFIG_TINYUSB_DESC_BCD_DEVICE=0x0100
+CONFIG_TINYUSB_DESC_MANUFACTURER_STRING="KaSe"
+CONFIG_TINYUSB_DESC_PRODUCT_STRING="KaSe Dongle"
+CONFIG_TINYUSB_DESC_SERIAL_STRING="dongle-v1"
+CONFIG_TINYUSB_DESC_CDC_STRING="KaSe Dongle CDC"
