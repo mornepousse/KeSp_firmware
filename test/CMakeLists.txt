@@ -24,6 +24,8 @@ add_executable(test_runner
     test_rf_packet.c
     test_heartbeat.c
     ../main/comm/rf/heartbeat.c
+    test_half_matrix_diff.c
+    ../main/comm/rf/half_scan_task.c
     test_main.c
 )
 

@@ -24,6 +24,7 @@ extern void test_leader(void);
 extern void test_tama_engine(void);
 extern void test_rf_packet(void);
 extern void test_heartbeat(void);
+extern void test_half_matrix_diff(void);
 
 int main(void) {
     printf("KeSp Firmware Unit Tests\n");
@@ -47,6 +48,7 @@ int main(void) {
     test_tama_engine();
     test_rf_packet();
     test_heartbeat();
+    test_half_matrix_diff();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);

@@ -40,13 +40,16 @@ void half_diff_emit(
             if (emit_cb) emit_cb(row, col, false, ctx);
         }
     }
-    /* Then presses */
+    /* Then new presses: only emit if not already in bitmap (avoids duplicates
+     * since key_data[] contains ALL currently pressed keys, not just new ones). */
     for (uint32_t i = 0; i < press_cnt; i++) {
         uint8_t row = pressed[i].input_index;
         uint8_t col = pressed[i].output_index;
         if (row < RF_HALF_ROWS && col < RF_HALF_COLS) {
-            rf_bitmap_set(bitmap, row, col, true);
-            if (emit_cb) emit_cb(row, col, true, ctx);
+            if (!rf_bitmap_get(bitmap, row, col)) {
+                rf_bitmap_set(bitmap, row, col, true);
+                if (emit_cb) emit_cb(row, col, true, ctx);
+            }
         }
     }
 }
