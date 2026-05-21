@@ -14,13 +14,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* ── Globals normally provided by matrix_scan.c (not compiled on dongle) ─ *
- * The engine and CDC handlers reference these. On the dongle, current_layout
- * is the active layer (driven by RF input + MO/TO keycodes via the engine).
- * matrix_test_* are placeholders ; matrix test mode is disabled on dongle. */
-uint8_t current_layout = 0;
-volatile bool matrix_test_mode = false;
-volatile uint32_t matrix_test_last_activity_ms = 0;
+/* Engine input-state globals (current_layout, matrix_test_*) live in
+ * comm/rf/dongle_engine_state.c (Plan 2). */
 
 /* ── status_display ─────────────────────────────────────────── */
 void status_display_update_layer_name(void) { /* no display on dongle */ }
@@ -60,3 +55,10 @@ const bt_device_slot_t *bt_get_slot(uint8_t slot) { (void)slot; return NULL; }
 bool hid_bluetooth_is_initialized(void) { return false; }
 bool hid_bluetooth_is_connected(void) { return false; }
 bool hid_bluetooth_is_pairing(void) { return false; }
+
+/* ── BLE HID send + io mode (engine/hid_transport reference these) ── */
+void send_hid_bl_key(uint8_t modifier, const uint8_t keycodes[6])
+{ (void)modifier; (void)keycodes; }       /* no BLE on dongle */
+void send_hid_bl_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
+{ (void)buttons; (void)x; (void)y; (void)wheel; }
+void save_io_mode(uint8_t mode) { (void)mode; }

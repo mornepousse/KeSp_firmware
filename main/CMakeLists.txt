@@ -85,9 +85,14 @@ if(CONFIG_KASE_DEVICE_ROLE_DONGLE)
     list(APPEND srcs "comm/cdc/cdc_dongle_stubs.c")
 endif()
 
-# RF RX (NRF24) — dongle role only (Plan 2 fills these in)
+# RF RX (NRF24) — dongle role only
 if(CONFIG_KASE_HAS_RF_RX)
-    # Plan 2 will add: comm/rf/rf_driver.c, rf_rx_task.c, heartbeat.c
+    list(APPEND srcs
+        "comm/rf/rf_driver.c"
+        "comm/rf/rf_rx_task.c"
+        "comm/rf/heartbeat.c"
+        "comm/rf/dongle_engine_state.c"
+    )
 endif()
 
 # ESP-NOW cold path — dongle role only (Plan 5 fills these in)
@@ -113,6 +118,10 @@ if(CONFIG_KASE_HAS_DISPLAY)
     list(APPEND priv_requires esp_lcd)
 endif()
 
+if(CONFIG_KASE_HAS_RF_RX)
+    list(APPEND priv_requires esp_driver_spi)
+endif()
+
 if(CONFIG_KASE_HAS_ESPNOW)
     list(APPEND priv_requires esp_wifi esp_event)
 endif()
@@ -132,6 +141,7 @@ idf_component_register(
         "comm/usb"
         "comm/cdc"
         "comm/ble"
+        "comm/rf"
         "tama"
         "input"
         "${BOARD_DIR}"

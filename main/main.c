@@ -245,11 +245,27 @@ void app_main(void) {
 #endif
   }
 #else  /* CONFIG_KASE_DEVICE_ROLE_DONGLE */
-  /* --- Dongle role: no matrix, no display, no BLE.
-   *     Plan 2 will add NRF init + rf_rx_task here.
-   *     Plan 5 will add ESP-NOW init.
-   *     For now: just announce we're alive. --- */
-  ESP_LOGI(TAG, "Dongle role: matrix/display/BLE skipped, awaiting RF stack (Plan 2)");
+  /* --- Dongle role: no local matrix/display/BLE. Engine is fed by RF. --- */
+  ESP_LOGI(TAG, "Dongle role: init engine + RF RX");
+  {
+    /* Engine subsystem inits (keyboard_manager_init lives in keyboard_task.c
+     * which is not compiled on the dongle — call the pieces directly). */
+    extern void tap_hold_init(void);
+    extern void tap_dance_init(void);
+    extern void combo_init(void);
+    extern void leader_init(void);
+    extern void key_override_init(void);
+    extern void hid_report_init(void);
+    extern bool rf_rx_start(void);
+    tap_hold_init();
+    tap_dance_init();
+    combo_init();
+    leader_init();
+    key_override_init();
+    hid_report_init();
+    if (!rf_rx_start())
+      ESP_LOGE(TAG, "RF RX failed to start (no radios?)");
+  }
 #endif /* CONFIG_KASE_DEVICE_ROLE_DONGLE */
 
   xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL,
