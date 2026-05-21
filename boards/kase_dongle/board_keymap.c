@@ -19,18 +19,23 @@
 #include "keyboard_config.h"
 
 uint16_t keymaps[LAYERS][MATRIX_ROWS][MATRIX_COLS] = {
-    /* Layer 0 — base */
+    /* Layer 0 — base.
+     * half-left = cols 0..6 (mapped from bench matrix-discovery 2026-05-21).
+     * half-right = cols 7..13 (TODO: map when right half is bench-tested).
+     * Matrix-row meaning on the half PCB: row4=top letter row, row3, row2,
+     * row1 = letter rows; row0 = thumb/function row; col6 = inner column. */
     {
-        { K_ESC,    K_1,    K_2,    K_3,    K_4,    K_5,    K_MINUS,
-          K_EQL,    K_6,    K_7,    K_8,    K_9,    K_0,    K_BSPC },
-        { K_TAB,    K_Q,    K_W,    K_E,    K_R,    K_T,    K_LBRC,
-          K_RBRC,   K_Y,    K_U,    K_I,    K_O,    K_P,    K_BSLSH },
-        { K_LCTRL,  K_A,    K_S,    K_D,    K_F,    K_G,    K_NONE,
-          K_NONE,   K_H,    K_J,    K_K,    K_L,    K_SCLN, K_QUOT },
-        { K_LSHIFT, K_Z,    K_X,    K_C,    K_V,    K_B,    MO_L1,
-          MO_L2,    K_N,    K_M,    K_COMM, K_DOT,  K_SLSH, K_ENT },
-        { K_NONE,   K_NONE, K_NONE, K_LGUI, K_LALT, K_SPC,  MO_L1,
-          MO_L2,    K_SPC,  K_RIGHT,K_LEFT, K_UP,   K_DOWN, K_NONE },
+      /*  c0       c1      c2      c3       c4       c5      c6   |  c7..c13 (half-right) */
+        { K_F5,    K_F10,  K_LGUI, K_LSHIFT,K_SPC,   MO_L1,  K_NONE,
+          K_NONE,  K_NONE, K_NONE, K_NONE,  K_NONE,  K_NONE, K_NONE },
+        { K_LCTRL, K_Z,    K_X,    K_C,     K_V,     K_B,    K_NONE,
+          K_NONE,  K_NONE, K_NONE, K_NONE,  K_NONE,  K_NONE, K_NONE },
+        { K_RALT,  K_A,    K_S,    K_D,     K_F,     K_G,    K_BSPC,
+          K_NONE,  K_NONE, K_NONE, K_NONE,  K_NONE,  K_NONE, K_NONE },
+        { K_TAB,   K_Q,    K_W,    K_E,     K_R,     K_T,    MO_L2,
+          K_NONE,  K_NONE, K_NONE, K_NONE,  K_NONE,  K_NONE, K_NONE },
+        { K_ESC,   K_1,    K_2,    K_3,     K_4,     K_5,    K_LBRC,
+          K_NONE,  K_NONE, K_NONE, K_NONE,  K_NONE,  K_NONE, K_NONE },
     },
     /* Layer 1 — lower (F-keys + nav) */
     {

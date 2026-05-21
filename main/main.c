@@ -43,6 +43,7 @@ static int display_sleep = 0; // 0 = on, 1 = off
 /* Task handle exported for diagnostics: status display task */
 TaskHandle_t status_display_task_handle = NULL;
 
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 static void cpu_time_logger_task(void *arg) {
   (void)arg;
   char buf[512];
@@ -55,6 +56,7 @@ static void cpu_time_logger_task(void *arg) {
     vTaskDelay(pdMS_TO_TICKS(5000));
   }
 }
+#endif
 
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 // Task handling status display updates, sleep/wake and layer change handling.
@@ -280,8 +282,12 @@ void app_main(void) {
   }
 #endif /* device role */
 
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
+  /* CPU-time logger is a dev diagnostic; runtime stats aren't enabled on the
+   * dongle/half builds (it would just fail every 5s), so keyboard-only. */
   xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL,
                           1);
+#endif
 
   /* Boot succeeded — reset crash counter and validate OTA */
   boot_crash_count = 0;

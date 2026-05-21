@@ -27,12 +27,19 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include <string.h>
 
 static const char *TAG = "half_scan";
 
 /* ── Radio state ────────────────────────────────────────────── */
 static rf_radio_t s_radio;
+
+/* Serializes NRF SPI access: rf_driver_send is called from BOTH the
+ * keyboard_button callback task (on key events) and the esp_timer task
+ * (heartbeat). spi_device_polling_transmit aborts if two transactions
+ * overlap, so all sends must be mutually exclusive. */
+static SemaphoreHandle_t s_tx_mutex;
 
 /* ── Packet sequence counter — shared by PKT_KEY and PKT_HEARTBEAT ─ */
 static volatile uint8_t s_seq = 0;
@@ -124,7 +131,9 @@ static void tx_key_event(uint8_t row, uint8_t col, bool key_pressed, void *ctx)
     uint8_t buf[3];
     rf_encode_key(buf, &e);
 
+    xSemaphoreTake(s_tx_mutex, portMAX_DELAY);
     bool ok = rf_driver_send(&s_radio, buf, 3);
+    xSemaphoreGive(s_tx_mutex);
     if (!ok) {
         /* Store for retry in next heartbeat tick */
         s_pending_retry = e;
@@ -162,7 +171,9 @@ static void heartbeat_timer_cb(void *arg)
         rf_key_event_t retry_evt = s_pending_retry;   /* snapshot (volatile struct copy) */
         retry_evt.seq = s_seq++;
         rf_encode_key(buf, &retry_evt);
+        xSemaphoreTake(s_tx_mutex, portMAX_DELAY);
         rf_driver_send(&s_radio, buf, 3);   /* no second retry on failure */
+        xSemaphoreGive(s_tx_mutex);
         s_has_pending_retry = false;
     }
 
@@ -177,7 +188,9 @@ static void heartbeat_timer_cb(void *arg)
 
     uint8_t buf[9];
     rf_encode_heartbeat(buf, &hb);
+    xSemaphoreTake(s_tx_mutex, portMAX_DELAY);
     bool ok = rf_driver_send(&s_radio, buf, 9);
+    xSemaphoreGive(s_tx_mutex);
     if (!ok) {
         ESP_LOGD(TAG, "heartbeat TX failed (MAX_RT)");
     }
@@ -188,6 +201,9 @@ static void half_scan_task(void *arg)
 {
     (void)arg;
     ESP_LOGI(TAG, "half_scan_task started");
+
+    /* Mutex to serialize NRF SPI sends (key-event task vs heartbeat timer) */
+    s_tx_mutex = xSemaphoreCreateMutex();
 
     /* Reset all matrix GPIO pins to detach bootloader/UART functions.
      * This mirrors the gpio_reset_pin() calls in matrix_scan.c::matrix_setup(). */

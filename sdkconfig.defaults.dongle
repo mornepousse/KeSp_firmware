@@ -23,9 +23,8 @@ CONFIG_LWIP_IPV6=n
 
 # --- Logs : WARN in prod (dongle is a sealed M.2 device, no console) ---
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
-# Console inherits CONFIG_ESP_CONSOLE_NONE from base defaults. For dongle
-# bring-up debugging, temporarily add CONFIG_ESP_CONSOLE_UART_DEFAULT=y here
-# and rm sdkconfig + rebuild to see logs on the CH340 (/dev/ttyUSB0).
+# Console inherits CONFIG_ESP_CONSOLE_NONE from base. For dongle bring-up,
+# temporarily add CONFIG_ESP_CONSOLE_UART_DEFAULT=y + rm sdkconfig + rebuild.
 
 # --- TinyUSB : descriptors specific to dongle (CDC/HID enable in base defaults) ---
 CONFIG_TINYUSB_DESC_USE_ESPRESSIF_VID=y
