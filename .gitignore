@@ -10,3 +10,5 @@ build_v1
 build_v2
 /build_dongle
 /build_v2_debug
+/build_half_left
+/build_half_right
