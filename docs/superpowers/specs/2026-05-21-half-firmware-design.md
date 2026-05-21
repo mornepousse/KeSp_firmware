@@ -124,13 +124,20 @@ Capability flags associés au rôle HALF :
 
 | Flag | Valeur HALF | Commentaire |
 |---|---|---|
-| `KASE_HAS_LOCAL_MATRIX` | `y` | Scan matrice 5×7 propre |
-| `KASE_HAS_RF_TX` | `y` | **Nouveau flag** — compile le chemin PTX |
+| `KASE_HAS_LOCAL_MATRIX` | `n` | **Voir note** : matrix_scan.c est couplé à l'engine (keyboard-only). Le half scanne via `keyboard_button` directement dans `half_scan_task.c`, pas via matrix_scan.c. |
+| `KASE_HAS_RF_TX` | `y` | **Nouveau flag** — compile le chemin PTX + `half_scan_task.c` |
 | `KASE_HAS_RF_RX` | `n` | Pas de réception RF |
 | `KASE_HAS_DISPLAY` | `n` | |
 | `KASE_HAS_BLE` | `n` | |
 | `KASE_HAS_TAMA` | `n` | |
 | `KASE_HAS_ESPNOW` | `n` | |
+
+**Note matrix_scan.c** : sur les keyboards, `matrix_scan.c` enveloppe `keyboard_button`
+ET pousse vers l'engine (`build_keycode_report` via notify). Sur le half on ne veut PAS
+ce couplage engine — `half_scan_task.c` possède directement le composant `keyboard_button`
+et route les callbacks vers le TX NRF. Donc `KASE_HAS_LOCAL_MATRIX=n` sur le half (sinon
+matrix_scan.c et half_scan_task se disputeraient le driver keyboard_button). Le half a bien
+une matrice locale, mais elle est gérée par `half_scan_task.c`, pas par `matrix_scan.c`.
 
 Le flag `KASE_HAS_RF_TX` est nouveau (absent des rôles KEYBOARD et DONGLE). Il conditionne
 la compilation de `rf_driver_init_tx()` et `rf_driver_send()` dans `rf_driver.c`
@@ -673,16 +680,16 @@ endif()
 `half_scan_task.c` est un nouveau fichier sous `main/comm/rf/` (ou `main/input/` selon
 l'organisation retenue à l'implémentation — la localisation est une décision d'implémentation).
 
-Sur le half, `KASE_HAS_LOCAL_MATRIX=y` compile `matrix_scan.c` (setup GPIO pins).
-`keyboard_task.c` **ne doit PAS être compilé** sur le half — il appelle directement
-`build_keycode_report()` et l'engine. À la place, `half_scan_task.c` s'appuie sur le
-composant `keyboard_button` pour les callbacks matrice (même driver bas niveau, sans
-l'engine au-dessus).
+Sur le half, ni `matrix_scan.c` ni `keyboard_task.c` ne sont compilés — les deux sont
+couplés à l'engine. À la place, `half_scan_task.c` (gated `CONFIG_KASE_HAS_RF_TX`) possède
+directement le composant `keyboard_button` pour les callbacks matrice et route vers le TX
+NRF, sans engine au-dessus.
 
-Conséquence pour `main/CMakeLists.txt` : séparer `matrix_scan.c` (compilé si
-`KASE_HAS_LOCAL_MATRIX`) de `keyboard_task.c` (compilé uniquement si
-`KASE_DEVICE_ROLE_KEYBOARD`). L'engine (`key_processor.c`, `hid_report.c`, etc.)
-et les tâches associées sont également conditionnés à `KASE_DEVICE_ROLE_KEYBOARD`.
+`matrix_scan.c` reste gated `CONFIG_KASE_HAS_LOCAL_MATRIX` (=y keyboard, =n dongle ET half).
+`keyboard_task.c` + l'engine HID restent keyboard-only (déjà le cas depuis le refactor dongle,
+où ils sont gated sur la présence de la matrice locale / le rôle). Vérifier à l'implémentation
+que `keyboard_task.c` n'est compilé que pour `KASE_DEVICE_ROLE_KEYBOARD` (sur le dongle il
+était exclu via `CONFIG_KASE_HAS_LOCAL_MATRIX` — confirmer que ce gating couvre aussi le half).
 
 ---
 
@@ -727,15 +734,14 @@ dans `PCB-esp/CLAUDE.md` pour GPIO3.
 **Action utilisateur** : confirmer que GPIO3 comme ROW2 ne cause pas de problème au
 boot (vérifier la résistance interne et l'état de la ligne ROW en mode input à `matrix_setup`).
 
-### 9.4 GPIO 21 — IRQ NRF (potentiellement partagé)
+### 9.4 GPIO 21 — IRQ NRF (OK, pas de conflit)
 
-Sur le dongle, IRQ1=GPIO8 et IRQ2=GPIO2. Sur le half, IRQ=GPIO21. Pas de conflit
-interne — GPIO21 est libre sur le half (e-ink BUSY est sur GPIO1, pas GPIO21).
+Sur le dongle, IRQ1=GPIO8 et IRQ2=GPIO2. Sur le half, IRQ=GPIO21.
 
-**Vérification** : GPIO21 est `USB_D-` sur l'ESP32-S3 natif. Sur le DevKitC, la
-signalisation USB D- passe par le circuit CH340C/USB interne, pas par GPIO21 directement.
-À confirmer dans le schéma `PCB-esp/KaSe.kicad_sch` que GPIO21 n'est pas connecté
-à la piste USB D- sur le PCB half.
+**Statut** : **safe**. Sur l'ESP32-S3 les broches USB natif sont **GPIO19 (USB_D-)** et
+**GPIO20 (USB_D+)** — PAS GPIO21. GPIO21 est un GPIO standard (libre). L'usage IRQ NRF
+dessus est sans conflit. (Note : en MVP l'IRQ TX n'est même pas utilisée — `rf_driver_send`
+polle STATUS — mais la broche est réservée correctement pour un usage IRQ futur.)
 
 ### 9.5 Pas de conflit SPI matrice / NRF
 
