@@ -16,7 +16,7 @@
 #include "usb_hid.h"
 #include <stdint.h>
 
-#if !CONFIG_KASE_DEVICE_ROLE_DONGLE
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 #include "display_backend.h"
 #include "hid_bluetooth_manager.h"
 #include "keyboard_task.h"
@@ -24,6 +24,10 @@
 #include "matrix_scan.h"
 #include "status_display.h"
 #include "tama_engine.h"
+#endif
+
+#if CONFIG_KASE_DEVICE_ROLE_HALF
+#include "half_scan_task.h"
 #endif
 
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for
@@ -52,7 +56,7 @@ static void cpu_time_logger_task(void *arg) {
   }
 }
 
-#if !CONFIG_KASE_DEVICE_ROLE_DONGLE
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 // Task handling status display updates, sleep/wake and layer change handling.
 static uint8_t last_displayed_layer =
     255; // Track what layer is currently shown
@@ -120,7 +124,7 @@ static void status_display_task(void *arg) {
         100)); // 100ms polling — fast enough for UI, no keyboard lag
   }
 }
-#endif /* !CONFIG_KASE_DEVICE_ROLE_DONGLE */
+#endif /* CONFIG_KASE_DEVICE_ROLE_KEYBOARD */
 
 /* Boot crash detection: RTC memory survives soft reboot but not power cycle */
 static RTC_NOINIT_ATTR uint32_t boot_crash_count;
@@ -178,7 +182,7 @@ void app_main(void) {
     combo_load();
     leader_load();
     key_override_load();
-#if !CONFIG_KASE_DEVICE_ROLE_DONGLE
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
     extern void tama_engine_init(void);
     bt_devices_load();
     tama_engine_init();
@@ -187,7 +191,7 @@ void app_main(void) {
     ESP_LOGW(TAG, "Safe mode: skipping NVS config loading");
   }
 
-#if !CONFIG_KASE_DEVICE_ROLE_DONGLE
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
   /* --- Keyboard-only init: display, matrix, BLE, LED strip --- */
   if (!safe_mode) {
     ESP_LOGI(TAG, "display init");
@@ -244,7 +248,7 @@ void app_main(void) {
     led_strip_start_task();
 #endif
   }
-#else  /* CONFIG_KASE_DEVICE_ROLE_DONGLE */
+#elif CONFIG_KASE_DEVICE_ROLE_DONGLE
   /* --- Dongle role: no local matrix/display/BLE. Engine is fed by RF. --- */
   ESP_LOGI(TAG, "Dongle role: init engine + RF RX");
   {
@@ -266,7 +270,15 @@ void app_main(void) {
     if (!rf_rx_start())
       ESP_LOGE(TAG, "RF RX failed to start (no radios?)");
   }
-#endif /* CONFIG_KASE_DEVICE_ROLE_DONGLE */
+#elif CONFIG_KASE_DEVICE_ROLE_HALF
+  /* --- Half role: reset matrix GPIOs, init NRF PTX, start scan task. --- */
+  ESP_LOGI(TAG, "Half role: starting NRF PTX + matrix scan");
+  if (!safe_mode) {
+    half_scan_task_start();
+  } else {
+    ESP_LOGW(TAG, "Safe mode: skipping half scan task (USB console accessible)");
+  }
+#endif /* device role */
 
   xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL,
                           1);

@@ -85,6 +85,11 @@ if(CONFIG_KASE_DEVICE_ROLE_DONGLE)
     list(APPEND srcs "comm/cdc/cdc_dongle_stubs.c")
 endif()
 
+# CDC stubs for half role (no-op symbols for tama/bt/display/layout)
+if(CONFIG_KASE_DEVICE_ROLE_HALF)
+    list(APPEND srcs "comm/cdc/cdc_half_stubs.c")
+endif()
+
 # RF RX (NRF24) — dongle role only
 if(CONFIG_KASE_HAS_RF_RX)
     list(APPEND srcs
@@ -93,6 +98,18 @@ if(CONFIG_KASE_HAS_RF_RX)
         "comm/rf/heartbeat.c"
         "comm/rf/dongle_engine_state.c"
     )
+endif()
+
+# RF TX (NRF24 PTX) + half scan task — half role only
+if(CONFIG_KASE_HAS_RF_TX)
+    list(APPEND srcs
+        "comm/rf/half_scan_task.c"
+    )
+    # rf_driver.c is already in the list when KASE_HAS_RF_RX is also set.
+    # When building half standalone (no RF_RX), add it here.
+    if(NOT CONFIG_KASE_HAS_RF_RX)
+        list(APPEND srcs "comm/rf/rf_driver.c")
+    endif()
 endif()
 
 # ESP-NOW cold path — dongle role only (Plan 5 fills these in)
@@ -119,6 +136,10 @@ if(CONFIG_KASE_HAS_DISPLAY)
 endif()
 
 if(CONFIG_KASE_HAS_RF_RX)
+    list(APPEND priv_requires esp_driver_spi)
+endif()
+
+if(CONFIG_KASE_HAS_RF_TX AND NOT CONFIG_KASE_HAS_RF_RX)
     list(APPEND priv_requires esp_driver_spi)
 endif()
 
