@@ -50,4 +50,27 @@ void    rf_driver_write_reg(rf_radio_t *radio, uint8_t reg, uint8_t val);
 /* Change channel at runtime (Plan 4 pairing). */
 void rf_driver_set_channel(rf_radio_t *radio, uint8_t ch);
 
+/* ── PTX mode — compiled only when KASE_HAS_RF_TX=y ─────────────── */
+#if CONFIG_KASE_HAS_RF_TX
+
+/* Initialize the radio in PTX mode (transmitter).
+ * Sets TX_ADDR + RX_ADDR_P0 to the same 5-byte address (required for ESB auto-ACK).
+ * Channel: cfg->channel. Data rate: 2 Mbps, 0 dBm, ARC=3, ARD=500 µs, DPL pipe 0.
+ * cfg->shares_bus_first=true → initializes the SPI bus (set true for the single half radio).
+ * Returns ESP_OK on success; sets radio->present to true. */
+esp_err_t rf_driver_init_tx(rf_radio_t *radio, const rf_radio_cfg_t *cfg);
+
+/* Transmit one payload (PTX, polled).
+ * Writes W_TX_PAYLOAD, pulses CE high ~15 µs, polls STATUS until TX_DS (ACK received)
+ * or MAX_RT (3 retries exhausted). Clears IRQ flags. Flushes TX FIFO on MAX_RT.
+ * Timeout ~5 ms (ARC=3 × ARD=500 µs × 2 + margin).
+ * Returns true on TX_DS (ACK from dongle). */
+bool rf_driver_send(rf_radio_t *radio, const uint8_t *buf, uint8_t len);
+
+/* Count of MAX_RT events accumulated since last reset.
+ * half_scan_task reads this to fill PKT_HEARTBEAT.link_q, then clears it. */
+extern uint32_t rf_tx_max_rt_count;
+
+#endif /* CONFIG_KASE_HAS_RF_TX */
+
 #endif /* RF_DRIVER_H */

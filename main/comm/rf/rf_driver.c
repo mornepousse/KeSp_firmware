@@ -4,6 +4,8 @@
  */
 #include "rf_driver.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -175,6 +177,151 @@ esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     ESP_LOGI(TAG, "radio ch=%u addr=KaSe.%02x init OK", cfg->channel, cfg->addr_suffix);
     return ESP_OK;
 }
+
+/* ════════════════════════════════════════════════════════════════
+ * PTX mode (half → dongle transmit)
+ * Compiled only when KASE_HAS_RF_TX=y. Shares all helpers above.
+ * ════════════════════════════════════════════════════════════════ */
+#if CONFIG_KASE_HAS_RF_TX
+
+/* Additional registers and commands for PTX mode */
+#define REG_TX_ADDR         0x10
+#define CMD_W_TX_PAYLOAD    0xA0
+#define CMD_FLUSH_TX        0xE1
+
+/* MAX_RT accumulator: read + reset by half_scan_task for PKT_HEARTBEAT.link_q */
+uint32_t rf_tx_max_rt_count = 0;
+
+esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
+{
+    memset(r, 0, sizeof(*r));
+    r->cfg = *cfg;
+
+    /* CSN + CE as GPIO outputs; CE low (PTX transmits only on CE pulse) */
+    gpio_config_t io = {
+        .pin_bit_mask = (1ULL << cfg->pin_csn) | (1ULL << cfg->pin_ce),
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    gpio_config(&io);
+    csn_high(r);
+    ce_low(r);
+
+    /* SPI bus — half has one radio, always shares_bus_first=true */
+    if (cfg->shares_bus_first) {
+        spi_bus_config_t bus = {
+            .mosi_io_num   = cfg->pin_mosi,
+            .miso_io_num   = cfg->pin_miso,
+            .sclk_io_num   = cfg->pin_sck,
+            .quadwp_io_num = -1, .quadhd_io_num = -1,
+            .max_transfer_sz = 64,
+        };
+        esp_err_t e = spi_bus_initialize(cfg->spi_host, &bus, SPI_DMA_CH_AUTO);
+        if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) return e;
+    }
+
+    spi_device_interface_config_t dev = {
+        .clock_speed_hz = cfg->clock_hz,
+        .mode           = 0,    /* CPOL=0, CPHA=0 — safe for GPIO45 strapping pin */
+        .spics_io_num   = -1,   /* manual CSN */
+        .queue_size     = 1,
+        .command_bits   = 0, .address_bits = 0,
+    };
+    ESP_ERROR_CHECK(spi_bus_add_device(cfg->spi_host, &dev, &r->spi));
+
+    vTaskDelay(pdMS_TO_TICKS(5));   /* power-on settle */
+
+    if (!rf_driver_probe(r)) {
+        r->present = false;
+        return ESP_FAIL;
+    }
+
+    /* Configure registers in PTX mode */
+    rf_driver_write_reg(r, REG_CONFIG,     0x00);   /* power down while configuring */
+    rf_driver_write_reg(r, REG_EN_AA,      0x01);   /* auto-ack pipe 0 (dongle ACKs our TX) */
+    rf_driver_write_reg(r, REG_EN_RXADDR,  0x01);   /* pipe 0 for ACK reception */
+    rf_driver_write_reg(r, REG_SETUP_AW,   0x03);   /* 5-byte address */
+    rf_driver_write_reg(r, REG_SETUP_RETR, 0x13);   /* ARD=500 µs (bits7:4=0x1), ARC=3 (bits3:0=0x3) */
+    rf_driver_set_channel(r, cfg->channel);
+    rf_driver_write_reg(r, REG_RF_SETUP,   0x0E);   /* 2 Mbps (RF_DR_HIGH=1, RF_DR_LOW=0), 0 dBm */
+    rf_driver_write_reg(r, REG_FEATURE,    0x04);   /* EN_DPL (bit2) */
+    rf_driver_write_reg(r, REG_DYNPD,      0x01);   /* DPL on pipe 0 */
+
+    /* TX_ADDR and RX_ADDR_P0 must be the same 5-byte address for ESB auto-ACK.
+     * Address = cfg->rx_addr[0..3] + cfg->addr_suffix. */
+    uint8_t addr[5];
+    memcpy(addr, cfg->rx_addr, 4);
+    addr[4] = cfg->addr_suffix;
+    write_reg_buf(r, REG_TX_ADDR,    addr, 5);
+    write_reg_buf(r, REG_RX_ADDR_P0, addr, 5);   /* MUST match TX_ADDR for ESB ACK */
+
+    /* Clear any stale IRQ flags, flush TX FIFO */
+    rf_driver_write_reg(r, REG_STATUS, 0x70);   /* clear RX_DR|TX_DS|MAX_RT */
+    {
+        uint8_t c = CMD_FLUSH_TX, rx_byte;
+        csn_low(r); spi_xfer(r, &c, &rx_byte, 1); csn_high(r);
+    }
+
+    /* PTX mode, power up.
+     * CONFIG = 0x3E = 0b00111110:
+     *   bit6 MASK_RX_DR=0 (RX IRQ enabled, though no RX in PTX)
+     *   bit5 MASK_TX_DS=1 (TX_DS IRQ masked — we poll STATUS)
+     *   bit4 MASK_MAX_RT=1 (MAX_RT IRQ masked — we poll STATUS)
+     *   bit3 EN_CRC=1
+     *   bit2 CRCO=1 (2-byte CRC)
+     *   bit1 PWR_UP=1
+     *   bit0 PRIM_RX=0 (PTX mode)
+     * MVP uses polling (STATUS register), so IRQ masks don't affect functionality.
+     * Masking TX_DS and MAX_RT keeps the IRQ pin clean in case it's monitored later. */
+    rf_driver_write_reg(r, REG_CONFIG, 0x3E);
+    vTaskDelay(pdMS_TO_TICKS(2));   /* Tpd2stby = 1.5 ms (datasheet) */
+    /* CE stays LOW in PTX; it is pulsed only during rf_driver_send() */
+
+    r->present = true;
+    ESP_LOGI(TAG, "radio PTX ch=0x%02x addr=KaSe.%02x init OK", cfg->channel, cfg->addr_suffix);
+    return ESP_OK;
+}
+
+bool rf_driver_send(rf_radio_t *r, const uint8_t *buf, uint8_t len)
+{
+    /* Write payload to TX FIFO */
+    uint8_t tx[33], rx_buf[33];
+    tx[0] = CMD_W_TX_PAYLOAD;
+    memcpy(&tx[1], buf, len);
+    csn_low(r);
+    spi_xfer(r, tx, rx_buf, (size_t)(len + 1));
+    csn_high(r);
+
+    /* Pulse CE high ≥ 10 µs to trigger transmission */
+    ce_high(r);
+    esp_rom_delay_us(15);   /* 15 µs > 10 µs minimum (datasheet Table 15) */
+    ce_low(r);
+
+    /* Poll STATUS until TX_DS (bit5 = ACK received) or MAX_RT (bit4 = all retries failed).
+     * Worst-case time: ARC=3 retries × ARD=500 µs × 2 (on-air) ≈ 3 ms + margin → 5 ms. */
+    uint32_t deadline_us = (uint32_t)(esp_timer_get_time() + 5000);
+    uint8_t status;
+    do {
+        status = rf_driver_read_reg(r, REG_STATUS);
+        if (status & 0x30) break;   /* TX_DS=bit5 or MAX_RT=bit4 set */
+    } while ((uint32_t)esp_timer_get_time() < deadline_us);
+
+    bool success = (status & 0x20) != 0;   /* bit5 TX_DS = ACK received */
+
+    if (status & 0x10) {
+        /* MAX_RT: flush TX FIFO or the failed packet blocks all future sends */
+        uint8_t c = CMD_FLUSH_TX;
+        csn_low(r); spi_xfer(r, &c, rx_buf, 1); csn_high(r);
+        rf_tx_max_rt_count++;
+    }
+
+    /* Clear TX_DS + MAX_RT flags in STATUS (write 1 to clear) */
+    rf_driver_write_reg(r, REG_STATUS, 0x30);
+
+    if (success) r->pkt_rx++;   /* reuse pkt_rx as pkt_tx_ok counter */
+    return success;
+}
+
+#endif /* CONFIG_KASE_HAS_RF_TX */
 
 bool rf_driver_rx_available(rf_radio_t *r)
 {
