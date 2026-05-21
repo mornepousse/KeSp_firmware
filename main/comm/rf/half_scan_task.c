@@ -82,10 +82,12 @@ void half_diff_emit(
     void (*emit_cb)(uint8_t row, uint8_t col, bool pressed, void *ctx),
     void *ctx)
 {
+    /* ROW2COL: keyboard_button drives rows (output) and senses cols (input),
+     * so output_index = row (0..4), input_index = col (0..6). */
     /* Process releases first (matches keyboard convention) */
     for (uint32_t i = 0; i < release_cnt; i++) {
-        uint8_t row = released[i].input_index;
-        uint8_t col = released[i].output_index;
+        uint8_t row = released[i].output_index;
+        uint8_t col = released[i].input_index;
         if (row < RF_HALF_ROWS && col < RF_HALF_COLS) {
             rf_bitmap_set(bitmap, row, col, false);
             if (emit_cb) emit_cb(row, col, false, ctx);
@@ -95,8 +97,8 @@ void half_diff_emit(
      * key_data[] contains ALL currently pressed keys (not just new ones),
      * so check the bitmap to avoid duplicate press events. */
     for (uint32_t i = 0; i < press_cnt; i++) {
-        uint8_t row = pressed[i].input_index;
-        uint8_t col = pressed[i].output_index;
+        uint8_t row = pressed[i].output_index;
+        uint8_t col = pressed[i].input_index;
         if (row < RF_HALF_ROWS && col < RF_HALF_COLS) {
             if (!rf_bitmap_get(bitmap, row, col)) {
                 rf_bitmap_set(bitmap, row, col, true);
@@ -207,18 +209,23 @@ static void half_scan_task(void *arg)
         return;
     }
 
-    /* Initialize keyboard_button matrix driver */
-    static int output_gpios[MATRIX_COLS];
-    static int input_gpios[MATRIX_ROWS];
-    for (int i = 0; i < MATRIX_COLS; i++) output_gpios[i] = col_gpios[i];
-    for (int i = 0; i < MATRIX_ROWS; i++) input_gpios[i]  = row_gpios[i];
+    /* Initialize keyboard_button matrix driver.
+     * The half PCB is ROW2COL: diodes conduct ROW→COL (confirmed by raw GPIO
+     * probe — driving a row HIGH makes the pressed col read HIGH). So we DRIVE
+     * the rows (output) and SENSE the cols (input). This is the opposite of the
+     * V1/V2 keyboards (COL2ROW), which is why the inherited config saw nothing.
+     * Consequently keyboard_button's output_index = row, input_index = col. */
+    static int output_gpios[MATRIX_ROWS];
+    static int input_gpios[MATRIX_COLS];
+    for (int i = 0; i < MATRIX_ROWS; i++) output_gpios[i] = row_gpios[i];
+    for (int i = 0; i < MATRIX_COLS; i++) input_gpios[i]  = col_gpios[i];
 
     keyboard_btn_config_t kbd_cfg = {
         .output_gpios     = output_gpios,
         .input_gpios      = input_gpios,
-        .output_gpio_num  = MATRIX_COLS,
-        .input_gpio_num   = MATRIX_ROWS,
-        .active_level     = 1,                        /* COL2ROW: active high */
+        .output_gpio_num  = MATRIX_ROWS,
+        .input_gpio_num   = MATRIX_COLS,
+        .active_level     = 1,                        /* ROW2COL: drive row high, sense col high */
         .debounce_ticks   = BOARD_DEBOUNCE_TICKS,
         .ticks_interval   = BOARD_MATRIX_SCAN_INTERVAL_US,
         .enable_power_save = false,

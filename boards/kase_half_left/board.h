@@ -16,7 +16,7 @@
 #define HALF_SIDE_LEFT  1
 #define HALF_SIDE       HALF_SIDE_LEFT
 
-/* ── Matrix 7 cols × 5 rows — COL2ROW, DevKitC ESP32-S3 ────── */
+/* ── Matrix 7 cols × 5 rows — ROW2COL, DevKitC ESP32-S3 ────── */
 /* Note: the half is a physical matrix but NOT managed by matrix_scan.c.
  * MATRIX_ROWS/COLS/MAX_MATRIX_KEYS are still required because engine code
  * (key_processor.c, keymap.c, etc.) references these defines at compile time. */
@@ -24,7 +24,9 @@
 #define MATRIX_COLS         7
 #define MAX_MATRIX_KEYS     (MATRIX_ROWS * MATRIX_COLS)   /* 35 */
 
-/* COL = output (driven), ROW = input (read). COL2ROW topology. */
+/* ROW2COL topology (verified by raw GPIO probe on the real board): diodes
+ * conduct ROW→COL, so half_scan_task DRIVES rows (output) and SENSES cols
+ * (input). Driving cols (COL2ROW, as on V1/V2) detects nothing on this PCB. */
 #define COLS0   GPIO_NUM_8
 #define COLS1   GPIO_NUM_7
 #define COLS2   GPIO_NUM_39   /* JTAG_TDI — safe: DevKitC uses USB-JTAG, gpio_reset_pin clears */
@@ -40,7 +42,7 @@
 #define ROWS4   GPIO_NUM_10
 
 /* ── Matrix scan timing (consumed by half_scan_task which creates kbd_cfg) ─ */
-#define BOARD_MATRIX_COL2ROW
+#define BOARD_MATRIX_ROW2COL
 #define BOARD_MATRIX_SCAN_INTERVAL_US   1000   /* 1 ms between scans */
 #define BOARD_MATRIX_SETTLING_US        0
 #define BOARD_MATRIX_RECOVERY_US        0
