@@ -1,0 +1,29 @@
+# KaSe half_left board overrides — merged on top of sdkconfig.defaults
+
+# --- Device role ---
+CONFIG_KASE_DEVICE_ROLE_HALF=y
+
+# --- Console UART active (GPIO43/44 not used by matrix on half) ---
+# This differs from the dongle which uses CONFIG_ESP_CONSOLE_NONE=y.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
+# --- Bluetooth disabled (not used in MVP; saves ~80KB heap) ---
+CONFIG_BT_ENABLED=n
+CONFIG_BT_CONTROLLER_ENABLED=n
+CONFIG_BT_BLUEDROID_ENABLED=n
+
+# --- WiFi disabled (ESP-NOW deferred to Phase 2) ---
+CONFIG_ESP_WIFI_ENABLED=n
+
+# --- Power management off (simpler for MVP; light-sleep deferred) ---
+CONFIG_PM_ENABLE=n
+
+# --- FreeRTOS tick = 1 ms (matches keyboard latency targets) ---
+CONFIG_FREERTOS_HZ=1000
+
+# --- TinyUSB: CDC only for flash/console — NO HID on half ---
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_HID_ENABLED=n
+
+# --- CPU 240 MHz fixed (power management off) ---
+CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240=y
