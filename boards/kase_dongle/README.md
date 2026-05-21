@@ -34,8 +34,13 @@ Extracted from `dongle.kicad_sch` netlist :
 
 ## Status
 
-**Plan 1 (bring-up)** ✅ : board variant créé, USB CDC binaire actif au boot,
-`MATRIX_STATE` reste à zéro (pas de RF input).
+**Plan 1 (bring-up)** ✅ : board variant créé, USB CDC binaire actif au boot.
+Hardware-vérifié : énumère `303a:4001`, CDC PING/FEATURES répondent.
+
+**Plan 2 (NRF RX stack)** ✅ codé + bench-vérifié : les 2 radios NRF24 probent OK
+sur le vrai dongle (SPI GPIO5/6/7, CSN 13/1, CE 14/4, IRQ 8/2), init canaux 76/82,
+`rf_rx_task` démarre (L=1 R=1). Réception de paquets pas encore validée (besoin d'un
+émetteur — TX tester sur le half, Task 8). `rf_packet` + `heartbeat` couverts par tests host.
 
 **Plans suivants** :
 - Plan 2 : NRF24L01+ stack + intégration engine (touche tester half → HID)
