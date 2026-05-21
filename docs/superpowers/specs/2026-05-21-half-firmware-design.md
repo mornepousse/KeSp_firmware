@@ -44,8 +44,17 @@ firmware keyboard existant. Alim 3.3V depuis le buck DD4012SA (voir PCB-esp/CLAU
 
 ### 2.2 Matrice clavier
 
-**7 colonnes × 5 lignes = 35 positions** (33 utilisées). Scan COL2ROW comme V2.
+**7 colonnes × 5 lignes = 35 positions** (33 utilisées).
 Source de vérité : `PCB-esp/CLAUDE.md` ligne "Key matrix".
+
+> **⚠ ROW2COL (corrigé au bench 2026-05-21)** : contrairement à ce que cette spec
+> supposait initialement (COL2ROW comme V1/V2), le PCB half est câblé **ROW2COL** —
+> les diodes conduisent ROW→COL. Vérifié par un probe GPIO brut sur la carte réelle :
+> driver une ROW à HIGH fait lire la COL pressée à HIGH. Donc `half_scan_task` DRIVE
+> les rows (output) et SENSE les colonnes (input), et mappe keyboard_button
+> output_index→row, input_index→col. La config COL2ROW héritée des claviers (drive
+> colonnes) ne détectait rien sur ce PCB (diodes bloquantes). Le pinout GPIO ci-dessous
+> est correct ; seule l'orientation drive/sense différait.
 
 | Signal | GPIO |
 |---|---|

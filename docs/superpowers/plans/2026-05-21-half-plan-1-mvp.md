@@ -1765,3 +1765,32 @@ The following were explicitly considered and excluded from Plan 1 MVP:
 - USB HID on half
 - Layer state display push (dongle → half → e-ink)
 - Multi-half bus (more than 2 halves)
+
+---
+
+## Bench result (2026-05-21) — MVP VALIDATED ✅
+
+End-to-end loop closed and verified on real hardware: pressing keys on the
+left half types correctly on the host PC ("fffgggttt44444" = keymap positions
+(2,4)/(2,5)/(1,5)/(0,4)).
+
+**Root cause found during bench (systematic-debugging):**
+The half PCB is **ROW2COL** (diodes conduct ROW→COL), not COL2ROW as inherited
+from the V1/V2 keyboards. Symptom: `keyboard_button` callback never fired
+(`cb=0`) even though the RF link was fully working (140 heartbeats ACKed, 0
+failures — proven via temporary half-side counters). A raw GPIO probe on the
+real board showed closures only when driving rows and reading cols.
+
+**Fix** (commit `fix(half): matrix is ROW2COL, not COL2ROW`):
+- `half_scan_task` drives rows (output) / senses cols (input)
+- keyboard_button `output_index`→row, `input_index`→col
+- `boards/kase_half_left/board.h`: `BOARD_MATRIX_ROW2COL`, ROW2COL comments
+- `test_half_matrix_diff.c` updated to ROW2COL index semantics
+
+**Debugging method that worked:** instrument at each component boundary before
+guessing. Half-side counters isolated "RF link OK / matrix dead", then a raw
+bidirectional GPIO probe revealed the diode orientation directly from the board
+(the docs/netlist were unreliable: `KaSe.net` is a stale Atreus62 export).
+
+**Lesson for the right half:** same reversible PCB → also ROW2COL. `kase_half_right`
+inherits `kase_half_left/board.h` so it gets the fix automatically.
