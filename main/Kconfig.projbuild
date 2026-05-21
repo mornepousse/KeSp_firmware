@@ -7,12 +7,16 @@ choice KASE_DEVICE_ROLE
         Selects the type of device this firmware runs on.
         KEYBOARD = standalone keyboard with local matrix (V1, V2, V2D).
         DONGLE   = USB receiver dongle for split wireless setup.
+        HALF     = split keyboard half, transmits matrix events to dongle.
 
 config KASE_DEVICE_ROLE_KEYBOARD
     bool "Keyboard (V1/V2/V2D)"
 
 config KASE_DEVICE_ROLE_DONGLE
     bool "Dongle (RX from halves)"
+
+config KASE_DEVICE_ROLE_HALF
+    bool "Half (TX to dongle via NRF24)"
 
 endchoice
 
@@ -22,6 +26,8 @@ config KASE_HAS_LOCAL_MATRIX
     default n
     help
         Compiles matrix_scan.c and keyboard_task.c local-scan path.
+        NOTE: the half has a physical matrix but manages it directly in
+        half_scan_task.c — it does NOT set this flag.
 
 config KASE_HAS_DISPLAY
     bool
@@ -49,7 +55,15 @@ config KASE_HAS_RF_RX
     default y if KASE_DEVICE_ROLE_DONGLE
     default n
     help
-        Compiles NRF24L01+ RX driver and rf_rx_task (Plan 2).
+        Compiles NRF24L01+ RX driver and rf_rx_task (dongle role).
+
+config KASE_HAS_RF_TX
+    bool
+    default y if KASE_DEVICE_ROLE_HALF
+    default n
+    help
+        Compiles NRF24L01+ TX path (rf_driver_init_tx, rf_driver_send)
+        and half_scan_task.c. Half role only.
 
 config KASE_HAS_ESPNOW
     bool
