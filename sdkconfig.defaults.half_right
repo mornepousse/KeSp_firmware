@@ -12,8 +12,16 @@ CONFIG_BT_ENABLED=n
 CONFIG_BT_CONTROLLER_ENABLED=n
 CONFIG_BT_BLUEDROID_ENABLED=n
 
-# --- WiFi disabled (ESP-NOW deferred to Phase 2) ---
-CONFIG_ESP_WIFI_ENABLED=n
+# --- WiFi enabled for ESP-NOW info channel (plan bricks-3) ---
+# ESP-NOW requires the WiFi radio. No AP, no IP, no credentials stored.
+# Memory impact: +60-80 KB heap (ESP32-S3 has 512 KB SRAM — acceptable).
+# Power impact: +10-20 mA (modem sleep pending power-management brick).
+# Channel: 6 (2437 MHz) — 29 MHz below NRF24 left at 2476 MHz (strategy A, spec §8.1).
+# See docs/superpowers/specs/2026-05-22-half-peripherals-espnow-design.md §8.4.
+CONFIG_ESP_WIFI_ENABLED=y
+CONFIG_ESP_WIFI_NVS_ENABLED=n
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
 
 # --- Power management off (simpler for MVP; light-sleep deferred) ---
 CONFIG_PM_ENABLE=n
