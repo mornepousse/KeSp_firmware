@@ -10,6 +10,7 @@
 #include "board_rf.h"
 #include "keyboard_config.h"
 #include "hid_transport.h"
+#include "cdc_binary_protocol.h"   /* ks_respond, KS_CMD_MATRIX_TEST */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_attr.h"
@@ -27,6 +28,13 @@ extern uint8_t current_press_col[];
 extern uint8_t current_press_stat[];
 extern uint8_t keycodes[];
 extern volatile uint8_t stat_matrix_changed;
+
+/* Matrix-test mode (toggled by KS_CMD_MATRIX_TEST in cdc_binary_cmds.c).
+ * Globals live in dongle_engine_state.c. When on, RF key events are streamed
+ * raw to the controller and the engine/HID is skipped. */
+extern volatile bool matrix_test_mode;
+extern volatile uint32_t matrix_test_last_activity_ms;
+#define MATRIX_TEST_TIMEOUT_MS 30000
 
 #define MAX_REPORT_KEYS 6
 #define INVALID_KEY_POS 0xFF
@@ -120,8 +128,16 @@ static bool drain_radio(rf_radio_t *radio, hb_half_state_t *hb, uint8_t half)
             if (rf_decode_key(buf, n, &e) && hb_apply_key(hb, &e)) {
                 uint8_t gcol = (half == HB_HALF_RIGHT) ? e.col + HALF_R_COL_OFFSET : e.col;
                 if (e.row < MATRIX_ROWS && gcol < MATRIX_COLS) {
-                    MATRIX_STATE[e.row][gcol] = e.pressed ? 1 : 0;
-                    changed = true;
+                    if (matrix_test_mode) {
+                        /* Stream raw (row,col,pressed) to the controller; no engine/HID.
+                         * Mirrors matrix_scan.c so the soft's matrix test works on the dongle. */
+                        uint8_t evt[3] = { e.row, gcol, (uint8_t)(e.pressed ? 1 : 0) };
+                        matrix_test_last_activity_ms = esp_timer_get_time() / 1000;
+                        ks_respond(KS_CMD_MATRIX_TEST, KS_STATUS_OK, evt, 3);
+                    } else {
+                        MATRIX_STATE[e.row][gcol] = e.pressed ? 1 : 0;
+                        changed = true;
+                    }
                 }
             } else {
                 radio->pkt_dup++;
@@ -160,6 +176,16 @@ static void rf_rx_task(void *arg)
         uint32_t now = esp_timer_get_time() / 1000;
         hb_check_timeout(&s_hb_left,  HB_HALF_LEFT,  &s_cb, now, 250);
         hb_check_timeout(&s_hb_right, HB_HALF_RIGHT, &s_cb, now, 250);
+
+        if (matrix_test_mode) {
+            /* Test events are streamed from drain_radio; skip the engine so no HID
+             * is emitted. Auto-exit after 30 s without CDC activity (matches keyboards). */
+            if (now - matrix_test_last_activity_ms > MATRIX_TEST_TIMEOUT_MS) {
+                matrix_test_mode = false;
+                ESP_LOGW(TAG, "matrix test mode timeout — auto-exit");
+            }
+            continue;
+        }
 
         tap_hold_tick();
         tap_dance_tick();
