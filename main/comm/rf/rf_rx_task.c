@@ -132,8 +132,20 @@ static bool drain_radio(rf_radio_t *radio, hb_half_state_t *hb, uint8_t half)
                 hb_reconcile(hb, half, &h, &s_cb, now);
                 changed = true;   /* reconciliation may have changed MATRIX_STATE */
             }
+        } else if (type == PKT_TYPE_TRACKPAD) {
+            rf_trackpad_t tp;
+            if (rf_decode_trackpad(buf, n, &tp)) {
+                /* TODO STUB: forward to mouse HID report.
+                 *   Plan 3 will implement:
+                 *     hid_send_mouse(tp.dx, tp.dy, tp.buttons, tp.scroll_v, tp.scroll_h)
+                 *   This requires TinyUSB HID descriptor update (composite mouse Report ID 2)
+                 *   and a mouse report builder in hid_report.c / usb_hid.c.
+                 *   For now, drop the packet silently — no crash, no action. */
+                (void)tp;
+                ESP_LOGD(TAG, "PKT_TRACKPAD dx=%d dy=%d btn=0x%02x (stub — dropped)",
+                         tp.dx, tp.dy, tp.buttons);
+            }
         }
-        /* PKT_TYPE_TRACKPAD handled in Plan 3 (mouse HID) */
     }
     return changed;
 }
