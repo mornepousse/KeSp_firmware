@@ -9,6 +9,7 @@
 #include "heartbeat.h"
 #include "board_rf.h"
 #include "keyboard_config.h"
+#include "hid_transport.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_attr.h"
@@ -135,15 +136,10 @@ static bool drain_radio(rf_radio_t *radio, hb_half_state_t *hb, uint8_t half)
         } else if (type == PKT_TYPE_TRACKPAD) {
             rf_trackpad_t tp;
             if (rf_decode_trackpad(buf, n, &tp)) {
-                /* TODO STUB: forward to mouse HID report.
-                 *   Plan 3 will implement:
-                 *     hid_send_mouse(tp.dx, tp.dy, tp.buttons, tp.scroll_v, tp.scroll_h)
-                 *   This requires TinyUSB HID descriptor update (composite mouse Report ID 2)
-                 *   and a mouse report builder in hid_report.c / usb_hid.c.
-                 *   For now, drop the packet silently — no crash, no action. */
-                (void)tp;
-                ESP_LOGD(TAG, "PKT_TRACKPAD dx=%d dy=%d btn=0x%02x (stub — dropped)",
-                         tp.dx, tp.dy, tp.buttons);
+                /* Forward mouse data directly — bypasses keyboard engine cycle.
+                 * hid_send_mouse signature: (buttons, x, y, wheel).
+                 * scroll_h is always 0 (out of v1 scope; no horizontal wheel arg). */
+                hid_send_mouse(tp.buttons, tp.dx, tp.dy, tp.scroll_v);
             }
         }
     }
