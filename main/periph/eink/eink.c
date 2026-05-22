@@ -53,7 +53,6 @@ void eink_fb_set_px(uint8_t *fb, int col, int row, int is_white)
 
 #include "board.h"         /* BOARD_EINK_* GPIO + SPI defines */
 #include "half_spi.h"      /* half_spi_lock / half_spi_unlock */
-#include "eink_lvgl.h"     /* eink_lvgl_init, eink_lvgl_start */
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -275,13 +274,32 @@ void eink_clear(void)
     /* eink_push already polls BUSY to completion — panel is white when this returns */
 }
 
+/* ── Refresh task ───────────────────────────────────────────── */
+/* NOTE: This task is retired in T5 (Plan Bricks-3). eink_start() will be
+ * repurposed to call eink_lvgl_init() + eink_lvgl_start() instead. */
+static void eink_task(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "eink_task started (1 Hz refresh)");
+
+    /* Initial clear on first run */
+    eink_clear();
+
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        /* Rendering deferred to LVGL (Plan Bricks-3 T4/T5). */
+    }
+}
+
 void eink_start(void)
 {
-    /* Retired: eink_task (1 Hz polling loop). Replaced by LVGL handler task.
-     * eink_lvgl_init() sets up LVGL, draw buffer, flush callback, tick timer,
-     * and creates the static screen. eink_lvgl_start() creates the handler task. */
-    eink_lvgl_init();
-    eink_lvgl_start();
+    BaseType_t ret = xTaskCreatePinnedToCore(
+        eink_task, "eink_task",
+        4096,
+        NULL, 3, NULL, 0);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "xTaskCreatePinnedToCore failed: %d", (int)ret);
+    }
 }
 
 #endif /* TEST_HOST */
