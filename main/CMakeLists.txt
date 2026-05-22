@@ -148,11 +148,12 @@ set(priv_requires
                 # esp_wifi component always registers (even if WiFi stack disabled)
                 # so listing it unconditionally is safe and avoids CMake conditional issues.
     esp_event   # esp_event_loop_create_default is called from espnow_link.c
+    bt          # BLE HID (keyboard role). MUST be unconditional: with set(COMPONENTS main)
+    esp_hid     # a conditional `if(CONFIG_KASE_HAS_BLE)` requires fails to pull bt on a fresh
+                # config (CONFIG unknown on first pass) and nothing else pulls it transitively
+                # → BT_* Kconfig symbols unknown + esp_bt_defs.h missing. Same fix as esp_wifi.
+                # Harmless on dongle/half (BT disabled in their sdkconfig → compiles to ~nothing).
 )
-
-if(CONFIG_KASE_HAS_BLE)
-    list(APPEND priv_requires bt esp_hid)
-endif()
 
 if(CONFIG_KASE_HAS_DISPLAY)
     list(APPEND priv_requires esp_lcd)

@@ -28,6 +28,10 @@ CONFIG_BT_GATTS_ENABLE=y
 CONFIG_BT_GATTC_ENABLE=y
 CONFIG_BT_BLE_SMP_ENABLE=y
 CONFIG_BT_BLE_SMP_BOND_NVS_FLASH=y
+# Legacy BLE 4.2 GAP APIs (esp_ble_gap_start_advertising / config_adv_data) — the
+# keyboard BLE HID code uses these. ESP-IDF 5.5 defaults to BLE 5.0-only, which
+# omits them → undefined references at link. Enable the 4.2 feature set.
+CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
 
 # LVGL: 16-bit color, required fonts
 CONFIG_LV_COLOR_16_SWAP=y
