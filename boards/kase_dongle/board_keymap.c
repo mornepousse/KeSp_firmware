@@ -25,17 +25,17 @@ uint16_t keymaps[LAYERS][MATRIX_ROWS][MATRIX_COLS] = {
      * Matrix-row meaning on the half PCB: row4=top letter row, row3, row2,
      * row1 = letter rows; row0 = thumb/function row; col6 = inner column. */
     {
-      /*  c0       c1      c2      c3       c4       c5      c6   |  c7..c13 (half-right) */
+      /*  half-left c0..c6                                    | half-right c7..c13 (local c0..c6) */
         { K_F5,    K_F10,  K_LGUI, K_LSHIFT,K_SPC,   MO_L1,  K_NONE,
-          K_NONE,  K_NONE, K_NONE, K_NONE,  K_NONE,  K_NONE, K_NONE },
+          K_DEL,   K_BSPC, K_RGUI, K_RSHIFT,K_SPC,   MO_L1,  K_NONE },
         { K_LCTRL, K_Z,    K_X,    K_C,     K_V,     K_B,    K_NONE,
-          K_NONE,  K_NONE, K_NONE, K_NONE,  K_NONE,  K_NONE, K_NONE },
+          K_RCTRL, K_SLSH, K_DOT,  K_COMM,  K_M,     K_N,    K_NONE },
         { K_RALT,  K_A,    K_S,    K_D,     K_F,     K_G,    K_BSPC,
-          K_NONE,  K_NONE, K_NONE, K_NONE,  K_NONE,  K_NONE, K_NONE },
+          K_QUOT,  K_SCLN, K_L,    K_K,     K_J,     K_H,    K_ENT },
         { K_TAB,   K_Q,    K_W,    K_E,     K_R,     K_T,    MO_L2,
-          K_NONE,  K_NONE, K_NONE, K_NONE,  K_NONE,  K_NONE, K_NONE },
+          K_BSLSH, K_P,    K_O,    K_I,     K_U,     K_Y,    MO_L2 },
         { K_ESC,   K_1,    K_2,    K_3,     K_4,     K_5,    K_LBRC,
-          K_NONE,  K_NONE, K_NONE, K_NONE,  K_NONE,  K_NONE, K_NONE },
+          K_MINUS, K_0,    K_9,    K_8,     K_7,     K_6,    K_RBRC },
     },
     /* Layer 1 — lower (F-keys + nav) */
     {
