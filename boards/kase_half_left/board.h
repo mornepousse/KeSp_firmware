@@ -63,13 +63,30 @@
 #define BOARD_NRF_ADDR_SUFFIX     0x01
 #define BOARD_NRF_CHANNEL         0x4C   /* 2476 MHz */
 
-/* ── Unused peripheral GPIO — not initialized in MVP ───────── */
-/* E-ink: CS=18, DC=12, RES=17, BUSY=1 */
-/* Trackpad I2C: SDA=40, SCL=38, RST=13, RDY=14 */
+/* ── Trackpad IQS5xx (TPS43-201A-S) ───────────────────────── */
+/* PCB connector: header J2, 6-pin 2.54mm. Free-wired to the carrying half. */
+#define BOARD_TRACK_SDA_GPIO    GPIO_NUM_40   /* I2C data,  4.7kΩ pull-up to 3.3V */
+#define BOARD_TRACK_SCL_GPIO    GPIO_NUM_38   /* I2C clock, 4.7kΩ pull-up to 3.3V */
+#define BOARD_TRACK_RST_GPIO    GPIO_NUM_13   /* Reset active-low; 10 ms pulse at boot */
+#define BOARD_TRACK_RDY_GPIO    GPIO_NUM_14   /* Data-ready IRQ, active-low, NEGEDGE */
+#define BOARD_TRACK_I2C_PORT    I2C_NUM_0
+#define BOARD_TRACK_I2C_HZ      400000        /* 400 kHz */
+/* IQS5xx default 7-bit address. Verify ADDR pin config on assembled PCB. */
+#define BOARD_TRACK_I2C_ADDR    0x74
+
+/* ── E-ink SSD1681 (WeAct 1.54", 200x200, 1bpp) ───────────── */
+/* Shares SPI2 bus (MOSI=GPIO48, MISO=GPIO47, SCK=GPIO45) with NRF24. */
+#define BOARD_EINK_CS_GPIO      GPIO_NUM_18   /* SPI chip select, active-low */
+#define BOARD_EINK_DC_GPIO      GPIO_NUM_12   /* Data/Command: H=data, L=command */
+#define BOARD_EINK_RST_GPIO     GPIO_NUM_17   /* Reset active-low; pulse at boot */
+#define BOARD_EINK_BUSY_GPIO    GPIO_NUM_1    /* Busy: H=panel busy, L=ready */
+#define BOARD_EINK_SPI_HZ       4000000       /* 4 MHz (SSD1681 max 20 MHz; conservative) */
+
+/* ── Other peripheral GPIO (hors scope de ces bricks) ──────── */
 /* Battery ADC: GPIO15 (ADC2_CH4), switchable GND=GPIO16 */
-/* BMS status: GPIO46 (input only) */
-/* LED backlight: GPIO11 (TPS61040DBV boost) */
-/* These GPIOs are left in reset state (input, no pull). */
+/* BMS status: GPIO46 (input-only charge indicator) */
+/* LED backlight: GPIO11 (TPS61040DBV boost enable) */
+/* These GPIOs are left in reset state until their bricks are implemented. */
 
 /* ── No display, no BLE, no LED strip on half ──────────────── */
 #define BOARD_DISPLAY_SLEEP_MS    0
