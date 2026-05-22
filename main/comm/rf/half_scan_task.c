@@ -33,6 +33,9 @@
 #if CONFIG_KASE_HAS_TRACKPAD
 #include "trackpad.h"
 #endif
+#if CONFIG_KASE_HAS_EINK
+#include "eink.h"
+#endif
 
 static const char *TAG = "half_scan";
 
@@ -242,6 +245,19 @@ static void half_scan_task(void *arg)
         ESP_LOGI(TAG, "trackpad not detected on this half (no I2C ACK) — skipping");
     }
 #endif /* CONFIG_KASE_HAS_TRACKPAD */
+
+#if CONFIG_KASE_HAS_EINK
+    /* E-ink skeleton: add SSD1681 SPI device, GPIO config, probe.
+     * Returns true if the panel is physically present on this half.
+     * Must be called AFTER rf_driver_init_tx (SPI2 bus must exist). */
+    bool eink_present = eink_init();
+    if (eink_present) {
+        ESP_LOGI(TAG, "e-ink detected — starting refresh task");
+        eink_start();
+    } else {
+        ESP_LOGI(TAG, "e-ink not detected on this half (BUSY timeout) — skipping");
+    }
+#endif /* CONFIG_KASE_HAS_EINK */
 
     /* Initialize keyboard_button matrix driver.
      * The half PCB is ROW2COL: diodes conduct ROW→COL (confirmed by raw GPIO
