@@ -21,6 +21,7 @@
 #include "board.h"           /* BOARD_NRF_*, COLS*, ROWS*, BOARD_DEBOUNCE_TICKS */
 #include "keyboard_button.h"
 #include "rf_driver.h"
+#include "half_spi.h"        /* half_spi_lock_init / half_spi_lock / half_spi_unlock */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_rom_sys.h"
@@ -29,6 +30,9 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include <string.h>
+#if CONFIG_KASE_HAS_TRACKPAD
+#include "trackpad.h"
+#endif
 
 static const char *TAG = "half_scan";
 
@@ -38,8 +42,8 @@ static rf_radio_t s_radio;
 /* Serializes NRF SPI access: rf_driver_send is called from BOTH the
  * keyboard_button callback task (on key events) and the esp_timer task
  * (heartbeat). spi_device_polling_transmit aborts if two transactions
- * overlap, so all sends must be mutually exclusive. */
-static SemaphoreHandle_t s_tx_mutex;
+ * overlap, so all sends must be mutually exclusive.
+ * The lock is now owned by half_spi.c (shared with e-ink and trackpad). */
 
 /* ── Packet sequence counter — shared by PKT_KEY and PKT_HEARTBEAT ─ */
 static volatile uint8_t s_seq = 0;
@@ -131,9 +135,9 @@ static void tx_key_event(uint8_t row, uint8_t col, bool key_pressed, void *ctx)
     uint8_t buf[3];
     rf_encode_key(buf, &e);
 
-    xSemaphoreTake(s_tx_mutex, portMAX_DELAY);
+    half_spi_lock();
     bool ok = rf_driver_send(&s_radio, buf, 3);
-    xSemaphoreGive(s_tx_mutex);
+    half_spi_unlock();
     if (!ok) {
         /* Store for retry in next heartbeat tick */
         s_pending_retry = e;
@@ -171,9 +175,9 @@ static void heartbeat_timer_cb(void *arg)
         rf_key_event_t retry_evt = s_pending_retry;   /* snapshot (volatile struct copy) */
         retry_evt.seq = s_seq++;
         rf_encode_key(buf, &retry_evt);
-        xSemaphoreTake(s_tx_mutex, portMAX_DELAY);
+        half_spi_lock();
         rf_driver_send(&s_radio, buf, 3);   /* no second retry on failure */
-        xSemaphoreGive(s_tx_mutex);
+        half_spi_unlock();
         s_has_pending_retry = false;
     }
 
@@ -188,9 +192,9 @@ static void heartbeat_timer_cb(void *arg)
 
     uint8_t buf[9];
     rf_encode_heartbeat(buf, &hb);
-    xSemaphoreTake(s_tx_mutex, portMAX_DELAY);
+    half_spi_lock();
     bool ok = rf_driver_send(&s_radio, buf, 9);
-    xSemaphoreGive(s_tx_mutex);
+    half_spi_unlock();
     if (!ok) {
         ESP_LOGD(TAG, "heartbeat TX failed (MAX_RT)");
     }
@@ -202,8 +206,8 @@ static void half_scan_task(void *arg)
     (void)arg;
     ESP_LOGI(TAG, "half_scan_task started");
 
-    /* Mutex to serialize NRF SPI sends (key-event task vs heartbeat timer) */
-    s_tx_mutex = xSemaphoreCreateMutex();
+    /* Initialize shared SPI2 bus lock (used by NRF, and by e-ink/trackpad bricks). */
+    half_spi_lock_init();
 
     /* Reset all matrix GPIO pins to detach bootloader/UART functions.
      * This mirrors the gpio_reset_pin() calls in matrix_scan.c::matrix_setup(). */
@@ -224,6 +228,18 @@ static void half_scan_task(void *arg)
         vTaskDelay(portMAX_DELAY);
         return;
     }
+
+#if CONFIG_KASE_HAS_TRACKPAD
+    /* Trackpad skeleton: init I2C, RST pulse, RDY IRQ, I2C probe.
+     * Returns true if the trackpad is physically present on this half. */
+    bool trackpad_present = trackpad_init();
+    if (trackpad_present) {
+        ESP_LOGI(TAG, "trackpad detected — starting trackpad task");
+        trackpad_start();
+    } else {
+        ESP_LOGI(TAG, "trackpad not detected on this half (no I2C ACK) — skipping");
+    }
+#endif /* CONFIG_KASE_HAS_TRACKPAD */
 
     /* Initialize keyboard_button matrix driver.
      * The half PCB is ROW2COL: diodes conduct ROW→COL (confirmed by raw GPIO
