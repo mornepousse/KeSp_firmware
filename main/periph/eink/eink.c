@@ -95,7 +95,12 @@ static void eink_send_data(const uint8_t *data, size_t len)
         .length    = len * 8,
         .tx_buffer = data,
     };
-    spi_device_polling_transmit(s_eink_dev, &t);
+    esp_err_t e = spi_device_polling_transmit(s_eink_dev, &t);
+    if (e != ESP_OK) {
+        /* The 5000-byte RAM write (cmd 0x24) fails here if the shared SPI bus
+         * max_transfer_sz is too small — must be ≥ EINK_FB_SIZE. */
+        ESP_LOGE(TAG, "eink_send_data(%u) FAILED: %s", (unsigned)len, esp_err_to_name(e));
+    }
 }
 
 bool eink_init(void)
@@ -187,6 +192,18 @@ void eink_push(const uint8_t *fb)
     {
         static const uint8_t d01[] = {0xC7, 0x00, 0x00};
         eink_send_data(d01, sizeof(d01));
+    }
+
+    /* ── Step 2b: Data Entry Mode (cmd 0x11) ─────────────────────
+     * MANDATORY: SWRESET restores 0x11 to its default 0x03 (Y INCREMENT),
+     * which conflicts with our DESCENDING Y window (0x45) + counter (0x4F=199).
+     * Without this, the 200 RAM lines land at wrong Y addresses → garbled output.
+     * 0x01 = X increment, Y decrement, address counter updated in X first (AM=0)
+     *        → matches RAM-Y start=199 end=0 written top-down. */
+    eink_send_cmd(0x11);
+    {
+        static const uint8_t d11[] = {0x01};
+        eink_send_data(d11, sizeof(d11));
     }
 
     /* ── Step 3: Border Waveform Control (cmd 0x3C) ─────────────

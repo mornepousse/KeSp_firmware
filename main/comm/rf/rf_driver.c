@@ -213,7 +213,11 @@ esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
             .miso_io_num   = cfg->pin_miso,
             .sclk_io_num   = cfg->pin_sck,
             .quadwp_io_num = -1, .quadhd_io_num = -1,
-            .max_transfer_sz = 64,
+            /* Half shares this bus with the SSD1681 e-ink, which writes the full
+             * 5000-byte framebuffer (cmd 0x24) in one transaction. The NRF24 itself
+             * only needs ~33 bytes, but the bus max must cover its largest device or
+             * the e-ink RAM write fails silently (ESP_ERR_INVALID_ARG) → garbled panel. */
+            .max_transfer_sz = 5120,
         };
         esp_err_t e = spi_bus_initialize(cfg->spi_host, &bus, SPI_DMA_CH_AUTO);
         if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) return e;

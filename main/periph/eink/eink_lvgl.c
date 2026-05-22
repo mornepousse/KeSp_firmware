@@ -86,10 +86,12 @@ static void eink_lvgl_set_px_cb(lv_disp_drv_t *drv,
                                  lv_opa_t opa)
 {
     (void)drv;
-    (void)buf;
-    (void)buf_w;
-    (void)opa;   /* no alpha blending on 1bpp — treat any non-zero alpha as opaque */
-    eink_fb_set_px(s_fb, (int)x, (int)y, (int)color.full);
+    (void)opa;   /* 1bpp: any coverage is opaque */
+    /* Store the rendered pixel into LVGL's own draw buffer at the RELATIVE
+     * position. The mapping into the full-screen s_fb happens in flush_cb,
+     * which receives the area's ABSOLUTE coordinates (rounder_cb only reports
+     * the invalidated region bounds, not each stripe's origin). */
+    ((lv_color_t *)buf)[(int)y * (int)buf_w + (int)x] = color;
 }
 
 /* ── rounder_cb — align dirty area to byte boundaries ───────────────
@@ -111,25 +113,37 @@ static void eink_lvgl_rounder_cb(lv_disp_drv_t *drv, lv_area_t *area)
 }
 
 /* ── flush_cb — called by lv_timer_handler after each rendered stripe ─
- * With set_px_cb registered, pixels are already packed into s_fb.
- * This callback only needs to trigger eink_push on the last fragment
- * and acknowledge the flush to LVGL.
+ * set_px_cb writes pixels into LVGL's own draw buffer at coords RELATIVE to the
+ * stripe. Here we map that buffer (color_p) into the full-screen s_fb using the
+ * stripe's ABSOLUTE coordinates from `area` (the only reliable source of the
+ * stripe origin — rounder_cb only reports the invalidated region's bounds).
+ * eink_push is triggered on the last fragment of the refresh.
  *
- * full_refresh=1 guarantees is_last is true only after all 200 rows are
- * rendered — so eink_push always receives a complete 5000-byte s_fb.
- *
- * CRITICAL: lv_disp_flush_ready(drv) MUST be called unconditionally —
- * even if eink_push is skipped — or LVGL will deadlock waiting for the
- * ready signal before issuing the next render. */
+ * CRITICAL: lv_disp_flush_ready(drv) MUST be called unconditionally — or LVGL
+ * deadlocks waiting for the ready signal before issuing the next render. */
 static void eink_lvgl_flush_cb(lv_disp_drv_t *drv,
                                 const lv_area_t *area,
                                 lv_color_t *color_p)
 {
-    (void)area;
-    (void)color_p;   /* pixels already in s_fb via set_px_cb — nothing to pack here */
+    /* Map this stripe's pixels into the full-screen s_fb using the area's
+     * ABSOLUTE coordinates. color_p is LVGL's draw buffer (1 byte/px at
+     * LV_COLOR_DEPTH=1), row-major with stride = area width. */
+    int w = area->x2 - area->x1 + 1;
+    int h = area->y2 - area->y1 + 1;
+    for (int ry = 0; ry < h; ry++) {
+        for (int rx = 0; rx < w; rx++) {
+            int v = color_p[ry * w + rx].full;   /* 1 = white, 0 = black */
+            /* This SSD1681 panel maps RAM-X=0 to the PHYSICAL RIGHT edge, so the
+             * framebuffer is displayed horizontally mirrored. Reverse the X axis
+             * here (col → WIDTH-1-col) so logical screen coords land correctly.
+             * (Verified on hardware: a raw left bar appeared on the right edge.) */
+            eink_fb_set_px(s_fb, (EINK_WIDTH - 1) - (area->x1 + rx),
+                           area->y1 + ry, v);
+        }
+    }
 
     if (lv_disp_flush_is_last(drv)) {
-        /* Full frame is in s_fb — push to SSD1681 panel */
+        /* Whole frame assembled in s_fb — push to the SSD1681 panel. */
         eink_push(s_fb);
     }
 
@@ -195,10 +209,13 @@ void eink_lvgl_init(void)
     s_disp_drv.rounder_cb   = eink_lvgl_rounder_cb;  /* byte-align dirty area */
     s_disp_drv.hor_res      = EINK_WIDTH;    /* 200 */
     s_disp_drv.ver_res      = EINK_HEIGHT;   /* 200 */
-    /* Trap 3: full_refresh=1 — LVGL sends the full 200×200 frame each cycle.
-     * Guarantees s_fb is complete when flush_cb fires with is_last=true.
-     * Required for SSD1681 (no partial RAM writes in v1). */
-    s_disp_drv.full_refresh = 1;
+    /* full_refresh MUST be 0 here: full_refresh=1 requires a FULL-SCREEN draw
+     * buffer (hor_res×ver_res = 40000 px). Our stripe buffer is only 2000 px,
+     * so full_refresh=1 breaks the render path and set_px_cb never paints → blank.
+     * With full_refresh=0 + set_px_cb, LVGL renders the invalidated screen in
+     * ~20 stripes; set_px_cb packs every pixel into s_fb across all stripes;
+     * is_last fires after the final stripe → eink_push() gets the complete frame. */
+    s_disp_drv.full_refresh = 0;
     lv_disp_drv_register(&s_disp_drv);
 
     ESP_LOGI(TAG, "LVGL init OK, display registered (%dx%d, 1bpp, set_px_cb)",
