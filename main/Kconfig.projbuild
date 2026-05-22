@@ -68,8 +68,31 @@ config KASE_HAS_RF_TX
 config KASE_HAS_ESPNOW
     bool
     default y if KASE_DEVICE_ROLE_DONGLE
+    default y if KASE_DEVICE_ROLE_HALF
     default n
     help
-        Compiles ESP-NOW cold path stack (Plan 5).
+        Compiles ESP-NOW stack (espnow_link.c + espnow_info.c).
+        On the dongle: info-channel + Plan 5 OTA/config reserved range.
+        On the half: info-channel only (layer/state RX, battery TX stub).
+        Requires WiFi — see sdkconfig.defaults.half_left/right (Plan Bricks-3).
+
+config KASE_HAS_TRACKPAD
+    bool
+    default y if KASE_DEVICE_ROLE_HALF
+    default n
+    help
+        Compiles trackpad.c (IQS5xx I2C driver + RF trackpad TX).
+        Runtime probe: trackpad_init() returns false if not physically present.
+        Compiled on both half variants — PCB is reversible, presence detected at boot.
+
+config KASE_HAS_EINK
+    bool
+    default y if KASE_DEVICE_ROLE_HALF
+    default n
+    help
+        Compiles eink.c (SSD1681 SPI skeleton + refresh task) and half_spi.c
+        (shared SPI2 bus lock used by NRF, e-ink, and trackpad).
+        Runtime probe: eink_init() returns false if panel not physically present.
+        Compiled on both half variants.
 
 endmenu
