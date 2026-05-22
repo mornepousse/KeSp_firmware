@@ -113,6 +113,11 @@ if(CONFIG_KASE_HAS_RF_TX)
     endif()
 endif()
 
+# Trackpad IQS5xx skeleton — half role only (compiled on both halves; runtime probe)
+if(CONFIG_KASE_HAS_TRACKPAD)
+    list(APPEND srcs "periph/trackpad/trackpad.c")
+endif()
+
 # ESP-NOW cold path — dongle role only (Plan 5 fills these in)
 if(CONFIG_KASE_HAS_ESPNOW)
     # Plan 5 will add: comm/espnow/*.c
@@ -167,6 +172,7 @@ idf_component_register(
         "tama"
         "input"
         "periph"
+        "periph/trackpad"
         "${BOARD_DIR}"
     PRIV_REQUIRES ${priv_requires}
 )

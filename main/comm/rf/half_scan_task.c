@@ -37,7 +37,9 @@
 static const char *TAG = "half_scan";
 
 /* ── Radio state ────────────────────────────────────────────── */
-static rf_radio_t s_radio;
+/* Non-static: shared with trackpad.c via extern rf_radio_t s_radio.
+ * trackpad_task calls rf_driver_send(&s_radio, ...) to send PKT_TRACKPAD. */
+rf_radio_t s_radio;
 
 /* Serializes NRF SPI access: rf_driver_send is called from BOTH the
  * keyboard_button callback task (on key events) and the esp_timer task
