@@ -35,3 +35,12 @@ CONFIG_TINYUSB_HID_ENABLED=n
 
 # --- CPU 240 MHz fixed (power management off) ---
 CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240=y
+
+# --- LVGL: 1bpp monochrome for SSD1681 e-ink ---
+# NOTE: This is HALF-build-only. Keyboard builds use LV_COLOR_DEPTH_16.
+# The half has independent build dirs (build_half_left, build_half_right)
+# and independent sdkconfig. No conflict with keyboard or dongle builds.
+CONFIG_LV_COLOR_DEPTH_1=y
+CONFIG_LV_USE_LABEL=y
+CONFIG_LV_FONT_MONTSERRAT_14=y
+# LVGL internal heap: ~8 KB at 1bpp (core + label objects). Within budget.
