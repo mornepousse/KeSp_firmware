@@ -36,6 +36,11 @@
 #if CONFIG_KASE_HAS_EINK
 #include "eink.h"
 #endif
+#if CONFIG_KASE_HAS_ESPNOW
+#include "espnow_info.h"
+#include "espnow_link.h"
+#include "espnow_msg.h"   /* en_battery_t */
+#endif
 
 static const char *TAG = "half_scan";
 
@@ -203,6 +208,24 @@ static void heartbeat_timer_cb(void *arg)
     if (!ok) {
         ESP_LOGD(TAG, "heartbeat TX failed (MAX_RT)");
     }
+
+#if CONFIG_KASE_HAS_ESPNOW
+    /* Battery TX: every ~30 s (300 × 100 ms ticks) */
+    static uint32_t s_batt_ticks = 0;
+    if (++s_batt_ticks >= 300) {
+        s_batt_ticks = 0;
+        en_battery_t b = {
+            .batt_dV  = 0,   /* TODO STUB: read ADC GPIO15 (battery brick, Phase 2+) */
+            .soc_pct  = 0,   /* TODO STUB: derive SoC from batt_dV */
+            .charging = 0,   /* TODO STUB: gpio_get_level(GPIO46) BMS status */
+        };
+        /* TODO STUB: load mac_dongle from NVS rf.mac_dongle and call espnow_send().
+         * Until MAC is configured, log only — do not send to zero MAC. */
+        ESP_LOGD(TAG, "battery stub: dV=%u soc=%u%% chg=%u (not sent — mac_dongle not configured)",
+                 b.batt_dV, b.soc_pct, b.charging);
+        (void)b;   /* suppress unused warning */
+    }
+#endif /* CONFIG_KASE_HAS_ESPNOW */
 }
 
 /* ── Main task body ─────────────────────────────────────────── */
@@ -258,6 +281,15 @@ static void half_scan_task(void *arg)
         ESP_LOGI(TAG, "e-ink not detected on this half (BUSY timeout) — skipping");
     }
 #endif /* CONFIG_KASE_HAS_EINK */
+
+#if CONFIG_KASE_HAS_ESPNOW
+    /* Initialize info-channel state BEFORE ESP-NOW link (mutex must exist before recv fires) */
+    espnow_info_init();
+    bool espnow_ok = espnow_link_init();
+    if (!espnow_ok) {
+        ESP_LOGW(TAG, "ESP-NOW init failed — info channel disabled (NRF TX continues)");
+    }
+#endif /* CONFIG_KASE_HAS_ESPNOW */
 
     /* Initialize keyboard_button matrix driver.
      * The half PCB is ROW2COL: diodes conduct ROW→COL (confirmed by raw GPIO

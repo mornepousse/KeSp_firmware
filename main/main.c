@@ -30,6 +30,11 @@
 #include "half_scan_task.h"
 #endif
 
+#if CONFIG_KASE_HAS_ESPNOW
+#include "espnow_info.h"
+#include "espnow_link.h"
+#endif
+
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for
  * isolation testing */
 #ifndef SKIP_STATUS_DISPLAY
@@ -271,6 +276,11 @@ void app_main(void) {
     hid_report_init();
     if (!rf_rx_start())
       ESP_LOGE(TAG, "RF RX failed to start (no radios?)");
+
+#if CONFIG_KASE_HAS_ESPNOW
+    espnow_info_init();
+    espnow_link_init();   /* ESP-NOW info channel: layer push to halves, battery RX */
+#endif
   }
 #elif CONFIG_KASE_DEVICE_ROLE_HALF
   /* --- Half role: reset matrix GPIOs, init NRF PTX, start scan task. --- */
