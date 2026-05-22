@@ -18,3 +18,9 @@ char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH] = {
     "L8",
     "L9",
 };
+
+/* Physical key layout JSON (consumed by the controller app for remap UI). */
+#define _STR(x) #x
+#define STR(x)  _STR(x)
+
+#include "../kase_dongle_layout.inc"

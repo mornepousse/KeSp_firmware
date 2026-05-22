@@ -20,11 +20,8 @@
 /* ── status_display ─────────────────────────────────────────── */
 void status_display_update_layer_name(void) { /* no display on dongle */ }
 
-/* ── board_layout_json ──────────────────────────────────────── *
- * cdc_binary_cmds.c does: extern const char board_layout_json[];
- *                         strlen(board_layout_json);
- * Provide an empty JSON array. */
-const char board_layout_json[] = "[]";
+/* board_layout_json is now provided by boards/kase_dongle/board_layout.c
+ * (via kase_dongle_layout.inc) — the real split-keyboard physical layout. */
 
 /* ── Tamagotchi ─────────────────────────────────────────────── *
  * Forward-declare tama types as opaque. The handlers that use them
