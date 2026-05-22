@@ -140,6 +140,10 @@ set(priv_requires
     unity
     esp_driver_i2c
     app_update
+    esp_wifi    # esp_now.h lives in esp_wifi/include; needed when ESPNOW=y.
+                # esp_wifi component always registers (even if WiFi stack disabled)
+                # so listing it unconditionally is safe and avoids CMake conditional issues.
+    esp_event   # esp_event_loop_create_default is called from espnow_link.c
 )
 
 if(CONFIG_KASE_HAS_BLE)
@@ -158,8 +162,11 @@ if(CONFIG_KASE_HAS_RF_TX AND NOT CONFIG_KASE_HAS_RF_RX)
     list(APPEND priv_requires esp_driver_spi)
 endif()
 
+# esp_wifi and esp_event are now unconditionally in priv_requires above.
+# This conditional block is kept for documentation/future conditional additions.
 if(CONFIG_KASE_HAS_ESPNOW)
-    list(APPEND priv_requires esp_wifi esp_event)
+    # Placeholder: additional ESPNOW-specific priv_requires can be added here.
+    # esp_wifi + esp_event already in base set above.
 endif()
 
 idf_component_register(
