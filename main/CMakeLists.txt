@@ -100,10 +100,11 @@ if(CONFIG_KASE_HAS_RF_RX)
     )
 endif()
 
-# RF TX (NRF24 PTX) + half scan task — half role only
+# RF TX (NRF24 PTX) + half scan task + shared SPI bus lock — half role only
 if(CONFIG_KASE_HAS_RF_TX)
     list(APPEND srcs
         "comm/rf/half_scan_task.c"
+        "periph/half_spi.c"
     )
     # rf_driver.c is already in the list when KASE_HAS_RF_RX is also set.
     # When building half standalone (no RF_RX), add it here.
@@ -165,6 +166,7 @@ idf_component_register(
         "comm/rf"
         "tama"
         "input"
+        "periph"
         "${BOARD_DIR}"
     PRIV_REQUIRES ${priv_requires}
 )
