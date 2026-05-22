@@ -123,9 +123,13 @@ if(CONFIG_KASE_HAS_EINK)
     list(APPEND srcs "periph/eink/eink.c")
 endif()
 
-# ESP-NOW cold path — dongle role only (Plan 5 fills these in)
+# ESP-NOW info channel — dongle + half roles (KASE_HAS_ESPNOW=y on both)
 if(CONFIG_KASE_HAS_ESPNOW)
-    # Plan 5 will add: comm/espnow/*.c
+    list(APPEND srcs
+        "comm/espnow/espnow_link.c"
+        "comm/espnow/espnow_info.c"
+    )
+    # Plan 5 will add: EN_OTA_*, EN_CFG_*, EN_TELEM_* handlers in additional .c files.
 endif()
 
 # PRIV_REQUIRES — gate on Kconfig flags
@@ -179,6 +183,7 @@ idf_component_register(
         "periph"
         "periph/trackpad"
         "periph/eink"
+        "comm/espnow"
         "${BOARD_DIR}"
     PRIV_REQUIRES ${priv_requires}
 )
