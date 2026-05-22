@@ -118,6 +118,11 @@ if(CONFIG_KASE_HAS_TRACKPAD)
     list(APPEND srcs "periph/trackpad/trackpad.c")
 endif()
 
+# E-ink SSD1681 skeleton — half role only
+if(CONFIG_KASE_HAS_EINK)
+    list(APPEND srcs "periph/eink/eink.c")
+endif()
+
 # ESP-NOW cold path — dongle role only (Plan 5 fills these in)
 if(CONFIG_KASE_HAS_ESPNOW)
     # Plan 5 will add: comm/espnow/*.c
@@ -173,6 +178,7 @@ idf_component_register(
         "input"
         "periph"
         "periph/trackpad"
+        "periph/eink"
         "${BOARD_DIR}"
     PRIV_REQUIRES ${priv_requires}
 )
