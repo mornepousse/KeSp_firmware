@@ -120,9 +120,11 @@ endif()
 
 # E-ink SSD1681 + LVGL monochrome driver — half role only
 if(CONFIG_KASE_HAS_EINK)
-    list(APPEND srcs "periph/eink/eink.c")
+    list(APPEND srcs
+        "periph/eink/eink.c"
+        "periph/eink/eink_lvgl.c"
+    )
     list(APPEND priv_requires lvgl)   # raw LVGL v8 — managed component
-    # eink_lvgl.c added in T4 (Plan Bricks-3)
 endif()
 
 # ESP-NOW info channel — dongle + half roles (KASE_HAS_ESPNOW=y on both)
