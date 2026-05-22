@@ -29,6 +29,8 @@ add_executable(test_runner
     test_espnow_msg.c
     test_eink_pack.c
     ../main/periph/eink/eink.c
+    test_trackpad_map.c
+    ../main/periph/trackpad/trackpad.c
     test_main.c
 )
 
@@ -36,4 +38,6 @@ target_include_directories(test_runner PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../boards/kase_v2_debug
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/periph/eink
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/periph/trackpad
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/rf
 )

@@ -1,21 +1,140 @@
 /*
- * trackpad.c — IQS5xx trackpad skeleton for KaSe half firmware.
+ * trackpad.c — IQS5xx trackpad driver for KaSe half firmware.
  *
- * Skeleton status:
+ * Skeleton status (after Plan IQS5xx-v1):
  *   REAL:  I2C init, RST pulse, RDY ISR + semaphore, I2C probe.
- *   STUB:  IQS5xx register read (protocol proprietary — see TODO block).
+ *   REAL:  IQS5xx register read (9-byte block, GestureEvents0..RelY).
+ *   REAL:  trackpad_map() — pure gesture-to-HID mapping (host-testable).
  *   REAL:  rf_encode_trackpad + half_spi_lock + rf_driver_send (send path).
  *
  * The PCB is reversible: both halves compile this module. Runtime probe
  * (I2C ACK check) determines whether the trackpad is mounted.
  *
  * s_radio is exposed as a non-static extern from half_scan_task.c.
+ *
+ * TEST_HOST guard: trackpad_map() and clamp8() are outside the guard
+ * so they can be compiled and tested on the host without ESP-IDF.
  */
 
+/* ── Host-safe includes (no ESP-IDF) ── */
 #include "trackpad.h"
+#include "rf_packet.h"      /* rf_trackpad_t — host-safe (stdint/stdbool only) */
+#include <stdbool.h>
+#include <stdint.h>
+
+/* ── IQS5xx-B000 register addresses (16-bit, big-endian on wire) ── */
+#define IQS5XX_REG_GESTURE_EVENTS_0   0x000F
+#define IQS5XX_REG_GESTURE_EVENTS_1   0x0010
+#define IQS5XX_REG_SYSTEM_INFO_0      0x0011
+#define IQS5XX_REG_SYSTEM_INFO_1      0x0012
+#define IQS5XX_REG_NUMBER_OF_FINGERS  0x0013
+#define IQS5XX_REG_RELATIVE_X         0x0014   /* int16, big-endian */
+#define IQS5XX_REG_RELATIVE_Y         0x0016   /* int16, big-endian */
+#define IQS5XX_REG_SYSTEM_CONTROL_0   0x0431   /* ACK_RESET bit — VERIFY at bench */
+#define IQS5XX_REG_END_WINDOW         0xEEEE   /* End Communication Window */
+
+/* ── Gesture event bitmasks — VERIFY against IQS5xx-B000 datasheet ── */
+#define IQS5XX_GEST0_SINGLE_TAP       0x01     /* GestureEvents0 bit 0 */
+#define IQS5XX_GEST1_SCROLL           0x02     /* GestureEvents1 bit 1 */
+
+/* ── SystemInfo0 bitmasks ── */
+#define IQS5XX_SYSINFO0_SHOW_RESET    0x80     /* bit 7 — set after reset */
+
+/* ── System Control 0 bitmasks ── */
+#define IQS5XX_SYSCTRL0_ACK_RESET     0x02     /* bit 1 — VERIFY address at bench */
+
+/* ── Read block ── */
+#define IQS5XX_READ_START_ADDR        0x000F   /* GestureEvents0 */
+#define IQS5XX_READ_BYTE_COUNT        9        /* through RelY LSB at 0x0017 */
+
+/* ── Tunable constants (outside TEST_HOST guard — used by trackpad_map) ── */
+#define IQS5XX_SCROLL_DIV             8        /* divide RelY for scroll speed; tune at bench */
+#define IQS5XX_EXPLICIT_END_WINDOW    1        /* 1 = write 0xEEEE after read */
+#define IQS5XX_INVERT_X               0        /* 1 = negate dx — verify at bench */
+#define IQS5XX_INVERT_Y               0        /* 1 = negate dy — verify at bench */
+
+/* ── clamp8: pure, host-safe ─────────────────────────────────────────
+ * Clamp a signed 16-bit value to the HID int8_t mouse delta range.
+ * Upper bound is +127 (not +128) for symmetry with -127. */
+static inline int8_t clamp8(int16_t v)
+{
+    if (v >  127) return  127;
+    if (v < -127) return -127;
+    return (int8_t)v;
+}
+
+/* ── trackpad_map: pure, host-safe ──────────────────────────────────
+ *
+ * Maps raw IQS5xx gesture fields to an rf_trackpad_t output.
+ * No I/O, no FreeRTOS calls, no global state reads.
+ *
+ * Precedence: scroll gesture (ge1 & GEST1_SCROLL) overrides cursor movement.
+ * Tap state machine: press is emitted on tap event; release on next call.
+ *
+ * Returns true if a packet should be sent (activity gate passed).
+ */
+bool trackpad_map(uint8_t ge0, uint8_t ge1, uint8_t n_fingers,
+                  int16_t rel_x, int16_t rel_y,
+                  bool *pending_release_io, rf_trackpad_t *out)
+{
+    (void)n_fingers;   /* unused in v1 — gesture bits carry scroll intent */
+
+    /* Zero the output; caller sets seq after return */
+    out->dx       = 0;
+    out->dy       = 0;
+    out->buttons  = 0;
+    out->scroll_v = 0;
+    out->scroll_h = 0;   /* always 0 — horizontal scroll out of v1 scope */
+
+    bool force_send = false;
+
+    /* ── Axis inversion (compile-time flags; default off) ── */
+    if (IQS5XX_INVERT_X) rel_x = (int16_t)(-rel_x);
+    if (IQS5XX_INVERT_Y) rel_y = (int16_t)(-rel_y);
+
+    /* ── Scroll vs cursor (scroll gesture takes priority) ── */
+    bool scroll_active = (ge1 & IQS5XX_GEST1_SCROLL) != 0;
+    if (scroll_active) {
+        /* 2-finger vertical scroll: divide RelY, clamp to [-127, +127] */
+        out->scroll_v = clamp8((int16_t)(rel_y / IQS5XX_SCROLL_DIV));
+        /* dx, dy remain 0 — scroll gesture suppresses cursor movement */
+    } else {
+        /* Cursor movement: clamp RelX/RelY to HID int8_t range */
+        out->dx = clamp8(rel_x);
+        out->dy = clamp8(rel_y);
+    }
+
+    /* ── Click state machine (single-tap pulse synthesis) ── */
+    bool tap_detected = (ge0 & IQS5XX_GEST0_SINGLE_TAP) != 0;
+
+    if (*pending_release_io) {
+        /* Previous iteration emitted press — emit release now */
+        out->buttons          = 0x00;
+        *pending_release_io   = false;
+        force_send            = true;   /* release always sends (even if no movement) */
+    } else if (tap_detected) {
+        /* Tap recognized this event — emit press */
+        out->buttons          = 0x01;  /* left button */
+        *pending_release_io   = true;  /* arm release for next iteration */
+        force_send            = true;  /* press always sends */
+    }
+    /* else: buttons stays 0x00 */
+
+    /* ── Activity gate ── */
+    bool send = force_send
+             || (out->dx       != 0)
+             || (out->dy       != 0)
+             || (out->scroll_v != 0)
+             || (out->buttons  != 0x00);
+
+    return send;
+}
+
+#ifndef TEST_HOST
+
+/* ── ESP-IDF-dependent includes ── */
 #include "board.h"           /* BOARD_TRACK_* GPIO + I2C defines */
 #include "half_spi.h"        /* half_spi_lock / half_spi_unlock */
-#include "rf_packet.h"       /* rf_trackpad_t, rf_encode_trackpad, PKT_TYPE_TRACKPAD */
 #include "rf_driver.h"       /* rf_driver_send, rf_radio_t */
 
 #include "driver/gpio.h"
@@ -41,6 +160,12 @@ static volatile uint8_t s_seq = 0;
 /* ── Reference to the half's NRF radio (owned by half_scan_task) ── */
 /* half_scan_task.c defines s_radio as non-static (extern linkage). */
 extern rf_radio_t s_radio;
+
+/* ── ShowReset ACK state — cleared after first successful ACK write ── */
+static bool s_need_reset_ack = true;
+
+/* ── Click state machine — true when waiting to emit button-release packet ── */
+static bool s_pending_release = false;
 
 /* ── RDY GPIO ISR handler — signals the trackpad task ──────── */
 static void IRAM_ATTR rdy_isr_handler(void *arg)
@@ -142,41 +267,92 @@ static void trackpad_task(void *arg)
         /* Wait for RDY pin to go low (data-ready from IQS5xx) */
         xSemaphoreTake(s_rdy_sem, portMAX_DELAY);
 
-        /* ----------------------------------------------------------------
-         * TODO STUB: Read IQS5xx touch report over I2C.
-         *
-         * The IQS5xx uses a Window Transfer protocol:
-         *   1. Wait for RDY low (done above).
-         *   2. I2C read starting at register 0x0000 (InfoFlags, 2 bytes):
-         *        - InfoFlags[1:0] = finger count, InfoFlags[7] = ShowReset
-         *   3. Continue reading XY data (register 0x0004..0x0014 for 5 fingers):
-         *        - Each finger: AbsX (16-bit), AbsY (16-bit), TouchStrength, Area
-         *   4. For relative movement: use the relative XY fields (register 0x0012..0x0013).
-         *   5. Read button state from InfoFlags.
-         *   6. End read with a STOP or an end-of-communication byte if required by IQS5xx.
-         *
-         * Suggested implementation sequence:
-         *   uint8_t reg_addr[2] = {0x00, 0x00};
-         *   uint8_t data[10];
-         *   i2c_master_transmit_receive(s_i2c_device, reg_addr, 2, data, 10, 50);
-         *   int8_t dx = (int8_t)data[...];  // extract from relative XY
-         *   int8_t dy = (int8_t)data[...];
-         *   uint8_t buttons = data[...] & 0x03;  // button bits
-         *
-         * Reference: Azoteq IQS550 / IQS572 Application Note AN171.
-         * ---------------------------------------------------------------- */
-
-        /* Stub: send zero movement (trackpad present, no actual data yet) */
-        rf_trackpad_t tp = {
-            .dx       = 0,    /* TODO STUB: replace with actual dx from IQS5xx */
-            .dy       = 0,    /* TODO STUB: replace with actual dy */
-            .buttons  = 0,    /* TODO STUB: replace with button state */
-            .scroll_v = 0,    /* TODO STUB: replace with vertical scroll delta */
-            .scroll_h = 0,    /* TODO STUB: replace with horizontal scroll delta */
-            .seq      = s_seq++,
+        /* ── Step 1: Read 9-byte block from GestureEvents0 (0x000F) ── */
+        /* IQS5xx window-transfer: write 2-byte reg addr, read 9 bytes.
+         * Must complete while RDY is asserted. Timeout 50 ms. */
+        uint8_t reg_addr[2] = {
+            (IQS5XX_READ_START_ADDR >> 8) & 0xFF,   /* 0x00 */
+            (IQS5XX_READ_START_ADDR)      & 0xFF,   /* 0x0F */
         };
+        uint8_t data[IQS5XX_READ_BYTE_COUNT];
+        esp_err_t err = i2c_master_transmit_receive(
+            s_i2c_device,
+            reg_addr, sizeof(reg_addr),
+            data, sizeof(data),
+            50   /* timeout ms */
+        );
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "I2C read failed: %d — skip event", err);
+            /* Do not end window — bus is already free after failed transaction */
+            continue;
+        }
 
-        /* Encode and transmit over NRF24 (PKT_TYPE_TRACKPAD = 0x3) */
+        /* ── Step 2: End Communication Window (best-effort) ─────────── */
+        /* Some IQS5xx revisions require an explicit 0xEEEE write to close
+         * the window. Others close on the I2C STOP from step 1.
+         * IQS5XX_EXPLICIT_END_WINDOW=1 by default — disable at bench if
+         * bus hangs (see bench checklist item 2). */
+#if IQS5XX_EXPLICIT_END_WINDOW
+        {
+            uint8_t end_cmd[3] = {0xEE, 0xEE, 0x00};
+            /* Best-effort: chip may already have closed the window — ignore error */
+            i2c_master_transmit(s_i2c_device, end_cmd, sizeof(end_cmd), 10);
+        }
+#endif
+
+        /* ── Step 3: Extract fields from read block ─────────────────── */
+        uint8_t  ge0       = data[0];   /* GestureEvents0 */
+        uint8_t  ge1       = data[1];   /* GestureEvents1 */
+        uint8_t  sysinfo0  = data[2];   /* SystemInfo0 — ShowReset = bit7 */
+        uint8_t  n_fingers = data[4];   /* NumberOfFingers */
+        int16_t  rel_x     = (int16_t)((data[5] << 8) | data[6]);
+        int16_t  rel_y     = (int16_t)((data[7] << 8) | data[8]);
+
+        /* ── Step 4: ShowReset ACK (once after hardware reset) ───────── */
+        /* On first read after RST pulse, ShowReset (sysinfo0 bit7) is set.
+         * Acknowledge by writing ACK_RESET bit to System Control 0 (0x0431).
+         * Skip the data from this event — RelX/RelY are garbage post-reset.
+         * Register address and bit position: VERIFY against IQS5xx-B000
+         * datasheet (spec §7 item 6). Expected: addr=0x0431, bit1=0x02. */
+        if (s_need_reset_ack) {
+            if (sysinfo0 & IQS5XX_SYSINFO0_SHOW_RESET) {
+                uint8_t ack_cmd[3] = {
+                    (IQS5XX_REG_SYSTEM_CONTROL_0 >> 8) & 0xFF,   /* 0x04 */
+                    (IQS5XX_REG_SYSTEM_CONTROL_0)      & 0xFF,   /* 0x31 */
+                    IQS5XX_SYSCTRL0_ACK_RESET                     /* 0x02 */
+                };
+                esp_err_t ack_err = i2c_master_transmit(s_i2c_device,
+                                                         ack_cmd, sizeof(ack_cmd),
+                                                         20);
+                if (ack_err == ESP_OK) {
+                    ESP_LOGI(TAG, "ShowReset ACK sent — entering normal operation");
+                } else {
+                    ESP_LOGW(TAG, "ShowReset ACK failed: %d", ack_err);
+                }
+                s_need_reset_ack = false;
+                continue;   /* skip this event's movement data */
+            } else {
+                /* ShowReset not set on first read — chip was already running */
+                s_need_reset_ack = false;
+                ESP_LOGI(TAG, "ShowReset not set on first read — normal operation");
+            }
+        }
+
+        /* ── Step 5: Map gesture fields → HID output ────────────────── */
+        rf_trackpad_t tp;
+        bool should_send = trackpad_map(ge0, ge1, n_fingers,
+                                        rel_x, rel_y,
+                                        &s_pending_release, &tp);
+
+        /* ── Step 6: Activity gate ───────────────────────────────────── */
+        if (!should_send) {
+            /* All fields zero, no button event — drop silently.
+             * No log here: this is the common idle case (hot path). */
+            continue;
+        }
+
+        /* ── Step 7: Encode and transmit ────────────────────────────── */
+        tp.seq = s_seq++;
         uint8_t buf[7];
         rf_encode_trackpad(buf, &tp);
         half_spi_lock();
@@ -195,3 +371,5 @@ void trackpad_start(void)
         ESP_LOGE(TAG, "xTaskCreatePinnedToCore failed: %d", (int)ret);
     }
 }
+
+#endif /* TEST_HOST */
