@@ -55,7 +55,27 @@ void eink_clear(void);
  * eink_task polls BUSY after calling eink_push. */
 void eink_push(const uint8_t *fb);
 
-/* Start the e-ink refresh task (prio 3, stack 4096, core 0).
+/* Initialize LVGL and start the e-ink LVGL handler task.
  * Only call if eink_init() returned true.
- * The task refreshes the panel at ~1 Hz (or on content change in future). */
+ * Calls eink_lvgl_init() (LVGL setup + static screen) then eink_lvgl_start()
+ * (handler task, prio 3, stack 4096, core 0). */
 void eink_start(void);
+
+/* ── 1bpp pixel packing helper ───────────────────────────────── */
+
+/* Pack one pixel into the SSD1681 B&W RAM framebuffer (MSB-first, white=1).
+ *
+ * Called from the LVGL set_px_cb for every pixel LVGL renders.
+ *
+ * Layout contract:
+ *   fb[row * (EINK_WIDTH/8) + col/8]  bit  (7 - col%8) = is_white
+ *   MSB = leftmost pixel in each byte. Row 0 = top of panel.
+ *   200 pixels wide → 25 bytes per row → 5000 bytes total (EINK_FB_SIZE).
+ *
+ * SSD1681 native: bit=1 → white, bit=0 → black.
+ * LVGL v8 at LV_COLOR_DEPTH=1: lv_color_white().full == 1 (white),
+ * lv_color_black().full == 0 (black). Polarity is direct — no inversion.
+ *
+ * Exposed non-static for host-side testing under TEST_HOST.
+ * In firmware, called only from eink_lvgl_set_px_cb (eink_lvgl.c). */
+void eink_fb_set_px(uint8_t *fb, int col, int row, int is_white);

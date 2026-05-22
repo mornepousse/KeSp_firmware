@@ -26,6 +26,7 @@ extern void test_rf_packet(void);
 extern void test_heartbeat(void);
 extern void test_half_matrix_diff(void);
 extern void test_espnow_msg(void);
+extern void test_eink_pack(void);
 
 int main(void) {
     printf("KeSp Firmware Unit Tests\n");
@@ -51,6 +52,7 @@ int main(void) {
     test_heartbeat();
     test_half_matrix_diff();
     test_espnow_msg();
+    test_eink_pack();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);

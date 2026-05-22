@@ -1,9 +1,6 @@
 /*
- * eink.c — SSD1681 e-ink skeleton for KaSe half firmware.
- * See eink.h for API contract and skeleton/stub boundary.
- *
- * Skeleton:  SPI device, GPIO, RST, probe, SPI lock ordering.
- * Stub:      SSD1681 command sequences, 1bpp rendering.
+ * eink.c — SSD1681 e-ink driver for KaSe half firmware.
+ * See eink.h for API contract.
  *
  * CRITICAL SPI lock contract (do not change):
  *   eink_push():
@@ -13,18 +10,56 @@
  *     [BUSY wait — long, ~1-2 s — bus FREE, NRF can TX key events]
  *
  * This ensures keyboard latency is not affected by e-ink refresh cycles.
+ *
+ * TEST_HOST guard: all ESP-IDF / FreeRTOS / GPIO / SPI code is inside
+ * #ifndef TEST_HOST blocks. eink_fb_set_px() is outside any guard — it is
+ * pure byte manipulation with no ESP-IDF dependencies, and must compile
+ * in both firmware and host test builds.
  */
 
 #include "eink.h"
+#include <string.h>   /* memset — used by both host and firmware builds */
+
+/* ── 1bpp pixel packing: set one pixel in the SSD1681 B&W RAM image ── */
+/*
+ * Packs a single pixel into the packed 1bpp framebuffer.
+ *
+ * Layout (row-major, MSB-first):
+ *   fb[row * (EINK_WIDTH/8) + col/8]  bit (7 - col%8) = is_white
+ *
+ * SSD1681 convention: bit=1 → white, bit=0 → black.
+ * LVGL v8 at LV_COLOR_DEPTH=1: color.full==1 = white, color.full==0 = black.
+ * Polarity is direct — no inversion needed.
+ *
+ * No FreeRTOS / GPIO / SPI deps. Called from eink_lvgl_set_px_cb (firmware)
+ * and directly from host tests. Must remain outside TEST_HOST guards.
+ */
+void eink_fb_set_px(uint8_t *fb, int col, int row, int is_white)
+{
+    int byte_idx = row * (EINK_WIDTH / 8) + col / 8;
+    int bit_idx  = 7 - (col % 8);   /* MSB = leftmost pixel in each byte */
+
+    if (is_white) {
+        fb[byte_idx] |=  (uint8_t)(1 << bit_idx);   /* white: set bit */
+    } else {
+        fb[byte_idx] &= ~(uint8_t)(1 << bit_idx);   /* black: clear bit */
+    }
+}
+
+#ifndef TEST_HOST
+/* All ESP-IDF / FreeRTOS / GPIO / SPI code is guarded here.
+ * The host test runner compiles eink.c with -DTEST_HOST and only
+ * sees eink_fb_set_px above. */
+
 #include "board.h"         /* BOARD_EINK_* GPIO + SPI defines */
 #include "half_spi.h"      /* half_spi_lock / half_spi_unlock */
+#include "eink_lvgl.h"     /* eink_lvgl_init, eink_lvgl_start */
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include <string.h>
 
 static const char *TAG = "eink";
 
@@ -37,10 +72,6 @@ static uint8_t s_fb[EINK_FB_SIZE];
 
 /* ── Probe result ───────────────────────────────────────────── */
 static bool s_present = false;
-
-/* ── Stub: current layer index for display (replaced by g_half_state in Plan Bricks-3) ── */
-/* TODO: remove this stub and read from g_half_state.layer_idx once Plan Bricks-3 is done */
-static uint8_t s_layer_idx_stub = 0;
 
 /* ── Helper: send one SPI command byte (DC=low) ─────────────── */
 /* Caller must hold half_spi_lock(). */
@@ -55,7 +86,7 @@ static void eink_send_cmd(uint8_t cmd)
 }
 
 /* ── Helper: send data bytes (DC=high) ──────────────────────── */
-/* Caller must hold half_spi_lock(). Suppressed in stub — called in eink_push TODO block. */
+/* Caller must hold half_spi_lock(). */
 static void eink_send_data(const uint8_t *data, size_t len)
 {
     if (len == 0) return;
@@ -138,39 +169,93 @@ void eink_push(const uint8_t *fb)
     /* STEP 1: Acquire SPI bus (NRF24 must not be transmitting) */
     half_spi_lock();
 
-    /* STEP 2: SSD1681 command sequence — write RAM + trigger full refresh.
-     *
-     * TODO STUB: Implement the following SSD1681 sequence:
-     *   1. SW reset (cmd 0x12), then wait BUSY (inside the lock, short wait ~10 ms).
-     *   2. Driver output control (cmd 0x01): set gate/source driver output counts
-     *        for 200×200: data = {0xC7, 0x00, 0x00}  (200-1=0xC7 gate lines)
-     *   3. Border waveform control (cmd 0x3C): data = {0x05}
-     *   4. Set RAM-X address start/end (cmd 0x44): data = {0x00, 0x18}
-     *        (0x00=col 0, 0x18=col 24 → 25 bytes × 8 bits = 200 px)
-     *   5. Set RAM-Y address start/end (cmd 0x45): data = {0xC7, 0x00, 0x00, 0x00}
-     *        (0x00C7 = 199 start, 0x0000 end — Y counts down)
-     *   6. Set RAM-X address counter (cmd 0x4E): data = {0x00}
-     *   7. Set RAM-Y address counter (cmd 0x4F): data = {0xC7, 0x00}
-     *   8. Write B&W RAM (cmd 0x24): send fb[EINK_FB_SIZE] bytes
-     *   9. Display update control 2 (cmd 0x22): data = {0xF7} (full update sequence)
-     *   10. Master activation (cmd 0x20): no data — triggers the refresh
-     *
-     * After step 10, BUSY goes HIGH (panel is refreshing). DO NOT poll BUSY inside
-     * the lock — release the lock first (step below), then poll.
-     *
-     * For now, send a no-op SW reset only (demonstrates SPI path works): */
-    eink_send_cmd(0x12);   /* SW Reset — BUSY goes high briefly */
-    /* eink_send_data is used in the full command sequence (TODO above).
-     * Reference it here to suppress -Wunused-function on the stub build. */
-    (void)eink_send_data;
-    (void)fb;   /* fb is used in the full RAM write sequence (TODO above) */
+    /* ── Step 1: Software Reset (cmd 0x12) ───────────────────────
+     * Restores all registers to OTP defaults before each full update.
+     * BUSY goes HIGH briefly (~10 ms). Poll inside the lock (short). */
+    eink_send_cmd(0x12);
+    {
+        int sw_wait = 0;
+        while (gpio_get_level(BOARD_EINK_BUSY_GPIO) == 1 && sw_wait < 50) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            sw_wait++;
+        }
+    }
 
-    /* STEP 3: Release SPI bus — BEFORE BUSY wait.
-     * Panel is now refreshing internally. NRF24 can transmit freely. */
+    /* ── Step 2: Driver Output Control (cmd 0x01) ────────────────
+     * Gate lines: 200 rows → 200-1 = 0xC7. Scanning dir: 0 (default). */
+    eink_send_cmd(0x01);
+    {
+        static const uint8_t d01[] = {0xC7, 0x00, 0x00};
+        eink_send_data(d01, sizeof(d01));
+    }
+
+    /* ── Step 3: Border Waveform Control (cmd 0x3C) ─────────────
+     * 0x05 = fix border at VSS (black). Prevents border flicker. */
+    eink_send_cmd(0x3C);
+    {
+        static const uint8_t d3c[] = {0x05};
+        eink_send_data(d3c, sizeof(d3c));
+    }
+
+    /* ── Step 4: Set RAM-X Address Start/End (cmd 0x44) ─────────
+     * Col 0 to col 24 → 25 bytes × 8 bits = 200 pixels. */
+    eink_send_cmd(0x44);
+    {
+        static const uint8_t d44[] = {0x00, 0x18};
+        eink_send_data(d44, sizeof(d44));
+    }
+
+    /* ── Step 5: Set RAM-Y Address Start/End (cmd 0x45) ─────────
+     * Y counts downward: start=199 (0x00C7), end=0 (0x0000). */
+    eink_send_cmd(0x45);
+    {
+        static const uint8_t d45[] = {0xC7, 0x00, 0x00, 0x00};
+        eink_send_data(d45, sizeof(d45));
+    }
+
+    /* ── Step 6: Set RAM-X Address Counter (cmd 0x4E) ───────────
+     * Reset X pointer to column 0 before RAM write. */
+    eink_send_cmd(0x4E);
+    {
+        static const uint8_t d4e[] = {0x00};
+        eink_send_data(d4e, sizeof(d4e));
+    }
+
+    /* ── Step 7: Set RAM-Y Address Counter (cmd 0x4F) ───────────
+     * Reset Y pointer to row 199 (top of display, RAM written top-down). */
+    eink_send_cmd(0x4F);
+    {
+        static const uint8_t d4f[] = {0xC7, 0x00};
+        eink_send_data(d4f, sizeof(d4f));
+    }
+
+    /* ── Step 8: Write B&W RAM (cmd 0x24) ───────────────────────
+     * Send 5000-byte framebuffer. bit=1→white, bit=0→black (SSD1681 native).
+     * MSB-first: byte[0] bit7 = pixel at (col=0, row=0). */
+    eink_send_cmd(0x24);
+    eink_send_data(fb, EINK_FB_SIZE);
+    ESP_LOGI(TAG, "eink_push: SPI write complete (~10 ms)");
+
+    /* ── Step 9: Display Update Control 2 (cmd 0x22) ────────────
+     * 0xF7 = full update using default OTP LUT (no custom waveform table). */
+    eink_send_cmd(0x22);
+    {
+        static const uint8_t d22[] = {0xF7};
+        eink_send_data(d22, sizeof(d22));
+    }
+
+    /* ── Step 10: Master Activation (cmd 0x20) ───────────────────
+     * No data. Triggers the ~2 s full refresh. BUSY goes HIGH immediately.
+     * DO NOT poll BUSY here — release the SPI lock first. */
+    eink_send_cmd(0x20);
+
+    /* CRITICAL: Release SPI bus BEFORE BUSY wait.
+     * Panel is now refreshing internally. NRF24 can transmit freely.
+     * BUSY wait (~1-2 s) is performed outside the lock. */
     half_spi_unlock();
 
-    /* STEP 4: Wait for BUSY to go low (panel refresh complete).
-     * Lock is NOT held during this wait. */
+    /* Wait for BUSY to go low (panel refresh complete).
+     * Lock is NOT held during this wait — NRF24 TX proceeds freely. */
     int wait_ms = 0;
     while (gpio_get_level(BOARD_EINK_BUSY_GPIO) == 1 && wait_ms < 3000) {
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -178,6 +263,8 @@ void eink_push(const uint8_t *fb)
     }
     if (wait_ms >= 3000) {
         ESP_LOGW(TAG, "eink_push: BUSY timeout after 3 s (panel hung?)");
+    } else {
+        ESP_LOGI(TAG, "eink_push: BUSY cleared after %d ms", wait_ms);
     }
 }
 
@@ -188,50 +275,13 @@ void eink_clear(void)
     /* eink_push already polls BUSY to completion — panel is white when this returns */
 }
 
-/* ── Refresh task ───────────────────────────────────────────── */
-static void eink_task(void *arg)
-{
-    (void)arg;
-    ESP_LOGI(TAG, "eink_task started (1 Hz refresh)");
-
-    /* Initial clear on first run */
-    eink_clear();
-
-    for (;;) {
-        /* 1 Hz refresh rate — e-ink content changes slowly (layer name, modifiers).
-         * Future optimization: wake on ESP-NOW layer-change notification instead. */
-        vTaskDelay(pdMS_TO_TICKS(1000));
-
-        /* TODO STUB: Render half_state into s_fb (1bpp, MSB-first).
-         *
-         * Plan Bricks-3 will wire g_half_state (espnow_info.h). Until then,
-         * s_layer_idx_stub is always 0 and rendering draws "Layer 0".
-         *
-         * Rendering decision (deferred — see spec Section 9.3):
-         *   Option A: Direct 1bpp font (bitmap font, no dependencies, minimal RAM).
-         *   Option B: LVGL with a custom 1bpp display driver (more flexible, ~150 KB flash).
-         *
-         * Suggested minimal direct approach:
-         *   1. memset(s_fb, 0xFF, EINK_FB_SIZE);  // white background
-         *   2. Draw layer index as ASCII digits using a 1bpp bitmap font.
-         *   3. Draw modifier state icons (Shift, Ctrl, etc.) as 16×16 bitmaps.
-         *   4. Draw BT/USB status indicators.
-         *
-         * For now: do nothing (panel stays white from eink_clear() above). */
-        (void)s_layer_idx_stub;   /* suppress unused warning until rendering is implemented */
-
-        /* Only push if content has changed (future: compare previous state) */
-        /* eink_push(s_fb); */   /* commented out — no rendering yet, avoid refresh noise */
-    }
-}
-
 void eink_start(void)
 {
-    BaseType_t ret = xTaskCreatePinnedToCore(
-        eink_task, "eink_task",
-        4096,   /* 4 KB stack: rendering may need temporary local buffers */
-        NULL, 3, NULL, 0);
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "xTaskCreatePinnedToCore failed: %d", (int)ret);
-    }
+    /* Retired: eink_task (1 Hz polling loop). Replaced by LVGL handler task.
+     * eink_lvgl_init() sets up LVGL, draw buffer, flush callback, tick timer,
+     * and creates the static screen. eink_lvgl_start() creates the handler task. */
+    eink_lvgl_init();
+    eink_lvgl_start();
 }
+
+#endif /* TEST_HOST */
