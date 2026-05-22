@@ -44,8 +44,14 @@
 #define IQS5XX_SYSCTRL0_ACK_RESET     0x02     /* bit 1 — VERIFY address at bench */
 
 /* ── Read block ── */
-#define IQS5XX_READ_START_ADDR        0x000F   /* GestureEvents0 */
-#define IQS5XX_READ_BYTE_COUNT        9        /* through RelY LSB at 0x0017 */
+/* IQS5xx-B000 map (confirmed vs QMK azoteq driver): GestureEvents0=0x000D,
+ * GE1=0x000E, SystemInfo0=0x000F, SystemInfo1=0x0010, NumberOfFingers=0x0011,
+ * RelativeX=0x0012 (2B), RelativeY=0x0014 (2B), AbsoluteX=0x0016.
+ * Reading from 0x000D puts GE0 at data[0], RelX at data[5..6], RelY at data[7..8].
+ * (Reading from 0x000F instead landed on SystemInfo0 → "relx"=RelY, "rely"=AbsX
+ *  which drifts and slams the cursor down.) */
+#define IQS5XX_READ_START_ADDR        0x000D   /* GestureEvents0 */
+#define IQS5XX_READ_BYTE_COUNT        9        /* 0x000D..0x0015 → through RelY LSB */
 
 /* ── Tunable constants (outside TEST_HOST guard — used by trackpad_map) ── */
 #define IQS5XX_SCROLL_DIV             8        /* divide RelY for scroll speed; tune at bench */
@@ -216,7 +222,9 @@ bool trackpad_init(void)
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,   /* external pull-up on PCB */
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type    = GPIO_INTR_NEGEDGE,     /* RDY goes low when data ready */
+        .intr_type    = GPIO_INTR_POSEDGE,     /* IQS5xx-B000 RDY is ACTIVE-HIGH: rises
+                                                * when a comm window opens. Read while high.
+                                                * (NEGEDGE fired at window CLOSE → I2C timeout.) */
     };
     gpio_config(&rdy_cfg);
 
