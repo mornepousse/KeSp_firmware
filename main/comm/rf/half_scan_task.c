@@ -22,6 +22,7 @@
 #include "keyboard_button.h"
 #include "rf_driver.h"
 #include "half_spi.h"        /* half_spi_lock_init / half_spi_lock / half_spi_unlock */
+#include "rf_pairing.h"      /* rf_pairing_load_set_id_half / rf_apply_set_id */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_rom_sys.h"
@@ -250,6 +251,16 @@ static void half_scan_task(void *arg)
 
     /* Initialize NRF24L01+ in PTX mode */
     rf_radio_cfg_t nrf_cfg = board_nrf_cfg();
+
+    /* Per-set addressing (Plan RF-1): if this half is paired (NVS rf.set_id set),
+     * derive its address+channel from the stored set_id and slot. If unpaired,
+     * rf_pairing_load_set_id_half() returns 0 with *slot = BOARD_NRF_ADDR_SUFFIX,
+     * and rf_apply_set_id is a no-op → nrf_cfg keeps the board factory defaults
+     * (KaSe.<suffix>, ch from BOARD_NRF_CHANNEL). */
+    uint8_t slot = BOARD_NRF_ADDR_SUFFIX;
+    uint16_t set_id = rf_pairing_load_set_id_half(BOARD_NRF_ADDR_SUFFIX, &slot);
+    rf_apply_set_id(&nrf_cfg, set_id, slot);
+
     esp_err_t err = rf_driver_init_tx(&s_radio, &nrf_cfg);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "NRF PTX init failed: %d — halting (safe: USB console OK)", err);
