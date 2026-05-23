@@ -1,8 +1,10 @@
 /*
- * espnow_info.c — ESP-NOW info-channel handler stubs.
+ * espnow_info.c — ESP-NOW info-channel handler.
  *
- * Skeleton:  dispatch logic, g_half_state update, mutex.
- * Stub:      all handler bodies (log only or no-op).
+ * Roles:
+ *   - Dongle: receives EN_INFO_BATTERY from a half; stub logs it.
+ *   - Half:   receives EN_INFO_LAYER + EN_INFO_STATE from dongle;
+ *             updates g_half_state (under mutex) + notifies eink_lvgl_task.
  *
  * Both dongle and half compile this file. Role-specific code is guarded with
  * CONFIG_KASE_DEVICE_ROLE_DONGLE / CONFIG_KASE_DEVICE_ROLE_HALF.
@@ -13,6 +15,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include <string.h>
 
 static const char *TAG = "espnow_info";
@@ -54,25 +57,51 @@ static void on_battery(const uint8_t mac[6], const en_battery_t *b)
 
 /* ── Half: receives EN_INFO_LAYER from dongle ─────────────────── */
 #if CONFIG_KASE_DEVICE_ROLE_HALF
+#include "eink_lvgl.h"    /* eink_get_task_handle() */
+
 static void on_layer(const en_layer_t *l)
 {
     ESP_LOGI(TAG, "layer update: idx=%u name='%.16s'", l->layer_idx, l->name);
-    /* TODO STUB: Update g_half_state and wake eink_task.
-     *   half_state_lock();
-     *   g_half_state.layer_idx = l->layer_idx;
-     *   memcpy(g_half_state.layer_name, l->name, 16);
-     *   half_state_unlock();
-     *   xTaskNotify(s_eink_task_handle, 0x01, eSetBits);   // wake eink to refresh
-     *   Requires: expose eink task handle (eink_get_task_handle() in eink.h). */
-    (void)l;
+
+    /* Update g_half_state under mutex — ESP-NOW recv task context.
+     * Timeout 10 ms: if the mutex is held by eink_lvgl_task during label update,
+     * we skip this event (next layer change will retry). Acceptable at low rate. */
+    if (xSemaphoreTake(g_half_state_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        g_half_state.layer_idx = l->layer_idx;
+        memcpy(g_half_state.layer_name, l->name, 16);
+        xSemaphoreGive(g_half_state_mutex);
+    } else {
+        ESP_LOGW(TAG, "on_layer: mutex timeout — layer update skipped");
+        return;
+    }
+
+    /* Wake eink_lvgl_task — bit 0 = layer/state event.
+     * Non-blocking (eSetBits): safe from any task context (not ISR). */
+    TaskHandle_t h = eink_get_task_handle();
+    if (h != NULL) {
+        xTaskNotify(h, 0x01, eSetBits);
+    }
 }
 
 /* ── Half: receives EN_INFO_STATE from dongle ─────────────────── */
 static void on_state(const en_state_t *s)
 {
     ESP_LOGD(TAG, "state update: mod=0x%02x flags=0x%02x", s->modifiers, s->flags);
-    /* TODO STUB: Update g_half_state modifiers/flags and wake eink_task. */
-    (void)s;
+
+    if (xSemaphoreTake(g_half_state_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        g_half_state.modifiers = s->modifiers;
+        g_half_state.flags     = s->flags;
+        xSemaphoreGive(g_half_state_mutex);
+    } else {
+        ESP_LOGW(TAG, "on_state: mutex timeout — state update skipped");
+        return;
+    }
+
+    /* Wake eink_lvgl_task — same bit 0; the task reads both layer_name and modifiers. */
+    TaskHandle_t h = eink_get_task_handle();
+    if (h != NULL) {
+        xTaskNotify(h, 0x01, eSetBits);
+    }
 }
 #endif /* CONFIG_KASE_DEVICE_ROLE_HALF */
 

@@ -63,6 +63,16 @@ static lv_disp_drv_t      s_disp_drv;
  * Fires every 5 ms → lv_tick_inc(5). Does NOT trigger redraws. */
 static esp_timer_handle_t s_tick_timer = NULL;
 
+/* ── Task handle — exposed for xTaskNotify from espnow_info.c ───
+ * Set in eink_lvgl_start() when the task is created.
+ * NULL until eink_lvgl_start() is called (checked before every notify). */
+static TaskHandle_t s_eink_task_handle = NULL;
+
+TaskHandle_t eink_get_task_handle(void)
+{
+    return s_eink_task_handle;
+}
+
 static void lvgl_tick_cb(void *arg)
 {
     (void)arg;
@@ -264,9 +274,10 @@ void eink_lvgl_start(void)
         4096,   /* bytes — monitor HWM and bump to 6144 if < 512 bytes free */
         NULL,
         3,      /* priority: lower than rf_rx_task and half_scan_task */
-        NULL,
+        &s_eink_task_handle,   /* save handle — used by eink_get_task_handle() */
         0);     /* core 0 */
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "xTaskCreatePinnedToCore failed for eink_lvgl_task");
+        s_eink_task_handle = NULL;
     }
 }

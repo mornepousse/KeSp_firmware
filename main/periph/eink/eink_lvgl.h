@@ -15,10 +15,13 @@
  *   eink_lvgl_init();    // lv_init, draw buf, disp drv, tick timer, screen content
  *   eink_lvgl_start();   // create eink_lvgl_task (prio 3, core 0)
  *
- * Thread safety: for v1 (static screen), only eink_lvgl_task touches LVGL.
- * Plan Bricks-4 (dynamic content) must add a mutex before calling lv_label_set_text
- * from an ESP-NOW callback.
+ * Thread safety: LVGL calls are confined to eink_lvgl_task only.
+ * ESP-NOW callbacks write to g_half_state (under mutex) then xTaskNotify —
+ * eink_lvgl_task wakes, reads g_half_state, calls lv_label_set_text safely.
  */
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 /* Initialize LVGL, register 1bpp display driver, create static screen content.
  * Must be called AFTER eink_init() returns true and BEFORE eink_lvgl_start(). */
@@ -27,3 +30,9 @@ void eink_lvgl_init(void);
 /* Create the LVGL handler task (eink_lvgl_task, prio 3, stack 4096, core 0).
  * Replaces the old eink_task polling loop. */
 void eink_lvgl_start(void);
+
+/* Returns the FreeRTOS task handle of the eink_lvgl_task, or NULL if not started.
+ * Used by espnow_info.c to wake the task when layer/state changes.
+ * Call xTaskNotify(eink_get_task_handle(), 0x01, eSetBits) — bit 0 = layer/state event.
+ * Always guard with: if (h != NULL) before calling xTaskNotify. */
+TaskHandle_t eink_get_task_handle(void);
