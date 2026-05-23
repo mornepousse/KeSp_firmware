@@ -8,6 +8,7 @@
 #include "rf_packet.h"
 #include "heartbeat.h"
 #include "board_rf.h"
+#include "rf_pairing.h"   /* rf_pairing_load_set_id_dongle, rf_apply_set_id */
 #include "keyboard_config.h"
 #include "hid_transport.h"
 #include "cdc_binary_protocol.h"   /* ks_respond, KS_CMD_MATRIX_TEST */
@@ -201,6 +202,15 @@ bool rf_rx_start(void)
 
     rf_radio_cfg_t lcfg = board_rf_left_cfg();
     rf_radio_cfg_t rcfg = board_rf_right_cfg();
+
+    /* Per-set addressing (Plan RF-1): if this dongle is paired (NVS rf.paired_count
+     * > 0), derive a unique address+channel from its own WiFi MAC. If unpaired,
+     * rf_pairing_load_set_id_dongle() returns 0 and rf_apply_set_id is a no-op,
+     * so lcfg/rcfg keep the board factory defaults (KaSe.01/.02, ch 76/82). */
+    uint16_t set_id = rf_pairing_load_set_id_dongle();
+    rf_apply_set_id(&lcfg, set_id, 0x01);   /* left  → slot 0x01 */
+    rf_apply_set_id(&rcfg, set_id, 0x02);   /* right → slot 0x02 */
+
     rf_driver_init(&s_left, &lcfg);
     rf_driver_init(&s_right, &rcfg);
 
