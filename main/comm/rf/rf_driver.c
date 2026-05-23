@@ -29,6 +29,7 @@ static const char *TAG = "rf_drv";
 #define REG_RF_CH       0x05
 #define REG_RF_SETUP    0x06
 #define REG_STATUS      0x07
+#define REG_OBSERVE_TX  0x08   /* [7:4]=PLOS_CNT, [3:0]=ARC_CNT (retries last pkt) */
 #define REG_RX_ADDR_P0  0x0A
 #define REG_RX_PW_P0    0x11
 #define REG_FIFO_STATUS 0x17
@@ -250,8 +251,13 @@ esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
 #define CMD_W_TX_PAYLOAD    0xA0
 #define CMD_FLUSH_TX        0xE1
 
-/* MAX_RT accumulator: read + reset by half_scan_task for PKT_HEARTBEAT.link_q */
+/* MAX_RT accumulator: still used for the FIFO-flush logic + debug. */
 uint32_t rf_tx_max_rt_count = 0;
+
+/* ARC_CNT accumulators: Σ per-packet retransmits + TX count since the last read.
+ * read + reset by half_scan_task to compute PKT_HEARTBEAT.link_q (retry %). */
+uint32_t rf_tx_retr_sum = 0;
+uint32_t rf_tx_count    = 0;
 
 esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
 {
@@ -378,6 +384,12 @@ bool rf_driver_send(rf_radio_t *r, const uint8_t *buf, uint8_t len)
         csn_low(r); spi_xfer(r, &c, rx_buf, 1); csn_high(r);
         rf_tx_max_rt_count++;
     }
+
+    /* Accumulate this packet's retransmit count for the link-quality metric.
+     * OBSERVE_TX ARC_CNT (bits 3:0) resets at the next TX; on MAX_RT it reads the
+     * max (ARC=3). Must be read before the next send. */
+    rf_tx_retr_sum += (uint32_t)(rf_driver_read_reg(r, REG_OBSERVE_TX) & 0x0F);
+    rf_tx_count++;
 
     /* Clear TX_DS + MAX_RT flags in STATUS (write 1 to clear) */
     rf_driver_write_reg(r, REG_STATUS, 0x30);

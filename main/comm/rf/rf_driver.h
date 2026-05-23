@@ -79,9 +79,14 @@ esp_err_t rf_driver_init_tx(rf_radio_t *radio, const rf_radio_cfg_t *cfg);
  * Returns true on TX_DS (ACK from dongle). */
 bool rf_driver_send(rf_radio_t *radio, const uint8_t *buf, uint8_t len);
 
-/* Count of MAX_RT events accumulated since last reset.
- * half_scan_task reads this to fill PKT_HEARTBEAT.link_q, then clears it. */
+/* Count of MAX_RT events accumulated since last reset (FIFO-flush logic + debug). */
 extern uint32_t rf_tx_max_rt_count;
+
+/* ARC_CNT accumulators since last reset: Σ per-packet retransmits and TX count.
+ * half_scan_task reads both to compute PKT_HEARTBEAT.link_q as a retry percentage
+ * (rf_tx_retr_sum × 100 / (rf_tx_count × 3)), then clears them. */
+extern uint32_t rf_tx_retr_sum;
+extern uint32_t rf_tx_count;
 
 /* Reprogram the half's TX address (REG_TX_ADDR + REG_RX_ADDR_P0, 5 bytes, CE low).
  * Used to retarget the half radio to RF_PAIR_ADDR for the PKT_PAIR_REQ burst. */

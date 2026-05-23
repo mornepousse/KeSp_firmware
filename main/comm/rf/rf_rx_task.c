@@ -29,13 +29,16 @@ uint8_t rf_signal_bars(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
     else if (hb_age_ms < 1200u) age_score = 1;
     else                         age_score = 0;
 
-    /* Retry score: lower link_q = fewer retries = better RF */
+    /* Retry score: link_q is a retransmit PERCENTAGE (0..100) computed on the half
+     * from OBSERVE_TX ARC_CNT (Σ retries × 100 / (tx_count × 3)). 0 = pristine,
+     * 100 = every packet exhausting all 3 ARC retries. Lower = better RF.
+     * Catches a degrading link (packets succeed but need retries) BEFORE losses. */
     uint8_t retry_score;
-    if      (link_q == 0)  retry_score = 4;
-    else if (link_q <= 2)  retry_score = 3;
-    else if (link_q <= 5)  retry_score = 2;
-    else if (link_q <= 10) retry_score = 1;
-    else                    retry_score = 0;
+    if      (link_q == 0)  retry_score = 4;   /* no retransmits */
+    else if (link_q <= 15) retry_score = 3;   /* occasional (≤0.45 retries/pkt) */
+    else if (link_q <= 33) retry_score = 2;   /* moderate (≤1 retry/pkt) */
+    else if (link_q <= 60) retry_score = 1;   /* heavy */
+    else                    retry_score = 0;   /* saturating retries */
 
     /* Minimum of both scores: both dimensions must be good to show 4 bars. */
     return (age_score < retry_score) ? age_score : retry_score;

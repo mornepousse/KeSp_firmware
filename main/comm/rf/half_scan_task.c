@@ -272,9 +272,17 @@ static void heartbeat_timer_cb(void *arg)
     memset(&hb, 0, sizeof(hb));
     memcpy(hb.bitmap, s_pressed_bitmap, RF_HALF_BITMAP_BYTES);
     hb.batt_dV = 0;   /* MVP: battery not measured */
-    hb.link_q  = (uint8_t)(rf_tx_max_rt_count > 255 ? 255 : rf_tx_max_rt_count);
+    /* link_q = retransmit percentage (0..100): Σ ARC_CNT × 100 / (tx_count × 3).
+     * 0 = pristine, 100 = every packet maxing all 3 retries. Catches a degrading
+     * link before packets are fully lost. */
+    {
+        uint32_t txc = rf_tx_count, rsum = rf_tx_retr_sum;
+        hb.link_q = (txc > 0) ? (uint8_t)((rsum * 100u) / (txc * 3u)) : 0;
+        rf_tx_retr_sum = 0;
+        rf_tx_count    = 0;
+    }
     hb.seq     = s_seq++;
-    rf_tx_max_rt_count = 0;   /* reset link quality counter */
+    rf_tx_max_rt_count = 0;   /* still cleared (used elsewhere for debug) */
 
     uint8_t buf[9];
     rf_encode_heartbeat(buf, &hb);
