@@ -17,6 +17,7 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_log.h"
+#include "esp_mac.h"       /* esp_read_mac, ESP_MAC_WIFI_STA */
 #include "nvs_flash.h"
 #include "nvs.h"
 #endif /* TEST_HOST */
