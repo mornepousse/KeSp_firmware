@@ -415,6 +415,12 @@ uint16_t rf_driver_pair_listen(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
         vTaskDelay(pdMS_TO_TICKS(2));
     }
     ce_low(r);
+    /* Restore PTX mode: rf_driver_send() does NOT write CONFIG (it assumes PTX),
+     * so without this the radio stays in PRX (0x3F) and every subsequent REQ in
+     * the pairing loop is silently NOT transmitted — only REQ #1 ever goes out.
+     * (Root cause of "one half pairs, the other never does": whoever's REQ #1
+     * happened to be ACKed paired; the other never re-sent.) */
+    rf_driver_write_reg(r, REG_CONFIG, 0x3E);   /* PTX power-up, EN_CRC|CRCO */
     return got;
 }
 
