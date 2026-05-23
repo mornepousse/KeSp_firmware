@@ -31,6 +31,7 @@ extern void test_trackpad_map(void);
 extern void test_rf_pairing(void);
 extern void test_espnow_peer_filter(void);
 extern void test_en_status(void);
+extern void test_rf_signal_bars(void);
 
 int main(void) {
     printf("KeSp Firmware Unit Tests\n");
@@ -61,6 +62,7 @@ int main(void) {
     test_rf_pairing();
     test_espnow_peer_filter();
     test_en_status();
+    test_rf_signal_bars();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);

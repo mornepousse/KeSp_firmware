@@ -3,7 +3,46 @@
  * the engine drive loop (mirrors keyboard_task.c but fed by RF instead of a
  * local matrix scan).
  */
+
+/*
+ * rf_signal_bars() — derive 0..4 signal quality bars for one half.
+ *
+ * Pure function: no globals, no I/O. Host-testable (outside TEST_HOST guard).
+ * Place before the #ifndef TEST_HOST block so it compiles in both contexts.
+ */
 #include "rf_rx_task.h"
+#include <stdint.h>
+#include <stdbool.h>
+
+uint8_t rf_signal_bars(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
+{
+    /* Link is considered down if rf_rx_task flagged it, OR if the
+     * heartbeat age exceeds 3× the nominal heartbeat interval (500 ms
+     * → 1500 ms threshold). 3× gives margin for two missed HBs. */
+    if (!link_up || hb_age_ms >= 1500u) return 0;
+
+    /* Age score: lower age = better freshness */
+    uint8_t age_score;
+    if      (hb_age_ms <  200u) age_score = 4;
+    else if (hb_age_ms <  400u) age_score = 3;
+    else if (hb_age_ms <  700u) age_score = 2;
+    else if (hb_age_ms < 1200u) age_score = 1;
+    else                         age_score = 0;
+
+    /* Retry score: lower link_q = fewer retries = better RF */
+    uint8_t retry_score;
+    if      (link_q == 0)  retry_score = 4;
+    else if (link_q <= 2)  retry_score = 3;
+    else if (link_q <= 5)  retry_score = 2;
+    else if (link_q <= 10) retry_score = 1;
+    else                    retry_score = 0;
+
+    /* Minimum of both scores: both dimensions must be good to show 4 bars. */
+    return (age_score < retry_score) ? age_score : retry_score;
+}
+
+#ifndef TEST_HOST
+
 #include "rf_driver.h"
 #include "rf_packet.h"
 #include "heartbeat.h"
@@ -362,3 +401,5 @@ void rf_rx_get_status(rf_link_status_t *out)
     out->pkt_dup_left  = s_left.pkt_dup;
     out->pkt_dup_right = s_right.pkt_dup;
 }
+
+#endif /* TEST_HOST */
