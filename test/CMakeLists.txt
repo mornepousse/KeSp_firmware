@@ -33,6 +33,8 @@ add_executable(test_runner
     ../main/periph/trackpad/trackpad.c
     test_rf_pairing.c
     ../main/comm/rf/rf_pairing.c
+    test_espnow_peer_filter.c
+    ../main/comm/espnow/espnow_link.c
     test_main.c
 )
 
@@ -42,4 +44,5 @@ target_include_directories(test_runner PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/periph/eink
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/periph/trackpad
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/rf
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/espnow
 )
