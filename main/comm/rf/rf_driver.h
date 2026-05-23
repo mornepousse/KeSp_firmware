@@ -50,6 +50,18 @@ void    rf_driver_write_reg(rf_radio_t *radio, uint8_t reg, uint8_t val);
 /* Change channel at runtime (Plan 4 pairing). */
 void rf_driver_set_channel(rf_radio_t *radio, uint8_t ch);
 
+/* Reprogram the live PRX pipe-0 RX address (5 bytes) without re-init.
+ * ce_low → write REG_RX_ADDR_P0 → ce_high. Used by the dongle pairing hot-switch. */
+void rf_driver_set_rx_address(rf_radio_t *r, const uint8_t addr[5]);
+
+/* Out-of-band one-shot PTX for the dongle PKT_PAIR_ACK (spec §5.4).
+ * Switches to PTX on ch+addr, transmits payload once (CE pulse, poll TX_DS/MAX_RT),
+ * then restores PRX on restore_ch+restore_addr and re-asserts CE high. Returns TX_DS.
+ * Compiled in both roles (no KASE_HAS_RF_TX guard). */
+bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
+                      const uint8_t *payload, uint8_t len,
+                      uint8_t restore_ch, const uint8_t restore_addr[5]);
+
 /* ── PTX mode — compiled only when KASE_HAS_RF_TX=y ─────────────── */
 #if CONFIG_KASE_HAS_RF_TX
 
@@ -70,6 +82,16 @@ bool rf_driver_send(rf_radio_t *radio, const uint8_t *buf, uint8_t len);
 /* Count of MAX_RT events accumulated since last reset.
  * half_scan_task reads this to fill PKT_HEARTBEAT.link_q, then clears it. */
 extern uint32_t rf_tx_max_rt_count;
+
+/* Reprogram the half's TX address (REG_TX_ADDR + REG_RX_ADDR_P0, 5 bytes, CE low).
+ * Used to retarget the half radio to RF_PAIR_ADDR for the PKT_PAIR_REQ burst. */
+void rf_driver_set_tx_address(rf_radio_t *r, const uint8_t addr[5]);
+
+/* Pairing-only: switch the half radio to PRX on ch+addr, wait up to timeout_ms for
+ * one RX payload (PKT_PAIR_ACK), copy to buf (max maxlen). Returns length (0 on
+ * timeout). Leaves radio in PRX — caller restores PTX via set_tx_address. */
+uint16_t rf_driver_pair_listen(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
+                               uint8_t *buf, uint16_t maxlen, uint32_t timeout_ms);
 
 #endif /* CONFIG_KASE_HAS_RF_TX */
 

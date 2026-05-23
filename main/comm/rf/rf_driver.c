@@ -79,6 +79,67 @@ void rf_driver_set_channel(rf_radio_t *r, uint8_t ch)
     rf_driver_write_reg(r, REG_RF_CH, ch & 0x7F);
 }
 
+/* ── Pairing helpers (both roles) — placed after write_reg_buf ──── */
+#ifndef CMD_W_TX_PAYLOAD
+#define CMD_W_TX_PAYLOAD 0xA0
+#endif
+#ifndef CMD_FLUSH_TX
+#define CMD_FLUSH_TX     0xE1
+#endif
+#define REG_TX_ADDR_OOB  0x10   /* avoid clashing with the RF_TX-block REG_TX_ADDR */
+
+void rf_driver_set_rx_address(rf_radio_t *r, const uint8_t addr[5])
+{
+    ce_low(r);
+    write_reg_buf(r, REG_RX_ADDR_P0, addr, 5);
+    ce_high(r);
+}
+
+bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
+                      const uint8_t *payload, uint8_t len,
+                      uint8_t restore_ch, const uint8_t restore_addr[5])
+{
+    /* ── Enter PTX on the pairing channel/address ── */
+    ce_low(r);
+    rf_driver_set_channel(r, ch);
+    write_reg_buf(r, REG_TX_ADDR_OOB, addr, 5);
+    write_reg_buf(r, REG_RX_ADDR_P0,  addr, 5);   /* match TX_ADDR for ESB ACK */
+    rf_driver_write_reg(r, REG_CONFIG, 0x3E);     /* PTX power-up, EN_CRC|CRCO */
+    vTaskDelay(pdMS_TO_TICKS(2));                  /* Tpd2stby */
+
+    rf_driver_write_reg(r, REG_STATUS, 0x70);     /* clear flags */
+    { uint8_t c = CMD_FLUSH_TX, rx; csn_low(r); spi_xfer(r, &c, &rx, 1); csn_high(r); }
+
+    /* ── Write payload + pulse CE ── */
+    uint8_t tx[33], rxb[33];
+    tx[0] = CMD_W_TX_PAYLOAD;
+    memcpy(&tx[1], payload, len);
+    csn_low(r); spi_xfer(r, tx, rxb, (size_t)(len + 1)); csn_high(r);
+    ce_high(r); esp_rom_delay_us(15); ce_low(r);
+
+    /* ── Poll TX_DS / MAX_RT ── */
+    uint32_t deadline = (uint32_t)(esp_timer_get_time() + 5000);
+    uint8_t status = 0;
+    do {
+        status = rf_driver_read_reg(r, REG_STATUS);
+        if (status & 0x30) break;
+    } while ((uint32_t)esp_timer_get_time() < deadline);
+    bool ok = (status & 0x20) != 0;   /* TX_DS = ACK received */
+    if (status & 0x10) { uint8_t c = CMD_FLUSH_TX, rx; csn_low(r); spi_xfer(r,&c,&rx,1); csn_high(r); }
+    rf_driver_write_reg(r, REG_STATUS, 0x30);
+
+    /* ── Restore PRX on the data address/channel ── */
+    ce_low(r);
+    rf_driver_set_channel(r, restore_ch);
+    write_reg_buf(r, REG_RX_ADDR_P0, restore_addr, 5);
+    rf_driver_write_reg(r, REG_CONFIG, 0x3F);     /* PRX power-up */
+    vTaskDelay(pdMS_TO_TICKS(2));
+    rf_driver_write_reg(r, REG_STATUS, 0x70);
+    { uint8_t c = CMD_FLUSH_RX, rx; csn_low(r); spi_xfer(r, &c, &rx, 1); csn_high(r); }
+    ce_high(r);                                    /* resume listening */
+    return ok;
+}
+
 bool rf_driver_probe(rf_radio_t *r)
 {
     uint8_t cfg = rf_driver_read_reg(r, REG_CONFIG);
@@ -323,6 +384,38 @@ bool rf_driver_send(rf_radio_t *r, const uint8_t *buf, uint8_t len)
 
     if (success) r->pkt_rx++;   /* reuse pkt_rx as pkt_tx_ok counter */
     return success;
+}
+
+void rf_driver_set_tx_address(rf_radio_t *r, const uint8_t addr[5])
+{
+    ce_low(r);
+    write_reg_buf(r, REG_TX_ADDR,    addr, 5);
+    write_reg_buf(r, REG_RX_ADDR_P0, addr, 5);   /* must match for ESB ACK */
+}
+
+uint16_t rf_driver_pair_listen(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
+                               uint8_t *buf, uint16_t maxlen, uint32_t timeout_ms)
+{
+    ce_low(r);
+    rf_driver_set_channel(r, ch);
+    write_reg_buf(r, REG_RX_ADDR_P0, addr, 5);
+    rf_driver_write_reg(r, REG_CONFIG, 0x3F);    /* PRX power-up */
+    vTaskDelay(pdMS_TO_TICKS(2));
+    rf_driver_write_reg(r, REG_STATUS, 0x70);
+    { uint8_t c = CMD_FLUSH_RX, rx; csn_low(r); spi_xfer(r, &c, &rx, 1); csn_high(r); }
+    ce_high(r);
+
+    uint16_t got = 0;
+    uint32_t deadline = (uint32_t)(esp_timer_get_time() / 1000) + timeout_ms;
+    while ((uint32_t)(esp_timer_get_time() / 1000) < deadline) {
+        if (rf_driver_rx_available(r)) {
+            got = rf_driver_read_rx(r, buf, maxlen);
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    ce_low(r);
+    return got;
 }
 
 #endif /* CONFIG_KASE_HAS_RF_TX */
