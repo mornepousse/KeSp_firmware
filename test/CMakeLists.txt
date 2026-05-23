@@ -35,6 +35,7 @@ add_executable(test_runner
     ../main/comm/rf/rf_pairing.c
     test_espnow_peer_filter.c
     ../main/comm/espnow/espnow_link.c
+    test_en_status.c
     test_main.c
 )
 

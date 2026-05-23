@@ -27,6 +27,31 @@
 #define EN_INFO_LAYER     0x02   /* dongle → half: current active layer (en_layer_t) */
 #define EN_INFO_STATE     0x03   /* dongle → half: modifier + flag state (en_state_t) */
 
+#define EN_INFO_STATUS    0x04   /* dongle → half: link + signal + USB status */
+
+/* ── EN_INFO_STATUS (dongle → half) — 3 bytes ─────────────────── */
+typedef struct __attribute__((packed)) {
+    uint8_t flags;      /* bit0=link_left_up, bit1=link_right_up,
+                           bit2=usb_active, bits3-7=rsvd (must be 0) */
+    uint8_t sig_left;   /* signal quality 0..4, 0=link_down or no data */
+    uint8_t sig_right;  /* signal quality 0..4, 0=link_down or no data */
+} en_status_t;
+
+static inline uint8_t en_encode_status(uint8_t *buf, const en_status_t *st)
+{
+    buf[0] = EN_INFO_STATUS;
+    memcpy(buf + 1, st, sizeof(*st));
+    return 1 + sizeof(*st);   /* 4 */
+}
+
+static inline bool en_decode_status(const uint8_t *buf, uint8_t len,
+                                     en_status_t *out)
+{
+    if (len < 1 + (uint8_t)sizeof(*out) || buf[0] != EN_INFO_STATUS) return false;
+    memcpy(out, buf + 1, sizeof(*out));
+    return true;
+}
+
 /* ── Reserved type ID ranges (Plan 5 — not implemented) ─────── */
 /* EN_OTA_BEGIN = 0x10, EN_OTA_CHUNK = 0x11, EN_OTA_END = 0x12, EN_OTA_ACK = 0x13 */
 /* EN_CFG_PUSH = 0x20, EN_CFG_ACK = 0x21                                           */
