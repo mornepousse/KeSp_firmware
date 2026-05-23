@@ -26,6 +26,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_rom_sys.h"
+#include "esp_mac.h"         /* esp_read_mac, ESP_MAC_WIFI_STA */
+#include "esp_system.h"      /* esp_restart */
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -58,6 +60,11 @@ rf_radio_t s_radio;
 
 /* ── Packet sequence counter — shared by PKT_KEY and PKT_HEARTBEAT ─ */
 static volatile uint8_t s_seq = 0;
+
+/* ── BOOT-button pairing trigger (GPIO0, active-low) ── */
+#define HALF_BOOT_GPIO        GPIO_NUM_0
+#define HALF_BOOT_HOLD_TICKS  30      /* 30 × 100 ms heartbeat ticks ≈ 3 s */
+static volatile bool s_pairing_active = false;
 
 /* ── Local pressed-key bitmap (maintained for PKT_HEARTBEAT) ── */
 static uint8_t s_pressed_bitmap[RF_HALF_BITMAP_BYTES];
@@ -175,6 +182,67 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle,
         tx_key_event, NULL);
 }
 
+/* ── Half pairing task: REQ loop on the rendezvous, await PKT_PAIR_ACK ── */
+static void half_pairing_task(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "pairing: window open (30 s) — sending PKT_PAIR_REQ");
+
+    uint8_t my_mac[6];
+    esp_read_mac(my_mac, ESP_MAC_WIFI_STA);
+    uint8_t req[7];
+    rf_encode_pair_req(req, my_mac);
+
+    static const uint8_t pair_addr[5] = RF_PAIR_ADDR;
+    uint32_t deadline = (uint32_t)(esp_timer_get_time() / 1000) + 30000;
+    bool acked = false;
+    rf_pair_ack_t ack;
+
+    while (!acked && (uint32_t)(esp_timer_get_time() / 1000) < deadline) {
+        /* Burst one REQ as PTX on the rendezvous. */
+        half_spi_lock();
+        rf_driver_set_tx_address(&s_radio, pair_addr);
+        rf_driver_set_channel(&s_radio, RF_PAIR_CHANNEL);
+        rf_driver_send(&s_radio, req, 7);
+        half_spi_unlock();
+
+        /* Listen ~150 ms for the ACK as PRX on the rendezvous. */
+        uint8_t rxb[32];
+        half_spi_lock();
+        uint16_t n = rf_driver_pair_listen(&s_radio, RF_PAIR_CHANNEL, pair_addr,
+                                           rxb, sizeof(rxb), 150);
+        half_spi_unlock();
+        if (n && rf_decode_pair_ack(rxb, n, &ack)) {
+            acked = true;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));   /* ~200 ms REQ cadence (spec §3.3) */
+    }
+
+    if (acked) {
+        ESP_LOGI(TAG, "pairing: ACK set_id=0x%04X slot=0x%02X — saving NVS + reboot",
+                 ack.set_id, ack.slot);
+        rf_pairing_save_half(ack.set_id, ack.slot, ack.dongle_wifi_mac);
+        vTaskDelay(pdMS_TO_TICKS(2000));   /* let log/NVS settle, then apply via reboot */
+        esp_restart();
+    } else {
+        ESP_LOGW(TAG, "pairing: timed out (no ACK) — restoring normal TX");
+        /* Restore the half's data address/channel from NVS (or factory). */
+        uint8_t slot = BOARD_NRF_ADDR_SUFFIX;
+        uint16_t set_id = rf_pairing_load_set_id_half(BOARD_NRF_ADDR_SUFFIX, &slot);
+        rf_radio_cfg_t cfg = board_nrf_cfg();
+        rf_apply_set_id(&cfg, set_id, slot);
+        uint8_t addr[5] = { cfg.rx_addr[0], cfg.rx_addr[1], cfg.rx_addr[2],
+                            cfg.rx_addr[3], cfg.addr_suffix };
+        half_spi_lock();
+        rf_driver_set_tx_address(&s_radio, addr);
+        rf_driver_set_channel(&s_radio, cfg.channel);
+        half_spi_unlock();
+        s_pairing_active = false;
+    }
+    vTaskDelete(NULL);
+}
+
 /* ── Heartbeat timer callback (100 ms periodic) ─────────────── */
 static void heartbeat_timer_cb(void *arg)
 {
@@ -227,6 +295,21 @@ static void heartbeat_timer_cb(void *arg)
         (void)b;   /* suppress unused warning */
     }
 #endif /* CONFIG_KASE_HAS_ESPNOW */
+
+    /* BOOT-button pairing trigger: spawn the pairing task after a ~3 s hold. */
+    static uint8_t s_boot_low_ticks = 0;
+    if (!s_pairing_active) {
+        if (gpio_get_level(HALF_BOOT_GPIO) == 0) {   /* active-low: pressed */
+            if (++s_boot_low_ticks >= HALF_BOOT_HOLD_TICKS) {
+                s_boot_low_ticks = 0;
+                s_pairing_active = true;
+                xTaskCreatePinnedToCore(half_pairing_task, "half_pair",
+                                        4096, NULL, 4, NULL, 0);
+            }
+        } else {
+            s_boot_low_ticks = 0;   /* released early — reset hold counter */
+        }
+    }
 }
 
 /* ── Main task body ─────────────────────────────────────────── */
@@ -237,6 +320,16 @@ static void half_scan_task(void *arg)
 
     /* Initialize shared SPI2 bus lock (used by NRF, and by e-ink/trackpad bricks). */
     half_spi_lock_init();
+
+    /* BOOT button (GPIO0) as input with pull-up — pairing trigger (held 3 s). */
+    gpio_config_t boot_cfg = {
+        .pin_bit_mask = (1ULL << HALF_BOOT_GPIO),
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,   /* polled in heartbeat_timer_cb */
+    };
+    gpio_config(&boot_cfg);
 
     /* Reset all matrix GPIO pins to detach bootloader/UART functions.
      * This mirrors the gpio_reset_pin() calls in matrix_scan.c::matrix_setup(). */
