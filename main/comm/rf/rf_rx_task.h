@@ -13,6 +13,10 @@ typedef struct {
     uint32_t hb_age_left_ms, hb_age_right_ms;
     uint32_t pkt_rx_left, pkt_rx_right;
     uint32_t pkt_dup_left, pkt_dup_right;
+    /* New: last link_q reported by each half in PKT_HEARTBEAT.
+     * 0 if no heartbeat received yet (conservative = best retry score). */
+    uint8_t link_q_left;
+    uint8_t link_q_right;
 } rf_link_status_t;
 
 void rf_rx_get_status(rf_link_status_t *out);

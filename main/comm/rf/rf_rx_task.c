@@ -51,6 +51,10 @@ uint8_t rf_signal_bars(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
 #include "keyboard_config.h"
 #include "hid_transport.h"
 #include "cdc_binary_protocol.h"   /* ks_respond, KS_CMD_MATRIX_TEST */
+#include "espnow_link.h"    /* espnow_send() */
+#include "espnow_msg.h"     /* en_status_t, EN_INFO_STATUS */
+#include "nvs.h"            /* nvs_open, nvs_get_blob, nvs_close */
+#include "tusb.h"           /* tud_ready() */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_mac.h"      /* esp_read_mac, ESP_MAC_WIFI_STA */
@@ -93,6 +97,17 @@ extern void tap_dance_tick(void);
 static rf_radio_t s_left, s_right;
 static hb_half_state_t s_hb_left, s_hb_right;
 static SemaphoreHandle_t s_evt_sem;
+
+/* Last link_q received from each half (PKT_HEARTBEAT.link_q).
+ * Read by rf_rx_get_status() → status_push_cb → rf_signal_bars(). */
+static uint8_t s_link_q_left  = 0;
+static uint8_t s_link_q_right = 0;
+
+/* 5 s periodic status push timer handle */
+static esp_timer_handle_t s_status_push_timer = NULL;
+
+/* Forward declaration — defined after rf_rx_start() */
+static void status_push_cb(void *arg);
 
 /* ── Pairing window state (driven inside rf_rx_task) ── */
 static volatile bool s_pairing_mode = false;
@@ -196,6 +211,9 @@ static bool drain_radio(rf_radio_t *radio, hb_half_state_t *hb, uint8_t half)
             if (rf_decode_heartbeat(buf, n, &h)) {
                 uint32_t now = esp_timer_get_time() / 1000;
                 hb_reconcile(hb, half, &h, &s_cb, now);
+                /* Update last link_q for signal quality derivation */
+                if (half == HB_HALF_LEFT)  s_link_q_left  = h.link_q;
+                else                        s_link_q_right = h.link_q;
                 changed = true;   /* reconciliation may have changed MATRIX_STATE */
             }
         } else if (type == PKT_TYPE_TRACKPAD) {
@@ -386,6 +404,22 @@ bool rf_rx_start(void)
 
     xTaskCreatePinnedToCore(rf_rx_task, "rf_rx", 8192, NULL, 10, NULL, 0);
     ESP_LOGI(TAG, "RF RX started (L=%d R=%d)", s_left.present, s_right.present);
+
+    /* ── 5 s periodic status push to paired halves ───────────────
+     * Created AFTER ESP-NOW is initialized (called from main.c after
+     * espnow_link_init()). The callback is safe from the esp_timer task
+     * context: no SPI, no portMAX_DELAY mutex (see status_push_cb comment). */
+    const esp_timer_create_args_t status_args = {
+        .callback = status_push_cb,
+        .name     = "status_push_tick",
+    };
+    if (esp_timer_create(&status_args, &s_status_push_timer) == ESP_OK) {
+        esp_timer_start_periodic(s_status_push_timer, 5 * 1000 * 1000ULL);  /* 5 s in µs */
+        ESP_LOGI(TAG, "status push timer started (5 s period)");
+    } else {
+        ESP_LOGW(TAG, "status push timer create failed -- status push disabled");
+    }
+
     return true;
 }
 
@@ -400,6 +434,69 @@ void rf_rx_get_status(rf_link_status_t *out)
     out->pkt_rx_right = s_right.pkt_rx;
     out->pkt_dup_left  = s_left.pkt_dup;
     out->pkt_dup_right = s_right.pkt_dup;
+    out->link_q_left  = s_link_q_left;
+    out->link_q_right = s_link_q_right;
+}
+
+/*
+ * status_push_cb — periodic esp_timer callback (5 s period).
+ *
+ * Context: esp_timer task (NOT rf_rx_task).
+ * Safe to call: rf_rx_get_status() (no SPI, copies atomically),
+ *               espnow_send() (thread-safe per ESP-NOW spec),
+ *               tud_ready() (TinyUSB, thread-safe read).
+ * Must NOT call: any rf_driver_* (SPI), xSemaphoreTake with portMAX_DELAY.
+ */
+static void status_push_cb(void *arg)
+{
+    (void)arg;
+
+    /* Lazy-load paired half MACs once from NVS "rf" (same pattern as layer_changed()). */
+    static uint8_t mac_left[6]  = {0};
+    static uint8_t mac_right[6] = {0};
+    static bool    macs_loaded  = false;
+
+    if (!macs_loaded) {
+        nvs_handle_t h;
+        if (nvs_open("rf", NVS_READONLY, &h) == ESP_OK) {
+            size_t sz = 6;
+            nvs_get_blob(h, "mac_left",  mac_left,  &sz);
+            sz = 6;
+            nvs_get_blob(h, "mac_right", mac_right, &sz);
+            nvs_close(h);
+        }
+        macs_loaded = true;
+    }
+
+    bool has_left  = mac_left[0]  | mac_left[1]  | mac_left[2]  |
+                     mac_left[3]  | mac_left[4]  | mac_left[5];
+    bool has_right = mac_right[0] | mac_right[1] | mac_right[2] |
+                     mac_right[3] | mac_right[4] | mac_right[5];
+
+    if (!has_left && !has_right) {
+        ESP_LOGD(TAG, "status_push_cb: no paired halves -- skip");
+        return;
+    }
+
+    /* Get current RF link diagnostics */
+    rf_link_status_t st;
+    rf_rx_get_status(&st);
+
+    /* Build EN_INFO_STATUS payload */
+    en_status_t msg;
+    msg.sig_left  = rf_signal_bars(st.link_left,  st.hb_age_left_ms,  st.link_q_left);
+    msg.sig_right = rf_signal_bars(st.link_right, st.hb_age_right_ms, st.link_q_right);
+    msg.flags = 0;
+    if (st.link_left)  msg.flags |= (1u << 0);
+    if (st.link_right) msg.flags |= (1u << 1);
+    if (tud_ready())   msg.flags |= (1u << 2);   /* USB active */
+
+    ESP_LOGD(TAG, "status_push: flags=0x%02x sig_l=%u sig_r=%u",
+             msg.flags, msg.sig_left, msg.sig_right);
+
+    /* Unicast to each paired half */
+    if (has_left)  espnow_send(mac_left,  EN_INFO_STATUS, &msg, sizeof(msg));
+    if (has_right) espnow_send(mac_right, EN_INFO_STATUS, &msg, sizeof(msg));
 }
 
 #endif /* TEST_HOST */
