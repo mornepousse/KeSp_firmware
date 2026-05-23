@@ -207,6 +207,14 @@ void send_hid_kb_mouse(uint8_t modifier, const uint8_t kc[6],
 
 uint8_t keyboard_get_usb_bl_state(void) { return usb_bl_state; }
 
+/* Returns the current HID modifier byte.
+ * Used by layer_changed() (dongle) to build EN_INFO_STATE payloads.
+ * current_modifiers is updated by send_hid_key() / send_hid_kb_mouse(). */
+uint8_t hid_report_get_modifiers(void)
+{
+    return current_modifiers;
+}
+
 void hid_report_init(void)
 {
     if (!hid_queue) {

@@ -6,6 +6,7 @@
  */
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 #include "keyboard_config.h"   /* MATRIX_ROWS, MATRIX_COLS */
 
 #define MAX_REPORT_KEYS 6      /* must match matrix_scan.c boot-protocol limit */
@@ -32,31 +33,76 @@ uint8_t usb_bl_state = 0;
 #if CONFIG_KASE_HAS_ESPNOW
 #include "espnow_link.h"
 #include "espnow_msg.h"
+#include "nvs.h"                    /* nvs_open, nvs_get_blob, nvs_close */
+#include "hid_report.h"             /* hid_report_get_modifiers() */
+#include "keyboard_config.h"        /* LAYERS, MAX_LAYOUT_NAME_LENGTH */
+#include "keymap.h"                 /* default_layout_names */
+#include "esp_log.h"
 #endif
 
 void layer_changed(void)
 {
 #if CONFIG_KASE_HAS_ESPNOW
-    /* TODO STUB: push EN_INFO_LAYER + EN_INFO_STATE to halves.
-     *
-     * When MAC pairing is implemented (Plan 4), load mac_left / mac_right from
-     * NVS rf.mac_left / rf.mac_right and call espnow_send() for each.
-     *
-     * en_layer_t l = {
-     *     .layer_idx = current_layout,
-     * };
-     * strncpy(l.name, get_layer_name(current_layout), 16);
-     * espnow_send(mac_left,  EN_INFO_LAYER, &l, sizeof(l));
-     * espnow_send(mac_right, EN_INFO_LAYER, &l, sizeof(l));
-     *
-     * en_state_t s = {
-     *     .modifiers = current_modifiers,   // from key_processor.c state
-     *     .flags     = 0,                   // TODO: caps_word, bt_connected, usb_active
-     * };
-     * espnow_send(mac_left,  EN_INFO_STATE, &s, sizeof(s));
-     * espnow_send(mac_right, EN_INFO_STATE, &s, sizeof(s));
-     *
-     * For now: no-op (MACs not configured, espnow_send would fail gracefully). */
+    /* Lazy-load paired half MACs from NVS "rf" on first call.
+     * Safe: layer_changed() is always called from rf_rx_task (single task).
+     * Static variables are task-local in effect (no concurrent access). */
+    static uint8_t mac_left[6]  = {0};
+    static uint8_t mac_right[6] = {0};
+    static bool    macs_loaded  = false;
+
+    if (!macs_loaded) {
+        nvs_handle_t h;
+        if (nvs_open("rf", NVS_READONLY, &h) == ESP_OK) {
+            size_t sz = 6;
+            nvs_get_blob(h, "mac_left",  mac_left,  &sz);
+            sz = 6;
+            nvs_get_blob(h, "mac_right", mac_right, &sz);
+            nvs_close(h);
+        }
+        macs_loaded = true;
+    }
+
+    bool has_left  = mac_left[0]  || mac_left[1]  || mac_left[2]  ||
+                     mac_left[3]  || mac_left[4]  || mac_left[5];
+    bool has_right = mac_right[0] || mac_right[1] || mac_right[2] ||
+                     mac_right[3] || mac_right[4] || mac_right[5];
+
+    if (!has_left && !has_right) {
+        ESP_LOGD("dongle_engine", "layer_changed: no paired halves — ESP-NOW skip");
+        return;
+    }
+
+    /* ── Build EN_INFO_LAYER payload ────────────────────────────
+     * default_layout_names: char[LAYERS][MAX_LAYOUT_NAME_LENGTH] (15 bytes each).
+     * en_layer_t.name:  char[16]. Copy 15 bytes max; 16th byte stays NUL. */
+    en_layer_t l;
+    memset(&l, 0, sizeof(l));
+    l.layer_idx = current_layout;
+    if (current_layout < LAYERS) {
+        strncpy(l.name, default_layout_names[current_layout], 15);
+        /* l.name[15] is already 0 from memset */
+    }
+
+    /* ── Build EN_INFO_STATE payload ────────────────────────────
+     * espnow_send() is called from rf_rx_task context — esp_now_send()
+     * is internally queued and thread-safe (spec §7.1 rationale). */
+    en_state_t s;
+    memset(&s, 0, sizeof(s));
+    s.modifiers = hid_report_get_modifiers();
+    s.flags     = 0;   /* caps_word / bt flags: future expansion (spec §7.1) */
+
+    /* ── Unicast to each paired half — fire-and-forget ──────────
+     * Low rate (one per layer change, typically seconds apart).
+     * NRF is NOT muted: info channel duty cycle < 0.1% (spec §7.5).
+     * espnow_send() returns false gracefully if peer was not added. */
+    if (has_left) {
+        espnow_send(mac_left, EN_INFO_LAYER, &l, sizeof(l));
+        espnow_send(mac_left, EN_INFO_STATE, &s, sizeof(s));
+    }
+    if (has_right) {
+        espnow_send(mac_right, EN_INFO_LAYER, &l, sizeof(l));
+        espnow_send(mac_right, EN_INFO_STATE, &s, sizeof(s));
+    }
 #endif /* CONFIG_KASE_HAS_ESPNOW */
 }
 

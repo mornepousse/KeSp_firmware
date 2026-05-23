@@ -19,3 +19,7 @@ void send_hid_kb_mouse(uint8_t modifier, const uint8_t keycodes[6],
 
 /* Get current USB/BLE transport state (0=USB, 1=BLE) */
 uint8_t keyboard_get_usb_bl_state(void);
+
+/* Returns the current HID modifier byte (left/right shift/ctrl/alt/GUI).
+ * Same encoding as USB HID boot protocol modifier byte. */
+uint8_t hid_report_get_modifiers(void);
