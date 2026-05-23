@@ -31,6 +31,8 @@ add_executable(test_runner
     ../main/periph/eink/eink.c
     test_trackpad_map.c
     ../main/periph/trackpad/trackpad.c
+    test_rf_pairing.c
+    ../main/comm/rf/rf_pairing.c
     test_main.c
 )
 

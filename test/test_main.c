@@ -28,6 +28,7 @@ extern void test_half_matrix_diff(void);
 extern void test_espnow_msg(void);
 extern void test_eink_pack(void);
 extern void test_trackpad_map(void);
+extern void test_rf_pairing(void);
 
 int main(void) {
     printf("KeSp Firmware Unit Tests\n");
@@ -55,6 +56,7 @@ int main(void) {
     test_espnow_msg();
     test_eink_pack();
     test_trackpad_map();
+    test_rf_pairing();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);
