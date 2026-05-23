@@ -47,6 +47,12 @@ bool is_known_peer(const uint8_t mac[6]);
  * Returns true on success. */
 bool espnow_link_init(void);
 
+/* (Re)derive the WiFi channel and (re)register all peer MACs from NVS "rf".
+ * Idempotent; requires esp_now_init() to have run. Call after a pairing completes
+ * so a freshly paired half is reachable WITHOUT a dongle reboot (also re-applies
+ * the channel if set_id changed on the first pairing). */
+void espnow_reload_peers(void);
+
 /* Send an ESP-NOW message.
  *   mac:     6-byte target peer MAC
  *   type:    message type ID (from espnow_msg.h)

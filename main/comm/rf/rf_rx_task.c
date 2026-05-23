@@ -267,6 +267,12 @@ static void rf_rx_apply_paired_config(void)
         rf_driver_set_rx_address(&s_right, raddr);
     }
     ESP_LOGI(TAG, "hot-switch: set_id=0x%04X L ch=%u R ch=%u", set_id, lcfg.channel, rcfg.channel);
+
+    /* Re-register ESP-NOW peers from the freshly-saved NVS pairing (+ re-derive
+     * the WiFi channel if set_id changed). Without this a newly paired half is
+     * not an ESP-NOW peer until a dongle reboot — its e-ink dashboard gets no
+     * status pushes. */
+    espnow_reload_peers();
 }
 
 /* Process the pairing rendezvous on radio L. Returns true while still pairing. */

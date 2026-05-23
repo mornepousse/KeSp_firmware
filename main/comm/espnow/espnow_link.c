@@ -131,6 +131,55 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info,
     espnow_info_dispatch(recv_info->src_addr, data, (uint8_t)data_len);
 }
 
+/* ── espnow_reload_peers() — (re)derive channel + (re)register peer MACs ─────
+ * Reads the peer MACs from NVS ("rf"), re-derives the WiFi channel from the
+ * current set_id, applies the channel, and (re)adds each peer to ESP-NOW + the
+ * recv-filter table. Called at init AND after a pairing completes, so a freshly
+ * paired half becomes reachable WITHOUT a dongle reboot.
+ * Requires esp_now_init() to have run. Idempotent (del-then-add per peer). */
+void espnow_reload_peers(void)
+{
+    uint8_t wifi_ch = espnow_derive_wifi_ch();
+    esp_wifi_set_channel(wifi_ch, WIFI_SECOND_CHAN_NONE);
+
+    uint8_t tmp_macs[ESPNOW_MAX_PEERS][6];
+    int     tmp_count = 0;
+
+    nvs_handle_t nvs_peer;
+    if (nvs_open("rf", NVS_READONLY, &nvs_peer) == ESP_OK) {
+#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+        uint8_t mac_l[6] = {0}, mac_r[6] = {0};
+        size_t sz = 6; nvs_get_blob(nvs_peer, "mac_left",  mac_l, &sz);
+        sz = 6;        nvs_get_blob(nvs_peer, "mac_right", mac_r, &sz);
+        if (mac_l[0]||mac_l[1]||mac_l[2]||mac_l[3]||mac_l[4]||mac_l[5]) memcpy(tmp_macs[tmp_count++], mac_l, 6);
+        if (mac_r[0]||mac_r[1]||mac_r[2]||mac_r[3]||mac_r[4]||mac_r[5]) memcpy(tmp_macs[tmp_count++], mac_r, 6);
+#endif
+#if CONFIG_KASE_DEVICE_ROLE_HALF
+        uint8_t mac_d[6] = {0};
+        size_t sz = 6; nvs_get_blob(nvs_peer, "mac_dongle", mac_d, &sz);
+        if (mac_d[0]||mac_d[1]||mac_d[2]||mac_d[3]||mac_d[4]||mac_d[5]) memcpy(tmp_macs[tmp_count++], mac_d, 6);
+#endif
+        nvs_close(nvs_peer);
+    }
+
+    esp_now_peer_info_t peer = { .channel = wifi_ch, .ifidx = WIFI_IF_STA, .encrypt = false };
+    for (int i = 0; i < tmp_count; i++) {
+        memcpy(peer.peer_addr, tmp_macs[i], 6);
+        esp_now_del_peer(tmp_macs[i]);   /* ignore err — peer may not exist yet */
+        esp_err_t pe = esp_now_add_peer(&peer);
+        if (pe != ESP_OK)
+            ESP_LOGW(TAG, "esp_now_add_peer failed for peer %d: %d", i, pe);
+        else
+            ESP_LOGI(TAG, "ESP-NOW peer %d registered: %02X:%02X:%02X:%02X:%02X:%02X ch=%u",
+                     i, tmp_macs[i][0], tmp_macs[i][1], tmp_macs[i][2],
+                     tmp_macs[i][3], tmp_macs[i][4], tmp_macs[i][5], wifi_ch);
+    }
+
+    espnow_set_peers((const uint8_t (*)[6])tmp_macs, tmp_count);
+    if (tmp_count == 0)
+        ESP_LOGW(TAG, "no paired peers configured (NVS rf.mac_* absent) — ESP-NOW send disabled");
+}
+
 bool espnow_link_init(void)
 {
     /* ── Network interface init (idempotent) ───────────────────── */
@@ -157,91 +206,17 @@ bool espnow_link_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    /* ── WiFi channel: derived from set_id (paired) or factory default 6 (unpaired).
-     * DEPRECATION NOTE: the NVS key "rf.wifi_ch" from the 2026-05-11 dongle spec §6
-     * is no longer read. For paired sets, wifi_ch is derived from set_id % 3 → {1,6,11}.
-     * For unpaired sets, wifi_ch defaults to 6 (2437 MHz, unchanged from prior behaviour).
-     * See rf-pairing-addressing-design.md §2.5 + §6.3 for rationale.
-     * IMPORTANT: esp_wifi_set_channel() MUST precede esp_now_add_peer()
-     *            (peer.channel must match the current WiFi channel). */
-    uint8_t wifi_ch = espnow_derive_wifi_ch();
-    esp_wifi_set_channel(wifi_ch, WIFI_SECOND_CHAN_NONE);
-    ESP_LOGI(TAG, "WiFi channel: %u (2%03u MHz)", wifi_ch, 412 + (uint32_t)wifi_ch * 5);
-
-    /* ── ESP-NOW init + recv callback ─────────────────────────── */
+    /* ── ESP-NOW init ─────────────────────────────────────────── */
     e = esp_now_init();
     if (e != ESP_OK) {
         ESP_LOGE(TAG, "esp_now_init failed: %d", e);
         return false;
     }
 
-    /* ── Load peer MACs from NVS "rf" and register with ESP-NOW ──
-     * Dongle role: keys "mac_left" (6B), "mac_right" (6B).
-     * Half role:   key "mac_dongle" (6B).
-     * If a key is absent or all-zeros: skip that peer — no panic.
-     * All-zeros MAC means "not yet paired" (key written by Plan RF-2 pairing flow). */
-    {
-        uint8_t tmp_macs[ESPNOW_MAX_PEERS][6];
-        int     tmp_count = 0;
-
-        nvs_handle_t nvs_peer;
-        if (nvs_open("rf", NVS_READONLY, &nvs_peer) == ESP_OK) {
-
-#if CONFIG_KASE_DEVICE_ROLE_DONGLE
-            /* Dongle: load mac_left and mac_right */
-            uint8_t mac_l[6] = {0}, mac_r[6] = {0};
-            size_t sz = 6;
-            nvs_get_blob(nvs_peer, "mac_left",  mac_l, &sz);
-            sz = 6;
-            nvs_get_blob(nvs_peer, "mac_right", mac_r, &sz);
-            if (mac_l[0] || mac_l[1] || mac_l[2] || mac_l[3] || mac_l[4] || mac_l[5]) {
-                memcpy(tmp_macs[tmp_count++], mac_l, 6);
-            }
-            if (mac_r[0] || mac_r[1] || mac_r[2] || mac_r[3] || mac_r[4] || mac_r[5]) {
-                memcpy(tmp_macs[tmp_count++], mac_r, 6);
-            }
-#endif /* CONFIG_KASE_DEVICE_ROLE_DONGLE */
-
-#if CONFIG_KASE_DEVICE_ROLE_HALF
-            /* Half: load mac_dongle */
-            uint8_t mac_d[6] = {0};
-            size_t sz = 6;
-            nvs_get_blob(nvs_peer, "mac_dongle", mac_d, &sz);
-            if (mac_d[0] || mac_d[1] || mac_d[2] || mac_d[3] || mac_d[4] || mac_d[5]) {
-                memcpy(tmp_macs[tmp_count++], mac_d, 6);
-            }
-#endif /* CONFIG_KASE_DEVICE_ROLE_HALF */
-
-            nvs_close(nvs_peer);
-        }
-
-        /* Register with ESP-NOW — must happen after esp_now_init() and esp_wifi_set_channel() */
-        esp_now_peer_info_t peer = {
-            .channel = wifi_ch,   /* MUST match esp_wifi_set_channel() above */
-            .ifidx   = WIFI_IF_STA,
-            .encrypt = false,
-        };
-        for (int i = 0; i < tmp_count; i++) {
-            memcpy(peer.peer_addr, tmp_macs[i], 6);
-            esp_err_t pe = esp_now_add_peer(&peer);
-            if (pe != ESP_OK) {
-                ESP_LOGW(TAG, "esp_now_add_peer failed for peer %d: %d", i, pe);
-            } else {
-                ESP_LOGI(TAG, "ESP-NOW peer %d registered: %02X:%02X:%02X:%02X:%02X:%02X ch=%u",
-                         i,
-                         tmp_macs[i][0], tmp_macs[i][1], tmp_macs[i][2],
-                         tmp_macs[i][3], tmp_macs[i][4], tmp_macs[i][5],
-                         wifi_ch);
-            }
-        }
-
-        /* Populate the recv-callback filter table (BEFORE registering callback) */
-        espnow_set_peers((const uint8_t (*)[6])tmp_macs, tmp_count);
-
-        if (tmp_count == 0) {
-            ESP_LOGW(TAG, "no paired peers configured (NVS rf.mac_* absent) — ESP-NOW send disabled");
-        }
-    }
+    /* Derive the WiFi channel + register peer MACs from NVS. The SAME path is
+     * re-run after a pairing completes (espnow_reload_peers) so a freshly paired
+     * half is reachable without a dongle reboot. Must follow esp_now_init(). */
+    espnow_reload_peers();
 
     /* Register recv callback AFTER filter table is populated */
     esp_now_register_recv_cb(espnow_recv_cb);
