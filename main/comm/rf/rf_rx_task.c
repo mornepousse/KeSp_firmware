@@ -108,7 +108,7 @@ static uint32_t s_pair_deadline_ms = 0;
 static uint8_t  s_pair_paired_count = 0;
 static uint8_t  s_pair_mac_left[6]  = {0};
 static uint8_t  s_pair_mac_right[6] = {0};
-#define RF_PAIR_WINDOW_MS 30000
+#define RF_PAIR_WINDOW_MS 120000   /* 2 min — relaxed envelope for the manual BOOT-hold dance */
 
 /* ── IRQ ISR (shared sem; task polls both radios) ── */
 static void IRAM_ATTR nrf_irq_isr(void *arg)
