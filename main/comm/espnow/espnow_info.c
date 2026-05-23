@@ -58,6 +58,7 @@ static void on_battery(const uint8_t mac[6], const en_battery_t *b)
 /* ── Half: receives EN_INFO_LAYER from dongle ─────────────────── */
 #if CONFIG_KASE_DEVICE_ROLE_HALF
 #include "eink_lvgl.h"    /* eink_get_task_handle() */
+#include "esp_timer.h"    /* esp_timer_get_time() — for last_status_ms */
 
 static void on_layer(const en_layer_t *l)
 {
@@ -103,6 +104,49 @@ static void on_state(const en_state_t *s)
         xTaskNotify(h, 0x01, eSetBits);
     }
 }
+/* ── Half: receives EN_INFO_STATUS from dongle ────────────────── */
+static void on_status(const en_status_t *st)
+{
+    bool link_left  = (st->flags & (1u << 0)) != 0;
+    bool link_right = (st->flags & (1u << 1)) != 0;
+    bool usb_active = (st->flags & (1u << 2)) != 0;
+
+    bool changed = false;
+
+    /* Update g_half_state under mutex (10 ms timeout, same as on_layer). */
+    if (xSemaphoreTake(g_half_state_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        if (g_half_state.link_left  != link_left  ||
+            g_half_state.link_right != link_right ||
+            g_half_state.usb_active != usb_active ||
+            g_half_state.sig_left   != st->sig_left ||
+            g_half_state.sig_right  != st->sig_right) {
+
+            g_half_state.link_left  = link_left;
+            g_half_state.link_right = link_right;
+            g_half_state.usb_active = usb_active;
+            g_half_state.sig_left   = st->sig_left;
+            g_half_state.sig_right  = st->sig_right;
+            changed = true;
+        }
+        /* Always update last_status_ms — resets the dongle-link timeout
+         * regardless of whether the payload changed (Trap 5). */
+        g_half_state.last_status_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        xSemaphoreGive(g_half_state_mutex);
+    } else {
+        ESP_LOGW(TAG, "on_status: mutex timeout -- update skipped");
+        return;
+    }
+
+    /* Wake eink_lvgl_task — bit 1 = status event (distinct from bit 0 = layer). */
+    if (changed) {
+        TaskHandle_t h = eink_get_task_handle();
+        if (h != NULL) {
+            xTaskNotify(h, 0x02, eSetBits);
+        }
+    }
+    /* If unchanged: last_status_ms was updated (timeout reset) but no notify sent.
+     * No e-ink refresh needed for an identical payload. */
+}
 #endif /* CONFIG_KASE_DEVICE_ROLE_HALF */
 
 /* ── Dispatch: called by espnow_link.c recv callback ─────────── */
@@ -133,6 +177,13 @@ void espnow_info_dispatch(const uint8_t mac[6], const uint8_t *buf, uint8_t len)
         en_state_t s;
         if (en_decode_state(buf, len, &s)) {
             on_state(&s);
+        }
+        break;
+    }
+    case EN_INFO_STATUS: {
+        en_status_t st;
+        if (en_decode_status(buf, len, &st)) {
+            on_status(&st);
         }
         break;
     }

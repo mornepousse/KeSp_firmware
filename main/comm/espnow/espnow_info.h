@@ -23,7 +23,15 @@ typedef struct {
     uint8_t layer_idx;       /* Current active layer index */
     char    layer_name[16];  /* Layer name, zero-padded */
     uint8_t modifiers;       /* HID modifier byte */
-    uint8_t flags;           /* bit0=caps_word, bit1=bt_connected, bit2=usb_active */
+    uint8_t flags;           /* bit0=caps_word, bit1=bt_connected, bit2=usb_active (on_state) */
+
+    /* New: status dashboard fields driven by EN_INFO_STATUS ─────── */
+    bool     link_left;       /* Left half RF link up (set by on_status) */
+    bool     link_right;      /* Right half RF link up */
+    uint8_t  sig_left;        /* 0..4 signal bars, left */
+    uint8_t  sig_right;       /* 0..4 signal bars, right */
+    bool     usb_active;      /* Dongle USB active (tud_ready()) — use for display */
+    uint32_t last_status_ms;  /* esp_timer_get_time()/1000 at last EN_INFO_STATUS recv */
 } half_state_t;
 
 /* Global half state (defined in espnow_info.c, HALF role only).
