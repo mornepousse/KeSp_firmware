@@ -171,6 +171,19 @@ void eink_push(const uint8_t *fb)
 {
     if (!s_present || s_eink_dev == NULL) return;
 
+    /* De-dup: skip the (slow ~1.5 s) refresh if the framebuffer is byte-for-byte
+     * identical to what's already on the panel. Kills redundant refreshes — e.g.
+     * the dongle pushes a layer to BOTH halves' MACs (so each half renders twice),
+     * and the 5 s status push re-renders unchanged labels. Only real visual
+     * changes trigger a panel refresh. */
+    static uint8_t s_last_fb[EINK_FB_SIZE];
+    static bool    s_have_last = false;
+    if (s_have_last && memcmp(fb, s_last_fb, EINK_FB_SIZE) == 0) {
+        return;   /* nothing changed on screen — no refresh */
+    }
+    memcpy(s_last_fb, fb, EINK_FB_SIZE);
+    s_have_last = true;
+
     /* STEP 1: Acquire SPI bus (NRF24 must not be transmitting) */
     half_spi_lock();
 
