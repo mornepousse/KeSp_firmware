@@ -104,6 +104,55 @@ static void test_rf_bitmap_all_positions(void)
     }
 }
 
+static void test_rf_pair_roundtrip(void)
+{
+    /* ── PKT_PAIR_REQ round-trip ──────────────────────────────── */
+    {
+        const uint8_t mac[6] = {0x24,0x6F,0x28,0xAA,0xBB,0xCC};
+        uint8_t buf[7];
+        uint16_t n = rf_encode_pair_req(buf, mac);
+        TEST_ASSERT_EQ(n, 7,                "pair_req: encodes 7 bytes");
+        TEST_ASSERT_EQ(buf[0], 0xF0,        "pair_req: byte0 = 0xF0");
+        TEST_ASSERT_EQ(rf_packet_type(buf,n), PKT_TYPE_PAIR_REQ, "pair_req: type 0xF");
+        uint8_t out[6] = {0};
+        TEST_ASSERT(rf_decode_pair_req(buf, n, out), "pair_req: decode ok");
+        TEST_ASSERT_EQ(memcmp(out, mac, 6), 0,       "pair_req: mac round-trips");
+    }
+
+    /* ── PKT_PAIR_ACK round-trip (big-endian set_id) ──────────── */
+    {
+        rf_pair_ack_t a = { .set_id = 0x1234,
+                            .dongle_wifi_mac = {0x10,0x20,0x30,0x40,0x50,0x60},
+                            .slot = 0x02 };
+        uint8_t buf[10];
+        uint16_t n = rf_encode_pair_ack(buf, &a);
+        TEST_ASSERT_EQ(n, 10,               "pair_ack: encodes 10 bytes");
+        TEST_ASSERT_EQ(buf[0], 0xE0,        "pair_ack: byte0 = 0xE0");
+        TEST_ASSERT_EQ(buf[1], 0x12,        "pair_ack: set_id hi first (BE)");
+        TEST_ASSERT_EQ(buf[2], 0x34,        "pair_ack: set_id lo second");
+        TEST_ASSERT_EQ(buf[9], 0x02,        "pair_ack: slot in byte9");
+        rf_pair_ack_t d;
+        TEST_ASSERT(rf_decode_pair_ack(buf, n, &d), "pair_ack: decode ok");
+        TEST_ASSERT_EQ(d.set_id, 0x1234,    "pair_ack: set_id round-trips");
+        TEST_ASSERT_EQ(d.slot, 0x02,        "pair_ack: slot round-trips");
+        TEST_ASSERT_EQ(memcmp(d.dongle_wifi_mac, a.dongle_wifi_mac, 6), 0,
+                                            "pair_ack: dongle mac round-trips");
+    }
+
+    /* ── Negative: wrong type / short buffer ──────────────────── */
+    {
+        uint8_t bad[10] = {0x10};   /* type 0x1 (KEY), not pair */
+        uint8_t out[6];
+        rf_pair_ack_t d;
+        TEST_ASSERT(!rf_decode_pair_req(bad, 7, out), "pair_req: wrong type rejected");
+        TEST_ASSERT(!rf_decode_pair_ack(bad, 10, &d), "pair_ack: wrong type rejected");
+        uint8_t shortbuf[5] = {0xF0};
+        TEST_ASSERT(!rf_decode_pair_req(shortbuf, 5, out), "pair_req: short buf rejected");
+        uint8_t shortack[9] = {0xE0};
+        TEST_ASSERT(!rf_decode_pair_ack(shortack, 9, &d),  "pair_ack: short buf rejected");
+    }
+}
+
 void test_rf_packet(void)
 {
     TEST_SUITE("RF packet codec");
@@ -113,4 +162,5 @@ void test_rf_packet(void)
     test_rf_trackpad_roundtrip();
     test_rf_decode_rejects();
     test_rf_bitmap_all_positions();
+    test_rf_pair_roundtrip();
 }

@@ -9,6 +9,8 @@
 #define PKT_TYPE_KEY        0x1
 #define PKT_TYPE_HEARTBEAT  0x2
 #define PKT_TYPE_TRACKPAD   0x3
+#define PKT_TYPE_PAIR_ACK   0xE   /* dongle→half pairing ACK (RF-2) */
+#define PKT_TYPE_PAIR_REQ   0xF   /* half→dongle pairing request (RF-2) */
 
 /* Flags (low nibble of byte 0) */
 #define PKT_FLAG_PRESSED    0x01   /* PKT_KEY: key is pressed (vs released) */
@@ -40,6 +42,12 @@ typedef struct {
     int8_t  scroll_v, scroll_h;
     uint8_t seq;
 } rf_trackpad_t;
+
+typedef struct {
+    uint16_t set_id;              /* host order; encoded big-endian on wire */
+    uint8_t  dongle_wifi_mac[6];
+    uint8_t  slot;               /* 0x01=left, 0x02=right */
+} rf_pair_ack_t;
 
 /* ── Encoders: write into buf, return byte count (0 on error) ── */
 
@@ -74,6 +82,25 @@ static inline uint16_t rf_encode_trackpad(uint8_t *buf, const rf_trackpad_t *t)
     buf[5] = (uint8_t)t->scroll_h;
     buf[6] = t->seq;
     return 7;
+}
+
+/* PKT_PAIR_REQ: 7 bytes — type 0xF, then the half's 6-byte WiFi STA MAC. */
+static inline uint16_t rf_encode_pair_req(uint8_t *buf, const uint8_t mac[6])
+{
+    buf[0] = (PKT_TYPE_PAIR_REQ << 4);
+    memcpy(buf + 1, mac, 6);
+    return 7;
+}
+
+/* PKT_PAIR_ACK: 10 bytes — type 0xE, set_id big-endian, dongle MAC, slot. */
+static inline uint16_t rf_encode_pair_ack(uint8_t *buf, const rf_pair_ack_t *a)
+{
+    buf[0] = (PKT_TYPE_PAIR_ACK << 4);
+    buf[1] = (uint8_t)(a->set_id >> 8);
+    buf[2] = (uint8_t)(a->set_id & 0xFF);
+    memcpy(buf + 3, a->dongle_wifi_mac, 6);
+    buf[9] = a->slot;
+    return 10;
 }
 
 /* ── Decoder: returns type (0 on error/unknown), fills the matching struct ── */
@@ -115,6 +142,22 @@ static inline bool rf_decode_trackpad(const uint8_t *buf, uint16_t len, rf_track
     t->scroll_v = (int8_t)buf[4];
     t->scroll_h = (int8_t)buf[5];
     t->seq = buf[6];
+    return true;
+}
+
+static inline bool rf_decode_pair_req(const uint8_t *buf, uint16_t len, uint8_t mac_out[6])
+{
+    if (len < 7 || rf_packet_type(buf, len) != PKT_TYPE_PAIR_REQ) return false;
+    memcpy(mac_out, buf + 1, 6);
+    return true;
+}
+
+static inline bool rf_decode_pair_ack(const uint8_t *buf, uint16_t len, rf_pair_ack_t *a)
+{
+    if (len < 10 || rf_packet_type(buf, len) != PKT_TYPE_PAIR_ACK) return false;
+    a->set_id = ((uint16_t)buf[1] << 8) | buf[2];
+    memcpy(a->dongle_wifi_mac, buf + 3, 6);
+    a->slot = buf[9];
     return true;
 }
 
