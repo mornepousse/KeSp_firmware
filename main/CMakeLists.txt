@@ -113,6 +113,11 @@ if(CONFIG_KASE_HAS_RF_TX)
     endif()
 endif()
 
+# Per-set NRF addressing + pairing (Plan RF-1/RF-2) — dongle (RX) and half (TX)
+if(CONFIG_KASE_HAS_RF_RX OR CONFIG_KASE_HAS_RF_TX)
+    list(APPEND srcs "comm/rf/rf_pairing.c")
+endif()
+
 # Trackpad IQS5xx skeleton — half role only (compiled on both halves; runtime probe)
 if(CONFIG_KASE_HAS_TRACKPAD)
     list(APPEND srcs "periph/trackpad/trackpad.c")
