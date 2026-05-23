@@ -19,6 +19,9 @@
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "matrix_scan.h"
+#if CONFIG_KASE_HAS_RF_RX
+#include "rf_rx_task.h"   /* rf_rx_pair_start */
+#endif
 
 /* ── System ─────────────────────────────────────────────────────── */
 
@@ -983,6 +986,24 @@ static void bin_cmd_nvs_reset(uint8_t cmd, const uint8_t *p, uint16_t l)
     esp_restart();
 }
 
+#if CONFIG_KASE_HAS_RF_RX
+/* RF_PAIR_START: payload [reset:u8]. Opens a 30 s pairing window asynchronously
+ * (the exchange runs in rf_rx_task). Responds immediately with
+ * [set_id_hi, set_id_lo, paired_count]. */
+static void bin_cmd_rf_pair_start(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    uint8_t reset = (l >= 1) ? p[0] : 0;
+    uint16_t set_id = 0;
+    uint8_t  paired_count = 0;
+    if (!rf_rx_pair_start(reset, &set_id, &paired_count)) {
+        ks_respond_err(cmd, KS_STATUS_ERR_BUSY);
+        return;
+    }
+    uint8_t resp[3] = { (uint8_t)(set_id >> 8), (uint8_t)(set_id & 0xFF), paired_count };
+    ks_respond(cmd, KS_STATUS_OK, resp, sizeof(resp));
+}
+#endif /* CONFIG_KASE_HAS_RF_RX */
+
 /* ── Command table ──────────────────────────────────────────────── */
 
 static const ks_bin_cmd_entry_t bin_cmd_table[] = {
@@ -1053,6 +1074,9 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     /* Diagnostics */
     { KS_CMD_MATRIX_TEST,       bin_cmd_matrix_test },
     { KS_CMD_NVS_RESET,         bin_cmd_nvs_reset },
+#if CONFIG_KASE_HAS_RF_RX
+    { KS_CMD_RF_PAIR_START,     bin_cmd_rf_pair_start },
+#endif
     /* OTA */
     { KS_CMD_OTA_START,         bin_cmd_ota_start },
     { KS_CMD_OTA_DATA,          bin_cmd_ota_data },

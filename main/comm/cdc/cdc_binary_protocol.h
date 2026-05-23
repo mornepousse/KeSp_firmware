@@ -102,6 +102,7 @@ typedef enum {
     /* Diagnostics (0xB0-0xBF) */
     KS_CMD_MATRIX_TEST      = 0xB0,
     KS_CMD_NVS_RESET        = 0xB1,
+    KS_CMD_RF_PAIR_START    = 0xB2,
 
     /* OTA (0xF0-0xFF) */
     KS_CMD_OTA_START        = 0xF0,
