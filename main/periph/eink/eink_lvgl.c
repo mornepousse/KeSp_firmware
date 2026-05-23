@@ -16,15 +16,12 @@
  *   - Tick: esp_timer 5 ms → lv_tick_inc(5).
  *   - Handler: eink_lvgl_task (lv_timer_handler loop, prio 3, core 0).
  *
- * Dashboard layout (200×200, 1bpp monochrome):
- *   y=  8   LAYER NAME  (Montserrat 28, centered, bold visual anchor)
- *   y= 50   separator line
- *   y= 62   L * [||||]  (Montserrat 14, left-padded)
- *   y= 80   R * [||||]
- *   y= 98   USB *
- *   y=116   BAT --%     (placeholder, ADC not yet implemented)
- *   y=134   separator line
- *   y=148   version     (Montserrat 14, centered, tag-only: "v3.7.12")
+ * Dashboard layout (200×200, 1bpp) — fastfetch style, monospace unscii_8:
+ *   left ~44 px : keyboard icon (drawn with LVGL primitives, no asset)
+ *   right x=48  : kase@dongle / sep / lay / L / R / usb / set / net / mem /
+ *                 flash / soc / fw  (key:value, 12 px pitch)
+ *   Dynamic lines (lay/L/R/usb/mem) updated by eink_lvgl_task; the rest are
+ *   static local stats gathered once at init. Battery = "--%" until ADC lands.
  *
  * Why set_px_cb, not direct draw buffer packing:
  *   At LV_COLOR_DEPTH=1, sizeof(lv_color_t)==1 (1 byte per pixel in the draw
@@ -42,11 +39,19 @@
 #include "lvgl.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"     /* esp_get_free_heap_size */
 #include "esp_app_desc.h"   /* esp_app_get_description() */
+#include "esp_chip_info.h"  /* esp_chip_info — SoC model + cores */
+#include "esp_flash.h"      /* esp_flash_get_size — chip flash size */
+#include "esp_partition.h"  /* esp_partition iteration — flash footprint */
+#include "driver/temperature_sensor.h"  /* CPU temp */
+#include "rf_pairing.h"     /* rf_pairing_load_set_id_half, rf_derive_wifi_ch */
+#include "board.h"          /* BOARD_NRF_ADDR_SUFFIX (this half's slot fallback) */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include <string.h>
+#include <stdio.h>
 
 static const char *TAG = "eink_lvgl";
 
@@ -80,10 +85,13 @@ static lv_obj_t *s_label_layer = NULL;
 /* ── Status dashboard labels ────────────────────────────────────
  * All use Montserrat 14 (default font). Initialized in eink_lvgl_init().
  * Updated on bit-1 notify or timeout. Separators are static lv_line objects. */
-static lv_obj_t *s_label_link_l   = NULL;   /* "L * [||||]" */
-static lv_obj_t *s_label_link_r   = NULL;   /* "R * [||||]" */
-static lv_obj_t *s_label_usb      = NULL;   /* "USB *"       */
-static lv_obj_t *s_label_bat      = NULL;   /* "BAT --%"  (placeholder) */
+static lv_obj_t *s_label_link_l   = NULL;   /* "L   : 248/255 --%" */
+static lv_obj_t *s_label_link_r   = NULL;   /* "R   : 250/255 --%" */
+static lv_obj_t *s_label_usb      = NULL;   /* "usb : on"          */
+static lv_obj_t *s_label_mem      = NULL;   /* "mem : 207K 42C" (heap + CPU temp) */
+
+/* CPU temperature sensor (installed in eink_lvgl_init, read in the task). */
+static temperature_sensor_handle_t s_tsens = NULL;
 
 /* Tracks whether the task is currently showing the "dongle lost" degraded view.
  * Guards against re-invalidating every 50 ms loop iteration when the dongle is
@@ -206,24 +214,87 @@ static void eink_lvgl_flush_cb(lv_disp_drv_t *drv,
     lv_disp_flush_ready(drv);
 }
 
-/*
- * build_link_label() — format a link-line string into buf (min 16 bytes).
- * side: 'L' or 'R'. q255 = raw 0..255 link quality (rf_signal_q255), 0 = down.
- * Output: "L  235/255" (link up) / "L  0/255" (down) / "L  --/255" (dongle absent).
- */
+/* ── Fastfetch info-line formatters (unscii_8 monospace, ~19 cols) ──────────
+ * Battery is a placeholder "--%" until the ADC feature lands (L+R slots reserved). */
+
+/* build_link_label() — "L   : 248/255 --%" (up) / "L   : --/255 --%" (dongle absent).
+ * side: 'L'/'R'. q255: raw 0..255 link quality (0 = link down). buf >= 20 bytes. */
 static void build_link_label(char *buf, char side, bool dongle_alive, uint8_t q255)
 {
-    if (!dongle_alive) snprintf(buf, 16, "%c  --/255", side);
-    else               snprintf(buf, 16, "%c  %u/255", side, (unsigned)q255);
+    if (!dongle_alive) snprintf(buf, 20, "%c   : --/255 --%%", side);
+    else               snprintf(buf, 20, "%c   : %u/255 --%%", side, (unsigned)q255);
 }
 
-/*
- * build_usb_label() — format the USB status line into buf (min 10 bytes).
- */
+/* build_usb_label() — "usb : on" / "off" / "?". buf >= 12 bytes. */
 static void build_usb_label(char *buf, bool dongle_alive, bool usb_active)
 {
     const char *s = dongle_alive ? (usb_active ? "on" : "off") : "?";
-    snprintf(buf, 10, "USB %s", s);
+    snprintf(buf, 12, "usb : %s", s);
+}
+
+/* build_mem_label() — "mem : 207K 42C" (heap free + CPU temp).
+ * Quantized: heap to nearest 8 KB, temp to integer °C → text rarely changes →
+ * e-ink rarely repaints. temp_c may be INT16_MIN if the sensor read failed. */
+static void build_mem_label(char *buf, uint32_t heap_free, int temp_c)
+{
+    uint32_t k8 = ((heap_free / 1024u) / 8u) * 8u;   /* nearest 8 KB (floor) */
+    if (temp_c > -100 && temp_c < 200)
+        snprintf(buf, 20, "mem : %luK %dC", (unsigned long)k8, temp_c);
+    else
+        snprintf(buf, 20, "mem : %luK --C", (unsigned long)k8);
+}
+
+/* ── draw_keyboard_icon() — small keyboard glyph drawn with LVGL primitives ──
+ * Body rounded rect (black border) + a 3×2 grid of filled keys + a spacebar.
+ * Crisp at 1bpp, no bitmap asset. Placed at (x,y); ~40×30 px. */
+static void draw_keyboard_icon(lv_obj_t *parent, int x, int y)
+{
+    lv_obj_t *body = lv_obj_create(parent);
+    lv_obj_set_size(body, 42, 30);
+    lv_obj_set_pos(body, x, y);
+    lv_obj_set_style_bg_color(body, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(body, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_color(body, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_width(body, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(body, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(body, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* 3 columns × 2 rows of keys (6×6 px), then a spacebar. */
+    for (int row = 0; row < 2; row++) {
+        for (int col = 0; col < 3; col++) {
+            lv_obj_t *key = lv_obj_create(body);
+            lv_obj_set_size(key, 7, 6);
+            lv_obj_set_pos(key, 5 + col * 11, 4 + row * 8);
+            lv_obj_set_style_bg_color(key, lv_color_black(), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(key, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_border_width(key, 0, LV_PART_MAIN);
+            lv_obj_set_style_radius(key, 1, LV_PART_MAIN);
+            lv_obj_set_style_pad_all(key, 0, LV_PART_MAIN);
+            lv_obj_clear_flag(key, LV_OBJ_FLAG_SCROLLABLE);
+        }
+    }
+    /* Spacebar */
+    lv_obj_t *space = lv_obj_create(body);
+    lv_obj_set_size(space, 24, 4);
+    lv_obj_set_pos(space, 7, 20);
+    lv_obj_set_style_bg_color(space, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(space, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(space, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(space, 1, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(space, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(space, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+/* make_line() — create a left-aligned unscii_8 (monospace) black label at (x,y). */
+static lv_obj_t *make_line(lv_obj_t *scr, int x, int y, const char *text)
+{
+    lv_obj_t *l = lv_label_create(scr);
+    lv_label_set_text(l, text);
+    lv_obj_set_style_text_color(l, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(l, &lv_font_unscii_8, LV_PART_MAIN);
+    lv_obj_set_pos(l, x, y);
+    return l;
 }
 
 /* ── render_paired_splash() — one-shot "PAIRED" confirmation screen ──
@@ -306,7 +377,9 @@ static void eink_lvgl_task(void *arg)
             if (name_copy[0] == '\0') memcpy(name_copy, "KaSe", 5);
 
             if (s_label_layer != NULL && lv_obj_is_valid(s_label_layer)) {
-                lv_label_set_text(s_label_layer, name_copy);
+                char laybuf[24];
+                snprintf(laybuf, sizeof(laybuf), "lay : %s", name_copy);
+                lv_label_set_text(s_label_layer, laybuf);
                 lv_obj_invalidate(s_label_layer);
                 ESP_LOGI(TAG, "eink: layer -> '%s'", name_copy);
             }
@@ -354,10 +427,18 @@ static void eink_lvgl_task(void *arg)
 
         /* ── Update status labels if needed ───────────────────────── */
         if (update_status) {
-            char lbuf[16], rbuf[16], ubuf[10];
+            char lbuf[20], rbuf[20], ubuf[12], mbuf[20];
             build_link_label(lbuf, 'L', dongle_alive, sig_left);
             build_link_label(rbuf, 'R', dongle_alive, sig_right);
             build_usb_label(ubuf, dongle_alive, usb_active);
+
+            /* mem line: heap free + CPU temp (quantized in build_mem_label). */
+            int temp_c = INT16_MIN;
+            if (s_tsens != NULL) {
+                float t = 0.0f;
+                if (temperature_sensor_get_celsius(s_tsens, &t) == ESP_OK) temp_c = (int)t;
+            }
+            build_mem_label(mbuf, (uint32_t)esp_get_free_heap_size(), temp_c);
 
             if (s_label_link_l != NULL && lv_obj_is_valid(s_label_link_l)) {
                 lv_label_set_text(s_label_link_l, lbuf);
@@ -371,9 +452,12 @@ static void eink_lvgl_task(void *arg)
                 lv_label_set_text(s_label_usb, ubuf);
                 lv_obj_invalidate(s_label_usb);
             }
-            /* s_label_bat is static "--" until ADC is implemented; no update needed */
-            ESP_LOGI(TAG, "eink: status -> %s  %s  %s (alive=%d)",
-                     lbuf, rbuf, ubuf, dongle_alive);
+            if (s_label_mem != NULL && lv_obj_is_valid(s_label_mem)) {
+                lv_label_set_text(s_label_mem, mbuf);
+                lv_obj_invalidate(s_label_mem);
+            }
+            ESP_LOGI(TAG, "eink: status -> %s  %s  %s  %s (alive=%d)",
+                     lbuf, rbuf, ubuf, mbuf, dongle_alive);
         }
 
         /* Stack headroom check — log once */
@@ -436,114 +520,75 @@ void eink_lvgl_init(void)
     ESP_ERROR_CHECK(esp_timer_create(&tick_args, &s_tick_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(s_tick_timer, 5 * 1000));   /* µs */
 
-    /* ── Full-screen status dashboard ──────────────────────────────
-     * Layout (200×200 px, all coords absolute, top-left origin):
-     *
-     *   y=  8  LAYER NAME  — Montserrat 28, centered (visual anchor)
-     *   y= 48  separator   — "--------------------" Montserrat 14, centered
-     *   y= 62  L link line — "L * [||||]"  Montserrat 14, left-padded x=16
-     *   y= 80  R link line — "R * [||||]"  Montserrat 14, left-padded x=16
-     *   y= 98  USB line    — "USB *"        Montserrat 14, left-padded x=16
-     *   y=116  BAT line    — "BAT --%"      Montserrat 14, left-padded x=16
-     *   y=134  separator   — "--------------------" Montserrat 14, centered
-     *   y=150  version     — "vX.Y.Z" (tag only), Montserrat 14, centered
-     *
-     * Fonts: Montserrat 28 (layer) + Montserrat 14 (everything else).
-     * Both are enabled in sdkconfig (CONFIG_LV_FONT_MONTSERRAT_28=y,
-     * CONFIG_LV_FONT_MONTSERRAT_14=y).
-     *
-     * Created here so LVGL renders on the first lv_timer_handler() call.
-     * Static labels invalidate once at creation; dynamic labels (layer,
-     * link_l, link_r, usb) are invalidated explicitly by eink_lvgl_task. */
-    lv_obj_t *scr = lv_scr_act();
+    /* ── CPU temperature sensor (best-effort) ─────────────────────── */
+    temperature_sensor_config_t tcfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+    if (temperature_sensor_install(&tcfg, &s_tsens) == ESP_OK) {
+        temperature_sensor_enable(s_tsens);
+    } else {
+        s_tsens = NULL;
+    }
 
-    /* White background → s_fb byte = 0xFF (all bits set) via set_px_cb.
-     * lv_color_white() has .full == 1 at LV_COLOR_DEPTH=1 → bit set = white. */
+    /* ── Fastfetch-style dashboard (200×200, monospace unscii_8) ────
+     * Left ~44 px: keyboard icon (drawn). Right column x=48: info lines.
+     * Static lines (set/net/flash/soc/fw + header/sep) drawn once here;
+     * dynamic lines (lay/L/R/usb/mem) updated by eink_lvgl_task. */
+    lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
 
-    /* ── Layer name (Montserrat 28, centered) ───────────────────────
-     * Prominent visual anchor at y=8. Initial "KaSe" shown until first
-     * EN_INFO_LAYER packet. Updated by eink_lvgl_task on bit-0 notify. */
-    s_label_layer = lv_label_create(scr);
-    lv_label_set_text(s_label_layer, "KaSe");
-    lv_obj_set_style_text_color(s_label_layer, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_font(s_label_layer, &lv_font_montserrat_28, LV_PART_MAIN);
-    /* Stretch to full width so lv_obj_align centers the text within the screen */
-    lv_obj_set_width(s_label_layer, EINK_WIDTH);
-    lv_obj_set_style_text_align(s_label_layer, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_pos(s_label_layer, 0, 8);
+    /* ── Gather local stats (all static after boot) ──────────────── */
+    uint8_t  slot   = BOARD_NRF_ADDR_SUFFIX;
+    uint16_t set_id = rf_pairing_load_set_id_half(BOARD_NRF_ADDR_SUFFIX, &slot);
+    uint8_t  wifi_ch  = (set_id == 0) ? 6 : rf_derive_wifi_ch(set_id);
+    uint8_t  nrf_base = (uint8_t)(80 + 2 * (set_id % 20));   /* L=base, R=base+1 */
 
-    /* ── Top separator (static, Montserrat 14) ──────────────────────
-     * 20 dashes spans ~160 px at 8 px/char — leaves comfortable margins. */
-    lv_obj_t *sep_top = lv_label_create(scr);
-    lv_label_set_text(sep_top, "--------------------");
-    lv_obj_set_style_text_color(sep_top, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_width(sep_top, EINK_WIDTH);
-    lv_obj_set_style_text_align(sep_top, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_pos(sep_top, 0, 48);
+    esp_chip_info_t chip;  esp_chip_info(&chip);
 
-    /* ── L link + signal (Montserrat 14, left-padded) ────────────── */
-    s_label_link_l = lv_label_create(scr);
-    lv_label_set_text(s_label_link_l, "L - [....]");
-    lv_obj_set_style_text_color(s_label_link_l, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(s_label_link_l, 16, 62);
+    uint32_t flash_size = 0;  esp_flash_get_size(NULL, &flash_size);
+    uint32_t flash_used = 0;
+    esp_partition_iterator_t pit = esp_partition_find(ESP_PARTITION_TYPE_ANY,
+                                                      ESP_PARTITION_SUBTYPE_ANY, NULL);
+    while (pit) {
+        const esp_partition_t *p = esp_partition_get(pit);
+        uint32_t end = p->address + p->size;
+        if (end > flash_used) flash_used = end;
+        pit = esp_partition_next(pit);
+    }
+    esp_partition_iterator_release(pit);
 
-    /* ── R link + signal (Montserrat 14, left-padded) ────────────── */
-    s_label_link_r = lv_label_create(scr);
-    lv_label_set_text(s_label_link_r, "R - [....]");
-    lv_obj_set_style_text_color(s_label_link_r, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(s_label_link_r, 16, 80);
-
-    /* ── USB status (Montserrat 14, left-padded) ─────────────────── */
-    s_label_usb = lv_label_create(scr);
-    lv_label_set_text(s_label_usb, "USB -");
-    lv_obj_set_style_text_color(s_label_usb, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(s_label_usb, 16, 98);
-
-    /* ── Battery (Montserrat 14, left-padded) — PLACEHOLDER ─────────
-     * ADC not yet implemented. Shows "BAT --%" until batt_pct is wired up.
-     * When ADC is ready: lv_label_set_text_fmt(s_label_bat, "BAT %3u%%", pct). */
-    s_label_bat = lv_label_create(scr);
-    lv_label_set_text(s_label_bat, "BAT --%");
-    lv_obj_set_style_text_color(s_label_bat, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(s_label_bat, 16, 116);
-
-    /* ── Bottom separator (static, Montserrat 14) ───────────────────*/
-    lv_obj_t *sep_bot = lv_label_create(scr);
-    lv_label_set_text(sep_bot, "--------------------");
-    lv_obj_set_style_text_color(sep_bot, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_width(sep_bot, EINK_WIDTH);
-    lv_obj_set_style_text_align(sep_bot, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_pos(sep_bot, 0, 134);
-
-    /* ── Firmware version (Montserrat 14, centered, tag-only) ───────
-     * Full git-describe string ("v3.7.12-87-gdc47652-dirty") overflows the
-     * 200 px screen at 14 px font (~8 px/char × 26 chars ≈ 208 px).
-     * Truncate to the version tag only: stop at the first '-' after "v".
-     *
-     * esp_app_desc_t.version is app_version from CMakeLists / git describe.
-     * It is NUL-terminated and at most 32 chars (IDF_VER_MAX_LEN). */
     const esp_app_desc_t *desc = esp_app_get_description();
-    char ver_short[32];
+    char ver_short[24];
     strncpy(ver_short, desc->version, sizeof(ver_short) - 1);
     ver_short[sizeof(ver_short) - 1] = '\0';
-    /* Find the second hyphen (first '-' after the 'v' prefix + digits).
-     * "v3.7.12-87-gdc47652-dirty" → stop after "v3.7.12". */
-    char *p = ver_short;
-    if (*p == 'v') p++;                  /* skip leading 'v' — stays in place */
-    while (*p && *p != '-') p++;         /* skip digits/dots to first '-' */
-    *p = '\0';                           /* truncate: "v3.7.12-87-g..." → "v3.7.12" */
+    { char *p = ver_short; if (*p == 'v') p++; while (*p && *p != '-') p++; *p = '\0'; }
 
-    lv_obj_t *label_ver = lv_label_create(scr);
-    lv_label_set_text(label_ver, ver_short);
-    lv_obj_set_style_text_color(label_ver, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_width(label_ver, EINK_WIDTH);
-    lv_obj_set_style_text_align(label_ver, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_pos(label_ver, 0, 150);
+    /* ── Keyboard icon (left column, vertically centered) ─────────── */
+    draw_keyboard_icon(scr, 2, 78);
 
-    ESP_LOGI(TAG, "eink dashboard created: layer=Montserrat28 status=Montserrat14");
-    ESP_LOGI(TAG, "firmware version display: '%s' (full: '%s')", ver_short, desc->version);
+    /* ── Info column (x=48, unscii_8, 12 px pitch) ────────────────── */
+    const int X = 48;
+    make_line(scr, X,   2, "kase@dongle");
+    make_line(scr, X,  14, "-------------------");
+    s_label_layer  = make_line(scr, X,  26, "lay : KaSe");
+    s_label_link_l = make_line(scr, X,  38, "L   : --/255 --%");
+    s_label_link_r = make_line(scr, X,  50, "R   : --/255 --%");
+    s_label_usb    = make_line(scr, X,  62, "usb : ?");
+    char b[40];
+    snprintf(b, sizeof(b), "set : 0x%04X", set_id);              make_line(scr, X, 74, b);
+    snprintf(b, sizeof(b), "net : ch%u %u/%u", wifi_ch, nrf_base, nrf_base + 1);
+    make_line(scr, X, 86, b);
+    s_label_mem    = make_line(scr, X,  98, "mem : --K --C");
+    snprintf(b, sizeof(b), "fls : %luM %luM",
+             (unsigned long)(flash_size / (1024UL * 1024UL)),
+             (unsigned long)((flash_used + 1024UL * 1024UL - 1) / (1024UL * 1024UL)));
+    make_line(scr, X, 110, b);
+    snprintf(b, sizeof(b), "soc : ESP32-S3 x%d", chip.cores);    make_line(scr, X, 122, b);
+    snprintf(b, sizeof(b), "fw  : %s", ver_short);               make_line(scr, X, 134, b);
+
+    ESP_LOGI(TAG, "eink fastfetch dashboard: set=0x%04X wifi_ch=%u nrf=%u/%u flash=%luM/%luM fw=%s",
+             set_id, wifi_ch, nrf_base, nrf_base + 1,
+             (unsigned long)(flash_size / (1024UL*1024UL)),
+             (unsigned long)((flash_used + 1024UL*1024UL - 1) / (1024UL*1024UL)), ver_short);
 }
 
 void eink_lvgl_start(void)

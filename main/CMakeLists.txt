@@ -158,6 +158,8 @@ set(priv_requires
                 # config (CONFIG unknown on first pass) and nothing else pulls it transitively
                 # → BT_* Kconfig symbols unknown + esp_bt_defs.h missing. Same fix as esp_wifi.
                 # Harmless on dongle/half (BT disabled in their sdkconfig → compiles to ~nothing).
+    esp_driver_tsens  # CPU temperature sensor — fastfetch e-ink dashboard (half)
+    spi_flash         # esp_flash_get_size / esp_partition_* — dashboard flash stats
 )
 
 if(CONFIG_KASE_HAS_DISPLAY)
