@@ -244,47 +244,19 @@ static void build_mem_label(char *buf, uint32_t heap_free, int temp_c)
         snprintf(buf, 20, "mem : %luK --C", (unsigned long)k8);
 }
 
-/* ── draw_keyboard_icon() — small keyboard glyph drawn with LVGL primitives ──
- * Body rounded rect (black border) + a 3×2 grid of filled keys + a spacebar.
- * Crisp at 1bpp, no bitmap asset. Placed at (x,y); ~40×30 px. */
-static void draw_keyboard_icon(lv_obj_t *parent, int x, int y)
-{
-    lv_obj_t *body = lv_obj_create(parent);
-    lv_obj_set_size(body, 42, 30);
-    lv_obj_set_pos(body, x, y);
-    lv_obj_set_style_bg_color(body, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(body, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(body, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_border_width(body, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(body, 4, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(body, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* 3 columns × 2 rows of keys (6×6 px), then a spacebar. */
-    for (int row = 0; row < 2; row++) {
-        for (int col = 0; col < 3; col++) {
-            lv_obj_t *key = lv_obj_create(body);
-            lv_obj_set_size(key, 7, 6);
-            lv_obj_set_pos(key, 5 + col * 11, 4 + row * 8);
-            lv_obj_set_style_bg_color(key, lv_color_black(), LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(key, LV_OPA_COVER, LV_PART_MAIN);
-            lv_obj_set_style_border_width(key, 0, LV_PART_MAIN);
-            lv_obj_set_style_radius(key, 1, LV_PART_MAIN);
-            lv_obj_set_style_pad_all(key, 0, LV_PART_MAIN);
-            lv_obj_clear_flag(key, LV_OBJ_FLAG_SCROLLABLE);
-        }
-    }
-    /* Spacebar */
-    lv_obj_t *space = lv_obj_create(body);
-    lv_obj_set_size(space, 24, 4);
-    lv_obj_set_pos(space, 7, 20);
-    lv_obj_set_style_bg_color(space, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(space, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(space, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(space, 1, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(space, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(space, LV_OBJ_FLAG_SCROLLABLE);
-}
+/* ── Penguin mascot — cycles one pose per refresh ───────────────────────────
+ * 4 poses, ALL the same 5-line bounding box: the body (.--., / || \, ^  ^) is
+ * fixed, only the eyes (blink/wide) and flippers move, so the penguin animates
+ * IN PLACE without shifting. Pure ASCII (unscii_8 has full ASCII coverage). */
+static const char *const s_penguins[] = {
+    " .--.\n(o..o)\n(>  <)\n/ || \\\n ^  ^",   /* idle           */
+    " .--.\n(-..-)\n(>  <)\n/ || \\\n ^  ^",   /* blink          */
+    " .--.\n(o..o)\n( >< )\n/ || \\\n ^  ^",   /* flippers in    */
+    " .--.\n(O..O)\n(<  >)\n/ || \\\n ^  ^",   /* wide, flap out */
+};
+#define PENGUIN_COUNT (sizeof(s_penguins) / sizeof(s_penguins[0]))
+static lv_obj_t *s_label_penguin = NULL;
+static uint8_t   s_penguin_idx   = 0;
 
 /* make_line() — create a left-aligned unscii_8 (monospace) black label at (x,y). */
 static lv_obj_t *make_line(lv_obj_t *scr, int x, int y, const char *text)
@@ -456,8 +428,14 @@ static void eink_lvgl_task(void *arg)
                 lv_label_set_text(s_label_mem, mbuf);
                 lv_obj_invalidate(s_label_mem);
             }
-            ESP_LOGI(TAG, "eink: status -> %s  %s  %s  %s (alive=%d)",
-                     lbuf, rbuf, ubuf, mbuf, dongle_alive);
+            /* Cycle the penguin one pose per refresh (animates in place). */
+            if (s_label_penguin != NULL && lv_obj_is_valid(s_label_penguin)) {
+                s_penguin_idx = (uint8_t)((s_penguin_idx + 1) % PENGUIN_COUNT);
+                lv_label_set_text(s_label_penguin, s_penguins[s_penguin_idx]);
+                lv_obj_invalidate(s_label_penguin);
+            }
+            ESP_LOGI(TAG, "eink: status -> %s  %s  %s  %s peng=%u (alive=%d)",
+                     lbuf, rbuf, ubuf, mbuf, (unsigned)s_penguin_idx, dongle_alive);
         }
 
         /* Stack headroom check — log once */
@@ -562,28 +540,31 @@ void eink_lvgl_init(void)
     ver_short[sizeof(ver_short) - 1] = '\0';
     { char *p = ver_short; if (*p == 'v') p++; while (*p && *p != '-') p++; *p = '\0'; }
 
-    /* ── Keyboard icon (left column, vertically centered) ─────────── */
-    draw_keyboard_icon(scr, 2, 78);
+    /* ── Penguin mascot (left column, beside the L/R/usb rows). Cycles a
+     *    pose per refresh via eink_lvgl_task. */
+    s_label_penguin = make_line(scr, 2, 60, s_penguins[0]);
 
-    /* ── Info column (x=48, unscii_8, 12 px pitch) ────────────────── */
-    const int X = 48;
-    make_line(scr, X,   2, "kase@dongle");
-    make_line(scr, X,  14, "-------------------");
-    s_label_layer  = make_line(scr, X,  26, "lay : KaSe");
-    s_label_link_l = make_line(scr, X,  38, "L   : --/255 --%");
-    s_label_link_r = make_line(scr, X,  50, "R   : --/255 --%");
-    s_label_usb    = make_line(scr, X,  62, "usb : ?");
+    /* ── Info column (x=52, unscii_8, 16 px pitch → fills the height) ──
+     * Keys padded to align the colons. Static lines drawn once; dynamic
+     * lines (lay/L/R/usb/mem) updated by eink_lvgl_task. */
+    const int X = 52;
+    make_line(scr, X,   4, "kase@dongle");
+    make_line(scr, X,  20, "-----------------");
+    s_label_layer  = make_line(scr, X,  36, "lay : KaSe");
+    s_label_link_l = make_line(scr, X,  52, "L   : --/255 --%");
+    s_label_link_r = make_line(scr, X,  68, "R   : --/255 --%");
+    s_label_usb    = make_line(scr, X,  84, "usb : ?");
     char b[40];
-    snprintf(b, sizeof(b), "set : 0x%04X", set_id);              make_line(scr, X, 74, b);
+    snprintf(b, sizeof(b), "set : 0x%04X", set_id);              make_line(scr, X, 100, b);
     snprintf(b, sizeof(b), "net : ch%u %u/%u", wifi_ch, nrf_base, nrf_base + 1);
-    make_line(scr, X, 86, b);
-    s_label_mem    = make_line(scr, X,  98, "mem : --K --C");
+    make_line(scr, X, 116, b);
+    s_label_mem    = make_line(scr, X, 132, "mem : --K --C");
     snprintf(b, sizeof(b), "fls : %luM %luM",
              (unsigned long)(flash_size / (1024UL * 1024UL)),
              (unsigned long)((flash_used + 1024UL * 1024UL - 1) / (1024UL * 1024UL)));
-    make_line(scr, X, 110, b);
-    snprintf(b, sizeof(b), "soc : ESP32-S3 x%d", chip.cores);    make_line(scr, X, 122, b);
-    snprintf(b, sizeof(b), "fw  : %s", ver_short);               make_line(scr, X, 134, b);
+    make_line(scr, X, 148, b);
+    snprintf(b, sizeof(b), "soc : ESP32-S3 x%d", chip.cores);    make_line(scr, X, 164, b);
+    snprintf(b, sizeof(b), "fw  : %s", ver_short);               make_line(scr, X, 180, b);
 
     ESP_LOGI(TAG, "eink fastfetch dashboard: set=0x%04X wifi_ch=%u nrf=%u/%u flash=%luM/%luM fw=%s",
              set_id, wifi_ch, nrf_base, nrf_base + 1,
