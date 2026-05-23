@@ -50,8 +50,40 @@ uint8_t rf_derive_wifi_ch(uint16_t set_id)
     return wifi_chans[set_id % 3];
 }
 
+/* ── Pure: positional slot assignment ──────────────────────────── */
+bool rf_pairing_assign_slot(uint8_t paired_count, uint8_t *slot_out)
+{
+    if (paired_count == 0) { *slot_out = 0x01; return true; }
+    if (paired_count == 1) { *slot_out = 0x02; return true; }
+    return false;   /* window full */
+}
+
+/* ── Pure: dedup against already-stored peers ──────────────────── */
+static bool mac_is_zero(const uint8_t m[6])
+{
+    for (int i = 0; i < 6; i++) if (m[i] != 0) return false;
+    return true;
+}
+
+bool rf_pairing_match_slot(const uint8_t mac[6],
+                           const uint8_t mac_left[6], const uint8_t mac_right[6],
+                           uint8_t *slot_out)
+{
+    int i;
+    if (!mac_is_zero(mac_left)) {
+        for (i = 0; i < 6 && mac[i] == mac_left[i]; i++) {}
+        if (i == 6) { *slot_out = 0x01; return true; }
+    }
+    if (!mac_is_zero(mac_right)) {
+        for (i = 0; i < 6 && mac[i] == mac_right[i]; i++) {}
+        if (i == 6) { *slot_out = 0x02; return true; }
+    }
+    return false;
+}
+
 #ifndef TEST_HOST
 
+#include <string.h>      /* memset */
 #include "esp_mac.h"     /* esp_read_mac, ESP_MAC_WIFI_STA */
 #include "nvs.h"
 #include "esp_log.h"
@@ -129,6 +161,63 @@ uint16_t rf_pairing_load_set_id_half(uint8_t fallback_slot, uint8_t *slot_out)
     nvs_close(h);
     ESP_LOGI(TAG, "set_id=0x%04X slot=0x%02X", set_id, *slot_out);
     return set_id;
+}
+
+esp_err_t rf_pairing_save_peer_dongle(uint8_t slot, const uint8_t mac[6],
+                                      uint8_t new_paired_count)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(RF_STORAGE_NAMESPACE, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    const char *key = (slot == 0x01) ? "mac_left" : "mac_right";
+    e = nvs_set_blob(h, key, mac, 6);
+    if (e == ESP_OK) e = nvs_set_u8(h, "paired_count", new_paired_count);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "saved %s, paired_count=%u (err=%d)", key, new_paired_count, e);
+    return e;
+}
+
+esp_err_t rf_pairing_reset_dongle(void)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(RF_STORAGE_NAMESPACE, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    nvs_erase_key(h, "mac_left");    /* ESP_ERR_NVS_NOT_FOUND is harmless */
+    nvs_erase_key(h, "mac_right");
+    nvs_set_u8(h, "paired_count", 0);
+    e = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "pairing reset (mac_left/right cleared, paired_count=0)");
+    return e;
+}
+
+void rf_pairing_load_peers_dongle(uint8_t mac_left[6], uint8_t mac_right[6],
+                                  uint8_t *paired_count)
+{
+    memset(mac_left, 0, 6);
+    memset(mac_right, 0, 6);
+    *paired_count = 0;
+    nvs_handle_t h;
+    if (nvs_open(RF_STORAGE_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;
+    size_t sz = 6; nvs_get_blob(h, "mac_left",  mac_left,  &sz);
+    sz = 6;        nvs_get_blob(h, "mac_right", mac_right, &sz);
+    nvs_get_u8(h, "paired_count", paired_count);
+    nvs_close(h);
+}
+
+esp_err_t rf_pairing_save_half(uint16_t set_id, uint8_t slot, const uint8_t mac_dongle[6])
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(RF_STORAGE_NAMESPACE, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_u16(h, "set_id", set_id);
+    if (e == ESP_OK) e = nvs_set_u8(h, "slot", slot);
+    if (e == ESP_OK) e = nvs_set_blob(h, "mac_dongle", mac_dongle, 6);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "half saved set_id=0x%04X slot=0x%02X (err=%d)", set_id, slot, e);
+    return e;
 }
 
 #endif /* TEST_HOST */

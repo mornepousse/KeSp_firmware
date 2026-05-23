@@ -106,4 +106,27 @@ void test_rf_pairing(void)
     uint16_t a = crc16_ccitt(mac, 6);
     uint16_t b = crc16_ccitt(mac, 6);
     TEST_ASSERT_EQ(a, b,               "crc16: deterministic for same MAC");
+
+    /* ── Slot assignment (positional) ─────────────────────────── */
+    uint8_t aslot;
+    TEST_ASSERT(rf_pairing_assign_slot(0, &aslot),  "assign: count0 → ok");
+    TEST_ASSERT_EQ(aslot, 0x01,                     "assign: count0 → slot 0x01");
+    TEST_ASSERT(rf_pairing_assign_slot(1, &aslot),  "assign: count1 → ok");
+    TEST_ASSERT_EQ(aslot, 0x02,                     "assign: count1 → slot 0x02");
+    TEST_ASSERT(!rf_pairing_assign_slot(2, &aslot), "assign: count2 → window full");
+
+    /* ── MAC dedup ────────────────────────────────────────────── */
+    const uint8_t ml[6] = {1,2,3,4,5,6};
+    const uint8_t mr[6] = {7,8,9,10,11,12};
+    const uint8_t zero[6] = {0};
+    uint8_t mslot;
+    TEST_ASSERT(rf_pairing_match_slot(ml, ml, mr, &mslot), "match: left mac → ok");
+    TEST_ASSERT_EQ(mslot, 0x01,                            "match: left mac → slot 0x01");
+    TEST_ASSERT(rf_pairing_match_slot(mr, ml, mr, &mslot), "match: right mac → ok");
+    TEST_ASSERT_EQ(mslot, 0x02,                            "match: right mac → slot 0x02");
+    const uint8_t mx[6] = {99,99,99,99,99,99};
+    TEST_ASSERT(!rf_pairing_match_slot(mx, ml, mr, &mslot),"match: unknown mac → no match");
+    /* all-zero stored slots are 'empty' → never match even a zero query */
+    TEST_ASSERT(!rf_pairing_match_slot(zero, zero, zero, &mslot),
+                                                            "match: empty store → no match");
 }

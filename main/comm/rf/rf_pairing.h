@@ -42,6 +42,20 @@ bool rf_derive_addr(uint16_t set_id, uint8_t slot,
  * matching espnow_link.c). Plan 3 consumes this. */
 uint8_t rf_derive_wifi_ch(uint16_t set_id);
 
+/* ── Pairing rendezvous (fixed, immutable — spec §3.2) ─────────── */
+#define RF_PAIR_CHANNEL  0x28                          /* 40 dec, 2440 MHz */
+#define RF_PAIR_ADDR     { 'K', 'S', 'P', 'R', 0xFF }  /* 5 bytes */
+
+/* Positional slot assignment (spec §3.4). paired_count 0→0x01, 1→0x02.
+ * Returns false (window full) when paired_count >= 2. Pure. */
+bool rf_pairing_assign_slot(uint8_t paired_count, uint8_t *slot_out);
+
+/* Dedup: if `mac` equals an already-stored peer, return its slot. All-zero
+ * stored MACs are treated as empty (no match). Returns false if no match. Pure. */
+bool rf_pairing_match_slot(const uint8_t mac[6],
+                           const uint8_t mac_left[6], const uint8_t mac_right[6],
+                           uint8_t *slot_out);
+
 #ifndef TEST_HOST
 
 #include "rf_driver.h"   /* rf_radio_cfg_t — firmware only */
@@ -64,6 +78,21 @@ uint16_t rf_pairing_load_set_id_dongle(void);
 /* Half: read NVS rf.set_id (u16) + rf.slot (u8). Absent/0 → return 0 and set
  * *slot_out = fallback_slot (the board factory suffix). 0xFFFF → 0x0001. */
 uint16_t rf_pairing_load_set_id_half(uint8_t fallback_slot, uint8_t *slot_out);
+
+/* Dongle: persist a paired half's MAC into the slot's NVS key and bump
+ * paired_count. slot 0x01 → "mac_left", 0x02 → "mac_right". Returns ESP_OK. */
+esp_err_t rf_pairing_save_peer_dongle(uint8_t slot, const uint8_t mac[6],
+                                      uint8_t new_paired_count);
+
+/* Dongle: clear mac_left/mac_right/paired_count (re-pair reset). */
+esp_err_t rf_pairing_reset_dongle(void);
+
+/* Dongle: load mac_left + mac_right (6B each; zeroed if absent) and paired_count. */
+void rf_pairing_load_peers_dongle(uint8_t mac_left[6], uint8_t mac_right[6],
+                                  uint8_t *paired_count);
+
+/* Half: persist set_id + slot + dongle MAC after receiving PKT_PAIR_ACK. */
+esp_err_t rf_pairing_save_half(uint16_t set_id, uint8_t slot, const uint8_t mac_dongle[6]);
 
 #endif /* TEST_HOST */
 
