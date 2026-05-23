@@ -28,12 +28,14 @@
 
 #include "eink_lvgl.h"
 #include "eink.h"           /* eink_push, eink_fb_set_px, EINK_WIDTH/HEIGHT/FB_SIZE */
+#include "espnow_info.h"    /* g_half_state, g_half_state_mutex, half_state_t */
 #include "lvgl.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_app_desc.h"   /* esp_app_get_description() */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include <string.h>
 
 static const char *TAG = "eink_lvgl";
@@ -58,6 +60,12 @@ static uint8_t s_fb[EINK_FB_SIZE];
 static lv_color_t         s_lvgl_buf[EINK_WIDTH * EINK_LVGL_BUF_ROWS];   /* 2000 bytes */
 static lv_disp_draw_buf_t s_draw_buf;
 static lv_disp_drv_t      s_disp_drv;
+
+/* ── Dynamic layer-name label ────────────────────────────────────
+ * Initialized to "KaSe" in eink_lvgl_init().
+ * Updated to g_half_state.layer_name when bit 0 notify fires.
+ * Falls back to "KaSe" if layer_name[0] == '\0' (unpaired / no packet yet). */
+static lv_obj_t *s_label_layer = NULL;
 
 /* ── Tick timer ─────────────────────────────────────────────────────
  * Fires every 5 ms → lv_tick_inc(5). Does NOT trigger redraws. */
@@ -175,16 +183,46 @@ static void eink_lvgl_task(void *arg)
     ESP_LOGI(TAG, "eink_lvgl_task started");
 
     for (;;) {
+        /* Run LVGL timers first (drives any pending invalidations from previous notify). */
         uint32_t sleep_ms = lv_timer_handler();
         if (sleep_ms == 0 || sleep_ms > 50) sleep_ms = 50;
-        vTaskDelay(pdMS_TO_TICKS(sleep_ms));
+
+        /* Wait for LVGL timer OR notify from on_layer()/on_state() (bit 0 = event). */
+        uint32_t notify_val = 0;
+        BaseType_t notified = xTaskNotifyWait(0, 0xFFFFFFFF, &notify_val,
+                                              pdMS_TO_TICKS(sleep_ms));
+
+        if (notified == pdTRUE && (notify_val & 0x01)) {
+            /* Layer or state changed — read layer_name under mutex. */
+            char name_copy[17] = {0};
+            if (xSemaphoreTake(g_half_state_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+                memcpy(name_copy, g_half_state.layer_name, 16);
+                xSemaphoreGive(g_half_state_mutex);
+            }
+            name_copy[16] = '\0';
+
+            /* Fallback: empty name (unpaired or no packet yet) → show "KaSe" */
+            if (name_copy[0] == '\0') {
+                memcpy(name_copy, "KaSe", 5);
+            }
+
+            /* Update LVGL label — safe: we are inside eink_lvgl_task (single LVGL task).
+             * lv_obj_is_valid() guards against a display_clear_screen() race. */
+            if (s_label_layer != NULL && lv_obj_is_valid(s_label_layer)) {
+                lv_label_set_text(s_label_layer, name_copy);
+                lv_obj_invalidate(s_label_layer);
+                ESP_LOGI(TAG, "eink: layer label updated to '%s'", name_copy);
+            }
+            /* lv_timer_handler() at the top of the next loop iteration will
+             * detect the invalidated region and trigger flush_cb → eink_push(). */
+        }
 
         /* Stack headroom check — log once after first render completes */
         static bool s_stack_checked = false;
         if (!s_stack_checked) {
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
             ESP_LOGI(TAG, "eink_lvgl_task stack HWM: %u words free", (unsigned)hwm);
-            if (hwm < 128) {   /* < 512 bytes */
+            if (hwm < 128) {
                 ESP_LOGW(TAG, "STACK LOW — bump eink_lvgl_task stack to 6144");
             }
             s_stack_checked = true;
@@ -250,11 +288,15 @@ void eink_lvgl_init(void)
     lv_obj_set_style_bg_color(scr, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
 
-    /* "KaSe" label — black text on white background */
-    lv_obj_t *label_name = lv_label_create(scr);
-    lv_label_set_text(label_name, "KaSe");
-    lv_obj_set_style_text_color(label_name, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(label_name, 60, 80);
+    /* Dynamic layer-name label.
+     * Initial text "KaSe" is shown until the first EN_INFO_LAYER packet arrives.
+     * Unpaired fallback: layer_name stays empty → "KaSe" is displayed indefinitely.
+     * On receipt of EN_INFO_LAYER: on_layer() updates g_half_state, notifies this task,
+     * and eink_lvgl_task calls lv_label_set_text() here (inside this task — thread-safe). */
+    s_label_layer = lv_label_create(scr);
+    lv_label_set_text(s_label_layer, "KaSe");
+    lv_obj_set_style_text_color(s_label_layer, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_pos(s_label_layer, 60, 80);
 
     /* Firmware version from git describe (set by ESP-IDF at build time) */
     const esp_app_desc_t *desc = esp_app_get_description();
