@@ -67,6 +67,19 @@ static lv_disp_drv_t      s_disp_drv;
  * Falls back to "KaSe" if layer_name[0] == '\0' (unpaired / no packet yet). */
 static lv_obj_t *s_label_layer = NULL;
 
+/* ── Status dashboard labels — added by eink-status-dashboard plan ─
+ * Initialized in eink_lvgl_init(). Updated on bit-1 notify or timeout. */
+static lv_obj_t *s_label_sep_top  = NULL;   /* static separator */
+static lv_obj_t *s_label_link_l   = NULL;   /* L link + signal line */
+static lv_obj_t *s_label_link_r   = NULL;   /* R link + signal line */
+static lv_obj_t *s_label_sep_bot  = NULL;   /* static separator */
+static lv_obj_t *s_label_usb      = NULL;   /* USB status line */
+
+/* Tracks whether the task is currently showing the "dongle lost" degraded view.
+ * Guards against re-invalidating every 50 ms loop iteration when the dongle is
+ * persistently absent (which would cause continuous 1.5 s e-ink refreshes). */
+static bool s_showing_degraded = false;
+
 /* ── Tick timer ─────────────────────────────────────────────────────
  * Fires every 5 ms → lv_tick_inc(5). Does NOT trigger redraws. */
 static esp_timer_handle_t s_tick_timer = NULL;
@@ -169,6 +182,34 @@ static void eink_lvgl_flush_cb(lv_disp_drv_t *drv,
     lv_disp_flush_ready(drv);
 }
 
+/*
+ * build_link_label() — format a link-line string into buf (min 16 bytes).
+ * side: 'L' or 'R'. dongle_alive: false = show '?' override.
+ * ASCII-only glyphs: '*' up, '-' down, '?' unknown, '|' bar, '.' empty.
+ * Output example: "L * [|||.]" (13 chars + NUL, well within 16 bytes).
+ */
+static void build_link_label(char *buf, char side,
+                              bool dongle_alive, bool link_up, uint8_t bars)
+{
+    const char dot = dongle_alive ? (link_up ? '*' : '-') : '?';
+    bars = (bars > 4) ? 4 : bars;   /* clamp */
+    char bstr[7];   /* "[||||]" + NUL */
+    bstr[0] = '[';
+    for (int i = 0; i < 4; i++) bstr[1 + i] = (i < (int)bars) ? '|' : '.';
+    bstr[5] = ']';
+    bstr[6] = '\0';
+    snprintf(buf, 16, "%c %c %s", side, dot, bstr);
+}
+
+/*
+ * build_usb_label() — format the USB status line into buf (min 10 bytes).
+ */
+static void build_usb_label(char *buf, bool dongle_alive, bool usb_active)
+{
+    const char dot = dongle_alive ? (usb_active ? '*' : '-') : '?';
+    snprintf(buf, 10, "USB %c", dot);
+}
+
 /* ── LVGL handler task ──────────────────────────────────────────────
  * lv_timer_handler() drives rendering + flush. Returns ms until next
  * LVGL timer fires (capped at 50 ms to remain responsive).
@@ -183,47 +224,98 @@ static void eink_lvgl_task(void *arg)
     ESP_LOGI(TAG, "eink_lvgl_task started");
 
     for (;;) {
-        /* Run LVGL timers first (drives any pending invalidations from previous notify). */
+        /* Run LVGL timers (drives pending invalidations from previous notify). */
         uint32_t sleep_ms = lv_timer_handler();
         if (sleep_ms == 0 || sleep_ms > 50) sleep_ms = 50;
 
-        /* Wait for LVGL timer OR notify from on_layer()/on_state() (bit 0 = event). */
+        /* Wait for LVGL timer OR notify (bit 0 = layer, bit 1 = status). */
         uint32_t notify_val = 0;
         BaseType_t notified = xTaskNotifyWait(0, 0xFFFFFFFF, &notify_val,
                                               pdMS_TO_TICKS(sleep_ms));
 
+        /* ── Bit 0: layer/state changed ──────────────────────────── */
         if (notified == pdTRUE && (notify_val & 0x01)) {
-            /* Layer or state changed — read layer_name under mutex. */
             char name_copy[17] = {0};
             if (xSemaphoreTake(g_half_state_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
                 memcpy(name_copy, g_half_state.layer_name, 16);
                 xSemaphoreGive(g_half_state_mutex);
             }
             name_copy[16] = '\0';
+            if (name_copy[0] == '\0') memcpy(name_copy, "KaSe", 5);
 
-            /* Fallback: empty name (unpaired or no packet yet) → show "KaSe" */
-            if (name_copy[0] == '\0') {
-                memcpy(name_copy, "KaSe", 5);
-            }
-
-            /* Update LVGL label — safe: we are inside eink_lvgl_task (single LVGL task).
-             * lv_obj_is_valid() guards against a display_clear_screen() race. */
             if (s_label_layer != NULL && lv_obj_is_valid(s_label_layer)) {
                 lv_label_set_text(s_label_layer, name_copy);
                 lv_obj_invalidate(s_label_layer);
-                ESP_LOGI(TAG, "eink: layer label updated to '%s'", name_copy);
+                ESP_LOGI(TAG, "eink: layer -> '%s'", name_copy);
             }
-            /* lv_timer_handler() at the top of the next loop iteration will
-             * detect the invalidated region and trigger flush_cb → eink_push(). */
         }
 
-        /* Stack headroom check — log once after first render completes */
+        /* ── Dongle-link timeout check (runs every loop, ~50 ms) ──
+         * Compute dongle_alive independently of whether a notify fired.
+         * This catches persistent absence without requiring a notify. */
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        bool dongle_alive = false;
+        bool link_left  = false;
+        bool link_right = false;
+        bool usb_active = false;
+        uint8_t sig_left  = 0;
+        uint8_t sig_right = 0;
+
+        if (xSemaphoreTake(g_half_state_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+            dongle_alive = (now_ms - g_half_state.last_status_ms) < 15000u;
+            link_left    = g_half_state.link_left;
+            link_right   = g_half_state.link_right;
+            usb_active   = g_half_state.usb_active;
+            sig_left     = g_half_state.sig_left;
+            sig_right    = g_half_state.sig_right;
+            xSemaphoreGive(g_half_state_mutex);
+        }
+
+        /* ── Bit 1: status changed (on_status notified) ──────────── */
+        bool update_status = (notified == pdTRUE && (notify_val & 0x02));
+
+        /* ── Degraded state transition: dongle lost / recovered ───── */
+        bool newly_degraded  = (!dongle_alive && !s_showing_degraded);
+        bool newly_recovered = ( dongle_alive &&  s_showing_degraded);
+        if (newly_degraded) {
+            s_showing_degraded = true;
+            update_status = true;   /* force label update to '?' */
+        }
+        if (newly_recovered) {
+            s_showing_degraded = false;
+            update_status = true;   /* force label update from '?' to real values */
+        }
+
+        /* ── Update status labels if needed ───────────────────────── */
+        if (update_status) {
+            char lbuf[16], rbuf[16], ubuf[10];
+            build_link_label(lbuf, 'L', dongle_alive, link_left,  sig_left);
+            build_link_label(rbuf, 'R', dongle_alive, link_right, sig_right);
+            build_usb_label(ubuf, dongle_alive, usb_active);
+
+            if (s_label_link_l != NULL && lv_obj_is_valid(s_label_link_l)) {
+                lv_label_set_text(s_label_link_l, lbuf);
+                lv_obj_invalidate(s_label_link_l);
+            }
+            if (s_label_link_r != NULL && lv_obj_is_valid(s_label_link_r)) {
+                lv_label_set_text(s_label_link_r, rbuf);
+                lv_obj_invalidate(s_label_link_r);
+            }
+            if (s_label_usb != NULL && lv_obj_is_valid(s_label_usb)) {
+                lv_label_set_text(s_label_usb, ubuf);
+                lv_obj_invalidate(s_label_usb);
+            }
+            ESP_LOGI(TAG, "eink: status -> %s  %s  %s (alive=%d)",
+                     lbuf, rbuf, ubuf, dongle_alive);
+        }
+
+        /* Stack headroom check — log once */
         static bool s_stack_checked = false;
         if (!s_stack_checked) {
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
             ESP_LOGI(TAG, "eink_lvgl_task stack HWM: %u words free", (unsigned)hwm);
             if (hwm < 128) {
-                ESP_LOGW(TAG, "STACK LOW — bump eink_lvgl_task stack to 6144");
+                ESP_LOGW(TAG, "STACK LOW -- bump eink_lvgl_task stack to 6144");
             }
             s_stack_checked = true;
         }
@@ -303,8 +395,38 @@ void eink_lvgl_init(void)
     lv_obj_t *label_ver = lv_label_create(scr);
     lv_label_set_text(label_ver, desc->version);
     lv_obj_set_style_text_color(label_ver, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(label_ver, 60, 100);
+    lv_obj_set_pos(label_ver, 60, 185);
 
+    /* ── Status dashboard labels ─────────────────────────────────────
+     * Separator, L-line, R-line, separator, USB-line.
+     * Initial text shows "unknown" state (dongle not yet connected). */
+
+    s_label_sep_top = lv_label_create(scr);
+    lv_label_set_text(s_label_sep_top, "-------------------");
+    lv_obj_set_style_text_color(s_label_sep_top, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_pos(s_label_sep_top, 10, 105);
+
+    s_label_link_l = lv_label_create(scr);
+    lv_label_set_text(s_label_link_l, "L - [....]");
+    lv_obj_set_style_text_color(s_label_link_l, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_pos(s_label_link_l, 20, 120);
+
+    s_label_link_r = lv_label_create(scr);
+    lv_label_set_text(s_label_link_r, "R - [....]");
+    lv_obj_set_style_text_color(s_label_link_r, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_pos(s_label_link_r, 20, 140);
+
+    s_label_sep_bot = lv_label_create(scr);
+    lv_label_set_text(s_label_sep_bot, "-------------------");
+    lv_obj_set_style_text_color(s_label_sep_bot, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_pos(s_label_sep_bot, 10, 155);
+
+    s_label_usb = lv_label_create(scr);
+    lv_label_set_text(s_label_usb, "USB -");
+    lv_obj_set_style_text_color(s_label_usb, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_pos(s_label_usb, 20, 170);
+
+    ESP_LOGI(TAG, "status dashboard labels created");
     ESP_LOGI(TAG, "static screen created: 'KaSe' + version '%s'", desc->version);
 }
 
