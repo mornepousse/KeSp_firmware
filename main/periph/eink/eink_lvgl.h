@@ -20,6 +20,7 @@
  * eink_lvgl_task wakes, reads g_half_state, calls lv_label_set_text safely.
  */
 
+#include <stdint.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -36,3 +37,9 @@ void eink_lvgl_start(void);
  * Call xTaskNotify(eink_get_task_handle(), 0x01, eSetBits) — bit 0 = layer/state event.
  * Always guard with: if (h != NULL) before calling xTaskNotify. */
 TaskHandle_t eink_get_task_handle(void);
+
+/* Show a one-shot "PAIRED" confirmation splash, then it stays until reboot.
+ * set_id is the assigned set identifier; slot is 0x01 (left) / 0x02 (right).
+ * No-op if the eink task was never started (no panel on this half) — best-effort.
+ * Called from half_pairing_task right after a successful pairing ACK. */
+void eink_lvgl_show_paired(uint16_t set_id, uint8_t slot);

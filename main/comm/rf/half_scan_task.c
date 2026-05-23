@@ -38,6 +38,7 @@
 #endif
 #if CONFIG_KASE_HAS_EINK
 #include "eink.h"
+#include "eink_lvgl.h"   /* eink_lvgl_show_paired() — pairing confirmation splash */
 #endif
 #if CONFIG_KASE_HAS_ESPNOW
 #include "espnow_info.h"
@@ -223,7 +224,13 @@ static void half_pairing_task(void *arg)
         ESP_LOGI(TAG, "pairing: ACK set_id=0x%04X slot=0x%02X — saving NVS + reboot",
                  ack.set_id, ack.slot);
         rf_pairing_save_half(ack.set_id, ack.slot, ack.dongle_wifi_mac);
-        vTaskDelay(pdMS_TO_TICKS(2000));   /* let log/NVS settle, then apply via reboot */
+#if CONFIG_KASE_HAS_EINK
+        /* Visual confirmation on the e-ink (no-op on the half without a panel).
+         * The radio TX is already done (ACK received) so the SPI bus is free for
+         * the eink refresh. */
+        eink_lvgl_show_paired(ack.set_id, ack.slot);
+#endif
+        vTaskDelay(pdMS_TO_TICKS(3000));   /* let splash render (~1.5s) + stay visible, then reboot */
         esp_restart();
     } else {
         ESP_LOGW(TAG, "pairing: timed out (no ACK) — restoring normal TX");

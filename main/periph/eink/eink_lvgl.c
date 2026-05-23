@@ -99,9 +99,23 @@ static esp_timer_handle_t s_tick_timer = NULL;
  * NULL until eink_lvgl_start() is called (checked before every notify). */
 static TaskHandle_t s_eink_task_handle = NULL;
 
+/* Pairing-splash data — set by eink_lvgl_show_paired(), consumed on bit 0x04.
+ * volatile: written from half_pairing_task, read from eink_lvgl_task. */
+static volatile uint16_t s_paired_set_id = 0;
+static volatile uint8_t  s_paired_slot   = 0;
+
 TaskHandle_t eink_get_task_handle(void)
 {
     return s_eink_task_handle;
+}
+
+void eink_lvgl_show_paired(uint16_t set_id, uint8_t slot)
+{
+    s_paired_set_id = set_id;
+    s_paired_slot   = slot;
+    if (s_eink_task_handle != NULL) {
+        xTaskNotify(s_eink_task_handle, 0x04, eSetBits);   /* bit 2 = pairing splash */
+    }
 }
 
 static void lvgl_tick_cb(void *arg)
@@ -220,6 +234,52 @@ static void build_usb_label(char *buf, bool dongle_alive, bool usb_active)
     snprintf(buf, 10, "USB %c", dot);
 }
 
+/* ── render_paired_splash() — one-shot "PAIRED" confirmation screen ──
+ * Builds a fresh full-screen screen and loads it. The dashboard screen stays in
+ * memory but hidden; we never restore it (the half reboots right after pairing),
+ * so leaving it is harmless and keeps s_label_* pointers valid.
+ * Rendered by the next lv_timer_handler() pass (≈1.5 s on e-ink).
+ * Layout (200×200, all centered): "PAIRED" (M28) / OK glyph (M28) /
+ * "set 0xXXXX" (M14 default) / "side L|R" (M14 default). */
+static void render_paired_splash(uint16_t set_id, uint8_t slot)
+{
+    lv_obj_t *scr = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(scr, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
+
+    lv_obj_t *l_title = lv_label_create(scr);
+    lv_label_set_text(l_title, "PAIRED");
+    lv_obj_set_style_text_color(l_title, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(l_title, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_set_width(l_title, EINK_WIDTH);
+    lv_obj_set_style_text_align(l_title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(l_title, 0, 30);
+
+    lv_obj_t *l_ok = lv_label_create(scr);
+    lv_label_set_text(l_ok, LV_SYMBOL_OK);   /* bundled in built-in Montserrat fonts */
+    lv_obj_set_style_text_color(l_ok, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(l_ok, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_set_width(l_ok, EINK_WIDTH);
+    lv_obj_set_style_text_align(l_ok, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(l_ok, 0, 78);
+
+    lv_obj_t *l_set = lv_label_create(scr);
+    lv_label_set_text_fmt(l_set, "set 0x%04X", set_id);
+    lv_obj_set_style_text_color(l_set, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_width(l_set, EINK_WIDTH);
+    lv_obj_set_style_text_align(l_set, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(l_set, 0, 128);
+
+    lv_obj_t *l_side = lv_label_create(scr);
+    lv_label_set_text(l_side, (slot == 0x01) ? "side L" : "side R");
+    lv_obj_set_style_text_color(l_side, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_width(l_side, EINK_WIDTH);
+    lv_obj_set_style_text_align(l_side, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(l_side, 0, 152);
+
+    lv_scr_load(scr);        /* makes scr the active screen → rendered next pass */
+}
+
 /* ── LVGL handler task ──────────────────────────────────────────────
  * lv_timer_handler() drives rendering + flush. Returns ms until next
  * LVGL timer fires (capped at 50 ms to remain responsive).
@@ -258,6 +318,14 @@ static void eink_lvgl_task(void *arg)
                 lv_obj_invalidate(s_label_layer);
                 ESP_LOGI(TAG, "eink: layer -> '%s'", name_copy);
             }
+        }
+
+        /* ── Bit 2: pairing splash (one-shot, stays until reboot) ──── */
+        if (notified == pdTRUE && (notify_val & 0x04)) {
+            ESP_LOGI(TAG, "eink: PAIRED splash set=0x%04X slot=0x%02X",
+                     s_paired_set_id, s_paired_slot);
+            render_paired_splash(s_paired_set_id, s_paired_slot);
+            continue;   /* skip dashboard updates; next lv_timer_handler renders splash */
         }
 
         /* ── Dongle-link timeout check (runs every loop, ~50 ms) ──
