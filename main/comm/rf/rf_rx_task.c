@@ -14,6 +14,7 @@
 #include "cdc_binary_protocol.h"   /* ks_respond, KS_CMD_MATRIX_TEST */
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_mac.h"      /* esp_read_mac, ESP_MAC_WIFI_STA */
 #include "esp_attr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -53,6 +54,14 @@ extern void tap_dance_tick(void);
 static rf_radio_t s_left, s_right;
 static hb_half_state_t s_hb_left, s_hb_right;
 static SemaphoreHandle_t s_evt_sem;
+
+/* ── Pairing window state (driven inside rf_rx_task) ── */
+static volatile bool s_pairing_mode = false;
+static uint32_t s_pair_deadline_ms = 0;
+static uint8_t  s_pair_paired_count = 0;
+static uint8_t  s_pair_mac_left[6]  = {0};
+static uint8_t  s_pair_mac_right[6] = {0};
+#define RF_PAIR_WINDOW_MS 30000
 
 /* ── IRQ ISR (shared sem; task polls both radios) ── */
 static void IRAM_ATTR nrf_irq_isr(void *arg)
@@ -163,12 +172,117 @@ static bool drain_radio(rf_radio_t *radio, hb_half_state_t *hb, uint8_t half)
     return changed;
 }
 
+bool rf_rx_pair_start(uint8_t reset, uint16_t *set_id_out, uint8_t *paired_count_out)
+{
+    if (!s_left.present) return false;   /* need radio L for the rendezvous */
+
+    if (reset) {
+        rf_pairing_reset_dongle();
+    }
+    rf_pairing_load_peers_dongle(s_pair_mac_left, s_pair_mac_right, &s_pair_paired_count);
+
+    /* Switch radio L to the pairing rendezvous PRX. */
+    static const uint8_t pair_addr[5] = RF_PAIR_ADDR;
+    rf_driver_set_channel(&s_left, RF_PAIR_CHANNEL);
+    rf_driver_set_rx_address(&s_left, pair_addr);
+
+    s_pair_deadline_ms = (uint32_t)(esp_timer_get_time() / 1000) + RF_PAIR_WINDOW_MS;
+    s_pairing_mode = true;
+
+    if (set_id_out)       *set_id_out = rf_compute_set_id();
+    if (paired_count_out) *paired_count_out = s_pair_paired_count;
+    ESP_LOGI(TAG, "pairing window open (reset=%u, paired_count=%u)", reset, s_pair_paired_count);
+    return true;
+}
+
+/* Reprogram both radios to the derived per-set address+channel (or factory if
+ * paired_count==0). Hot-switch — no reboot (USB stays up). */
+static void rf_rx_apply_paired_config(void)
+{
+    uint16_t set_id = (s_pair_paired_count > 0) ? rf_compute_set_id() : 0;
+
+    rf_radio_cfg_t lcfg = board_rf_left_cfg();
+    rf_radio_cfg_t rcfg = board_rf_right_cfg();
+    rf_apply_set_id(&lcfg, set_id, 0x01);
+    rf_apply_set_id(&rcfg, set_id, 0x02);
+
+    uint8_t laddr[5] = { lcfg.rx_addr[0], lcfg.rx_addr[1], lcfg.rx_addr[2],
+                         lcfg.rx_addr[3], lcfg.addr_suffix };
+    uint8_t raddr[5] = { rcfg.rx_addr[0], rcfg.rx_addr[1], rcfg.rx_addr[2],
+                         rcfg.rx_addr[3], rcfg.addr_suffix };
+    rf_driver_set_channel(&s_left,  lcfg.channel);
+    rf_driver_set_rx_address(&s_left, laddr);
+    if (s_right.present) {
+        rf_driver_set_channel(&s_right,  rcfg.channel);
+        rf_driver_set_rx_address(&s_right, raddr);
+    }
+    ESP_LOGI(TAG, "hot-switch: set_id=0x%04X L ch=%u R ch=%u", set_id, lcfg.channel, rcfg.channel);
+}
+
+/* Process the pairing rendezvous on radio L. Returns true while still pairing. */
+static bool rf_rx_pairing_service(void)
+{
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+
+    /* Window timeout or both halves paired → close + hot-switch. */
+    if (now >= s_pair_deadline_ms || s_pair_paired_count >= 2) {
+        rf_rx_apply_paired_config();
+        s_pairing_mode = false;
+        ESP_LOGI(TAG, "pairing window closed (paired_count=%u)", s_pair_paired_count);
+        return false;
+    }
+
+    /* Drain any PKT_PAIR_REQ on radio L. */
+    uint8_t buf[32];
+    while (rf_driver_rx_available(&s_left)) {
+        uint16_t n = rf_driver_read_rx(&s_left, buf, sizeof(buf));
+        if (n == 0) break;
+        uint8_t mac[6];
+        if (!rf_decode_pair_req(buf, n, mac)) continue;
+
+        uint8_t slot = 0;
+        bool is_dup = rf_pairing_match_slot(mac, s_pair_mac_left, s_pair_mac_right, &slot);
+        if (!is_dup) {
+            if (!rf_pairing_assign_slot(s_pair_paired_count, &slot)) continue; /* full */
+        }
+
+        /* Persist (new pairings only bump count). */
+        if (!is_dup) {
+            uint8_t new_count = s_pair_paired_count + 1;
+            rf_pairing_save_peer_dongle(slot, mac, new_count);
+            if (slot == 0x01) memcpy(s_pair_mac_left,  mac, 6);
+            else              memcpy(s_pair_mac_right, mac, 6);
+            s_pair_paired_count = new_count;
+        }
+
+        /* Send PKT_PAIR_ACK out-of-band on radio L, then restore PAIR PRX. */
+        uint8_t dmac[6];
+        esp_read_mac(dmac, ESP_MAC_WIFI_STA);
+        rf_pair_ack_t ack = { .set_id = rf_compute_set_id(), .slot = slot };
+        memcpy(ack.dongle_wifi_mac, dmac, 6);
+        uint8_t ackbuf[10];
+        rf_encode_pair_ack(ackbuf, &ack);
+
+        static const uint8_t pair_addr[5] = RF_PAIR_ADDR;
+        rf_driver_oob_tx(&s_left, RF_PAIR_CHANNEL, pair_addr, ackbuf, 10,
+                         RF_PAIR_CHANNEL, pair_addr);   /* restore to PAIR PRX */
+        ESP_LOGI(TAG, "ACK sent slot=0x%02X (dup=%d, paired_count=%u)",
+                 slot, is_dup, s_pair_paired_count);
+    }
+    return true;
+}
+
 static void rf_rx_task(void *arg)
 {
     (void)arg;
     const TickType_t tick_period = pdMS_TO_TICKS(10);
     for (;;) {
         xSemaphoreTake(s_evt_sem, tick_period);
+
+        if (s_pairing_mode) {
+            rf_rx_pairing_service();
+            continue;   /* skip normal RX/engine while pairing */
+        }
 
         bool changed = false;
         if (s_left.present)  changed |= drain_radio(&s_left,  &s_hb_left,  HB_HALF_LEFT);
