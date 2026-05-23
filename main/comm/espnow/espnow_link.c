@@ -12,6 +12,7 @@
 #ifndef TEST_HOST
 #include "espnow_link.h"
 #include "espnow_info.h"   /* espnow_info_dispatch */
+#include "rf_pairing.h"    /* rf_pairing_load_set_id_dongle / _half */
 #include "esp_now.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -87,22 +88,23 @@ static uint16_t crc16_ccitt_espnow(const uint8_t *data, size_t len)
  * Returns 6 (unpaired default) if NVS paired_count is 0 or absent. */
 static uint8_t espnow_derive_wifi_ch(void)
 {
-    /* Read NVS paired_count to decide whether to apply derivation. */
-    uint8_t paired_count = 0;
-    nvs_handle_t h;
-    if (nvs_open("rf", NVS_READONLY, &h) == ESP_OK) {
-        nvs_get_u8(h, "paired_count", &paired_count);
-        nvs_close(h);
+    /* The set_id MUST be identical on the dongle and both halves or ESP-NOW
+     * ends up on different channels and no packet is ever received.
+     * Use the role-correct source (RF-1 loaders):
+     *   - Dongle: set_id = crc16(own MAC) when paired (paired_count>0).
+     *   - Half:   set_id = the STORED dongle set_id (NVS "set_id"), NOT crc16 of
+     *             the half's own MAC. The half has no "paired_count" key, so the
+     *             old paired_count gate always defaulted it to ch 6 → mismatch. */
+    uint16_t set_id = 0;
+#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+    set_id = rf_pairing_load_set_id_dongle();
+#elif CONFIG_KASE_DEVICE_ROLE_HALF
+    uint8_t slot;
+    set_id = rf_pairing_load_set_id_half(0x01, &slot);
+#endif
+    if (set_id == 0) {
+        return 6;   /* unpaired: factory default 2437 MHz */
     }
-    if (paired_count == 0) {
-        return 6;   /* factory default: 2437 MHz, same as prior hardcoded value */
-    }
-
-    uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    uint16_t set_id = crc16_ccitt_espnow(mac, 6);
-    /* Guard reserved sentinels (spec §2.1) */
-    if (set_id == 0x0000 || set_id == 0xFFFF) set_id = 0x0001;
 
     /* {1,6,11}[set_id % 3] — non-overlapping 2.4 GHz WiFi channels (spec §2.5) */
     static const uint8_t ch_table[3] = {1, 6, 11};

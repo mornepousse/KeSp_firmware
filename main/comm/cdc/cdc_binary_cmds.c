@@ -55,10 +55,21 @@ static void bin_cmd_dfu(uint8_t cmd, const uint8_t *p, uint16_t l)
 
 /* ── Keymap ─────────────────────────────────────────────────────── */
 
-/* LAYER_INDEX: no payload → response: [current_layer:u8] */
+/* LAYER_INDEX:
+ *   no payload  → read:  response [current_layer:u8]
+ *   1-byte payload [layer:u8] → set the active layer + fire layer_changed()
+ *     (pushes EN_INFO_LAYER to the halves on the dongle → live e-ink), then
+ *     response [current_layer:u8]. Lets the controller switch layers and makes
+ *     the e-ink layer display testable without a physical MO key. */
 static void bin_cmd_layer_index(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
-    (void)p; (void)l;
+    if (l >= 1) {
+        uint8_t want = p[0];
+        if (want >= LAYERS) { ks_respond_err(cmd, KS_STATUS_ERR_RANGE); return; }
+        current_layout = want;
+        extern void layer_changed(void);
+        layer_changed();
+    }
     uint8_t layer = (uint8_t)current_layout;
     ks_respond(cmd, KS_STATUS_OK, &layer, 1);
 }
