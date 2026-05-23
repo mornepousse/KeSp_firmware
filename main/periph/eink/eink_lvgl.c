@@ -208,21 +208,13 @@ static void eink_lvgl_flush_cb(lv_disp_drv_t *drv,
 
 /*
  * build_link_label() — format a link-line string into buf (min 16 bytes).
- * side: 'L' or 'R'. dongle_alive: false = show '?' override.
- * ASCII-only glyphs: '*' up, '-' down, '?' unknown, '|' bar, '.' empty.
- * Output example: "L * [|||.]" (13 chars + NUL, well within 16 bytes).
+ * side: 'L' or 'R'. q255 = raw 0..255 link quality (rf_signal_q255), 0 = down.
+ * Output: "L  235/255" (link up) / "L  0/255" (down) / "L  --/255" (dongle absent).
  */
-static void build_link_label(char *buf, char side,
-                              bool dongle_alive, bool link_up, uint8_t bars)
+static void build_link_label(char *buf, char side, bool dongle_alive, uint8_t q255)
 {
-    const char dot = dongle_alive ? (link_up ? '*' : '-') : '?';
-    bars = (bars > 4) ? 4 : bars;   /* clamp */
-    char bstr[7];   /* "[||||]" + NUL */
-    bstr[0] = '[';
-    for (int i = 0; i < 4; i++) bstr[1 + i] = (i < (int)bars) ? '|' : '.';
-    bstr[5] = ']';
-    bstr[6] = '\0';
-    snprintf(buf, 16, "%c %c %s", side, dot, bstr);
+    if (!dongle_alive) snprintf(buf, 16, "%c  --/255", side);
+    else               snprintf(buf, 16, "%c  %u/255", side, (unsigned)q255);
 }
 
 /*
@@ -230,8 +222,8 @@ static void build_link_label(char *buf, char side,
  */
 static void build_usb_label(char *buf, bool dongle_alive, bool usb_active)
 {
-    const char dot = dongle_alive ? (usb_active ? '*' : '-') : '?';
-    snprintf(buf, 10, "USB %c", dot);
+    const char *s = dongle_alive ? (usb_active ? "on" : "off") : "?";
+    snprintf(buf, 10, "USB %s", s);
 }
 
 /* ── render_paired_splash() — one-shot "PAIRED" confirmation screen ──
@@ -333,16 +325,12 @@ static void eink_lvgl_task(void *arg)
          * This catches persistent absence without requiring a notify. */
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
         bool dongle_alive = false;
-        bool link_left  = false;
-        bool link_right = false;
         bool usb_active = false;
-        uint8_t sig_left  = 0;
+        uint8_t sig_left  = 0;   /* raw 0..255 link quality (rf_signal_q255) */
         uint8_t sig_right = 0;
 
         if (xSemaphoreTake(g_half_state_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
             dongle_alive = (now_ms - g_half_state.last_status_ms) < 15000u;
-            link_left    = g_half_state.link_left;
-            link_right   = g_half_state.link_right;
             usb_active   = g_half_state.usb_active;
             sig_left     = g_half_state.sig_left;
             sig_right    = g_half_state.sig_right;
@@ -367,8 +355,8 @@ static void eink_lvgl_task(void *arg)
         /* ── Update status labels if needed ───────────────────────── */
         if (update_status) {
             char lbuf[16], rbuf[16], ubuf[10];
-            build_link_label(lbuf, 'L', dongle_alive, link_left,  sig_left);
-            build_link_label(rbuf, 'R', dongle_alive, link_right, sig_right);
+            build_link_label(lbuf, 'L', dongle_alive, sig_left);
+            build_link_label(rbuf, 'R', dongle_alive, sig_right);
             build_usb_label(ubuf, dongle_alive, usb_active);
 
             if (s_label_link_l != NULL && lv_obj_is_valid(s_label_link_l)) {

@@ -5,8 +5,9 @@
  */
 
 /*
- * rf_signal_bars() — derive 0..4 signal quality bars for one half.
+ * rf_signal_q255() — derive a 0..255 link-quality value for one half.
  *
+ * 255 = best, 0 = link down / timed out. Displayed raw on the e-ink as "235/255".
  * Pure function: no globals, no I/O. Host-testable (outside TEST_HOST guard).
  * Place before the #ifndef TEST_HOST block so it compiles in both contexts.
  */
@@ -14,34 +15,23 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-uint8_t rf_signal_bars(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
+uint8_t rf_signal_q255(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
 {
-    /* Link is considered down if rf_rx_task flagged it, OR if the
-     * heartbeat age exceeds 3× the nominal heartbeat interval (500 ms
-     * → 1500 ms threshold). 3× gives margin for two missed HBs. */
+    /* Link is down if rf_rx_task flagged it, OR if the heartbeat age exceeds 3×
+     * the nominal heartbeat interval (500 ms → 1500 ms). 3× = two missed HBs. */
     if (!link_up || hb_age_ms >= 1500u) return 0;
 
-    /* Age score: lower age = better freshness */
-    uint8_t age_score;
-    if      (hb_age_ms <  200u) age_score = 4;
-    else if (hb_age_ms <  400u) age_score = 3;
-    else if (hb_age_ms <  700u) age_score = 2;
-    else if (hb_age_ms < 1200u) age_score = 1;
-    else                         age_score = 0;
+    /* Age factor: 255 when fresh, linear down to 0 at the 1500 ms timeout. */
+    uint32_t age_factor = 255u * (1500u - hb_age_ms) / 1500u;
 
-    /* Retry score: link_q is a retransmit PERCENTAGE (0..100) computed on the half
-     * from OBSERVE_TX ARC_CNT (Σ retries × 100 / (tx_count × 3)). 0 = pristine,
-     * 100 = every packet exhausting all 3 ARC retries. Lower = better RF.
-     * Catches a degrading link (packets succeed but need retries) BEFORE losses. */
-    uint8_t retry_score;
-    if      (link_q == 0)  retry_score = 4;   /* no retransmits */
-    else if (link_q <= 15) retry_score = 3;   /* occasional (≤0.45 retries/pkt) */
-    else if (link_q <= 33) retry_score = 2;   /* moderate (≤1 retry/pkt) */
-    else if (link_q <= 60) retry_score = 1;   /* heavy */
-    else                    retry_score = 0;   /* saturating retries */
+    /* Retry factor: link_q is a retransmit PERCENTAGE (0..100) from OBSERVE_TX
+     * ARC_CNT (Σ retries × 100 / (tx_count × 3)). 255 at 0 % (pristine), linear
+     * down to 0 at 100 % (every packet maxing all 3 ARC retries). */
+    uint8_t  lq = (link_q > 100u) ? 100u : link_q;
+    uint32_t retry_factor = 255u * (100u - lq) / 100u;
 
-    /* Minimum of both scores: both dimensions must be good to show 4 bars. */
-    return (age_score < retry_score) ? age_score : retry_score;
+    /* Both dimensions must be good — take the worse of the two. */
+    return (uint8_t)((age_factor < retry_factor) ? age_factor : retry_factor);
 }
 
 #ifndef TEST_HOST
@@ -487,8 +477,8 @@ static void status_push_cb(void *arg)
 
     /* Build EN_INFO_STATUS payload */
     en_status_t msg;
-    msg.sig_left  = rf_signal_bars(st.link_left,  st.hb_age_left_ms,  st.link_q_left);
-    msg.sig_right = rf_signal_bars(st.link_right, st.hb_age_right_ms, st.link_q_right);
+    msg.sig_left  = rf_signal_q255(st.link_left,  st.hb_age_left_ms,  st.link_q_left);
+    msg.sig_right = rf_signal_q255(st.link_right, st.hb_age_right_ms, st.link_q_right);
     msg.flags = 0;
     if (st.link_left)  msg.flags |= (1u << 0);
     if (st.link_right) msg.flags |= (1u << 1);

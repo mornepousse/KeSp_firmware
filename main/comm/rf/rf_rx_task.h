@@ -22,8 +22,9 @@ typedef struct {
 void rf_rx_get_status(rf_link_status_t *out);
 
 /* Signal quality derivation — pure function, host-testable.
- * Returns 0..4 signal bars. 0 = link down or very bad. See rf_rx_task.c for thresholds. */
-uint8_t rf_signal_bars(bool link_up, uint32_t hb_age_ms, uint8_t link_q);
+ * Returns 0..255 link quality (255 = best, 0 = link down/timed out).
+ * See rf_rx_task.c for the age/retry mapping. */
+uint8_t rf_signal_q255(bool link_up, uint32_t hb_age_ms, uint8_t link_q);
 
 /* Begin a pairing window (called from the CDC KS_CMD_RF_PAIR_START handler).
  * reset=1 → clear NVS mac_left/mac_right/paired_count first. Switches radio L to

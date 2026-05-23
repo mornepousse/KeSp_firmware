@@ -33,8 +33,8 @@
 typedef struct __attribute__((packed)) {
     uint8_t flags;      /* bit0=link_left_up, bit1=link_right_up,
                            bit2=usb_active, bits3-7=rsvd (must be 0) */
-    uint8_t sig_left;   /* signal quality 0..4, 0=link_down or no data */
-    uint8_t sig_right;  /* signal quality 0..4, 0=link_down or no data */
+    uint8_t sig_left;   /* link quality 0..255 (rf_signal_q255), 0=link_down/no data */
+    uint8_t sig_right;  /* link quality 0..255 (rf_signal_q255), 0=link_down/no data */
 } en_status_t;
 
 static inline uint8_t en_encode_status(uint8_t *buf, const en_status_t *st)
