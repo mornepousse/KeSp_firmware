@@ -8,13 +8,23 @@
  *       multiple of 8, x2 rounds up to multiple_of_8 + 7).
  *   - disp_drv.flush_cb: calls eink_push(s_fb) on last fragment; always
  *       calls lv_disp_flush_ready(drv) — LVGL deadlocks without this.
- *   - disp_drv.full_refresh = 1: LVGL sends the full 200×200 frame each cycle,
- *       guaranteeing s_fb is fully populated before eink_push is called.
+ *   - disp_drv.full_refresh = 0: LVGL renders the invalidated screen in
+ *       stripes; set_px_cb packs every pixel into s_fb across all stripes;
+ *       is_last fires after the final stripe → eink_push() gets the complete frame.
  *   - Draw buffer: EINK_WIDTH × 10 = 2000 lv_color_t elements (2000 bytes
  *       at LV_COLOR_DEPTH=1). Scratch space only — never interpreted by our code.
  *   - Tick: esp_timer 5 ms → lv_tick_inc(5).
  *   - Handler: eink_lvgl_task (lv_timer_handler loop, prio 3, core 0).
- *   - Static screen: "KaSe" + firmware version from esp_app_get_description().
+ *
+ * Dashboard layout (200×200, 1bpp monochrome):
+ *   y=  8   LAYER NAME  (Montserrat 28, centered, bold visual anchor)
+ *   y= 50   separator line
+ *   y= 62   L * [||||]  (Montserrat 14, left-padded)
+ *   y= 80   R * [||||]
+ *   y= 98   USB *
+ *   y=116   BAT --%     (placeholder, ADC not yet implemented)
+ *   y=134   separator line
+ *   y=148   version     (Montserrat 14, centered, tag-only: "v3.7.12")
  *
  * Why set_px_cb, not direct draw buffer packing:
  *   At LV_COLOR_DEPTH=1, sizeof(lv_color_t)==1 (1 byte per pixel in the draw
@@ -62,18 +72,18 @@ static lv_disp_draw_buf_t s_draw_buf;
 static lv_disp_drv_t      s_disp_drv;
 
 /* ── Dynamic layer-name label ────────────────────────────────────
- * Initialized to "KaSe" in eink_lvgl_init().
+ * Initialized to "KaSe" in eink_lvgl_init(). Uses Montserrat 28 (bold anchor).
  * Updated to g_half_state.layer_name when bit 0 notify fires.
  * Falls back to "KaSe" if layer_name[0] == '\0' (unpaired / no packet yet). */
 static lv_obj_t *s_label_layer = NULL;
 
-/* ── Status dashboard labels — added by eink-status-dashboard plan ─
- * Initialized in eink_lvgl_init(). Updated on bit-1 notify or timeout. */
-static lv_obj_t *s_label_sep_top  = NULL;   /* static separator */
-static lv_obj_t *s_label_link_l   = NULL;   /* L link + signal line */
-static lv_obj_t *s_label_link_r   = NULL;   /* R link + signal line */
-static lv_obj_t *s_label_sep_bot  = NULL;   /* static separator */
-static lv_obj_t *s_label_usb      = NULL;   /* USB status line */
+/* ── Status dashboard labels ────────────────────────────────────
+ * All use Montserrat 14 (default font). Initialized in eink_lvgl_init().
+ * Updated on bit-1 notify or timeout. Separators are static lv_line objects. */
+static lv_obj_t *s_label_link_l   = NULL;   /* "L * [||||]" */
+static lv_obj_t *s_label_link_r   = NULL;   /* "R * [||||]" */
+static lv_obj_t *s_label_usb      = NULL;   /* "USB *"       */
+static lv_obj_t *s_label_bat      = NULL;   /* "BAT --%"  (placeholder) */
 
 /* Tracks whether the task is currently showing the "dongle lost" degraded view.
  * Guards against re-invalidating every 50 ms loop iteration when the dongle is
@@ -305,6 +315,7 @@ static void eink_lvgl_task(void *arg)
                 lv_label_set_text(s_label_usb, ubuf);
                 lv_obj_invalidate(s_label_usb);
             }
+            /* s_label_bat is static "--" until ADC is implemented; no update needed */
             ESP_LOGI(TAG, "eink: status -> %s  %s  %s (alive=%d)",
                      lbuf, rbuf, ubuf, dongle_alive);
         }
@@ -369,10 +380,25 @@ void eink_lvgl_init(void)
     ESP_ERROR_CHECK(esp_timer_create(&tick_args, &s_tick_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(s_tick_timer, 5 * 1000));   /* µs */
 
-    /* ── Static screen content ──────────────────────────────────────
+    /* ── Full-screen status dashboard ──────────────────────────────
+     * Layout (200×200 px, all coords absolute, top-left origin):
+     *
+     *   y=  8  LAYER NAME  — Montserrat 28, centered (visual anchor)
+     *   y= 48  separator   — "--------------------" Montserrat 14, centered
+     *   y= 62  L link line — "L * [||||]"  Montserrat 14, left-padded x=16
+     *   y= 80  R link line — "R * [||||]"  Montserrat 14, left-padded x=16
+     *   y= 98  USB line    — "USB *"        Montserrat 14, left-padded x=16
+     *   y=116  BAT line    — "BAT --%"      Montserrat 14, left-padded x=16
+     *   y=134  separator   — "--------------------" Montserrat 14, centered
+     *   y=150  version     — "vX.Y.Z" (tag only), Montserrat 14, centered
+     *
+     * Fonts: Montserrat 28 (layer) + Montserrat 14 (everything else).
+     * Both are enabled in sdkconfig (CONFIG_LV_FONT_MONTSERRAT_28=y,
+     * CONFIG_LV_FONT_MONTSERRAT_14=y).
+     *
      * Created here so LVGL renders on the first lv_timer_handler() call.
-     * Static screen invalidates once at creation. After the first flush,
-     * no further invalidations occur until screen content is explicitly changed. */
+     * Static labels invalidate once at creation; dynamic labels (layer,
+     * link_l, link_r, usb) are invalidated explicitly by eink_lvgl_task. */
     lv_obj_t *scr = lv_scr_act();
 
     /* White background → s_fb byte = 0xFF (all bits set) via set_px_cb.
@@ -380,54 +406,88 @@ void eink_lvgl_init(void)
     lv_obj_set_style_bg_color(scr, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
 
-    /* Dynamic layer-name label.
-     * Initial text "KaSe" is shown until the first EN_INFO_LAYER packet arrives.
-     * Unpaired fallback: layer_name stays empty → "KaSe" is displayed indefinitely.
-     * On receipt of EN_INFO_LAYER: on_layer() updates g_half_state, notifies this task,
-     * and eink_lvgl_task calls lv_label_set_text() here (inside this task — thread-safe). */
+    /* ── Layer name (Montserrat 28, centered) ───────────────────────
+     * Prominent visual anchor at y=8. Initial "KaSe" shown until first
+     * EN_INFO_LAYER packet. Updated by eink_lvgl_task on bit-0 notify. */
     s_label_layer = lv_label_create(scr);
     lv_label_set_text(s_label_layer, "KaSe");
     lv_obj_set_style_text_color(s_label_layer, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(s_label_layer, 60, 80);
+    lv_obj_set_style_text_font(s_label_layer, &lv_font_montserrat_28, LV_PART_MAIN);
+    /* Stretch to full width so lv_obj_align centers the text within the screen */
+    lv_obj_set_width(s_label_layer, EINK_WIDTH);
+    lv_obj_set_style_text_align(s_label_layer, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(s_label_layer, 0, 8);
 
-    /* Firmware version from git describe (set by ESP-IDF at build time) */
-    const esp_app_desc_t *desc = esp_app_get_description();
-    lv_obj_t *label_ver = lv_label_create(scr);
-    lv_label_set_text(label_ver, desc->version);
-    lv_obj_set_style_text_color(label_ver, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(label_ver, 60, 185);
+    /* ── Top separator (static, Montserrat 14) ──────────────────────
+     * 20 dashes spans ~160 px at 8 px/char — leaves comfortable margins. */
+    lv_obj_t *sep_top = lv_label_create(scr);
+    lv_label_set_text(sep_top, "--------------------");
+    lv_obj_set_style_text_color(sep_top, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_width(sep_top, EINK_WIDTH);
+    lv_obj_set_style_text_align(sep_top, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(sep_top, 0, 48);
 
-    /* ── Status dashboard labels ─────────────────────────────────────
-     * Separator, L-line, R-line, separator, USB-line.
-     * Initial text shows "unknown" state (dongle not yet connected). */
-
-    s_label_sep_top = lv_label_create(scr);
-    lv_label_set_text(s_label_sep_top, "-------------------");
-    lv_obj_set_style_text_color(s_label_sep_top, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(s_label_sep_top, 10, 105);
-
+    /* ── L link + signal (Montserrat 14, left-padded) ────────────── */
     s_label_link_l = lv_label_create(scr);
     lv_label_set_text(s_label_link_l, "L - [....]");
     lv_obj_set_style_text_color(s_label_link_l, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(s_label_link_l, 20, 120);
+    lv_obj_set_pos(s_label_link_l, 16, 62);
 
+    /* ── R link + signal (Montserrat 14, left-padded) ────────────── */
     s_label_link_r = lv_label_create(scr);
     lv_label_set_text(s_label_link_r, "R - [....]");
     lv_obj_set_style_text_color(s_label_link_r, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(s_label_link_r, 20, 140);
+    lv_obj_set_pos(s_label_link_r, 16, 80);
 
-    s_label_sep_bot = lv_label_create(scr);
-    lv_label_set_text(s_label_sep_bot, "-------------------");
-    lv_obj_set_style_text_color(s_label_sep_bot, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(s_label_sep_bot, 10, 155);
-
+    /* ── USB status (Montserrat 14, left-padded) ─────────────────── */
     s_label_usb = lv_label_create(scr);
     lv_label_set_text(s_label_usb, "USB -");
     lv_obj_set_style_text_color(s_label_usb, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_pos(s_label_usb, 20, 170);
+    lv_obj_set_pos(s_label_usb, 16, 98);
 
-    ESP_LOGI(TAG, "status dashboard labels created");
-    ESP_LOGI(TAG, "static screen created: 'KaSe' + version '%s'", desc->version);
+    /* ── Battery (Montserrat 14, left-padded) — PLACEHOLDER ─────────
+     * ADC not yet implemented. Shows "BAT --%" until batt_pct is wired up.
+     * When ADC is ready: lv_label_set_text_fmt(s_label_bat, "BAT %3u%%", pct). */
+    s_label_bat = lv_label_create(scr);
+    lv_label_set_text(s_label_bat, "BAT --%");
+    lv_obj_set_style_text_color(s_label_bat, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_pos(s_label_bat, 16, 116);
+
+    /* ── Bottom separator (static, Montserrat 14) ───────────────────*/
+    lv_obj_t *sep_bot = lv_label_create(scr);
+    lv_label_set_text(sep_bot, "--------------------");
+    lv_obj_set_style_text_color(sep_bot, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_width(sep_bot, EINK_WIDTH);
+    lv_obj_set_style_text_align(sep_bot, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(sep_bot, 0, 134);
+
+    /* ── Firmware version (Montserrat 14, centered, tag-only) ───────
+     * Full git-describe string ("v3.7.12-87-gdc47652-dirty") overflows the
+     * 200 px screen at 14 px font (~8 px/char × 26 chars ≈ 208 px).
+     * Truncate to the version tag only: stop at the first '-' after "v".
+     *
+     * esp_app_desc_t.version is app_version from CMakeLists / git describe.
+     * It is NUL-terminated and at most 32 chars (IDF_VER_MAX_LEN). */
+    const esp_app_desc_t *desc = esp_app_get_description();
+    char ver_short[32];
+    strncpy(ver_short, desc->version, sizeof(ver_short) - 1);
+    ver_short[sizeof(ver_short) - 1] = '\0';
+    /* Find the second hyphen (first '-' after the 'v' prefix + digits).
+     * "v3.7.12-87-gdc47652-dirty" → stop after "v3.7.12". */
+    char *p = ver_short;
+    if (*p == 'v') p++;                  /* skip leading 'v' — stays in place */
+    while (*p && *p != '-') p++;         /* skip digits/dots to first '-' */
+    *p = '\0';                           /* truncate: "v3.7.12-87-g..." → "v3.7.12" */
+
+    lv_obj_t *label_ver = lv_label_create(scr);
+    lv_label_set_text(label_ver, ver_short);
+    lv_obj_set_style_text_color(label_ver, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_width(label_ver, EINK_WIDTH);
+    lv_obj_set_style_text_align(label_ver, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(label_ver, 0, 150);
+
+    ESP_LOGI(TAG, "eink dashboard created: layer=Montserrat28 status=Montserrat14");
+    ESP_LOGI(TAG, "firmware version display: '%s' (full: '%s')", ver_short, desc->version);
 }
 
 void eink_lvgl_start(void)
