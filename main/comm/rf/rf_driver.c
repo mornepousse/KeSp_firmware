@@ -240,6 +240,36 @@ esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     return ESP_OK;
 }
 
+/* Re-assert the PRX RX config on a live radio WITHOUT re-adding the SPI device.
+ * NRF24 (clone) modules can wedge over time — stop ACKing/receiving even though
+ * the SPI link is fine. Re-writing the config registers + flushing RX un-wedges
+ * them. CE-low (standby) → rewrite EN_AA/RXADDR/SETUP/CH/RF/FEATURE/DYNPD/addr →
+ * clear flags + FLUSH_RX → CONFIG=0x3F (PRX, powered) → CE-high. No power-down
+ * cycle, so ~200 µs settle is enough. Called by the dongle radio watchdog.
+ * (Mirrors the register block in rf_driver_init; keep them in sync.) */
+void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
+{
+    if (!r->present) return;
+    ce_low(r);                                       /* standby while reconfiguring */
+    rf_driver_write_reg(r, REG_EN_AA, 0x01);
+    rf_driver_write_reg(r, REG_EN_RXADDR, 0x01);
+    rf_driver_write_reg(r, REG_SETUP_AW, 0x03);
+    rf_driver_write_reg(r, REG_SETUP_RETR, 0x13);
+    rf_driver_set_channel(r, cfg->channel);
+    rf_driver_write_reg(r, REG_RF_SETUP, 0x0E);
+    rf_driver_write_reg(r, REG_FEATURE, 0x04);
+    rf_driver_write_reg(r, REG_DYNPD, 0x01);
+    uint8_t addr[5];
+    memcpy(addr, cfg->rx_addr, 4);
+    addr[4] = cfg->addr_suffix;
+    write_reg_buf(r, REG_RX_ADDR_P0, addr, 5);
+    rf_driver_write_reg(r, REG_STATUS, 0x70);        /* clear RX_DR|TX_DS|MAX_RT */
+    { uint8_t c = CMD_FLUSH_RX, rx; csn_low(r); spi_xfer(r, &c, &rx, 1); csn_high(r); }
+    rf_driver_write_reg(r, REG_CONFIG, 0x3F);        /* PRX, powered, RX_DR IRQ on */
+    esp_rom_delay_us(200);
+    ce_high(r);                                      /* resume listening */
+}
+
 /* ════════════════════════════════════════════════════════════════
  * PTX mode (half → dongle transmit)
  * Compiled only when KASE_HAS_RF_TX=y. Shares all helpers above.

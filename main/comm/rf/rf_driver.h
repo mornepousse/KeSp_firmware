@@ -54,6 +54,10 @@ void rf_driver_set_channel(rf_radio_t *radio, uint8_t ch);
  * ce_low → write REG_RX_ADDR_P0 → ce_high. Used by the dongle pairing hot-switch. */
 void rf_driver_set_rx_address(rf_radio_t *r, const uint8_t addr[5]);
 
+/* Re-assert the full PRX RX config on a live radio (no SPI re-add). Un-wedges an
+ * NRF that stopped ACKing/receiving over time. Used by the dongle radio watchdog. */
+void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg);
+
 /* Out-of-band one-shot PTX for the dongle PKT_PAIR_ACK (spec §5.4).
  * Switches to PTX on ch+addr, transmits payload once (CE pulse, poll TX_DS/MAX_RT),
  * then restores PRX on restore_ch+restore_addr and re-asserts CE high. Returns TX_DS.

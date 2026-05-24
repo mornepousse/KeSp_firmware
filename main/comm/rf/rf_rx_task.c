@@ -88,6 +88,11 @@ extern void tap_hold_tick(void);
 extern void tap_dance_tick(void);
 
 static rf_radio_t s_left, s_right;
+
+/* Current per-radio config (set_id-derived) — kept so the radio watchdog can
+ * re-arm a wedged radio with the live address/channel. Updated at init and on
+ * every pairing hot-switch. */
+static rf_radio_cfg_t s_lcfg, s_rcfg;
 static hb_half_state_t s_hb_left, s_hb_right;
 static SemaphoreHandle_t s_evt_sem;
 
@@ -255,6 +260,7 @@ static void rf_rx_apply_paired_config(void)
     rf_radio_cfg_t rcfg = board_rf_right_cfg();
     rf_apply_set_id(&lcfg, set_id, 0x01);
     rf_apply_set_id(&rcfg, set_id, 0x02);
+    s_lcfg = lcfg; s_rcfg = rcfg;   /* keep live config for the radio watchdog */
 
     uint8_t laddr[5] = { lcfg.rx_addr[0], lcfg.rx_addr[1], lcfg.rx_addr[2],
                          lcfg.rx_addr[3], lcfg.addr_suffix };
@@ -328,6 +334,34 @@ static bool rf_rx_pairing_service(void)
     return true;
 }
 
+/* ── Radio watchdog — re-arm a radio that's been silent too long ─────────────
+ * NRF24 (clone) modules can wedge over time: stop ACKing/receiving the half
+ * even though SPI is fine (observed: left ack% → 0, only a dongle reboot fixed
+ * it). If a present radio gets NO heartbeat for > RF_REARM_SILENCE_MS, re-assert
+ * its RX config to self-heal — no reboot. Rate-limited; harmless if the half is
+ * simply off (re-arm just rewrites registers, nothing to receive). */
+#define RF_REARM_SILENCE_MS 2000u
+static void rf_rx_watchdog(uint32_t now)
+{
+    static uint32_t s_left_rearm_ms = 0, s_right_rearm_ms = 0;
+    if (s_left.present &&
+        (now - s_hb_left.last_hb_ms) > RF_REARM_SILENCE_MS &&
+        (now - s_left_rearm_ms)      > RF_REARM_SILENCE_MS) {
+        rf_driver_rearm_rx(&s_left, &s_lcfg);
+        s_left_rearm_ms = now;
+        ESP_LOGW(TAG, "watchdog: re-armed LEFT radio (silent %lu ms)",
+                 (unsigned long)(now - s_hb_left.last_hb_ms));
+    }
+    if (s_right.present &&
+        (now - s_hb_right.last_hb_ms) > RF_REARM_SILENCE_MS &&
+        (now - s_right_rearm_ms)      > RF_REARM_SILENCE_MS) {
+        rf_driver_rearm_rx(&s_right, &s_rcfg);
+        s_right_rearm_ms = now;
+        ESP_LOGW(TAG, "watchdog: re-armed RIGHT radio (silent %lu ms)",
+                 (unsigned long)(now - s_hb_right.last_hb_ms));
+    }
+}
+
 static void rf_rx_task(void *arg)
 {
     (void)arg;
@@ -347,6 +381,7 @@ static void rf_rx_task(void *arg)
         uint32_t now = esp_timer_get_time() / 1000;
         hb_check_timeout(&s_hb_left,  HB_HALF_LEFT,  &s_cb, now, 250);
         hb_check_timeout(&s_hb_right, HB_HALF_RIGHT, &s_cb, now, 250);
+        rf_rx_watchdog(now);   /* self-heal a wedged NRF radio (no reboot) */
 
         if (matrix_test_mode) {
             /* Test events are streamed from drain_radio; skip the engine so no HID
@@ -380,6 +415,7 @@ bool rf_rx_start(void)
     uint16_t set_id = rf_pairing_load_set_id_dongle();
     rf_apply_set_id(&lcfg, set_id, 0x01);   /* left  → slot 0x01 */
     rf_apply_set_id(&rcfg, set_id, 0x02);   /* right → slot 0x02 */
+    s_lcfg = lcfg; s_rcfg = rcfg;           /* keep live config for the radio watchdog */
 
     rf_driver_init(&s_left, &lcfg);
     rf_driver_init(&s_right, &rcfg);
