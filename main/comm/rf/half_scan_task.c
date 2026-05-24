@@ -78,6 +78,19 @@ static volatile rf_key_event_t s_pending_retry;
 /* rf_tx_max_rt_count is the global in rf_driver.c (PTX section). */
 extern uint32_t rf_tx_max_rt_count;
 
+/* ── 10 s console status accounting (printed from heartbeat_timer_cb) ────────
+ * A "half_stat" line every 10 s on the debug UART: identity + TX health (ACK %
+ * of heartbeats reaching the dongle) + dongle-side view + heap + presence.
+ * Window counters reset each print → values are "over the last 10 s". */
+static uint16_t s_stat_set_id      = 0;
+static uint8_t  s_stat_slot        = 0;
+static bool     s_trackpad_present = false;
+static bool     s_eink_present     = false;
+static uint32_t s_stat_hb_total    = 0;   /* heartbeats sent this window  */
+static uint32_t s_stat_hb_ok       = 0;   /* heartbeats ACKed this window */
+static uint32_t s_stat_maxrt       = 0;   /* MAX_RT events this window    */
+static uint8_t  s_stat_last_lq     = 0;   /* last link_q (retry %)        */
+
 /* ── NRF radio config (built from board.h defines) ─────────── */
 static rf_radio_cfg_t board_nrf_cfg(void)
 {
@@ -250,6 +263,44 @@ static void half_pairing_task(void *arg)
     vTaskDelete(NULL);
 }
 
+/* ── half_status_print() — one "half_stat" line for the debug console ────────
+ * Called every 10 s from heartbeat_timer_cb. Window counters reset after. */
+static void half_status_print(void)
+{
+    uint32_t up_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
+    uint32_t ack  = s_stat_hb_total ? (s_stat_hb_ok * 100u / s_stat_hb_total) : 0;
+    char slot_c   = (s_stat_slot == 0x02) ? 'R' : 'L';
+
+    char lay[17] = "-";
+    int  alive = 0, usb = 0, sl = 0, sr = 0;
+#if CONFIG_KASE_HAS_ESPNOW
+    if (xSemaphoreTake(g_half_state_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+        memcpy(lay, g_half_state.layer_name, 16); lay[16] = '\0';
+        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        alive = (now - g_half_state.last_status_ms) < 15000u;
+        usb   = g_half_state.usb_active ? 1 : 0;
+        sl    = g_half_state.sig_left;
+        sr    = g_half_state.sig_right;
+        xSemaphoreGive(g_half_state_mutex);
+    }
+    if (lay[0] == '\0') { lay[0] = '-'; lay[1] = '\0'; }
+#endif
+
+    ESP_LOGI("half_stat",
+        "up=%lus slot=%c set=0x%04X | TX hb=%lu ack=%lu%% maxrt=%lu lq=%u%% | "
+        "DONGLE alive=%d lay=%s usb=%d L=%d R=%d | heap=%luK tp=%d eink=%d",
+        (unsigned long)up_s, slot_c, s_stat_set_id,
+        (unsigned long)s_stat_hb_total, (unsigned long)ack,
+        (unsigned long)s_stat_maxrt, (unsigned)s_stat_last_lq,
+        alive, lay, usb, sl, sr,
+        (unsigned long)(esp_get_free_heap_size() / 1024u),
+        s_trackpad_present, s_eink_present);
+
+    s_stat_hb_total = 0;
+    s_stat_hb_ok    = 0;
+    s_stat_maxrt    = 0;
+}
+
 /* ── Heartbeat timer callback (100 ms periodic) ─────────────── */
 static void heartbeat_timer_cb(void *arg)
 {
@@ -281,7 +332,9 @@ static void heartbeat_timer_cb(void *arg)
         rf_tx_retr_sum = 0;
         rf_tx_count    = 0;
     }
+    s_stat_last_lq = hb.link_q;
     hb.seq     = s_seq++;
+    s_stat_maxrt += rf_tx_max_rt_count;   /* accumulate for the 10 s status */
     rf_tx_max_rt_count = 0;   /* still cleared (used elsewhere for debug) */
 
     uint8_t buf[9];
@@ -291,6 +344,15 @@ static void heartbeat_timer_cb(void *arg)
     half_spi_unlock();
     if (!ok) {
         ESP_LOGD(TAG, "heartbeat TX failed (MAX_RT)");
+    }
+
+    /* ── 10 s console status (100 × 100 ms ticks) ─────────────── */
+    s_stat_hb_total++;
+    if (ok) s_stat_hb_ok++;
+    static uint32_t s_stat_ticks = 0;
+    if (++s_stat_ticks >= 100) {
+        s_stat_ticks = 0;
+        half_status_print();
     }
 
 #if CONFIG_KASE_HAS_ESPNOW
@@ -368,6 +430,8 @@ static void half_scan_task(void *arg)
     uint8_t slot = BOARD_NRF_ADDR_SUFFIX;
     uint16_t set_id = rf_pairing_load_set_id_half(BOARD_NRF_ADDR_SUFFIX, &slot);
     rf_apply_set_id(&nrf_cfg, set_id, slot);
+    s_stat_set_id = set_id;   /* for the 10 s status line */
+    s_stat_slot   = slot;
 
     esp_err_t err = rf_driver_init_tx(&s_radio, &nrf_cfg);
     if (err != ESP_OK) {
@@ -380,6 +444,7 @@ static void half_scan_task(void *arg)
     /* Trackpad skeleton: init I2C, RST pulse, RDY IRQ, I2C probe.
      * Returns true if the trackpad is physically present on this half. */
     bool trackpad_present = trackpad_init();
+    s_trackpad_present = trackpad_present;   /* for the 10 s status line */
     if (trackpad_present) {
         ESP_LOGI(TAG, "trackpad detected — starting trackpad task");
         trackpad_start();
@@ -393,6 +458,7 @@ static void half_scan_task(void *arg)
      * Returns true if the panel is physically present on this half.
      * Must be called AFTER rf_driver_init_tx (SPI2 bus must exist). */
     bool eink_present = eink_init();
+    s_eink_present = eink_present;   /* for the 10 s status line */
     if (eink_present) {
         ESP_LOGI(TAG, "e-ink detected — starting refresh task");
         eink_start();
