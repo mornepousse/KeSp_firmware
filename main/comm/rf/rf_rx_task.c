@@ -417,6 +417,22 @@ bool rf_rx_start(void)
     rf_apply_set_id(&rcfg, set_id, 0x02);   /* right → slot 0x02 */
     s_lcfg = lcfg; s_rcfg = rcfg;           /* keep live config for the radio watchdog */
 
+    /* Park BOTH CSN HIGH before initialising either radio. The dongle shares
+     * one SPI bus between NRF1 (csn=13) and NRF2 (csn=1 — a UART0 strap pin
+     * that floats LOW at reset). If RIGHT's CSN is still floating during
+     * rf_driver_init(LEFT), NRF2 will silently latch LEFT's SPI traffic in
+     * parallel, and the writes meant for NRF1 get corrupted by the parasitic
+     * activity on the bus. Observed symptom: NRF1 boots with CONFIG=0x3E,
+     * EN_AA=0, EN_RXADDR=0 while NRF2 looks fine — verify_rx FAILs on LEFT.
+     * Pre-driving both CSN HIGH guarantees only one radio sees each command. */
+    gpio_config_t csn_park = {
+        .pin_bit_mask = (1ULL << lcfg.pin_csn) | (1ULL << rcfg.pin_csn),
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    gpio_config(&csn_park);
+    gpio_set_level(lcfg.pin_csn, 1);
+    gpio_set_level(rcfg.pin_csn, 1);
+
     rf_driver_init(&s_left, &lcfg);
     rf_driver_verify_rx(&s_left, &lcfg);    /* read-back config check (logs OK / per-reg FAIL) */
     rf_driver_init(&s_right, &rcfg);
