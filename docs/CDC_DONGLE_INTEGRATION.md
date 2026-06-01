@@ -222,8 +222,9 @@ rien a "restaurer".
 
 ## 8. Annexe : exemples de framing brut
 
-Tous les exemples utilisent le CRC-8 polynome 0x07 (init 0x00) calcule sur
-les bytes a partir de `cmd_id` jusqu'au dernier byte de payload.
+Tous les exemples utilisent le CRC-8/MAXIM (polynome 0x31, init 0x00, no
+reflection) calcule uniquement sur le **payload** (pas sur cmd_id ni len).
+Un payload vide donne CRC = 0x00.
 
 ### Polling RF_STATUS
 
