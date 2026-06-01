@@ -217,54 +217,42 @@ static void eink_lvgl_flush_cb(lv_disp_drv_t *drv,
 /* ── Fastfetch info-line formatters (unscii_8 monospace, ~19 cols) ──────────
  * Battery is a placeholder "--%" until the ADC feature lands (L+R slots reserved). */
 
-/* build_link_label() — "L   : 248/255 --%" (up) / "L   : --/255 --%" (dongle absent).
- * side: 'L'/'R'. q255: raw 0..255 link quality (0 = link down). buf >= 20 bytes. */
+/* build_link_label() — " L 248/255 --%" with WiFi glyph (FontAwesome via Montserrat).
+ * side: 'L'/'R'. q255: raw 0..255 link quality (0 = link down). buf >= 28 bytes. */
 static void build_link_label(char *buf, char side, bool dongle_alive, uint8_t q255)
 {
-    if (!dongle_alive) snprintf(buf, 20, "%c   : --/255 --%%", side);
-    else               snprintf(buf, 20, "%c   : %u/255 --%%", side, (unsigned)q255);
+    if (!dongle_alive) snprintf(buf, 28, LV_SYMBOL_WIFI " %c --/255 --%%", side);
+    else               snprintf(buf, 28, LV_SYMBOL_WIFI " %c %u/255 --%%", side, (unsigned)q255);
 }
 
-/* build_usb_label() — "usb : on" / "off" / "?". buf >= 12 bytes. */
+/* build_usb_label() — "  on" / "  off" / "  ?" with USB glyph. buf >= 16 bytes. */
 static void build_usb_label(char *buf, bool dongle_alive, bool usb_active)
 {
     const char *s = dongle_alive ? (usb_active ? "on" : "off") : "?";
-    snprintf(buf, 12, "usb : %s", s);
+    snprintf(buf, 16, LV_SYMBOL_USB " %s", s);
 }
 
-/* build_mem_label() — "mem : 207K 42C" (heap free + CPU temp).
+/* build_mem_label() — "207K · 42°C" (heap free + CPU temp), with charge glyph.
  * Quantized: heap to nearest 8 KB, temp to integer °C → text rarely changes →
  * e-ink rarely repaints. temp_c may be INT16_MIN if the sensor read failed. */
 static void build_mem_label(char *buf, uint32_t heap_free, int temp_c)
 {
     uint32_t k8 = ((heap_free / 1024u) / 8u) * 8u;   /* nearest 8 KB (floor) */
     if (temp_c > -100 && temp_c < 200)
-        snprintf(buf, 20, "mem : %luK %dC", (unsigned long)k8, temp_c);
+        snprintf(buf, 28, LV_SYMBOL_CHARGE " %luK  %d\xC2\xB0""C", (unsigned long)k8, temp_c);
     else
-        snprintf(buf, 20, "mem : %luK --C", (unsigned long)k8);
+        snprintf(buf, 28, LV_SYMBOL_CHARGE " %luK  --\xC2\xB0""C", (unsigned long)k8);
 }
 
-/* ── Penguin mascot — cycles one pose per refresh ───────────────────────────
- * 4 poses, ALL the same 5-line bounding box: the body (.--., / || \, ^  ^) is
- * fixed, only the eyes (blink/wide) and flippers move, so the penguin animates
- * IN PLACE without shifting. Pure ASCII (unscii_8 has full ASCII coverage). */
-static const char *const s_penguins[] = {
-    " .--.\n(o..o)\n(>  <)\n/ || \\\n ^  ^",   /* idle           */
-    " .--.\n(-..-)\n(>  <)\n/ || \\\n ^  ^",   /* blink          */
-    " .--.\n(o..o)\n( >< )\n/ || \\\n ^  ^",   /* flippers in    */
-    " .--.\n(O..O)\n(<  >)\n/ || \\\n ^  ^",   /* wide, flap out */
-};
-#define PENGUIN_COUNT (sizeof(s_penguins) / sizeof(s_penguins[0]))
-static lv_obj_t *s_label_penguin = NULL;
-static uint8_t   s_penguin_idx   = 0;
-
-/* make_line() — create a left-aligned unscii_8 (monospace) black label at (x,y). */
+/* make_line() — create a left-aligned Montserrat 14 black label at (x,y).
+ * Montserrat 14 ships with LV_SYMBOL_* (FontAwesome glyphs) so we can use
+ * LV_SYMBOL_USB / LV_SYMBOL_WIFI etc. inline in the label text. */
 static lv_obj_t *make_line(lv_obj_t *scr, int x, int y, const char *text)
 {
     lv_obj_t *l = lv_label_create(scr);
     lv_label_set_text(l, text);
     lv_obj_set_style_text_color(l, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_font(l, &lv_font_unscii_8, LV_PART_MAIN);
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_pos(l, x, y);
     return l;
 }
@@ -399,7 +387,7 @@ static void eink_lvgl_task(void *arg)
 
         /* ── Update status labels if needed ───────────────────────── */
         if (update_status) {
-            char lbuf[20], rbuf[20], ubuf[12], mbuf[20];
+            char lbuf[28], rbuf[28], ubuf[16], mbuf[28];
             build_link_label(lbuf, 'L', dongle_alive, sig_left);
             build_link_label(rbuf, 'R', dongle_alive, sig_right);
             build_usb_label(ubuf, dongle_alive, usb_active);
@@ -428,14 +416,8 @@ static void eink_lvgl_task(void *arg)
                 lv_label_set_text(s_label_mem, mbuf);
                 lv_obj_invalidate(s_label_mem);
             }
-            /* Cycle the penguin one pose per refresh (animates in place). */
-            if (s_label_penguin != NULL && lv_obj_is_valid(s_label_penguin)) {
-                s_penguin_idx = (uint8_t)((s_penguin_idx + 1) % PENGUIN_COUNT);
-                lv_label_set_text(s_label_penguin, s_penguins[s_penguin_idx]);
-                lv_obj_invalidate(s_label_penguin);
-            }
-            ESP_LOGI(TAG, "eink: status -> %s  %s  %s  %s peng=%u (alive=%d)",
-                     lbuf, rbuf, ubuf, mbuf, (unsigned)s_penguin_idx, dongle_alive);
+            ESP_LOGI(TAG, "eink: status -> %s  %s  %s  %s (alive=%d)",
+                     lbuf, rbuf, ubuf, mbuf, dongle_alive);
         }
 
         /* Stack headroom check — log once */
@@ -540,31 +522,52 @@ void eink_lvgl_init(void)
     ver_short[sizeof(ver_short) - 1] = '\0';
     { char *p = ver_short; if (*p == 'v') p++; while (*p && *p != '-') p++; *p = '\0'; }
 
-    /* ── Penguin mascot (left column, beside the L/R/usb rows). Cycles a
-     *    pose per refresh via eink_lvgl_task. */
-    s_label_penguin = make_line(scr, 2, 60, s_penguins[0]);
+    /* ── Header: "KaSe" big, Montserrat 28, centered ───────────── */
+    lv_obj_t *title = lv_label_create(scr);
+    lv_label_set_text(title, "KaSe");
+    lv_obj_set_style_text_color(title, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_set_width(title, EINK_WIDTH);
+    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(title, 0, 2);
 
-    /* ── Info column (x=52, unscii_8, 16 px pitch → fills the height) ──
-     * Keys padded to align the colons. Static lines drawn once; dynamic
-     * lines (lay/L/R/usb/mem) updated by eink_lvgl_task. */
-    const int X = 52;
-    make_line(scr, X,   4, "kase@dongle");
-    make_line(scr, X,  20, "-----------------");
-    s_label_layer  = make_line(scr, X,  36, "lay : KaSe");
-    s_label_link_l = make_line(scr, X,  52, "L   : --/255 --%");
-    s_label_link_r = make_line(scr, X,  68, "R   : --/255 --%");
-    s_label_usb    = make_line(scr, X,  84, "usb : ?");
+    /* Version below the title, Montserrat 14, centered */
+    lv_obj_t *ver_lbl = lv_label_create(scr);
+    lv_label_set_text(ver_lbl, ver_short);
+    lv_obj_set_style_text_color(ver_lbl, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(ver_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_width(ver_lbl, EINK_WIDTH);
+    lv_obj_set_style_text_align(ver_lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(ver_lbl, 0, 34);
+
+    /* Separator line (1 px, full width minus margins) */
+    static lv_point_t sep_pts[] = {{8, 0}, {192, 0}};
+    lv_obj_t *sep = lv_line_create(scr);
+    lv_line_set_points(sep, sep_pts, 2);
+    lv_obj_set_style_line_color(sep, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_line_width(sep, 1, LV_PART_MAIN);
+    lv_obj_set_pos(sep, 0, 52);
+
+    /* ── Info column: Montserrat 14, ~15 px pitch, full width ────
+     * Icons (LV_SYMBOL_*) come from FontAwesome glyphs shipped with the
+     * built-in Montserrat 14. Dynamic lines (lay/L/R/usb/mem) get updated
+     * by eink_lvgl_task; statics are drawn once. */
+    const int X = 8;
+    int y = 58;
+    s_label_layer  = make_line(scr, X, y, "lay  KaSe");                          y += 15;
+    s_label_link_l = make_line(scr, X, y, LV_SYMBOL_WIFI "  L --/255 --%");      y += 15;
+    s_label_link_r = make_line(scr, X, y, LV_SYMBOL_WIFI "  R --/255 --%");      y += 15;
+    s_label_usb    = make_line(scr, X, y, LV_SYMBOL_USB "  ?");                  y += 15;
     char b[40];
-    snprintf(b, sizeof(b), "set : 0x%04X", set_id);              make_line(scr, X, 100, b);
-    snprintf(b, sizeof(b), "net : ch%u %u/%u", wifi_ch, nrf_base, nrf_base + 1);
-    make_line(scr, X, 116, b);
-    s_label_mem    = make_line(scr, X, 132, "mem : --K --C");
-    snprintf(b, sizeof(b), "fls : %luM %luM",
+    snprintf(b, sizeof(b), "set  0x%04X", set_id);                               make_line(scr, X, y, b); y += 15;
+    snprintf(b, sizeof(b), "net  ch%u  nrf %u/%u", wifi_ch, nrf_base, nrf_base + 1);
+    make_line(scr, X, y, b);                                                     y += 15;
+    s_label_mem    = make_line(scr, X, y, LV_SYMBOL_CHARGE "  --K  --\xC2\xB0""C"); y += 15;
+    snprintf(b, sizeof(b), "fls  %luM / %luM",
              (unsigned long)(flash_size / (1024UL * 1024UL)),
              (unsigned long)((flash_used + 1024UL * 1024UL - 1) / (1024UL * 1024UL)));
-    make_line(scr, X, 148, b);
-    snprintf(b, sizeof(b), "soc : ESP32-S3 x%d", chip.cores);    make_line(scr, X, 164, b);
-    snprintf(b, sizeof(b), "fw  : %s", ver_short);               make_line(scr, X, 180, b);
+    make_line(scr, X, y, b);                                                     y += 15;
+    snprintf(b, sizeof(b), "soc  ESP32-S3 x%d", chip.cores);                     make_line(scr, X, y, b);
 
     ESP_LOGI(TAG, "eink fastfetch dashboard: set=0x%04X wifi_ch=%u nrf=%u/%u flash=%luM/%luM fw=%s",
              set_id, wifi_ch, nrf_base, nrf_base + 1,
