@@ -33,32 +33,46 @@ bool trackpad_init(void);
  * Not available in TEST_HOST builds — guarded in trackpad.c. */
 void trackpad_start(void);
 
+/* ── Gesture state held across calls to trackpad_map ────────────────
+ * The caller (trackpad_task) owns one instance and resets it to zeros at
+ * startup. The map function mutates it as gestures progress. */
+typedef struct {
+    bool    pending_release;   /* true → emit a button-release packet next call */
+    bool    drag_active;       /* true → left button held due to press-and-hold */
+    uint8_t peak_fingers;      /* highest n_fingers seen in current touch session */
+} trackpad_state_t;
+
 /* ── Pure gesture-to-HID mapping function — host-testable ──────────
  *
  * Maps raw IQS5xx fields to rf_trackpad_t output fields.
  * No I/O, no FreeRTOS calls, no global state reads.
  *
+ * Supported gestures (v2):
+ *   - 1-finger cursor             → dx, dy
+ *   - 1-finger single tap         → left click pulse  (button 0x01)
+ *   - 2-finger tap                → right click pulse (button 0x02)  ← v2
+ *   - 3-finger tap                → middle click pulse (button 0x04) ← v2
+ *     (detected via peak_fingers tracked across the touch session)
+ *   - 2-finger swipe (Scroll evt) → scroll_v / scroll_h               ← v2 (h)
+ *   - Press-and-hold              → hold left button while moving;
+ *     released when fingers leave the surface.                        ← v2 (drag)
+ *
+ * Cursor sensitivity is scaled by IQS5XX_SENS_NUM/IQS5XX_SENS_DEN
+ * (compile-time tunable in trackpad.c — default 1.0).
+ *
  * Parameters:
  *   ge0              GestureEvents0 byte (data[0] from 9-byte read block)
  *   ge1              GestureEvents1 byte (data[1])
- *   n_fingers        NumberOfFingers byte (data[4]) — unused in v1 logic
+ *   n_fingers        NumberOfFingers byte (data[4])
  *   rel_x            RelativeX signed 16-bit (data[5..6] big-endian decoded)
  *   rel_y            RelativeY signed 16-bit (data[7..8] big-endian decoded)
- *   pending_release_io  In/out: current state of the tap-release state machine.
- *                       Set to true by the function when a tap press is emitted.
- *                       Cleared to false when the release packet is emitted.
- *                       The caller (trackpad_task) holds this as a static bool.
+ *   state            In/out gesture state (see trackpad_state_t)
  *   out              Output: filled with dx, dy, buttons, scroll_v, scroll_h.
  *                    seq is NOT set here — caller sets out->seq = s_seq++ after return.
- *                    scroll_h is always set to 0 (out of v1 scope).
  *
  * Returns true if a packet should be sent (activity gate passed).
  * Returns false if all output fields are zero and no button event — caller drops.
- *
- * Precedence: scroll gesture overrides cursor movement.
- * Tap detection: buttons=0x01 on tap event; pending_release_io set to true.
- * Release: buttons=0x00 on next call when pending_release_io is true; force-send.
  */
 bool trackpad_map(uint8_t ge0, uint8_t ge1, uint8_t n_fingers,
                   int16_t rel_x, int16_t rel_y,
-                  bool *pending_release_io, rf_trackpad_t *out);
+                  trackpad_state_t *state, rf_trackpad_t *out);

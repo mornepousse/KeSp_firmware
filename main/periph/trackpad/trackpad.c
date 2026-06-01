@@ -33,9 +33,11 @@
 #define IQS5XX_REG_SYSTEM_CONTROL_0   0x0431   /* ACK_RESET bit — VERIFY at bench */
 #define IQS5XX_REG_END_WINDOW         0xEEEE   /* End Communication Window */
 
-/* ── Gesture event bitmasks — VERIFY against IQS5xx-B000 datasheet ── */
-#define IQS5XX_GEST0_SINGLE_TAP       0x01     /* GestureEvents0 bit 0 */
-#define IQS5XX_GEST1_SCROLL           0x02     /* GestureEvents1 bit 1 */
+/* ── Gesture event bitmasks (IQS5xx-B000) ───────────────────────── */
+#define IQS5XX_GEST0_SINGLE_TAP       0x01     /* GE0 bit 0 — single tap (any finger count) */
+#define IQS5XX_GEST0_PRESS_HOLD       0x02     /* GE0 bit 1 — press-and-hold → start drag */
+#define IQS5XX_GEST1_TWO_FINGER_TAP   0x01     /* GE1 bit 0 — 2-finger tap → right click */
+#define IQS5XX_GEST1_SCROLL           0x02     /* GE1 bit 1 — 2-finger scroll (vertical + horizontal) */
 
 /* ── SystemInfo0 bitmasks ── */
 #define IQS5XX_SYSINFO0_SHOW_RESET    0x80     /* bit 7 — set after reset */
@@ -47,17 +49,26 @@
 /* IQS5xx-B000 map (confirmed vs QMK azoteq driver): GestureEvents0=0x000D,
  * GE1=0x000E, SystemInfo0=0x000F, SystemInfo1=0x0010, NumberOfFingers=0x0011,
  * RelativeX=0x0012 (2B), RelativeY=0x0014 (2B), AbsoluteX=0x0016.
- * Reading from 0x000D puts GE0 at data[0], RelX at data[5..6], RelY at data[7..8].
- * (Reading from 0x000F instead landed on SystemInfo0 → "relx"=RelY, "rely"=AbsX
- *  which drifts and slams the cursor down.) */
+ * Reading from 0x000D puts GE0 at data[0], RelX at data[5..6], RelY at data[7..8]. */
 #define IQS5XX_READ_START_ADDR        0x000D   /* GestureEvents0 */
 #define IQS5XX_READ_BYTE_COUNT        9        /* 0x000D..0x0015 → through RelY LSB */
 
 /* ── Tunable constants (outside TEST_HOST guard — used by trackpad_map) ── */
-#define IQS5XX_SCROLL_DIV             8        /* divide RelY for scroll speed; tune at bench */
+#define IQS5XX_SCROLL_DIV             8        /* divide rel for scroll speed; tune at bench */
 #define IQS5XX_EXPLICIT_END_WINDOW    1        /* 1 = write 0xEEEE after read */
 #define IQS5XX_INVERT_X               0        /* 1 = negate dx — verify at bench */
 #define IQS5XX_INVERT_Y               0        /* 1 = negate dy — verify at bench */
+
+/* Cursor sensitivity scaling: dx,dy are multiplied by SENS_NUM/SENS_DEN.
+ * Default 1.0 (3/3) preserves existing feel; bump SENS_NUM to e.g. 4 or 5 for
+ * faster cursor without losing precision (clamp at int8 happens after). */
+#define IQS5XX_SENS_NUM               3
+#define IQS5XX_SENS_DEN               3
+
+/* HID mouse button bits (matches USB HID standard button report) */
+#define MOUSE_BTN_LEFT                0x01
+#define MOUSE_BTN_RIGHT               0x02
+#define MOUSE_BTN_MIDDLE              0x04
 
 /* ── clamp8: pure, host-safe ─────────────────────────────────────────
  * Clamp a signed 16-bit value to the HID int8_t mouse delta range.
@@ -69,28 +80,34 @@ static inline int8_t clamp8(int16_t v)
     return (int8_t)v;
 }
 
-/* ── trackpad_map: pure, host-safe ──────────────────────────────────
+/* ── trackpad_map: pure, host-safe (v2) ─────────────────────────────
  *
  * Maps raw IQS5xx gesture fields to an rf_trackpad_t output.
  * No I/O, no FreeRTOS calls, no global state reads.
  *
- * Precedence: scroll gesture (ge1 & GEST1_SCROLL) overrides cursor movement.
- * Tap state machine: press is emitted on tap event; release on next call.
+ * Gesture precedence (most → least specific):
+ *   1. Press-and-hold      → drag: left button held while fingers stay down,
+ *                            released on n_fingers=0.
+ *   2. Scroll gesture      → scroll_v / scroll_h (both axes), suppresses cursor.
+ *   3. Tap (1F/2F/3F)      → button pulse press; next call emits release.
+ *   4. Cursor movement     → dx, dy scaled by IQS5XX_SENS_NUM/DEN.
+ *
+ * 3-finger tap detection is synthesized: we track the peak number of fingers
+ * seen during the current touch session (in state) and route a tap event to
+ * MIDDLE if peak ≥ 3. The chip itself doesn't emit a 3F-tap event.
  *
  * Returns true if a packet should be sent (activity gate passed).
  */
 bool trackpad_map(uint8_t ge0, uint8_t ge1, uint8_t n_fingers,
                   int16_t rel_x, int16_t rel_y,
-                  bool *pending_release_io, rf_trackpad_t *out)
+                  trackpad_state_t *state, rf_trackpad_t *out)
 {
-    (void)n_fingers;   /* unused in v1 — gesture bits carry scroll intent */
-
     /* Zero the output; caller sets seq after return */
     out->dx       = 0;
     out->dy       = 0;
     out->buttons  = 0;
     out->scroll_v = 0;
-    out->scroll_h = 0;   /* always 0 — horizontal scroll out of v1 scope */
+    out->scroll_h = 0;
 
     bool force_send = false;
 
@@ -98,39 +115,82 @@ bool trackpad_map(uint8_t ge0, uint8_t ge1, uint8_t n_fingers,
     if (IQS5XX_INVERT_X) rel_x = (int16_t)(-rel_x);
     if (IQS5XX_INVERT_Y) rel_y = (int16_t)(-rel_y);
 
-    /* ── Scroll vs cursor (scroll gesture takes priority) ── */
+    /* ── Track peak fingers across the current touch session ──
+     * Resets to 0 below when n_fingers returns to 0. */
+    if (n_fingers > state->peak_fingers) state->peak_fingers = n_fingers;
+
+    /* ── Drag: press-and-hold engages drag; releases when fingers leave ── */
+    bool press_hold = (ge0 & IQS5XX_GEST0_PRESS_HOLD) != 0;
+    bool just_ended_drag = false;
+    if (press_hold && !state->drag_active) {
+        state->drag_active = true;
+        force_send         = true;
+    }
+    if (state->drag_active) {
+        if (n_fingers == 0) {
+            /* Fingers lifted → release the drag with one buttons=0 packet */
+            state->drag_active = false;
+            just_ended_drag    = true;
+            force_send         = true;
+            /* buttons stays 0x00 → that's the release */
+        } else {
+            /* Still dragging → hold left button down */
+            out->buttons |= MOUSE_BTN_LEFT;
+        }
+    }
+
+    /* ── Scroll vs cursor (scroll gesture takes priority over movement) ── */
     bool scroll_active = (ge1 & IQS5XX_GEST1_SCROLL) != 0;
     if (scroll_active) {
-        /* 2-finger vertical scroll: divide RelY, clamp to [-127, +127] */
+        /* 2-finger scroll, both axes */
         out->scroll_v = clamp8((int16_t)(rel_y / IQS5XX_SCROLL_DIV));
-        /* dx, dy remain 0 — scroll gesture suppresses cursor movement */
-    } else {
-        /* Cursor movement: clamp RelX/RelY to HID int8_t range */
-        out->dx = clamp8(rel_x);
-        out->dy = clamp8(rel_y);
+        out->scroll_h = clamp8((int16_t)(rel_x / IQS5XX_SCROLL_DIV));
+        /* dx, dy remain 0 — scroll suppresses cursor */
+    } else if (!state->drag_active || n_fingers > 0) {
+        /* Cursor movement (also valid while dragging to drag-move).
+         * Sensitivity scaling: multiply RelX/Y by SENS_NUM/SENS_DEN. */
+        int32_t sx = (int32_t)rel_x * IQS5XX_SENS_NUM / IQS5XX_SENS_DEN;
+        int32_t sy = (int32_t)rel_y * IQS5XX_SENS_NUM / IQS5XX_SENS_DEN;
+        out->dx = clamp8((int16_t)sx);
+        out->dy = clamp8((int16_t)sy);
     }
 
-    /* ── Click state machine (single-tap pulse synthesis) ── */
-    bool tap_detected = (ge0 & IQS5XX_GEST0_SINGLE_TAP) != 0;
+    /* ── Tap state machine (multi-finger aware) ──
+     * - 2-finger tap event (GE1 bit 0) is dedicated → right click.
+     * - SingleTap event (GE0 bit 0) is routed by peak_fingers:
+     *     peak ≥ 3 → middle click; otherwise left click.
+     * Drag is exclusive: don't synthesize taps in the same iteration as a drag
+     * start or just-ended drag (the IQS5xx may emit a SingleTap on hold-release). */
+    bool two_finger_tap = (ge1 & IQS5XX_GEST1_TWO_FINGER_TAP) != 0;
+    bool single_tap     = (ge0 & IQS5XX_GEST0_SINGLE_TAP)     != 0;
 
-    if (*pending_release_io) {
-        /* Previous iteration emitted press — emit release now */
+    if (state->pending_release) {
         out->buttons          = 0x00;
-        *pending_release_io   = false;
-        force_send            = true;   /* release always sends (even if no movement) */
-    } else if (tap_detected) {
-        /* Tap recognized this event — emit press */
-        out->buttons          = 0x01;  /* left button */
-        *pending_release_io   = true;  /* arm release for next iteration */
-        force_send            = true;  /* press always sends */
+        state->pending_release = false;
+        force_send             = true;
+    } else if (!state->drag_active && !just_ended_drag) {
+        if (two_finger_tap) {
+            out->buttons           = MOUSE_BTN_RIGHT;
+            state->pending_release = true;
+            force_send             = true;
+        } else if (single_tap) {
+            out->buttons           = (state->peak_fingers >= 3)
+                                    ? MOUSE_BTN_MIDDLE
+                                    : MOUSE_BTN_LEFT;
+            state->pending_release = true;
+            force_send             = true;
+        }
     }
-    /* else: buttons stays 0x00 */
+
+    /* ── Reset peak fingers when surface is empty (new touch starts fresh) ── */
+    if (n_fingers == 0) state->peak_fingers = 0;
 
     /* ── Activity gate ── */
     bool send = force_send
              || (out->dx       != 0)
              || (out->dy       != 0)
              || (out->scroll_v != 0)
+             || (out->scroll_h != 0)
              || (out->buttons  != 0x00);
 
     return send;
@@ -170,8 +230,8 @@ extern rf_radio_t s_radio;
 /* ── ShowReset ACK state — cleared after first successful ACK write ── */
 static bool s_need_reset_ack = true;
 
-/* ── Click state machine — true when waiting to emit button-release packet ── */
-static bool s_pending_release = false;
+/* ── Gesture state — held across calls to trackpad_map (caller-owned). ── */
+static trackpad_state_t s_tp_state = {0};
 
 /* ── RDY GPIO ISR handler — signals the trackpad task ──────── */
 static void IRAM_ATTR rdy_isr_handler(void *arg)
@@ -350,7 +410,7 @@ static void trackpad_task(void *arg)
         rf_trackpad_t tp;
         bool should_send = trackpad_map(ge0, ge1, n_fingers,
                                         rel_x, rel_y,
-                                        &s_pending_release, &tp);
+                                        &s_tp_state, &tp);
 
         /* ── Step 6: Activity gate ───────────────────────────────────── */
         if (!should_send) {
