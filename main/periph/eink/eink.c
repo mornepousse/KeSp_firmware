@@ -115,31 +115,47 @@ bool eink_init(void)
     };
     gpio_config(&out_cfg);
 
+    /* Pull-down on BUSY: when no panel is connected the pin floats and may
+     * randomly read LOW, fooling the probe. Pulldown forces "no panel" = LOW
+     * reliably; a real SSD1681 drives BUSY HIGH during reset/init and easily
+     * overrides the weak pulldown. */
     gpio_config_t busy_cfg = {
         .pin_bit_mask = (1ULL << BOARD_EINK_BUSY_GPIO),
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
     };
     gpio_config(&busy_cfg);
 
-    /* ── Reset pulse: RST high 10 ms → low 10 ms → high 10 ms ─ */
+    /* ── Reset pulse: RST high 10 ms → low 10 ms → high (probe starts immediately) ─ */
     gpio_set_level(BOARD_EINK_RST_GPIO, 1);
     vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(BOARD_EINK_RST_GPIO, 0);
     vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(BOARD_EINK_RST_GPIO, 1);
-    vTaskDelay(pdMS_TO_TICKS(10));
 
-    /* ── Probe: BUSY should go low within 200 ms after reset ─── */
-    /* SSD1681 pulls BUSY high internally during power-on / reset init. */
+    /* ── Probe step 1: BUSY must go HIGH at some point during the panel's POR ──
+     * A real SSD1681 drives BUSY HIGH within ~1 ms of RST release and holds it
+     * for ~10 ms while booting. With no panel + pulldown, BUSY stays LOW the
+     * whole window → "no panel". Fine-grained polling to catch the HIGH pulse. */
+    bool busy_seen_high = false;
+    for (int us_elapsed = 0; us_elapsed < 30000; us_elapsed += 200) {
+        if (gpio_get_level(BOARD_EINK_BUSY_GPIO) == 1) { busy_seen_high = true; break; }
+        esp_rom_delay_us(200);
+    }
+    if (!busy_seen_high) {
+        ESP_LOGI(TAG, "BUSY never went high after reset — panel not present on this half");
+        return false;
+    }
+
+    /* ── Probe step 2: wait for BUSY to drop (panel done with its POR) ─── */
     int probe_ms = 0;
     while (gpio_get_level(BOARD_EINK_BUSY_GPIO) == 1 && probe_ms < 200) {
         vTaskDelay(pdMS_TO_TICKS(10));
         probe_ms += 10;
     }
     if (gpio_get_level(BOARD_EINK_BUSY_GPIO) != 0) {
-        ESP_LOGI(TAG, "BUSY did not go low within 200 ms — panel not present on this half");
+        ESP_LOGI(TAG, "BUSY stuck high after 200 ms — panel may be defective");
         return false;
     }
 
