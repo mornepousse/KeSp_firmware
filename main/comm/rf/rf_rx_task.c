@@ -418,7 +418,9 @@ bool rf_rx_start(void)
     s_lcfg = lcfg; s_rcfg = rcfg;           /* keep live config for the radio watchdog */
 
     rf_driver_init(&s_left, &lcfg);
+    rf_driver_verify_rx(&s_left, &lcfg);    /* read-back config check (logs OK / per-reg FAIL) */
     rf_driver_init(&s_right, &rcfg);
+    rf_driver_verify_rx(&s_right, &rcfg);
 
     if (!s_left.present && !s_right.present) {
         ESP_LOGE(TAG, "no NRF radios present - RF disabled");

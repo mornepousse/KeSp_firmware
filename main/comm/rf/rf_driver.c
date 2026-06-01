@@ -266,8 +266,57 @@ void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_STATUS, 0x70);        /* clear RX_DR|TX_DS|MAX_RT */
     { uint8_t c = CMD_FLUSH_RX, rx; csn_low(r); spi_xfer(r, &c, &rx, 1); csn_high(r); }
     rf_driver_write_reg(r, REG_CONFIG, 0x3F);        /* PRX, powered, RX_DR IRQ on */
-    esp_rom_delay_us(200);
+    vTaskDelay(pdMS_TO_TICKS(2));                     /* Tpd2stby ≈1.5ms — MUST wait before
+                                                        CE-high if the radio was powered down
+                                                        (0x3C), else it never enters RX */
     ce_high(r);                                      /* resume listening */
+}
+
+/* Boot-time sanity check on a freshly-init'd PRX radio: read back the critical
+ * registers and compare to the expected init values. Logs "verify OK" with the
+ * read-back values, or "verify FAIL" with the exact diff per register.
+ * Useful to spot a radio whose SPI writes silently didn't fully land — exactly
+ * what we hit on the dongle's NRF1 (CONFIG ended up 0x3C instead of 0x3F due to
+ * a marginal solder joint dropping bits 0,1 = PWR_UP/PRIM_RX). */
+bool rf_driver_verify_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
+{
+    if (!r->present) {
+        ESP_LOGW(TAG, "verify csn=%d skipped (not present)", cfg->pin_csn);
+        return false;
+    }
+    uint8_t cfg_v = rf_driver_read_reg(r, REG_CONFIG);
+    uint8_t en_aa = rf_driver_read_reg(r, REG_EN_AA);
+    uint8_t en_rx = rf_driver_read_reg(r, REG_EN_RXADDR);
+    uint8_t ch_v  = rf_driver_read_reg(r, REG_RF_CH);
+    uint8_t rf_v  = rf_driver_read_reg(r, REG_RF_SETUP);
+
+    /* RX_ADDR_P0 is a 5-byte register — read in one R_REGISTER transaction. */
+    uint8_t tx[6] = { REG_RX_ADDR_P0, 0, 0, 0, 0, 0 };
+    uint8_t rx[6] = {0};
+    csn_low(r);
+    spi_xfer(r, tx, rx, 6);
+    csn_high(r);
+    uint8_t addr_lsb = rx[1];   /* LSB = slot suffix in the KaSe addressing scheme */
+
+    bool ok = (cfg_v == 0x3F)
+           && (en_aa == 0x01)
+           && (en_rx == 0x01)
+           && (ch_v  == cfg->channel)
+           && (rf_v  == 0x0E)
+           && (addr_lsb == cfg->addr_suffix);
+
+    if (ok) {
+        ESP_LOGI(TAG, "verify csn=%d OK   CONFIG=0x%02x EN_AA=0x%02x EN_RX=0x%02x "
+                      "RF_CH=%u RF_SETUP=0x%02x ADDR.lsb=0x%02x",
+                 cfg->pin_csn, cfg_v, en_aa, en_rx, ch_v, rf_v, addr_lsb);
+    } else {
+        ESP_LOGW(TAG, "verify csn=%d FAIL CONFIG=0x%02x(exp 0x3F) EN_AA=0x%02x(exp 0x01) "
+                      "EN_RX=0x%02x(exp 0x01) RF_CH=%u(exp %u) RF_SETUP=0x%02x(exp 0x0E) "
+                      "ADDR.lsb=0x%02x(exp 0x%02x)",
+                 cfg->pin_csn, cfg_v, en_aa, en_rx, ch_v, cfg->channel,
+                 rf_v, addr_lsb, cfg->addr_suffix);
+    }
+    return ok;
 }
 
 /* ════════════════════════════════════════════════════════════════
