@@ -42,16 +42,35 @@ void espnow_info_init(void)
 
 /* ── Dongle: receives EN_INFO_BATTERY from a half ─────────────── */
 #if CONFIG_KASE_DEVICE_ROLE_DONGLE
+extern void rf_pairing_load_peers_dongle(uint8_t mac_left[6],
+                                         uint8_t mac_right[6],
+                                         uint8_t *paired_count);
+
+extern void dongle_cache_set_battery(uint8_t slot,
+                                     uint8_t batt_dV, uint8_t soc_pct,
+                                     uint8_t charging);
+
 static void on_battery(const uint8_t mac[6], const en_battery_t *b)
 {
     ESP_LOGI(TAG, "battery from %02X:%02X:%02X:%02X:%02X:%02X: %u.%uV soc=%u%% chg=%u",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
              b->batt_dV / 10, b->batt_dV % 10,
              b->soc_pct, b->charging);
-    /* TODO STUB: Forward battery level to controller via CDC push frame.
-     *   Suggested: new KR unsolicited frame (KS_CMD_RF_LINK_STATUS extended, or new cmd).
-     *   Or: store in a global and return via KS_CMD_DONGLE_STATS.
-     *   For now: log only. */
+
+    /* Resolve the sender's MAC to a slot (0=LEFT, 1=RIGHT) and stash the
+     * sample so KS_CMD_BATTERY can serve it on demand. Unknown MAC → drop. */
+    uint8_t mac_left[6]  = {0};
+    uint8_t mac_right[6] = {0};
+    uint8_t paired = 0;
+    rf_pairing_load_peers_dongle(mac_left, mac_right, &paired);
+
+    if (memcmp(mac, mac_left, 6) == 0) {
+        dongle_cache_set_battery(0, b->batt_dV, b->soc_pct, b->charging);
+    } else if (memcmp(mac, mac_right, 6) == 0) {
+        dongle_cache_set_battery(1, b->batt_dV, b->soc_pct, b->charging);
+    } else {
+        ESP_LOGW(TAG, "battery from unpaired MAC — dropped");
+    }
 }
 #endif /* CONFIG_KASE_DEVICE_ROLE_DONGLE */
 

@@ -81,8 +81,12 @@ if(CONFIG_KASE_HAS_TAMA)
 endif()
 
 # Dongle CDC stubs (no-op symbols for tama/bt/display referenced by cdc_binary_cmds.c)
+# and dongle-specific binary commands (RF status, pair list/reset, battery).
 if(CONFIG_KASE_DEVICE_ROLE_DONGLE)
-    list(APPEND srcs "comm/cdc/cdc_dongle_stubs.c")
+    list(APPEND srcs
+        "comm/cdc/cdc_dongle_stubs.c"
+        "comm/cdc/cdc_dongle_cmds.c"
+    )
 endif()
 
 # CDC stubs for half role (no-op symbols for tama/bt/display/layout)

@@ -41,7 +41,18 @@ static void bin_cmd_version(uint8_t cmd, const uint8_t *p, uint16_t l)
 static void bin_cmd_features(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
     (void)p; (void)l;
-    static const char feat[] = "MT,LT,LM,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE,COMBO,LEADER,GESC,LAYER_LOCK,WPM,TRI_LAYER,MATRIX_TEST";
+#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+    /* Dongle role: the controller uses RF_DONGLE as the discriminator and the
+     * RF_* tags to know which RF/diag commands are available. */
+    static const char feat[] =
+        "MT,LT,LM,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE,COMBO,LEADER,GESC,"
+        "LAYER_LOCK,WPM,TRI_LAYER,MATRIX_TEST,"
+        "RF_DONGLE,RF_STATUS,RF_PAIR,BATTERY";
+#else
+    static const char feat[] =
+        "MT,LT,LM,OSM,OSL,CAPS_WORD,REPEAT,TAP_DANCE,COMBO,LEADER,GESC,"
+        "LAYER_LOCK,WPM,TRI_LAYER,MATRIX_TEST";
+#endif
     ks_respond(cmd, KS_STATUS_OK, (const uint8_t *)feat, (uint16_t)strlen(feat));
 }
 

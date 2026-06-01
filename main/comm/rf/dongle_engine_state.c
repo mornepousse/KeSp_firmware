@@ -109,3 +109,51 @@ void layer_changed(void)
 /* matrix test mode is keyboard-only; inert globals so CDC handlers link */
 volatile bool matrix_test_mode = false;
 volatile uint32_t matrix_test_last_activity_ms = 0;
+
+/* ── Battery sample cache (dongle) ─────────────────────────────────
+ * Filled by espnow_info.c::on_battery() each time a half pushes
+ * EN_INFO_BATTERY. Drained by the CDC KS_CMD_BATTERY handler.
+ *
+ * Slot mapping mirrors rf_link_status_t: 0 = LEFT, 1 = RIGHT.
+ * dV/soc/charging default to 0xFF until the first sample arrives → the
+ * controller can render "unknown" without polling forever.
+ * last_ms = esp_timer_get_time()/1000 at capture; 0 = never. */
+#include "esp_timer.h"
+
+typedef struct {
+    uint8_t  batt_dV;     /* en_battery_t.batt_dV   (0xFF = unknown) */
+    uint8_t  soc_pct;     /* en_battery_t.soc_pct   (0xFF = unknown) */
+    uint8_t  charging;    /* en_battery_t.charging  (0xFF = unknown) */
+    uint32_t last_ms;     /* esp_timer ms at last update; 0 = never */
+} dongle_batt_t;
+
+static dongle_batt_t s_batt[2] = {
+    { 0xFF, 0xFF, 0xFF, 0 },
+    { 0xFF, 0xFF, 0xFF, 0 },
+};
+
+void dongle_cache_set_battery(uint8_t slot,
+                              uint8_t batt_dV, uint8_t soc_pct, uint8_t charging)
+{
+    if (slot > 1) return;
+    s_batt[slot].batt_dV  = batt_dV;
+    s_batt[slot].soc_pct  = soc_pct;
+    s_batt[slot].charging = charging;
+    s_batt[slot].last_ms  = (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+void dongle_cache_get_battery(uint8_t slot,
+                              uint8_t *batt_dV, uint8_t *soc_pct,
+                              uint8_t *charging, uint32_t *age_ms_out)
+{
+    uint8_t s = (slot > 1) ? 1 : slot;
+    *batt_dV  = s_batt[s].batt_dV;
+    *soc_pct  = s_batt[s].soc_pct;
+    *charging = s_batt[s].charging;
+    if (s_batt[s].last_ms == 0) {
+        *age_ms_out = 0xFFFFFFFFu;  /* never seen */
+    } else {
+        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+        *age_ms_out = now - s_batt[s].last_ms;
+    }
+}

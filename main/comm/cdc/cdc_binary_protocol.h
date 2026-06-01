@@ -103,6 +103,10 @@ typedef enum {
     KS_CMD_MATRIX_TEST      = 0xB0,
     KS_CMD_NVS_RESET        = 0xB1,
     KS_CMD_RF_PAIR_START    = 0xB2,
+    KS_CMD_RF_STATUS        = 0xB3,  /* dongle: link state + signal + packet counters */
+    KS_CMD_RF_PAIR_LIST     = 0xB4,  /* dongle: list currently paired half MACs */
+    KS_CMD_RF_PAIR_RESET    = 0xB5,  /* dongle: clear all pairings (rf NVS ns) */
+    KS_CMD_BATTERY          = 0xB6,  /* dongle: last battery sample per half */
 
     /* OTA (0xF0-0xFF) */
     KS_CMD_OTA_START        = 0xF0,

@@ -485,6 +485,109 @@ Efface les configurations sauvegardees en NVS et reboot avec les valeurs par def
 
 ---
 
+### Dongle / Wireless (0xB2–0xB6, dongle role only)
+
+Ces commandes ne sont exposees que sur le firmware dongle (`CONFIG_KASE_DEVICE_ROLE_DONGLE`). Pour detecter le role coter soft, lire la liste de features (KS_CMD_FEATURES) et chercher le tag `RF_DONGLE`. Si absent, le device est un clavier autonome (V1/V2/V2D) — les commandes ci-dessous repondent `ERR_UNKNOWN`.
+
+Tous les champs multi-octets sont little-endian sauf mention contraire.
+
+---
+
+#### RF_PAIR_START (0xB2)
+Ouvre une fenetre de pairing de 30 secondes pour accueillir une moitie. Le dongle bascule la radio gauche sur l'adresse/canal de rendezvous et attend un `rf_pair_req`. La reponse part immediatement (non bloquante) ; l'echange continue dans `rf_rx_task`.
+
+- Request: `[reset:u8]`
+  - `reset = 0` : ajoute la prochaine moitie aux pairs existants
+  - `reset = 1` : efface d'abord toutes les paires NVS, puis ouvre la fenetre
+- Response: `[set_id_hi:u8][set_id_lo:u8][paired_count:u8]`
+  - `set_id` : identifiant 16-bit du set (derive d'eFuse) — utile pour afficher coter soft
+  - `paired_count` : nombre de moities couplees actuellement (0..2)
+- Erreur: `ERR_BUSY` si une fenetre est deja ouverte ou si la radio gauche n'est pas presente
+
+Pour savoir si le pairing a abouti, poller `RF_PAIR_LIST` apres ~5–30 s : `paired_count` augmente quand une nouvelle moitie a complete l'echange.
+
+---
+
+#### RF_STATUS (0xB3)
+Snapshot complet de l'etat du lien radio pour les deux moities. Idempotent, sans effet de bord — peut etre poll a 1–2 Hz pour piloter un indicateur de barres dans le soft.
+
+- Request: payload vide
+- Response: `27 bytes`
+
+| Offset | Type   | Champ           | Description                                                |
+|-------:|--------|-----------------|------------------------------------------------------------|
+| 0      | u8     | `flags`         | bit0=link_left_up, bit1=link_right_up, bits2-7=reserves    |
+| 1      | u8     | `sig_left`      | qualite 0..255 (rf_signal_q255 — 0 = down/timeout)         |
+| 2      | u8     | `sig_right`     | idem droite                                                |
+| 3..6   | u32 LE | `hb_age_left`   | ms depuis le dernier heartbeat de la moitie gauche         |
+| 7..10  | u32 LE | `hb_age_right`  | idem droite                                                |
+| 11..14 | u32 LE | `pkt_rx_left`   | nombre total de paquets acceptes (incremente sur succes)   |
+| 15..18 | u32 LE | `pkt_rx_right`  | idem droite                                                |
+| 19..22 | u32 LE | `pkt_dup_left`  | nombre de duplicats rejetes (seq deja vue)                 |
+| 23..26 | u32 LE | `pkt_dup_right` | idem droite                                                |
+
+**Mapping recommande pour 4 barres de signal :**
+```
+sig >= 200 → 4 barres
+sig >= 140 → 3 barres
+sig >=  80 → 2 barres
+sig >=  30 → 1 barre
+sig <   30 → 0 barre / lien casse
+```
+
+**Detection de moitie absente** : si `link_<side>_up = 0` ET `pkt_rx_<side> == 0`, la moitie n'a jamais ete vue depuis le boot. Si `link_<side>_up = 0` ET `pkt_rx_<side> > 0`, la moitie a perdu le lien apres avoir fonctionne.
+
+---
+
+#### RF_PAIR_LIST (0xB4)
+Liste des MACs des moities actuellement couplees (lecture NVS namespace `rf`).
+
+- Request: payload vide
+- Response: `13 bytes`
+
+| Offset | Type    | Champ           | Description                                  |
+|-------:|---------|-----------------|----------------------------------------------|
+| 0      | u8      | `paired_count`  | 0..2                                         |
+| 1..6   | u8[6]   | `mac_left`      | MAC WiFi STA de la moitie gauche (ou zeros)  |
+| 7..12  | u8[6]   | `mac_right`     | idem droite                                  |
+
+Si `mac_<side>` vaut `00:00:00:00:00:00`, le slot est libre.
+
+---
+
+#### RF_PAIR_RESET (0xB5)
+Efface toutes les paires (NVS namespace `rf` purgee). Les moities couplees expireront leur heartbeat et ne pourront pas se reconnecter sans re-pairing. Utile pour migrer un dongle vers un autre set de moities, ou pour debug.
+
+- Request: payload vide
+- Response: `[paired_count:u8]` — 0 apres reset
+- Erreur: `ERR_UNKNOWN` si l'ecriture NVS echoue
+
+Le dongle continue de tourner ; la radio garde sa config courante. Pour repeupler les paires, appeler `RF_PAIR_START` avec `reset = 0`.
+
+---
+
+#### BATTERY (0xB6)
+Derniere mesure de batterie cachee pour chaque moitie. Les moities n'emettent `EN_INFO_BATTERY` que lorsque la valeur change (rate-limited), donc l'`age_ms` peut grandir legitimement entre deux samples.
+
+- Request: payload vide
+- Response: `14 bytes` — 2 enregistrements de 7 octets chacun
+
+Format d'un enregistrement (slot 0 = LEFT, slot 1 = RIGHT) :
+
+| Offset | Type   | Champ      | Description                                      |
+|-------:|--------|------------|--------------------------------------------------|
+| 0      | u8     | `batt_dV`  | Tension × 10 (volts × 10). `0xFF` = jamais vu    |
+| 1      | u8     | `soc_pct`  | State of charge 0..100. `0xFF` = inconnu         |
+| 2      | u8     | `charging` | 0 = decharge, 1 = en charge. `0xFF` = inconnu    |
+| 3..6   | u32 LE | `age_ms`   | ms depuis la derniere mise a jour. `0xFFFFFFFF` = jamais recu |
+
+**Regles d'affichage coter soft :**
+- Si `batt_dV == 0xFF` OU `soc_pct == 0xFF` → afficher "—" / placeholder
+- Si `age_ms > 60000` (1 minute) → griser la valeur (potentiellement obsolete)
+- Si `age_ms == 0xFFFFFFFF` → la moitie ne supporte pas encore la telemetrie batterie (firmware ancien ou pile de batterie pas encore branchee)
+
+---
+
 ### OTA (0xF0–0xFF)
 
 #### OTA_START (0xF0)

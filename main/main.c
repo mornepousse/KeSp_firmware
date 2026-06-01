@@ -169,6 +169,10 @@ void app_main(void) {
   {
     extern void cdc_binary_cmds_init(void);
     cdc_binary_cmds_init();
+#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+    extern void cdc_dongle_cmds_init(void);
+    cdc_dongle_cmds_init();
+#endif
   }
 
   keymap_init_nvs();
