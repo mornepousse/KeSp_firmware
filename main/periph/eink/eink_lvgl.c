@@ -258,47 +258,56 @@ static lv_obj_t *make_line(lv_obj_t *scr, int x, int y, const char *text)
 }
 
 /* ── render_paired_splash() — one-shot "PAIRED" confirmation screen ──
- * Builds a fresh full-screen screen and loads it. The dashboard screen stays in
+ * Visual layout, more minimalist + readable at a glance:
+ *   y=20..68    huge LV_SYMBOL_OK in Montserrat 48 (the visual anchor)
+ *   y=104..132  "PAIRED" in Montserrat 28
+ *   y=170       1 px separator line
+ *   y=176..190  "set 0xXXXX · side L|R" in Montserrat 14 (bottom info strip)
+ * Builds a fresh screen and lv_scr_loads it. The dashboard screen stays in
  * memory but hidden; we never restore it (the half reboots right after pairing),
  * so leaving it is harmless and keeps s_label_* pointers valid.
- * Rendered by the next lv_timer_handler() pass (≈1.5 s on e-ink).
- * Layout (200×200, all centered): "PAIRED" (M28) / OK glyph (M28) /
- * "set 0xXXXX" (M14 default) / "side L|R" (M14 default). */
+ * Rendered by the next lv_timer_handler() pass (≈1.5 s on e-ink). */
 static void render_paired_splash(uint16_t set_id, uint8_t slot)
 {
     lv_obj_t *scr = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(scr, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
 
+    /* Big check — Montserrat 48 ships LV_SYMBOL_* the same as the smaller sizes */
+    lv_obj_t *l_ok = lv_label_create(scr);
+    lv_label_set_text(l_ok, LV_SYMBOL_OK);
+    lv_obj_set_style_text_color(l_ok, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(l_ok, &lv_font_montserrat_48, LV_PART_MAIN);
+    lv_obj_set_width(l_ok, EINK_WIDTH);
+    lv_obj_set_style_text_align(l_ok, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(l_ok, 0, 20);
+
+    /* "PAIRED" — Montserrat 28 */
     lv_obj_t *l_title = lv_label_create(scr);
     lv_label_set_text(l_title, "PAIRED");
     lv_obj_set_style_text_color(l_title, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_text_font(l_title, &lv_font_montserrat_28, LV_PART_MAIN);
     lv_obj_set_width(l_title, EINK_WIDTH);
     lv_obj_set_style_text_align(l_title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_pos(l_title, 0, 30);
+    lv_obj_set_pos(l_title, 0, 104);
 
-    lv_obj_t *l_ok = lv_label_create(scr);
-    lv_label_set_text(l_ok, LV_SYMBOL_OK);   /* bundled in built-in Montserrat fonts */
-    lv_obj_set_style_text_color(l_ok, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_font(l_ok, &lv_font_montserrat_28, LV_PART_MAIN);
-    lv_obj_set_width(l_ok, EINK_WIDTH);
-    lv_obj_set_style_text_align(l_ok, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_pos(l_ok, 0, 78);
+    /* Thin separator line above the info strip */
+    static lv_point_t splash_sep_pts[] = {{20, 0}, {180, 0}};
+    lv_obj_t *sep = lv_line_create(scr);
+    lv_line_set_points(sep, splash_sep_pts, 2);
+    lv_obj_set_style_line_color(sep, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_line_width(sep, 1, LV_PART_MAIN);
+    lv_obj_set_pos(sep, 0, 168);
 
-    lv_obj_t *l_set = lv_label_create(scr);
-    lv_label_set_text_fmt(l_set, "set 0x%04X", set_id);
-    lv_obj_set_style_text_color(l_set, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_width(l_set, EINK_WIDTH);
-    lv_obj_set_style_text_align(l_set, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_pos(l_set, 0, 128);
-
-    lv_obj_t *l_side = lv_label_create(scr);
-    lv_label_set_text(l_side, (slot == 0x01) ? "side L" : "side R");
-    lv_obj_set_style_text_color(l_side, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_width(l_side, EINK_WIDTH);
-    lv_obj_set_style_text_align(l_side, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_pos(l_side, 0, 152);
+    /* Bottom info strip: "set 0xXXXX · side L|R" — Montserrat 14, centered */
+    lv_obj_t *l_info = lv_label_create(scr);
+    lv_label_set_text_fmt(l_info, "set 0x%04X  \xC2\xB7  side %c",
+                          set_id, (slot == 0x01) ? 'L' : 'R');
+    lv_obj_set_style_text_color(l_info, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(l_info, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_width(l_info, EINK_WIDTH);
+    lv_obj_set_style_text_align(l_info, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(l_info, 0, 176);
 
     lv_scr_load(scr);        /* makes scr the active screen → rendered next pass */
 }
