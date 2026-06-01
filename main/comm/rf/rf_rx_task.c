@@ -413,6 +413,17 @@ bool rf_rx_start(void)
      * rf_pairing_load_set_id_dongle() returns 0 and rf_apply_set_id is a no-op,
      * so lcfg/rcfg keep the board factory defaults (KaSe.01/.02, ch 76/82). */
     uint16_t set_id = rf_pairing_load_set_id_dongle();
+    if (set_id == 0) {
+        /* No NVS pairs — fall back to the set_id COMPUTED from this dongle's
+         * own WiFi MAC. Halves that were paired in a previous lifetime stored
+         * exactly this same id (derived from the dongle's MAC during the
+         * pairing handshake), so reusing it here makes their TX addresses
+         * match our RX addresses without any new pairing exchange.
+         * Effect: as long as the dongle's MAC stays stable, NVS-erased dongles
+         * still recover their bond with previously-paired halves. */
+        set_id = rf_compute_set_id();
+        ESP_LOGW(TAG, "no NVS pairs — using computed set_id 0x%04X for RX", set_id);
+    }
     rf_apply_set_id(&lcfg, set_id, 0x01);   /* left  → slot 0x01 */
     rf_apply_set_id(&rcfg, set_id, 0x02);   /* right → slot 0x02 */
     s_lcfg = lcfg; s_rcfg = rcfg;           /* keep live config for the radio watchdog */
