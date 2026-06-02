@@ -12,3 +12,4 @@ build_v2
 /build_v2_debug
 /build_half_left
 /build_half_right
+build_*/

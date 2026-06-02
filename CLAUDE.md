@@ -185,6 +185,43 @@ sur le target. Exécution : `cd test/build && ./test_runner`.
 Les tests doivent être parallel-safe : pas d'état global muté, pas de
 chemins temp partagés. Mocks NVS via fake implementations dans le test.
 
+## Workflow anti-régression (OBLIGATOIRE)
+
+Source unique de vérité : `scripts/check.sh`.
+- `./scripts/check.sh --host-only` — tests host (~secondes)
+- `./scripts/check.sh --board <name>` — host + build d'un board
+- `./scripts/check.sh` — host + build des 6 boards (sdkconfig isolé par board)
+
+**Activation des hooks git (une fois par clone)** :
+```bash
+git config core.hooksPath scripts/hooks
+```
+`pre-push` lance le check complet et bloque le push si rouge. WIP : `git push --no-verify`.
+
+**Hooks Claude Code** (`.claude/settings.json`, automatiques) :
+- `PostToolUse` sur édition de `.c/.h` dans `main/`, `boards/`, `test/` → tests host.
+- `Stop` → host + build du board courant (lu dans `.kase-board`). Si ESP-IDF n'est pas sourcé, dégrade en tests host seuls.
+Changer de board courant : `echo kase_v1 > .kase-board`.
+
+**Jamais** builder deux boards dans le même `build/` avec le `sdkconfig` racine
+(fuite de config). Toujours `-B build_<board> -DSDKCONFIG=build_<board>/sdkconfig`.
+
+### Norme TDD — nouvelle logique pure
+Toute nouvelle fonction de logique pure (keymap, layers, combo, tap-hold,
+parsing CDC, encoding keycodes…) : test host écrit **d'abord**, ajouté à
+`test/CMakeLists.txt` + déclaré dans `test/test_main.c`. Invoquer l'agent
+`kase-test-author`.
+
+### Quand invoquer les agents kase-*
+- `kase-firmware-debugger` → backtrace / boot loop / crash.
+- `kase-test-author` → ajout de logique pure (cf. norme TDD).
+- `kase-code-reviewer` → avant un merge / release.
+Les autres (`cdc-protocol`, `board-variant`, `release-manager`, `maintainer`,
+`security-auditor`) : à la demande ponctuelle.
+
+### Avant un merge vers main / release
+Dérouler `docs/HARDWARE_SMOKE_TEST.md` sur les boards concernés.
+
 ## Dépendances ESP-IDF
 
 Managed via `main/idf_component.yml` :
