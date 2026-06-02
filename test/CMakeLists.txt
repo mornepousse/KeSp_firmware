@@ -42,6 +42,8 @@ add_executable(test_runner
     ../main/comm/rf/half_power.c
     test_half_battery.c
     ../main/comm/rf/half_battery.c
+    test_cdc_monitor.c
+    ../main/comm/cdc/ks_monitor.c
     test_main.c
 )
 

@@ -35,6 +35,7 @@ extern void test_en_status(void);
 extern void test_rf_signal_q255(void);
 extern void test_half_power(void);
 extern void test_half_battery(void);
+extern void test_cdc_monitor(void);
 
 int main(void) {
     printf("KeSp Firmware Unit Tests\n");
@@ -69,6 +70,7 @@ int main(void) {
     test_rf_signal_q255();
     test_half_power();
     test_half_battery();
+    test_cdc_monitor();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);
