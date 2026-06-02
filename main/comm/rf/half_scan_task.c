@@ -24,6 +24,7 @@
 #include "half_spi.h"        /* half_spi_lock_init / half_spi_lock / half_spi_unlock */
 #include "rf_pairing.h"      /* rf_pairing_load_set_id_half / rf_apply_set_id */
 #include "half_power.h"      /* half_power_next / half_power_hb_divisor */
+#include "half_sleep.h"      /* half_sleep_enter */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_rom_sys.h"
@@ -557,9 +558,13 @@ static void half_scan_task(void *arg)
 
     ESP_LOGI(TAG, "matrix + NRF PTX + heartbeat timer running");
 
-    /* Task is event-driven via callbacks; block indefinitely */
+    /* Task is event-driven via callbacks; poll for SLEEP state every 500 ms */
     for (;;) {
-        vTaskDelay(portMAX_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+        if (half_power_next(s_last_activity_ms, now) == HALF_POWER_SLEEP) {
+            half_sleep_enter();   /* blocks: quiesce -> (placeholder) -> restore */
+        }
     }
 }
 
@@ -572,8 +577,15 @@ void half_scan_stop_for_sleep(void)
 
 void half_scan_restart_after_wake(void)
 {
-    keyboard_button_create(&s_kbd_cfg, &s_kbd);
-    keyboard_button_register_cb(s_kbd, s_kbd_cb_cfg, NULL);
+    esp_err_t r = keyboard_button_create(&s_kbd_cfg, &s_kbd);
+    if (r == ESP_OK && s_kbd) {
+        keyboard_button_register_cb(s_kbd, s_kbd_cb_cfg, NULL);
+    } else {
+        /* Best-effort: heartbeat still restarts below; keys won't fire until the
+         * next wake cycle recreates the scan. Surface it for debugging. */
+        ESP_LOGE(TAG, "restart_after_wake: keyboard_button_create failed: %d", r);
+        s_kbd = NULL;
+    }
     s_last_activity_ms = (uint32_t)(esp_timer_get_time() / 1000);
     if (s_hb_timer) esp_timer_start_periodic(s_hb_timer, 100 * 1000);
 }
