@@ -1,5 +1,7 @@
 #include "half_sleep.h"
-#include "half_scan_task.h"   /* half_scan_stop_for_sleep / restart_after_wake */
+#include "half_scan_task.h"   /* half_scan_stop_for_sleep / restart_after_wake /
+                               * half_scan_nrf_power / arm/disarm_key_wake */
+#include "esp_sleep.h"        /* esp_light_sleep_start */
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -33,15 +35,18 @@ void half_sleep_enter(void)
     esp_wifi_stop();                 /* WiFi off (main saving) */
 #endif
 
-    /* TODO Task 6: NRF power-down + matrix GPIO wake config + esp_light_sleep_start().
-     * Skeleton placeholder: a fixed 2 s delay. Task 6's esp_light_sleep_start() will
-     * block HERE until a key GPIO wakes the CPU, so the wifi_stop/start cycle runs
-     * once per wake event — not every 2.5 s. The cycling below is INTENTIONAL
-     * skeleton behaviour, not a bug. */
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    /* NRF power-down → arm key-wake GPIOs → light-sleep.
+     * esp_light_sleep_start() blocks until a key GPIO fires (or any other enabled
+     * wake source). BENCH-TUNE: GPIO polarity (rows HIGH / cols pulldown / HIGH level)
+     * is first-cut — verify on hardware; invert if keypress does not trigger wake. */
+    half_scan_nrf_power(false);
+    half_scan_arm_key_wake();
+    ESP_LOGI(TAG, "SLEEP: entering light-sleep");
+    esp_light_sleep_start();         /* returns on wake */
+    half_scan_disarm_key_wake();
 
     ESP_LOGI(TAG, "WAKE: restore");
-    /* TODO Task 6: NRF power-up FIRST */
+    half_scan_nrf_power(true);       /* NRF power-up FIRST — Tpd2stby wait inside */
     half_scan_restart_after_wake();  /* recreate keyboard_button + heartbeat; detects held key */
 #if CONFIG_KASE_HAS_ESPNOW
     esp_wifi_start();

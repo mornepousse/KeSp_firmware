@@ -319,6 +319,33 @@ bool rf_driver_verify_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     return ok;
 }
 
+/* ── NRF power-down / power-up (both roles) ─────────────────────────────
+ * power_down: asserts CE low (standby), then clears PWR_UP (CONFIG bit1).
+ *   The chip enters power-down mode and draws ~900 nA (datasheet §6.1).
+ *   SPI remains accessible; no register state is lost.
+ * power_up: sets PWR_UP via read-modify-write on CONFIG, then waits 5 ms
+ *   (Tpd2stby datasheet spec: 1.5 ms min; 5 ms gives headroom for clones).
+ *   CE is NOT re-asserted here — the caller is responsible for CE (TX pulse
+ *   or CE-high for PRX listening) after power-up.
+ * BENCH-NOTE: Tpd2stby is 5 ms here — may be shortened to 2 ms after
+ *   bench validation confirms the NRF clone responds correctly. */
+void rf_driver_power_down(rf_radio_t *r)
+{
+    ce_low(r);
+    uint8_t cfg = rf_driver_read_reg(r, REG_CONFIG);
+    cfg &= ~(1u << 1);   /* clear PWR_UP (bit1) */
+    rf_driver_write_reg(r, REG_CONFIG, cfg);
+}
+
+void rf_driver_power_up(rf_radio_t *r)
+{
+    uint8_t cfg = rf_driver_read_reg(r, REG_CONFIG);
+    cfg |= (1u << 1);    /* set PWR_UP (bit1) */
+    rf_driver_write_reg(r, REG_CONFIG, cfg);
+    vTaskDelay(pdMS_TO_TICKS(5));   /* Tpd2stby: 1.5 ms min, 5 ms for clone margin
+                                     * BENCH-TUNE: may reduce to 2 ms after validation */
+}
+
 /* ════════════════════════════════════════════════════════════════
  * PTX mode (half → dongle transmit)
  * Compiled only when KASE_HAS_RF_TX=y. Shares all helpers above.

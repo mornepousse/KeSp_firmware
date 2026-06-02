@@ -30,6 +30,7 @@
 #include "esp_rom_sys.h"
 #include "esp_mac.h"         /* esp_read_mac, ESP_MAC_WIFI_STA */
 #include "esp_system.h"      /* esp_restart */
+#include "esp_sleep.h"       /* esp_light_sleep_start, gpio_wakeup_enable, esp_sleep_enable_gpio_wakeup */
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -573,6 +574,51 @@ void half_scan_stop_for_sleep(void)
 {
     if (s_hb_timer) esp_timer_stop(s_hb_timer);
     if (s_kbd) { keyboard_button_delete(s_kbd); s_kbd = NULL; }
+}
+
+/* NRF power-down/up wrappers — act on the module-global s_radio.
+ * Called by half_sleep_enter() around esp_light_sleep_start(). */
+void half_scan_nrf_power(bool on)
+{
+    if (on) rf_driver_power_up(&s_radio);
+    else    rf_driver_power_down(&s_radio);
+}
+
+/* Configure matrix columns as GPIO light-sleep wake sources.
+ * Must be called AFTER half_scan_stop_for_sleep() (keyboard_button deleted,
+ * so the matrix GPIOs are free to reconfigure).
+ *
+ * BENCH-TUNE: ROW2COL — diodes conduct ROW→COL.  Drive rows HIGH so a
+ * pressed key pulls its column HIGH.  Cols are configured as inputs with
+ * pulldown; gpio_wakeup fires on HIGH level.
+ * If the bench shows no wake on keypress, try the inverse polarity:
+ *   rows LOW + col pullup + GPIO_INTR_LOW_LEVEL.
+ * gpio_wakeup_enable is valid for both input levels on ESP32-S3. */
+void half_scan_arm_key_wake(void)
+{
+    const int rows[MATRIX_ROWS] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+    const int cols[MATRIX_COLS] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6 };
+
+    for (int i = 0; i < MATRIX_ROWS; i++) {
+        gpio_set_direction(rows[i], GPIO_MODE_OUTPUT);
+        gpio_set_level(rows[i], 1);   /* BENCH-TUNE: active level (HIGH for ROW2COL) */
+    }
+    for (int i = 0; i < MATRIX_COLS; i++) {
+        gpio_set_direction(cols[i], GPIO_MODE_INPUT);
+        gpio_set_pull_mode(cols[i], GPIO_PULLDOWN_ONLY);
+        gpio_wakeup_enable(cols[i], GPIO_INTR_HIGH_LEVEL);   /* BENCH-TUNE: polarity */
+    }
+    esp_sleep_enable_gpio_wakeup();
+}
+
+/* Disarm key-wake GPIOs after light-sleep returns.
+ * keyboard_button_create (called by half_scan_restart_after_wake) will
+ * reconfigure the matrix GPIOs fully, so only the wake registrations need
+ * to be cleared here. */
+void half_scan_disarm_key_wake(void)
+{
+    const int cols[MATRIX_COLS] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6 };
+    for (int i = 0; i < MATRIX_COLS; i++) gpio_wakeup_disable(cols[i]);
 }
 
 void half_scan_restart_after_wake(void)

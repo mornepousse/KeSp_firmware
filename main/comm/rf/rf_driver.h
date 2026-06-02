@@ -73,6 +73,16 @@ bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
                       const uint8_t *payload, uint8_t len,
                       uint8_t restore_ch, const uint8_t restore_addr[5]);
 
+/* Power-down/up the NRF chip (works for both PTX and PRX roles).
+ * power_down: CE low (standby) → clear PWR_UP (CONFIG bit1) → chip draws ~900 nA.
+ * power_up:   set PWR_UP → wait Tpd2stby (~5 ms margin; datasheet min 1.5 ms) → CE
+ *             state is NOT changed here; caller must assert CE for TX/RX if needed.
+ * These operate on REG_CONFIG directly via the public rf_driver_write/read_reg API.
+ * BENCH-NOTE: the exact CONFIG value written back by power_up preserves the
+ * current PRIM_RX/mask bits via read-modify-write. */
+void rf_driver_power_down(rf_radio_t *r);
+void rf_driver_power_up(rf_radio_t *r);
+
 /* ── PTX mode — compiled only when KASE_HAS_RF_TX=y ─────────────── */
 #if CONFIG_KASE_HAS_RF_TX
 
