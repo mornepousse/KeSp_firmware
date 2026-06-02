@@ -13,6 +13,7 @@ set(srcs
     "comm/cdc/cdc_ota.c"
     "comm/cdc/cdc_binary_protocol.c"
     "comm/cdc/cdc_binary_cmds.c"
+    "comm/cdc/ks_monitor.c"
 
     # Engine (always compiled — runs on both keyboard and dongle)
     "input/key_processor.c"

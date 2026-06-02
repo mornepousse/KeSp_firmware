@@ -1,6 +1,9 @@
 /* Binary command handlers for all KaSe CDC commands */
 #include "cdc_binary_cmds.h"
 #include "cdc_internal.h"
+#include "ks_monitor.h"
+#include "esp_heap_caps.h"
+#include <limits.h>
 #include "keyboard_config.h"
 #include "keyboard_task.h"
 #include "keymap.h"
@@ -1008,6 +1011,66 @@ static void bin_cmd_nvs_reset(uint8_t cmd, const uint8_t *p, uint16_t l)
     esp_restart();
 }
 
+/* MONITOR: no payload → consolidated live snapshot (ks_monitor_t, KS_MONITOR_SIZE bytes).
+ * Works on all roles; RF/battery fields only populated when CONFIG_KASE_HAS_RF_RX=y. */
+static void bin_cmd_monitor(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    (void)p; (void)l;
+    ks_monitor_t m = {0};
+    m.fmt = KS_MONITOR_FMT;
+
+    /* System */
+    m.uptime_s     = (uint32_t)(esp_timer_get_time() / 1000000ULL);
+    uint32_t heap  = esp_get_free_heap_size() / 1024u;
+    m.heap_free_kb = (heap > 0xFFFFu) ? 0xFFFFu : (uint16_t)heap;
+    m.temp_c       = INT8_MIN;          /* no tsens wired here yet */
+    m.layer_idx    = (uint8_t)current_layout;
+    uint16_t w     = wpm_get();
+    m.wpm          = (w > 255u) ? 255u : (uint8_t)w;
+    m.keys_total   = key_stats_total;
+
+    /* BT */
+    m.bt_slot = bt_get_active_slot();
+    if (hid_bluetooth_is_connected()) m.flags |= KS_MON_F_BT_CONN;
+
+    /* USB */
+    if (tud_ready()) m.flags |= KS_MON_F_USB;
+
+    /* RF + battery (dongle only) */
+#if CONFIG_KASE_HAS_RF_RX
+    extern void dongle_cache_get_battery(uint8_t slot,
+                                         uint8_t *batt_dV, uint8_t *soc_pct,
+                                         uint8_t *charging, uint32_t *age_ms_out);
+    m.flags |= KS_MON_F_HAS_RF;
+    rf_link_status_t st;
+    rf_rx_get_status(&st);
+    if (st.link_left)  m.flags |= KS_MON_F_LINK_L;
+    if (st.link_right) m.flags |= KS_MON_F_LINK_R;
+    m.sig_left   = rf_signal_q255(st.link_left,  st.hb_age_left_ms,  st.link_q_left);
+    m.sig_right  = rf_signal_q255(st.link_right, st.hb_age_right_ms, st.link_q_right);
+    uint32_t age_l_ms = st.hb_age_left_ms;
+    uint32_t age_r_ms = st.hb_age_right_ms;
+    m.hb_age_l_ms = (age_l_ms > 0xFFFFu) ? 0xFFFFu : (uint16_t)age_l_ms;
+    m.hb_age_r_ms = (age_r_ms > 0xFFFFu) ? 0xFFFFu : (uint16_t)age_r_ms;
+    /* Battery: mirror bin_cmd_battery (0xB6) data path from dongle_engine_state.c */
+    {
+        uint8_t dV, soc, chg; uint32_t age;
+        dongle_cache_get_battery(0, &dV, &soc, &chg, &age);
+        m.batt_l_dv  = dV;
+        m.batt_l_soc = soc;
+        m.batt_l_chg = chg;
+        dongle_cache_get_battery(1, &dV, &soc, &chg, &age);
+        m.batt_r_dv  = dV;
+        m.batt_r_soc = soc;
+        m.batt_r_chg = chg;
+    }
+#endif /* CONFIG_KASE_HAS_RF_RX */
+
+    uint8_t buf[KS_MONITOR_SIZE];
+    ks_monitor_encode(buf, &m);
+    ks_respond(cmd, KS_STATUS_OK, buf, KS_MONITOR_SIZE);
+}
+
 #if CONFIG_KASE_HAS_RF_RX
 /* RF_PAIR_START: payload [reset:u8]. Opens a 30 s pairing window asynchronously
  * (the exchange runs in rf_rx_task). Responds immediately with
@@ -1096,6 +1159,7 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     /* Diagnostics */
     { KS_CMD_MATRIX_TEST,       bin_cmd_matrix_test },
     { KS_CMD_NVS_RESET,         bin_cmd_nvs_reset },
+    { KS_CMD_MONITOR,           bin_cmd_monitor },
 #if CONFIG_KASE_HAS_RF_RX
     { KS_CMD_RF_PAIR_START,     bin_cmd_rf_pair_start },
 #endif
