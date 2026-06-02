@@ -153,6 +153,82 @@ static void test_rf_pair_roundtrip(void)
     }
 }
 
+/* ── TDD: declared-slot PKT_PAIR_REQ (RF-declared-slot spec) ───────────────
+ * Ces tests encodent le contrat de la NOUVELLE API (non encore implémentée) :
+ *   rf_encode_pair_req(buf, mac, slot) → 8 octets
+ *   rf_decode_pair_req(buf, len, mac_out, slot_out) → bool, 4 paramètres
+ * Ils doivent ÉCHOUER À LA COMPILATION tant que rf_packet.h n'est pas mis à jour.
+ * Ne pas implémenter la production pour les faire passer — TDD red state.
+ */
+
+/* Roundtrip slot=0x01 : encode 8 octets, decode préserve mac et slot. */
+static void test_rf_pair_req_slot_left_roundtrip(void)
+{
+    const uint8_t mac[6] = {0x24, 0x6F, 0x28, 0x11, 0x22, 0x33};
+    uint8_t buf[8];
+    /* Nouvelle signature : rf_encode_pair_req(buf, mac, slot) → 8 */
+    uint16_t n = rf_encode_pair_req(buf, mac, 0x01);
+    TEST_ASSERT_EQ(n, 8, "pair_req slot=0x01: encode retourne 8 octets");
+    TEST_ASSERT_EQ(buf[7], 0x01, "pair_req slot=0x01: byte7 = slot");
+
+    uint8_t mac_out[6] = {0};
+    uint8_t slot_out = 0xFF;
+    /* Nouvelle signature : rf_decode_pair_req(buf, len, mac_out, slot_out) → bool */
+    bool ok = rf_decode_pair_req(buf, n, mac_out, &slot_out);
+    TEST_ASSERT(ok, "pair_req slot=0x01: decode ok");
+    TEST_ASSERT_EQ(memcmp(mac_out, mac, 6), 0, "pair_req slot=0x01: mac preservée");
+    TEST_ASSERT_EQ(slot_out, 0x01, "pair_req slot=0x01: slot preservé");
+}
+
+/* Roundtrip slot=0x02 : même contrat pour la moitié droite. */
+static void test_rf_pair_req_slot_right_roundtrip(void)
+{
+    const uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+    uint8_t buf[8];
+    uint16_t n = rf_encode_pair_req(buf, mac, 0x02);
+    TEST_ASSERT_EQ(n, 8, "pair_req slot=0x02: encode retourne 8 octets");
+    TEST_ASSERT_EQ(buf[7], 0x02, "pair_req slot=0x02: byte7 = slot");
+
+    uint8_t mac_out[6] = {0};
+    uint8_t slot_out = 0xFF;
+    bool ok = rf_decode_pair_req(buf, n, mac_out, &slot_out);
+    TEST_ASSERT(ok, "pair_req slot=0x02: decode ok");
+    TEST_ASSERT_EQ(memcmp(mac_out, mac, 6), 0, "pair_req slot=0x02: mac preservée");
+    TEST_ASSERT_EQ(slot_out, 0x02, "pair_req slot=0x02: slot preservé");
+}
+
+/* Rétrocompatibilité : buffer 7 octets (ancienne moitié sans slot byte).
+ * Le decode doit réussir, mac préservée, slot_out = 0 (inconnu). */
+static void test_rf_pair_req_legacy_7bytes(void)
+{
+    const uint8_t mac[6] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60};
+    /* Construction manuelle : byte0 = type 0xF (PKT_TYPE_PAIR_REQ << 4 = 0xF0),
+     * bytes 1..6 = mac — pas de slot byte (ancien firmware). */
+    uint8_t buf[7];
+    buf[0] = (PKT_TYPE_PAIR_REQ << 4);
+    memcpy(buf + 1, mac, 6);
+
+    uint8_t mac_out[6] = {0};
+    uint8_t slot_out = 0xFF;
+    bool ok = rf_decode_pair_req(buf, 7, mac_out, &slot_out);
+    TEST_ASSERT(ok, "pair_req legacy 7B: decode ok");
+    TEST_ASSERT_EQ(memcmp(mac_out, mac, 6), 0, "pair_req legacy 7B: mac preservée");
+    TEST_ASSERT_EQ(slot_out, 0, "pair_req legacy 7B: slot_out = 0 (inconnu)");
+}
+
+/* Buffer trop court (len < 7) : decode doit retourner false. */
+static void test_rf_pair_req_too_short(void)
+{
+    uint8_t buf[6];
+    buf[0] = (PKT_TYPE_PAIR_REQ << 4);
+    memset(buf + 1, 0xAA, 5);
+
+    uint8_t mac_out[6];
+    uint8_t slot_out = 0xFF;
+    bool ok = rf_decode_pair_req(buf, 6, mac_out, &slot_out);
+    TEST_ASSERT(!ok, "pair_req len<7: retourne false");
+}
+
 void test_rf_packet(void)
 {
     TEST_SUITE("RF packet codec");
@@ -163,4 +239,10 @@ void test_rf_packet(void)
     test_rf_decode_rejects();
     test_rf_bitmap_all_positions();
     test_rf_pair_roundtrip();
+
+    /* TDD red: nouveaux tests déclaré-slot — échouent tant que l'API n'est pas mise à jour */
+    test_rf_pair_req_slot_left_roundtrip();
+    test_rf_pair_req_slot_right_roundtrip();
+    test_rf_pair_req_legacy_7bytes();
+    test_rf_pair_req_too_short();
 }

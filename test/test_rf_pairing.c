@@ -130,3 +130,89 @@ void test_rf_pairing(void)
     TEST_ASSERT(!rf_pairing_match_slot(zero, zero, zero, &mslot),
                                                             "match: empty store → no match");
 }
+
+/* ── TDD: rf_pairing_resolve_slot (RF-declared-slot spec) ──────────────────
+ * Encode le contrat de la NOUVELLE fonction pure (non encore implémentée) :
+ *   bool rf_pairing_resolve_slot(uint8_t declared_slot,
+ *                                uint8_t paired_count,
+ *                                uint8_t *slot_out)
+ * Doit ÉCHOUER À LA COMPILATION jusqu'à ce que rf_pairing.h/.c soient mis à
+ * jour. Ne pas implémenter la production pour faire passer ces tests.
+ *
+ * Contrat :
+ *   - declared_slot 0x01 ou 0x02 → identité (slot_out = declared_slot), true.
+ *   - declared_slot 0 ou valeur invalide → fallback positionnel
+ *     (rf_pairing_assign_slot) : count0→0x01, count1→0x02, count>=2→false.
+ */
+
+/* Cas anti-inversion : la moitié droite pairée en premier déclare 0x02 ;
+ * le dongle doit l'accepter même si paired_count==0 (qui positionnellement
+ * donnerait 0x01). C'est la garantie principale de ce changement. */
+static void test_resolve_slot_declared_right_paired_first(void)
+{
+    uint8_t slot_out = 0xFF;
+    bool ok = rf_pairing_resolve_slot(0x02, 0, &slot_out);
+    TEST_ASSERT(ok, "resolve: declared=0x02, count=0 → ok");
+    TEST_ASSERT_EQ(slot_out, 0x02,
+                   "resolve: declared=0x02 gagne sur positionnel (anti-swap)");
+}
+
+/* Moitié gauche déclarée explicitement ; paired_count=1 ne doit pas l'écraser. */
+static void test_resolve_slot_declared_left_count1(void)
+{
+    uint8_t slot_out = 0xFF;
+    bool ok = rf_pairing_resolve_slot(0x01, 1, &slot_out);
+    TEST_ASSERT(ok, "resolve: declared=0x01, count=1 → ok");
+    TEST_ASSERT_EQ(slot_out, 0x01, "resolve: declared=0x01 préservé malgré count=1");
+}
+
+/* Fallback positionnel count=0 : déclaré inconnu (0) → slot 0x01. */
+static void test_resolve_slot_fallback_count0(void)
+{
+    uint8_t slot_out = 0xFF;
+    bool ok = rf_pairing_resolve_slot(0, 0, &slot_out);
+    TEST_ASSERT(ok, "resolve: declared=0, count=0 → ok (fallback)");
+    TEST_ASSERT_EQ(slot_out, 0x01, "resolve: fallback count=0 → 0x01");
+}
+
+/* Fallback positionnel count=1 : déclaré inconnu → slot 0x02. */
+static void test_resolve_slot_fallback_count1(void)
+{
+    uint8_t slot_out = 0xFF;
+    bool ok = rf_pairing_resolve_slot(0, 1, &slot_out);
+    TEST_ASSERT(ok, "resolve: declared=0, count=1 → ok (fallback)");
+    TEST_ASSERT_EQ(slot_out, 0x02, "resolve: fallback count=1 → 0x02");
+}
+
+/* Fallback positionnel count=2 : fenêtre pleine → false. */
+static void test_resolve_slot_fallback_count2_full(void)
+{
+    uint8_t slot_out = 0xFF;
+    bool ok = rf_pairing_resolve_slot(0, 2, &slot_out);
+    TEST_ASSERT(!ok, "resolve: declared=0, count=2 → fenêtre pleine (false)");
+}
+
+/* Garbage dans declared_slot (ex: 0x07) : traité comme inconnu → fallback. */
+static void test_resolve_slot_invalid_declared_falls_back(void)
+{
+    uint8_t slot_out = 0xFF;
+    bool ok = rf_pairing_resolve_slot(0x07, 0, &slot_out);
+    TEST_ASSERT(ok, "resolve: declared=0x07 invalide, count=0 → ok (fallback)");
+    TEST_ASSERT_EQ(slot_out, 0x01,
+                   "resolve: garbage declared traité comme 0 → positionnel 0x01");
+}
+
+/* Point d'entrée de la suite — appelle les sous-tests existants ET les nouveaux. */
+/* NOTE : on NE redéfinit PAS test_rf_pairing() — on étend via un wrapper
+ * appelé depuis test_main.c avec un nom différent pour éviter le doublon de
+ * symbole. Le wrapper ci-dessous sera déclaré/appelé dans test_main.c. */
+void test_rf_pairing_declared_slot(void)
+{
+    TEST_SUITE("rf_pairing declared-slot (TDD red)");
+    test_resolve_slot_declared_right_paired_first();
+    test_resolve_slot_declared_left_count1();
+    test_resolve_slot_fallback_count0();
+    test_resolve_slot_fallback_count1();
+    test_resolve_slot_fallback_count2_full();
+    test_resolve_slot_invalid_declared_falls_back();
+}
