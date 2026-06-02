@@ -563,8 +563,16 @@ static void half_scan_task(void *arg)
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(500));
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-        if (half_power_next(s_last_activity_ms, now) == HALF_POWER_SLEEP) {
-            half_sleep_enter();   /* blocks: quiesce -> (placeholder) -> restore */
+        /* GUARD (runtime): halves with an e-ink present do NOT enter light-sleep
+         * yet — the NRF power-down SPI hangs during the sleep sequence when the
+         * e-ink shares SPI2 (root cause not yet pinned; see the Phase 2 spec).
+         * They stay in the Phase 1 throttle tier (screen + everything keep
+         * working). Light-sleep IS validated on halves without an e-ink.
+         * Runtime check (s_eink_present), not compile-time: both half builds
+         * compile the e-ink, presence is probed at boot. */
+        if (!s_eink_present &&
+            half_power_next(s_last_activity_ms, now) == HALF_POWER_SLEEP) {
+            half_sleep_enter();   /* blocks: quiesce -> light-sleep -> restore */
         }
     }
 }
