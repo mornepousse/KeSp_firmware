@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: ['**']
+    tags: ['v*']
   pull_request:
-    branches: [main]
 
 jobs:
   host-tests:
@@ -13,17 +13,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build and run unit tests
         run: |
-          cd test
-          mkdir -p build && cd build
-          cmake ..
-          make
-          ./test_runner
+          cmake -S test -B test/build
+          cmake --build test/build
+          ./test/build/test_runner
 
   build-firmware:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        board: [kase_v1, kase_v2, kase_v2_debug]
+        board: [kase_v1, kase_v2, kase_v2_debug, kase_dongle, kase_half_left, kase_half_right]
     steps:
       - uses: actions/checkout@v4
       - name: Build ${{ matrix.board }}
@@ -31,12 +30,12 @@ jobs:
         with:
           esp_idf_version: v5.5.1
           target: esp32s3
-          command: idf.py -DBOARD=${{ matrix.board }} build
+          command: idf.py -B build_${{ matrix.board }} -DBOARD=${{ matrix.board }} -DSDKCONFIG=build_${{ matrix.board }}/sdkconfig build
       - name: Upload firmware binary
         uses: actions/upload-artifact@v4
         with:
           name: firmware-${{ matrix.board }}
-          path: build/KeSp.bin
+          path: build_${{ matrix.board }}/KeSp.bin
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
