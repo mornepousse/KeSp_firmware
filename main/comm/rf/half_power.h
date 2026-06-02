@@ -12,7 +12,7 @@ typedef enum {
 
 /* Idle thresholds in milliseconds (tunable). */
 #define HALF_POWER_T_THROTTLE_MS  3000u
-#define HALF_POWER_T_SLEEP_MS     30000u
+#define HALF_POWER_T_SLEEP_MS     15000u
 
 /* Pure: decide the power state from elapsed idle time.
  * idle = now_ms - last_activity_ms. Caller passes monotonic ms counters; the
