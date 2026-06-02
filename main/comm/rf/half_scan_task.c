@@ -563,12 +563,13 @@ static void half_scan_task(void *arg)
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(500));
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-        /* GUARD (runtime): e-ink halves still skip light-sleep. The NRF/SPI strand
-         * is fixed (half_sleep holds half_spi_lock + no vTaskSuspend), and
-         * nrf_power now succeeds — BUT esp_wifi_stop() itself hangs on the e-ink
-         * half (3rd, independent issue: WiFi-stop + active LVGL task + light-sleep).
-         * Pending a focused fix (likely: WiFi modem-sleep instead of esp_wifi_stop).
-         * Light-sleep IS validated on non-e-ink halves. */
+        /* GUARD (runtime): e-ink halves skip light-sleep pending bench validation
+         * of the WiFi-stop reorder fix. Progress so far: NRF/SPI bus-lock strand
+         * FIXED (nrf_power succeeds); esp_wifi_stop reordered before the SPI lock
+         * + esp_now_deinit (esp32-expert) — built, NOT yet bench-validated (e-ink
+         * went into a flaky state during testing). Light-sleep validated on
+         * non-e-ink halves. Remove this guard once the e-ink half is confirmed on
+         * a clean bench. */
         if (!s_eink_present &&
             half_power_next(s_last_activity_ms, now) == HALF_POWER_SLEEP) {
             half_sleep_enter();   /* blocks: quiesce -> light-sleep -> restore */

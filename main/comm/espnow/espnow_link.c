@@ -225,6 +225,24 @@ bool espnow_link_init(void)
     return true;
 }
 
+/* ── espnow_link_restart_espnow() — re-init ESP-NOW after esp_wifi_start() ──
+ * Called from half_sleep.c on wake when WiFi was fully stopped for light-sleep.
+ * Sequence: esp_now_init → espnow_reload_peers → esp_now_register_recv_cb.
+ * Requires esp_wifi_start() to have been called immediately before.
+ * Returns true on success. */
+bool espnow_link_restart_espnow(void)
+{
+    esp_err_t e = esp_now_init();
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "espnow_link_restart_espnow: esp_now_init failed: %d", e);
+        return false;
+    }
+    espnow_reload_peers();
+    esp_now_register_recv_cb(espnow_recv_cb);
+    ESP_LOGI(TAG, "espnow_link_restart_espnow: ESP-NOW re-init OK");
+    return true;
+}
+
 bool espnow_send(const uint8_t mac[6], uint8_t type, const void *payload, uint16_t len)
 {
     /* Build [type][payload] frame */

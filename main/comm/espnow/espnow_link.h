@@ -53,6 +53,12 @@ bool espnow_link_init(void);
  * the channel if set_id changed on the first pairing). */
 void espnow_reload_peers(void);
 
+/* Re-initialize ESP-NOW after a WiFi stop/start cycle (e.g. light-sleep wake).
+ * Calls esp_now_init(), espnow_reload_peers(), and esp_now_register_recv_cb()
+ * in one step. Requires esp_wifi_start() to have completed before this call.
+ * Returns true on success. */
+bool espnow_link_restart_espnow(void);
+
 /* Send an ESP-NOW message.
  *   mac:     6-byte target peer MAC
  *   type:    message type ID (from espnow_msg.h)
