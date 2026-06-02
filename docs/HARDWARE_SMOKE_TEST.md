@@ -33,6 +33,13 @@ dans la PR/release.
 - [ ] Power Phase 1 : frappe reste instantanée (scan/TX inchangés)
 - [ ] Power Phase 1 : après ~3 s sans frappe, le heartbeat ralentit (console half : TX heartbeat espacée) sans perte de lien
 - [ ] Power Phase 1 : reprise immédiate du heartbeat 100 ms à la première frappe
+- [ ] Power Phase 2 : entre en light-sleep après ~15 s d'inactivité (console muette)
+- [ ] Power Phase 2 : chute de courant mesurée (WiFi + NRF off) — noter la valeur
+- [ ] Power Phase 2 : 1re frappe réveille + s'enregistre (latence acceptable), suivantes plein régime
+- [ ] Power Phase 2 : e-ink lisible gelé pendant le sommeil, redevient live au réveil
+- [ ] Power Phase 2 : aucune touche bloquée/fantôme au réveil ; relâchement géré
+- [ ] Power Phase 2 : si le réveil ne déclenche pas sur touche, inverser la polarité GPIO colonnes (cf. half_scan_arm_key_wake BENCH-TUNE)
+- [ ] Power Phase 2 : left + right indépendamment
 
 ## BLE (boards concernés)
 - [ ] Appairage host OK, tape sans drop pendant 1 min
