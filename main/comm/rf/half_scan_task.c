@@ -204,8 +204,10 @@ static void half_pairing_task(void *arg)
 
     uint8_t my_mac[6];
     esp_read_mac(my_mac, ESP_MAC_WIFI_STA);
-    uint8_t req[7];
-    rf_encode_pair_req(req, my_mac);
+    /* Declare our own slot (board identity: half_left=0x01, half_right=0x02) so
+     * the dongle assigns L/R by identity, not by pairing order. */
+    uint8_t req[8];
+    rf_encode_pair_req(req, my_mac, BOARD_NRF_ADDR_SUFFIX);
 
     static const uint8_t pair_addr[5] = RF_PAIR_ADDR;
     uint32_t deadline = (uint32_t)(esp_timer_get_time() / 1000) + 30000;
@@ -217,7 +219,7 @@ static void half_pairing_task(void *arg)
         half_spi_lock();
         rf_driver_set_tx_address(&s_radio, pair_addr);
         rf_driver_set_channel(&s_radio, RF_PAIR_CHANNEL);
-        rf_driver_send(&s_radio, req, 7);
+        rf_driver_send(&s_radio, req, 8);
         half_spi_unlock();
 
         /* Listen ~150 ms for the ACK as PRX on the rendezvous. */

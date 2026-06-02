@@ -58,6 +58,18 @@ bool rf_pairing_assign_slot(uint8_t paired_count, uint8_t *slot_out)
     return false;   /* window full */
 }
 
+/* ── Pure: resolve slot — declared identity wins, else positional ── */
+bool rf_pairing_resolve_slot(uint8_t declared_slot, uint8_t paired_count, uint8_t *slot_out)
+{
+    /* The half declares its own slot (board identity, 0x01/0x02): honor it so
+     * pairing is order-independent. Unknown/garbage (0 or other) → positional. */
+    if (declared_slot == 0x01 || declared_slot == 0x02) {
+        *slot_out = declared_slot;
+        return true;
+    }
+    return rf_pairing_assign_slot(paired_count, slot_out);
+}
+
 /* ── Pure: dedup against already-stored peers ──────────────────── */
 static bool mac_is_zero(const uint8_t m[6])
 {

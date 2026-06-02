@@ -300,12 +300,15 @@ static bool rf_rx_pairing_service(void)
         uint16_t n = rf_driver_read_rx(&s_left, buf, sizeof(buf));
         if (n == 0) break;
         uint8_t mac[6];
-        if (!rf_decode_pair_req(buf, n, mac)) continue;
+        uint8_t declared_slot = 0;
+        if (!rf_decode_pair_req(buf, n, mac, &declared_slot)) continue;
 
         uint8_t slot = 0;
         bool is_dup = rf_pairing_match_slot(mac, s_pair_mac_left, s_pair_mac_right, &slot);
         if (!is_dup) {
-            if (!rf_pairing_assign_slot(s_pair_paired_count, &slot)) continue; /* full */
+            /* Half declares its own slot (board identity) → order-independent,
+             * no L/R swap. Legacy halves send slot=0 → positional fallback. */
+            if (!rf_pairing_resolve_slot(declared_slot, s_pair_paired_count, &slot)) continue; /* full */
         }
 
         /* Persist (new pairings only bump count). */
@@ -515,22 +518,13 @@ static void status_push_cb(void *arg)
 {
     (void)arg;
 
-    /* Lazy-load paired half MACs once from NVS "rf" (same pattern as layer_changed()). */
-    static uint8_t mac_left[6]  = {0};
-    static uint8_t mac_right[6] = {0};
-    static bool    macs_loaded  = false;
-
-    if (!macs_loaded) {
-        nvs_handle_t h;
-        if (nvs_open("rf", NVS_READONLY, &h) == ESP_OK) {
-            size_t sz = 6;
-            nvs_get_blob(h, "mac_left",  mac_left,  &sz);
-            sz = 6;
-            nvs_get_blob(h, "mac_right", mac_right, &sz);
-            nvs_close(h);
-        }
-        macs_loaded = true;
-    }
+    /* Use the live paired-MAC copy maintained by the RX task: loaded from NVS at
+     * boot (rf_pairing_load_peers_dongle) and refreshed on every successful
+     * pairing. A previous one-shot static cache here required a dongle reboot
+     * after re-pairing before the status push would resume — fixed by reading
+     * the live copy each tick. */
+    const uint8_t *mac_left  = s_pair_mac_left;
+    const uint8_t *mac_right = s_pair_mac_right;
 
     bool has_left  = mac_left[0]  | mac_left[1]  | mac_left[2]  |
                      mac_left[3]  | mac_left[4]  | mac_left[5];

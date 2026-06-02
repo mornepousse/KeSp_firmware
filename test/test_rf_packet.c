@@ -109,14 +109,16 @@ static void test_rf_pair_roundtrip(void)
     /* ── PKT_PAIR_REQ round-trip ──────────────────────────────── */
     {
         const uint8_t mac[6] = {0x24,0x6F,0x28,0xAA,0xBB,0xCC};
-        uint8_t buf[7];
-        uint16_t n = rf_encode_pair_req(buf, mac);
-        TEST_ASSERT_EQ(n, 7,                "pair_req: encodes 7 bytes");
+        uint8_t buf[8];
+        uint16_t n = rf_encode_pair_req(buf, mac, 0x01);
+        TEST_ASSERT_EQ(n, 8,                "pair_req: encodes 8 bytes");
         TEST_ASSERT_EQ(buf[0], 0xF0,        "pair_req: byte0 = 0xF0");
         TEST_ASSERT_EQ(rf_packet_type(buf,n), PKT_TYPE_PAIR_REQ, "pair_req: type 0xF");
         uint8_t out[6] = {0};
-        TEST_ASSERT(rf_decode_pair_req(buf, n, out), "pair_req: decode ok");
+        uint8_t slot = 0xFF;
+        TEST_ASSERT(rf_decode_pair_req(buf, n, out, &slot), "pair_req: decode ok");
         TEST_ASSERT_EQ(memcmp(out, mac, 6), 0,       "pair_req: mac round-trips");
+        TEST_ASSERT_EQ(slot, 0x01,          "pair_req: slot round-trips");
     }
 
     /* ── PKT_PAIR_ACK round-trip (big-endian set_id) ──────────── */
@@ -143,11 +145,12 @@ static void test_rf_pair_roundtrip(void)
     {
         uint8_t bad[10] = {0x10};   /* type 0x1 (KEY), not pair */
         uint8_t out[6];
+        uint8_t slot = 0;
         rf_pair_ack_t d;
-        TEST_ASSERT(!rf_decode_pair_req(bad, 7, out), "pair_req: wrong type rejected");
+        TEST_ASSERT(!rf_decode_pair_req(bad, 7, out, &slot), "pair_req: wrong type rejected");
         TEST_ASSERT(!rf_decode_pair_ack(bad, 10, &d), "pair_ack: wrong type rejected");
         uint8_t shortbuf[5] = {0xF0};
-        TEST_ASSERT(!rf_decode_pair_req(shortbuf, 5, out), "pair_req: short buf rejected");
+        TEST_ASSERT(!rf_decode_pair_req(shortbuf, 5, out, &slot), "pair_req: short buf rejected");
         uint8_t shortack[9] = {0xE0};
         TEST_ASSERT(!rf_decode_pair_ack(shortack, 9, &d),  "pair_ack: short buf rejected");
     }

@@ -50,6 +50,12 @@ uint8_t rf_derive_wifi_ch(uint16_t set_id);
  * Returns false (window full) when paired_count >= 2. Pure. */
 bool rf_pairing_assign_slot(uint8_t paired_count, uint8_t *slot_out);
 
+/* Resolve the slot for a pairing half: if the half declared a valid slot
+ * (0x01/0x02), honor it (order-independent — no L/R swap). Otherwise fall back
+ * to positional assignment by paired_count. Returns false if positional and
+ * the window is full. Pure. */
+bool rf_pairing_resolve_slot(uint8_t declared_slot, uint8_t paired_count, uint8_t *slot_out);
+
 /* Dedup: if `mac` equals an already-stored peer, return its slot. All-zero
  * stored MACs are treated as empty (no match). Returns false if no match. Pure. */
 bool rf_pairing_match_slot(const uint8_t mac[6],

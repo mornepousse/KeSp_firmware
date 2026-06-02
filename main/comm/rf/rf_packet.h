@@ -84,12 +84,15 @@ static inline uint16_t rf_encode_trackpad(uint8_t *buf, const rf_trackpad_t *t)
     return 7;
 }
 
-/* PKT_PAIR_REQ: 7 bytes — type 0xF, then the half's 6-byte WiFi STA MAC. */
-static inline uint16_t rf_encode_pair_req(uint8_t *buf, const uint8_t mac[6])
+/* PKT_PAIR_REQ: 8 bytes — type 0xF, the half's 6-byte WiFi STA MAC, then the
+ * half's declared slot (0x01=left / 0x02=right, board identity). slot=0 = unknown
+ * (legacy 7-byte halves). */
+static inline uint16_t rf_encode_pair_req(uint8_t *buf, const uint8_t mac[6], uint8_t slot)
 {
     buf[0] = (PKT_TYPE_PAIR_REQ << 4);
     memcpy(buf + 1, mac, 6);
-    return 7;
+    buf[7] = slot;
+    return 8;
 }
 
 /* PKT_PAIR_ACK: 10 bytes — type 0xE, set_id big-endian, dongle MAC, slot. */
@@ -145,10 +148,12 @@ static inline bool rf_decode_trackpad(const uint8_t *buf, uint16_t len, rf_track
     return true;
 }
 
-static inline bool rf_decode_pair_req(const uint8_t *buf, uint16_t len, uint8_t mac_out[6])
+static inline bool rf_decode_pair_req(const uint8_t *buf, uint16_t len,
+                                      uint8_t mac_out[6], uint8_t *slot_out)
 {
     if (len < 7 || rf_packet_type(buf, len) != PKT_TYPE_PAIR_REQ) return false;
     memcpy(mac_out, buf + 1, 6);
+    *slot_out = (len >= 8) ? buf[7] : 0;   /* legacy 7-byte req → slot unknown */
     return true;
 }
 
