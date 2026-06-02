@@ -233,6 +233,9 @@ static bool s_need_reset_ack = true;
 /* ── Gesture state — held across calls to trackpad_map (caller-owned). ── */
 static trackpad_state_t s_tp_state = {0};
 
+/* ── Trackpad task handle — needed for suspend/resume during light-sleep ── */
+static TaskHandle_t s_tp_task = NULL;
+
 /* ── RDY GPIO ISR handler — signals the trackpad task ──────── */
 static void IRAM_ATTR rdy_isr_handler(void *arg)
 {
@@ -434,10 +437,22 @@ void trackpad_start(void)
     BaseType_t ret = xTaskCreatePinnedToCore(
         trackpad_task, "trackpad",
         3072,   /* stack: 3 KB (I2C + encoding, no large buffers) */
-        NULL, 6, NULL, 0);
+        NULL, 6, &s_tp_task, 0);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "xTaskCreatePinnedToCore failed: %d", (int)ret);
     }
+}
+
+void trackpad_suspend(void)
+{
+    gpio_isr_handler_remove(BOARD_TRACK_RDY_GPIO);   /* no RDY wake while asleep */
+    if (s_tp_task) vTaskSuspend(s_tp_task);
+}
+
+void trackpad_resume(void)
+{
+    if (s_tp_task) vTaskResume(s_tp_task);
+    gpio_isr_handler_add(BOARD_TRACK_RDY_GPIO, rdy_isr_handler, NULL);
 }
 
 #endif /* TEST_HOST */

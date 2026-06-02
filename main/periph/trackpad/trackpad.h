@@ -33,6 +33,11 @@ bool trackpad_init(void);
  * Not available in TEST_HOST builds — guarded in trackpad.c. */
 void trackpad_start(void);
 
+/* Pause/restart the trackpad RDY ISR + task so it neither draws nor wakes the
+ * CPU during half light-sleep. */
+void trackpad_suspend(void);
+void trackpad_resume(void);
+
 /* ── Gesture state held across calls to trackpad_map ────────────────
  * The caller (trackpad_task) owns one instance and resets it to zeros at
  * startup. The map function mutates it as gestures progress. */
