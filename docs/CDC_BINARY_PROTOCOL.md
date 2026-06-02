@@ -603,7 +603,7 @@ Snapshot consolide de l'etat live du clavier (et de ses moities sans fil). Concu
 | 8      | i8     | `temp_c`       | Temperature interne degC ; `INT8_MIN` (−128) = pas de capteur     |
 | 9      | u8     | `layer_idx`    | Index du layer actif                                              |
 | 10     | u8     | `wpm`          | Mots par minute courants (sature a 255)                           |
-| 11     | u32 LE | `keys_total`   | Nombre total de touches pressees depuis le boot (reset a 0 au reboot — distinct du compteur NVS persistant `key_stats_tot`) |
+| 11     | u32 LE | `keys_total`   | Nombre total de touches pressees, cumul a vie (restaure depuis NVS `key_stats_tot` au boot) |
 | 15     | u8     | `sig_left`     | Qualite du lien RF gauche 0..255 (0 si `has_rf=0`)                |
 | 16     | u8     | `sig_right`    | Idem droite                                                       |
 | 17     | u16 LE | `hb_age_L_ms`  | ms depuis le dernier heartbeat de la moitie gauche (tronque a u16, sature a 0xFFFF — RF_STATUS utilise u32 pour ces champs) |
