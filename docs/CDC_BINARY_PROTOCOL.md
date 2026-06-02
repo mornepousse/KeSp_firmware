@@ -589,46 +589,48 @@ Format d'un enregistrement (slot 0 = LEFT, slot 1 = RIGHT) :
 ---
 
 #### MONITOR (0xB7)
-Snapshot consolidé de l'état live du clavier (et de ses moitiés sans fil). Conçu pour piloter un tableau de bord de monitoring dans KaSe_soft. Idempotent, sans effet de bord — poll recommandé à **1–2 Hz**.
+Snapshot consolide de l'etat live du clavier (et de ses moities sans fil). Concu pour piloter un tableau de bord de monitoring dans KaSe_soft. Idempotent, sans effet de bord — poll recommande a **1–2 Hz**.
 
 - Request: payload vide (`KS [B7] 0000 00`)
 - Response: `28 bytes` — toujours OK, sentinelles pour les champs sans source disponible
 
-| Off | Type  | Champ          | Description                                                       |
-|----:|-------|----------------|-------------------------------------------------------------------|
-| 0   | u8    | `fmt`          | = `0x01` — version du format, permet évolution future             |
-| 1   | u8    | `flags`        | bitmask (voir ci-dessous)                                         |
-| 2   | u32 LE| `uptime_s`     | Secondes depuis le boot                                           |
-| 6   | u16 LE| `heap_free_kb` | Heap libre en KB (saturé à 0xFFFF)                                |
-| 8   | i8    | `temp_c`       | Température interne °C ; `INT8_MIN` (−128) = pas de capteur       |
-| 9   | u8    | `layer_idx`    | Index du layer actif                                              |
-| 10  | u8    | `wpm`          | Mots par minute courants (saturé à 255)                           |
-| 11  | u32 LE| `keys_total`   | Nombre total de touches pressées depuis le boot                   |
-| 15  | u8    | `sig_left`     | Qualité du lien RF gauche 0..255 (0 si `has_rf=0`)                |
-| 16  | u8    | `sig_right`    | Idem droite                                                       |
-| 17  | u16 LE| `hb_age_L_ms`  | ms depuis le dernier heartbeat de la moitié gauche (sat. 0xFFFF)  |
-| 19  | u16 LE| `hb_age_R_ms`  | Idem droite                                                       |
-| 21  | u8    | `batt_L_dV`    | Tension batterie gauche × 10 (0 = inconnu)                        |
-| 22  | u8    | `batt_L_soc`   | State of charge gauche 0..100 %                                   |
-| 23  | u8    | `batt_L_chg`   | 0 = décharge, 1 = en charge                                       |
-| 24  | u8    | `batt_R_dV`    | Tension batterie droite × 10 (0 = inconnu)                        |
-| 25  | u8    | `batt_R_soc`   | State of charge droite 0..100 %                                   |
-| 26  | u8    | `batt_R_chg`   | 0 = décharge, 1 = en charge                                       |
-| 27  | u8    | `bt_slot`      | Slot Bluetooth actif                                              |
+| Offset | Type   | Champ          | Description                                                       |
+|-------:|--------|----------------|-------------------------------------------------------------------|
+| 0      | u8     | `fmt`          | = `0x01` — version du format, permet evolution future             |
+| 1      | u8     | `flags`        | bitmask (voir ci-dessous)                                         |
+| 2      | u32 LE | `uptime_s`     | Secondes depuis le boot                                           |
+| 6      | u16 LE | `heap_free_kb` | Heap libre en KB (sature a 0xFFFF)                                |
+| 8      | i8     | `temp_c`       | Temperature interne degC ; `INT8_MIN` (−128) = pas de capteur     |
+| 9      | u8     | `layer_idx`    | Index du layer actif                                              |
+| 10     | u8     | `wpm`          | Mots par minute courants (sature a 255)                           |
+| 11     | u32 LE | `keys_total`   | Nombre total de touches pressees depuis le boot (reset a 0 au reboot — distinct du compteur NVS persistant `key_stats_tot`) |
+| 15     | u8     | `sig_left`     | Qualite du lien RF gauche 0..255 (0 si `has_rf=0`)                |
+| 16     | u8     | `sig_right`    | Idem droite                                                       |
+| 17     | u16 LE | `hb_age_L_ms`  | ms depuis le dernier heartbeat de la moitie gauche (tronque a u16, sature a 0xFFFF — RF_STATUS utilise u32 pour ces champs) |
+| 19     | u16 LE | `hb_age_R_ms`  | Idem droite (meme troncature u16/0xFFFF)                          |
+| 21     | u8     | `batt_L_dV`    | Tension batterie gauche x10 (0 = inconnu)                         |
+| 22     | u8     | `batt_L_soc`   | State of charge gauche 0..100 %                                   |
+| 23     | u8     | `batt_L_chg`   | 0 = decharge, 1 = en charge                                       |
+| 24     | u8     | `batt_R_dV`    | Tension batterie droite x10 (0 = inconnu)                         |
+| 25     | u8     | `batt_R_soc`   | State of charge droite 0..100 %                                   |
+| 26     | u8     | `batt_R_chg`   | 0 = decharge, 1 = en charge                                       |
+| 27     | u8     | `bt_slot`      | Slot Bluetooth actif (0–2 ; `BT_MAX_DEVICES = 3`)                 |
+
+Note: dans ce snapshot, les champs batterie utilisent 0 = inconnu (et non 0xFF comme la commande BATTERY 0xB6) — format consolide simplifie.
 
 **Flags (offset 1) :**
 
-| Bit | Masque | Constante    | Signification                        |
-|-----|--------|--------------|--------------------------------------|
-| 0   | 0x01   | `HAS_RF`     | Firmware rôle dongle avec radio RF   |
-| 1   | 0x02   | `LINK_L`     | Moitié gauche connectée              |
-| 2   | 0x04   | `LINK_R`     | Moitié droite connectée              |
-| 3   | 0x08   | `USB`        | Lien USB actif                       |
-| 4   | 0x10   | `BT_CONN`    | Bluetooth connecté                   |
+| Bit | Masque | Constante    | Signification                       |
+|-----|--------|--------------|-------------------------------------|
+| 0   | 0x01   | `HAS_RF`     | Firmware role dongle avec radio RF  |
+| 1   | 0x02   | `LINK_L`     | Moitie gauche connectee             |
+| 2   | 0x04   | `LINK_R`     | Moitie droite connectee             |
+| 3   | 0x08   | `USB`        | Lien USB actif                      |
+| 4   | 0x10   | `BT_CONN`    | Bluetooth connecte                  |
 
-**Clavier autonome (sans dongle) :** `has_rf = 0`, les offsets 15..26 (signal RF, heartbeat, batterie) valent zéro. Le soft détecte la présence RF via le flag `HAS_RF` (et/ou le tag `RF_DONGLE` dans la réponse FEATURES).
+**Clavier autonome (sans dongle) :** `has_rf = 0`, les offsets 15..26 (signal RF, heartbeat, batterie) valent zero. Le soft detecte la presence RF via le flag `HAS_RF` (et/ou le tag `RF_DONGLE` dans la reponse FEATURES).
 
-**Température :** `temp_c = INT8_MIN` (−128) signifie que le capteur n'est pas disponible.
+**Temperature :** `temp_c = INT8_MIN` (−128) signifie que le capteur n'est pas disponible.
 
 **Exemple de parsing Python :**
 
@@ -733,7 +735,7 @@ public class MonitorSnapshot
 }
 ```
 
-**Usage dashboard recommandé :** timer 1–2 Hz → `KS [B7] 0000 00` → `Parse(response.Payload)` → mettre à jour les bindings WPF. Pas de gestion d'erreur nécessaire (la commande retourne toujours OK).
+**Usage dashboard recommande :** timer 1–2 Hz → `KS [B7] 0000 00` → `Parse(response.Payload)` → mettre a jour les bindings WPF. Pas de gestion d'erreur necessaire (la commande retourne toujours OK).
 
 ---
 
