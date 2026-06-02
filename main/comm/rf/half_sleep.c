@@ -27,74 +27,45 @@ void half_sleep_enter(void)
     ESP_LOGI(TAG, "SLEEP: quiesce");
     half_scan_stop_for_sleep();      /* stop heartbeat + delete keyboard_button */
 
-    /* NRF power-down MUST happen BEFORE eink_lvgl_suspend().
+    /* Hold the shared SPI2 bus mutex (half_spi_lock) across the ENTIRE sleep
+     * window — NRF power-down, the light-sleep, and NRF power-up. This is what
+     * makes light-sleep safe on e-ink halves (NRF + e-ink share SPI2).
      *
-     * ROOT CAUSE of the hang (confirmed from IDF spi_master.c source):
+     * ROOT CAUSE (confirmed from IDF spi_master.c): spi_device_polling_transmit
+     * acquires the IDF SPI bus lock for the transaction. If a task is frozen
+     * mid-transaction (holding that lock), the next polling_transmit on the other
+     * device blocks forever (xSemaphoreTake portMAX_DELAY). Two ways the e-ink
+     * froze mid-transaction: (a) vTaskSuspend(eink) at an arbitrary point —
+     * now removed (eink_lvgl_suspend only stops the tick); (b) esp_light_sleep
+     * CPU-pausing the e-ink task while it is mid eink_push, then priority
+     * inversion on wake (high-prio scan task's NRF power-up waits for the
+     * low-prio e-ink task to release the bus, but it can't run).
      *
-     * spi_device_polling_transmit() = polling_start() + polling_end().
-     * polling_start() calls spi_bus_lock_acquire_start(dev->dev_lock, portMAX_DELAY).
-     * Inside acquire_start(): if another device currently holds the IDF bus lock
-     * (i.e. lock->acquiring_dev != NULL and its LOCK bit is set), acquire_core()
-     * returns false and the caller blocks on xSemaphoreTake(dev->semphr, portMAX_DELAY).
-     * That semaphore is ONLY given by the current owner when it calls polling_end() →
-     * spi_bus_lock_acquire_end(), which runs acquire_end_core() → resume_dev() on the
-     * next waiting device.
-     *
-     * When eink_lvgl_task is vTaskSuspend()'d by eink_lvgl_suspend(), the task is
-     * frozen at whatever FreeRTOS scheduling point the kernel chose.  If it was
-     * suspended AFTER entering polling_start (i.e. after spi_bus_lock_acquire_start
-     * set the e-ink device's LOCK bit and made it lock->acquiring_dev) but BEFORE
-     * polling_end() cleared the LOCK bit and called spi_bus_lock_acquire_end(), the
-     * IDF bus lock is permanently stranded:
-     *   - lock->acquiring_dev == s_eink_dev  (LOCK bit set, never cleared)
-     *   - The NRF polling_start() calls acquire_core(), sees LOCK_MASK != 0,
-     *     returns false, then blocks on xSemaphoreTake(nrf->semphr, portMAX_DELAY)
-     *   - That semaphore will never be given because the only task that can call
-     *     polling_end() (eink_lvgl_task) is suspended.
-     *   → PERMANENT DEADLOCK, indistinguishable from a bare hang.
-     *
-     * The fix: power down the NRF (two SPI transactions) BEFORE suspending the
-     * e-ink task.  At that point:
-     *   - The heartbeat timer is already stopped (half_scan_stop_for_sleep above),
-     *     so no new NRF SPI traffic will be attempted.
-     *   - The e-ink task may or may not hold the lock, but it doesn't matter:
-     *     we are not competing for the bus here.
-     *   - The NRF power-down writes complete while the bus is fully idle (no e-ink
-     *     refresh is triggered between heartbeat stop and this point, and the LVGL
-     *     task has not been suspended yet so if it was mid-transaction it can still
-     *     finish and release the lock normally before we try to acquire it).
-     *
-     * The half_spi_lock() (FreeRTOS mutex, separate from the IDF bus lock) is still
-     * needed here: the keyboard_button task was deleted above, and the heartbeat timer
-     * is stopped, so there are no concurrent NRF callers left from the scan side —
-     * BUT eink_push() (called from flush_cb inside lv_timer_handler) also takes
-     * half_spi_lock while doing its SPI writes.  We wrap the NRF power-down in
-     * half_spi_lock so it cannot collide with an in-progress eink_push.
-     *
-     * After half_spi_unlock() returns, the eink task is guaranteed to be OUTSIDE any
-     * polling transaction (it had to release half_spi_lock to reach this point), so
-     * it cannot hold the IDF bus lock.  It is then safe to vTaskSuspend it. */
+     * Holding half_spi_lock for the whole window prevents BOTH: eink_push() takes
+     * half_spi_lock around its SPI, so while WE hold it the e-ink task can only be
+     * blocked on the mutex (OUTSIDE any IDF transaction) — never holding the IDF
+     * bus lock when we power the NRF or when the chip sleeps/wakes. */
     half_spi_lock();
-    half_scan_nrf_power(false);      /* power down NRF FIRST — see comment above */
-    half_spi_unlock();
 
 #if CONFIG_KASE_HAS_EINK
-    eink_lvgl_suspend();             /* stop 5 ms LVGL tick + suspend task (now safe) */
+    eink_lvgl_suspend();             /* stop 5 ms LVGL tick (no vTaskSuspend) */
 #endif
 #if CONFIG_KASE_HAS_TRACKPAD
-    trackpad_suspend();
+    trackpad_suspend();              /* trackpad blocked on the mutex → safe to suspend */
 #endif
+    half_scan_nrf_power(false);      /* NRF power-down — SPI under half_spi_lock */
 #if CONFIG_KASE_HAS_ESPNOW
     esp_wifi_stop();                 /* WiFi off (main saving) */
 #endif
     half_scan_arm_key_wake();
     ESP_LOGI(TAG, "SLEEP: entering light-sleep");
-    esp_light_sleep_start();         /* returns on wake */
+    esp_light_sleep_start();         /* returns on wake (still holding half_spi_lock) */
     half_scan_disarm_key_wake();
 
     ESP_LOGI(TAG, "WAKE: restore");
-    half_scan_nrf_power(true);       /* NRF power-up FIRST — Tpd2stby wait inside */
+    half_scan_nrf_power(true);       /* NRF power-up — SPI under half_spi_lock */
     half_scan_restart_after_wake();  /* recreate keyboard_button + heartbeat; detects held key */
+    half_spi_unlock();               /* release the bus: e-ink/heartbeat resume SPI */
 #if CONFIG_KASE_HAS_ESPNOW
     esp_wifi_start();
     espnow_reload_peers();

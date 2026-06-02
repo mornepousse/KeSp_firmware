@@ -446,14 +446,20 @@ static void eink_lvgl_task(void *arg)
 
 void eink_lvgl_suspend(void)
 {
-    if (s_tick_timer)       esp_timer_stop(s_tick_timer);       /* stop 5 ms lv_tick_inc */
-    if (s_eink_task_handle) vTaskSuspend(s_eink_task_handle);   /* freeze lv_timer_handler loop */
+    /* Stop the 5 ms LVGL tick ONLY. We deliberately do NOT vTaskSuspend the eink
+     * task: vTaskSuspend freezes it at an arbitrary point, stranding any shared
+     * lock it holds at that instant — the IDF SPI bus lock (→ hung NRF SPI) and
+     * the heap lock (→ hung esp_wifi_stop) were both observed. With the tick
+     * stopped, LVGL time is frozen so lv_timer_handler renders nothing; the task
+     * just idles its wait loop until light-sleep CPU-pauses all tasks. half_sleep.c
+     * holds half_spi_lock across the whole sleep window, so the eink task cannot be
+     * mid-SPI-transaction when the chip sleeps/wakes (no lock strand). */
+    if (s_tick_timer) esp_timer_stop(s_tick_timer);
 }
 
 void eink_lvgl_resume(void)
 {
-    if (s_eink_task_handle) vTaskResume(s_eink_task_handle);
-    if (s_tick_timer)       esp_timer_start_periodic(s_tick_timer, 5 * 1000);
+    if (s_tick_timer) esp_timer_start_periodic(s_tick_timer, 5 * 1000);
 }
 
 void eink_lvgl_init(void)
