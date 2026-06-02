@@ -30,6 +30,9 @@ dans la PR/release.
 - [ ] Dashboard e-ink : L/R/USB + batterie, sans corruption
 - [ ] Trackpad (si présent) : curseur, clic G/D/M, scroll
 - [ ] BLE pairing OK + reconnexion après deep sleep
+- [ ] Power Phase 1 : frappe reste instantanée (scan/TX inchangés)
+- [ ] Power Phase 1 : après ~3 s sans frappe, le heartbeat ralentit (console half : TX heartbeat espacée) sans perte de lien
+- [ ] Power Phase 1 : reprise immédiate du heartbeat 100 ms à la première frappe
 
 ## BLE (boards concernés)
 - [ ] Appairage host OK, tape sans drop pendant 1 min
