@@ -602,11 +602,16 @@ void half_scan_arm_key_wake(void)
     for (int i = 0; i < MATRIX_ROWS; i++) {
         gpio_set_direction(rows[i], GPIO_MODE_OUTPUT);
         gpio_set_level(rows[i], 1);   /* BENCH-TUNE: active level (HIGH for ROW2COL) */
+        /* Keep the active config (driving HIGH) DURING light-sleep — otherwise the
+         * IDF automatic GPIO sleep isolation floats the rows and no keypress can
+         * pull a column → no wake. */
+        gpio_sleep_sel_dis(rows[i]);
     }
     for (int i = 0; i < MATRIX_COLS; i++) {
         gpio_set_direction(cols[i], GPIO_MODE_INPUT);
         gpio_set_pull_mode(cols[i], GPIO_PULLDOWN_ONLY);
         gpio_wakeup_enable(cols[i], GPIO_INTR_HIGH_LEVEL);   /* BENCH-TUNE: polarity */
+        gpio_sleep_sel_dis(cols[i]);   /* keep input+pulldown+wake config in sleep */
     }
     esp_sleep_enable_gpio_wakeup();
 }
