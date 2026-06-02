@@ -43,3 +43,9 @@ TaskHandle_t eink_get_task_handle(void);
  * No-op if the eink task was never started (no panel on this half) — best-effort.
  * Called from half_pairing_task right after a successful pairing ACK. */
 void eink_lvgl_show_paired(uint16_t set_id, uint8_t slot);
+
+/* Pause/restart the LVGL tick timer (5 ms) + handler task so the half can enter
+ * light-sleep without LVGL timers waking the CPU. The e-ink panel is bistable:
+ * the displayed image persists with zero power while suspended. */
+void eink_lvgl_suspend(void);
+void eink_lvgl_resume(void);

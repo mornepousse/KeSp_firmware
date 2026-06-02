@@ -444,6 +444,18 @@ static void eink_lvgl_task(void *arg)
 
 /* ── Public API ─────────────────────────────────────────────────────*/
 
+void eink_lvgl_suspend(void)
+{
+    if (s_tick_timer)       esp_timer_stop(s_tick_timer);       /* stop 5 ms lv_tick_inc */
+    if (s_eink_task_handle) vTaskSuspend(s_eink_task_handle);   /* freeze lv_timer_handler loop */
+}
+
+void eink_lvgl_resume(void)
+{
+    if (s_eink_task_handle) vTaskResume(s_eink_task_handle);
+    if (s_tick_timer)       esp_timer_start_periodic(s_tick_timer, 5 * 1000);
+}
+
 void eink_lvgl_init(void)
 {
     /* Initialize LVGL core */
