@@ -40,6 +40,8 @@ add_executable(test_runner
     ../main/comm/rf/rf_rx_task.c
     test_half_power.c
     ../main/comm/rf/half_power.c
+    test_half_battery.c
+    ../main/comm/rf/half_battery.c
     test_main.c
 )
 

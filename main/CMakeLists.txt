@@ -109,6 +109,7 @@ if(CONFIG_KASE_HAS_RF_TX)
     list(APPEND srcs
         "comm/rf/half_scan_task.c"
         "comm/rf/half_power.c"
+        "comm/rf/half_battery.c"
         "comm/rf/half_sleep.c"
         "periph/half_spi.c"
     )

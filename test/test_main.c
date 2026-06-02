@@ -34,6 +34,7 @@ extern void test_espnow_peer_filter(void);
 extern void test_en_status(void);
 extern void test_rf_signal_q255(void);
 extern void test_half_power(void);
+extern void test_half_battery(void);
 
 int main(void) {
     printf("KeSp Firmware Unit Tests\n");
@@ -67,6 +68,7 @@ int main(void) {
     test_en_status();
     test_rf_signal_q255();
     test_half_power();
+    test_half_battery();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);
