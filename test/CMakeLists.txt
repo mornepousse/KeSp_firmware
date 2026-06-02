@@ -38,6 +38,8 @@ add_executable(test_runner
     test_en_status.c
     test_rf_signal_q255.c
     ../main/comm/rf/rf_rx_task.c
+    test_half_power.c
+    ../main/comm/rf/half_power.c
     test_main.c
 )
 
