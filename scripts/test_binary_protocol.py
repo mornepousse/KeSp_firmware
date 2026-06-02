@@ -188,6 +188,29 @@ def test_bluetooth(t: TestRunner):
         slot, init, conn, pairing = r["payload"][:4]
         print(f"         slot={slot} init={init} conn={conn} pairing={pairing}")
 
+def test_monitor(t: TestRunner):
+    print("\n=== Monitor snapshot (0xB7) ===")
+    r = t.expect("MONITOR", 0xB7, min_len=28, max_len=28)
+    if r and len(r["payload"]) == 28:
+        p = r["payload"]
+        fmt, flags = p[0], p[1]
+        uptime, = struct.unpack_from("<I", p, 2)
+        heap_kb, = struct.unpack_from("<H", p, 6)
+        temp = struct.unpack_from("<b", p, 8)[0]
+        layer, wpm = p[9], p[10]
+        keys, = struct.unpack_from("<I", p, 11)
+        sig_l, sig_r = p[15], p[16]
+        hb_l, = struct.unpack_from("<H", p, 17)
+        hb_r, = struct.unpack_from("<H", p, 19)
+        bl_dv, bl_soc, bl_chg = p[21], p[22], p[23]
+        br_dv, br_soc, br_chg = p[24], p[25], p[26]
+        bt_slot = p[27]
+        print(f"         fmt={fmt} flags=0x{flags:02x} up={uptime}s heap={heap_kb}KB "
+              f"temp={temp} layer={layer} wpm={wpm} keys={keys}")
+        print(f"         sig L/R={sig_l}/{sig_r} hb_age L/R={hb_l}/{hb_r}ms "
+              f"battL={bl_dv/10:.1f}V/{bl_soc}%/chg{bl_chg} "
+              f"battR={br_dv/10:.1f}V/{br_soc}%/chg{br_chg} bt_slot={bt_slot}")
+
 def test_tama(t: TestRunner):
     print("\n=== Tamagotchi ===")
     r = t.expect("TAMA_QUERY", 0xA0, min_len=20)
@@ -277,6 +300,7 @@ def main():
     test_leader(t)
     test_ko(t)
     test_bluetooth(t)
+    test_monitor(t)
     test_tama(t)
     test_features(t)
     test_ota_cycle(t)

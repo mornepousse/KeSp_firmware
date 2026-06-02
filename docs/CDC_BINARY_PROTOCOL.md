@@ -588,6 +588,155 @@ Format d'un enregistrement (slot 0 = LEFT, slot 1 = RIGHT) :
 
 ---
 
+#### MONITOR (0xB7)
+Snapshot consolidé de l'état live du clavier (et de ses moitiés sans fil). Conçu pour piloter un tableau de bord de monitoring dans KaSe_soft. Idempotent, sans effet de bord — poll recommandé à **1–2 Hz**.
+
+- Request: payload vide (`KS [B7] 0000 00`)
+- Response: `28 bytes` — toujours OK, sentinelles pour les champs sans source disponible
+
+| Off | Type  | Champ          | Description                                                       |
+|----:|-------|----------------|-------------------------------------------------------------------|
+| 0   | u8    | `fmt`          | = `0x01` — version du format, permet évolution future             |
+| 1   | u8    | `flags`        | bitmask (voir ci-dessous)                                         |
+| 2   | u32 LE| `uptime_s`     | Secondes depuis le boot                                           |
+| 6   | u16 LE| `heap_free_kb` | Heap libre en KB (saturé à 0xFFFF)                                |
+| 8   | i8    | `temp_c`       | Température interne °C ; `INT8_MIN` (−128) = pas de capteur       |
+| 9   | u8    | `layer_idx`    | Index du layer actif                                              |
+| 10  | u8    | `wpm`          | Mots par minute courants (saturé à 255)                           |
+| 11  | u32 LE| `keys_total`   | Nombre total de touches pressées depuis le boot                   |
+| 15  | u8    | `sig_left`     | Qualité du lien RF gauche 0..255 (0 si `has_rf=0`)                |
+| 16  | u8    | `sig_right`    | Idem droite                                                       |
+| 17  | u16 LE| `hb_age_L_ms`  | ms depuis le dernier heartbeat de la moitié gauche (sat. 0xFFFF)  |
+| 19  | u16 LE| `hb_age_R_ms`  | Idem droite                                                       |
+| 21  | u8    | `batt_L_dV`    | Tension batterie gauche × 10 (0 = inconnu)                        |
+| 22  | u8    | `batt_L_soc`   | State of charge gauche 0..100 %                                   |
+| 23  | u8    | `batt_L_chg`   | 0 = décharge, 1 = en charge                                       |
+| 24  | u8    | `batt_R_dV`    | Tension batterie droite × 10 (0 = inconnu)                        |
+| 25  | u8    | `batt_R_soc`   | State of charge droite 0..100 %                                   |
+| 26  | u8    | `batt_R_chg`   | 0 = décharge, 1 = en charge                                       |
+| 27  | u8    | `bt_slot`      | Slot Bluetooth actif                                              |
+
+**Flags (offset 1) :**
+
+| Bit | Masque | Constante    | Signification                        |
+|-----|--------|--------------|--------------------------------------|
+| 0   | 0x01   | `HAS_RF`     | Firmware rôle dongle avec radio RF   |
+| 1   | 0x02   | `LINK_L`     | Moitié gauche connectée              |
+| 2   | 0x04   | `LINK_R`     | Moitié droite connectée              |
+| 3   | 0x08   | `USB`        | Lien USB actif                       |
+| 4   | 0x10   | `BT_CONN`    | Bluetooth connecté                   |
+
+**Clavier autonome (sans dongle) :** `has_rf = 0`, les offsets 15..26 (signal RF, heartbeat, batterie) valent zéro. Le soft détecte la présence RF via le flag `HAS_RF` (et/ou le tag `RF_DONGLE` dans la réponse FEATURES).
+
+**Température :** `temp_c = INT8_MIN` (−128) signifie que le capteur n'est pas disponible.
+
+**Exemple de parsing Python :**
+
+```python
+import struct
+
+def parse_monitor(payload: bytes) -> dict:
+    assert len(payload) == 28
+    fmt, flags = payload[0], payload[1]
+    uptime,    = struct.unpack_from("<I", payload, 2)
+    heap_kb,   = struct.unpack_from("<H", payload, 6)
+    temp       = struct.unpack_from("<b", payload, 8)[0]
+    layer, wpm = payload[9], payload[10]
+    keys,      = struct.unpack_from("<I", payload, 11)
+    sig_l, sig_r = payload[15], payload[16]
+    hb_l,      = struct.unpack_from("<H", payload, 17)
+    hb_r,      = struct.unpack_from("<H", payload, 19)
+    bl_dv, bl_soc, bl_chg = payload[21], payload[22], payload[23]
+    br_dv, br_soc, br_chg = payload[24], payload[25], payload[26]
+    bt_slot    = payload[27]
+    has_rf     = bool(flags & 0x01)
+    return dict(
+        fmt=fmt, flags=flags, uptime_s=uptime, heap_free_kb=heap_kb,
+        temp_c=temp if temp != -128 else None,
+        layer_idx=layer, wpm=wpm, keys_total=keys,
+        sig_left=sig_l if has_rf else None,
+        sig_right=sig_r if has_rf else None,
+        hb_age_L_ms=hb_l, hb_age_R_ms=hb_r,
+        batt_L=(bl_dv / 10, bl_soc, bool(bl_chg)) if bl_dv else None,
+        batt_R=(br_dv / 10, br_soc, bool(br_chg)) if br_dv else None,
+        bt_slot=bt_slot,
+    )
+```
+
+**Exemple de parsing C# (KaSe_soft) :**
+
+```csharp
+public class MonitorSnapshot
+{
+    // Raw fields
+    public byte   Fmt        { get; init; }
+    public byte   Flags      { get; init; }
+    public uint   UptimeS    { get; init; }
+    public ushort HeapFreeKb { get; init; }
+    public sbyte  TempC      { get; init; }
+    public byte   LayerIdx   { get; init; }
+    public byte   Wpm        { get; init; }
+    public uint   KeysTotal  { get; init; }
+    public byte   SigLeft    { get; init; }
+    public byte   SigRight   { get; init; }
+    public ushort HbAgeLeftMs  { get; init; }
+    public ushort HbAgeRightMs { get; init; }
+    public byte   BattLdV    { get; init; }
+    public byte   BattLSoc   { get; init; }
+    public byte   BattLChg   { get; init; }
+    public byte   BattRdV    { get; init; }
+    public byte   BattRSoc   { get; init; }
+    public byte   BattRChg   { get; init; }
+    public byte   BtSlot     { get; init; }
+
+    // Flag helpers
+    public bool HasRf      => (Flags & 0x01) != 0;
+    public bool LinkLeft   => (Flags & 0x02) != 0;
+    public bool LinkRight  => (Flags & 0x04) != 0;
+    public bool UsbActive  => (Flags & 0x08) != 0;
+    public bool BtConnected => (Flags & 0x10) != 0;
+
+    // Derived
+    public bool TempAvailable => TempC != -128;
+    public double BattLVoltage => BattLdV / 10.0;
+    public double BattRVoltage => BattRdV / 10.0;
+
+    public static MonitorSnapshot Parse(byte[] p)
+    {
+        // All multi-byte fields are little-endian.
+        // BitConverter is LE on all modern platforms; assert if needed:
+        // if (!BitConverter.IsLittleEndian) throw new PlatformNotSupportedException();
+        if (p.Length < 28) throw new ArgumentException("payload must be 28 bytes");
+        return new MonitorSnapshot
+        {
+            Fmt          = p[0],
+            Flags        = p[1],
+            UptimeS      = BitConverter.ToUInt32(p, 2),
+            HeapFreeKb   = BitConverter.ToUInt16(p, 6),
+            TempC        = (sbyte)p[8],
+            LayerIdx     = p[9],
+            Wpm          = p[10],
+            KeysTotal    = BitConverter.ToUInt32(p, 11),
+            SigLeft      = p[15],
+            SigRight     = p[16],
+            HbAgeLeftMs  = BitConverter.ToUInt16(p, 17),
+            HbAgeRightMs = BitConverter.ToUInt16(p, 19),
+            BattLdV      = p[21],
+            BattLSoc     = p[22],
+            BattLChg     = p[23],
+            BattRdV      = p[24],
+            BattRSoc     = p[25],
+            BattRChg     = p[26],
+            BtSlot       = p[27],
+        };
+    }
+}
+```
+
+**Usage dashboard recommandé :** timer 1–2 Hz → `KS [B7] 0000 00` → `Parse(response.Payload)` → mettre à jour les bindings WPF. Pas de gestion d'erreur nécessaire (la commande retourne toujours OK).
+
+---
+
 ### OTA (0xF0–0xFF)
 
 #### OTA_START (0xF0)
