@@ -35,7 +35,9 @@ run_host_tests() {
   info "Tests host…"
   cmake -S test -B test/build >/dev/null 2>&1 || { fail "cmake (test) failed"; return 1; }
   cmake --build test/build >/dev/null 2>&1 || { fail "build des tests host failed"; return 1; }
-  if ./test/build/test_runner | tail -3 | grep -q ", 0 failed"; then
+  # test_runner sort 1 si au moins un test échoue (test_main.c) — on se fie
+  # au code de sortie, plus robuste qu'un grep sur le format de sortie.
+  if ./test/build/test_runner >/dev/null 2>&1; then
     ok "Tests host OK"
     return 0
   else

@@ -35,17 +35,22 @@ Chaque variant sous `boards/<name>/` avec `board.h`, `board_keymap.c`,
 
 ```bash
 source ~/esp/esp-idf/export.sh
-idf.py -B build_v1  -DBOARD=kase_v1       build
-idf.py -B build_v2  -DBOARD=kase_v2       build
-idf.py -B build_v2d -DBOARD=kase_v2_debug build
+idf.py -B build_kase_v1       -DBOARD=kase_v1       -DSDKCONFIG=build_kase_v1/sdkconfig       build
+idf.py -B build_kase_v2       -DBOARD=kase_v2       -DSDKCONFIG=build_kase_v2/sdkconfig       build
+idf.py -B build_kase_v2_debug -DBOARD=kase_v2_debug -DSDKCONFIG=build_kase_v2_debug/sdkconfig build
 ```
 
-Paramètre CMake : `-DBOARD=<name>` (pas `-DBOARD_VARIANT`). Chaque board
-a son propre dossier build (`build_v1/`, `build_v2/`, `build_v2d/`).
+Paramètre CMake : `-DBOARD=<name>` (pas `-DBOARD_VARIANT`). Chaque board a son
+propre dossier build (`build_kase_<name>/`) **et son propre `sdkconfig`** via
+`-DSDKCONFIG=build_kase_<name>/sdkconfig` — c'est ce qui évite la fuite de
+config entre boards (cf. Workflow anti-régression). 6 boards au total : V1, V2,
+V2D, dongle, half_left, half_right. Pour tout vérifier d'un coup :
+`./scripts/check.sh`.
 
-**Important** : `sdkconfig` est partagé entre les 3 builds. Ne pas le
-supprimer entre builds sinon `fullclean` régénère depuis `sdkconfig.defaults`
-et perd les overrides manuels.
+**Important** : avec `-DSDKCONFIG=build_kase_<name>/sdkconfig`, chaque board a
+son sdkconfig isolé dans son dossier build — plus de fuite de config entre
+boards. Le `sdkconfig` historique à la racine reste celui d'un build legacy
+sans `-DSDKCONFIG` ; ne pas mélanger les deux modes sur un même board.
 
 ## Flash
 
@@ -194,7 +199,7 @@ Source unique de vérité : `scripts/check.sh`.
 
 **Activation des hooks git (une fois par clone)** :
 ```bash
-git config core.hooksPath scripts/hooks
+./scripts/install-hooks.sh   # ou: git config core.hooksPath scripts/hooks
 ```
 `pre-push` lance le check complet et bloque le push si rouge. WIP : `git push --no-verify`.
 
@@ -254,8 +259,8 @@ secondaire).
 ## Release workflow
 
 1. Bump version via tag git `vX.Y.Z`
-2. Clean build 3 boards (`rm -rf build_<N>/`)
+2. `./scripts/check.sh` doit être vert (les 6 boards build)
 3. Merge binaries avec `esptool.py merge_bin` pour les `_full.bin`
-4. `glab release create vX.Y.Z <6 files>` (app + full × 3)
+4. `glab release create vX.Y.Z <files...>` (app + full)
 
 Voir `docs/` pour protocoles et keycodes détaillés.
