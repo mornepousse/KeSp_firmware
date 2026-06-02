@@ -108,6 +108,7 @@ endif()
 if(CONFIG_KASE_HAS_RF_TX)
     list(APPEND srcs
         "comm/rf/half_scan_task.c"
+        "comm/rf/half_power.c"
         "periph/half_spi.c"
     )
     # rf_driver.c is already in the list when KASE_HAS_RF_RX is also set.

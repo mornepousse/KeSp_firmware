@@ -23,6 +23,7 @@
 #include "rf_driver.h"
 #include "half_spi.h"        /* half_spi_lock_init / half_spi_lock / half_spi_unlock */
 #include "rf_pairing.h"      /* rf_pairing_load_set_id_half / rf_apply_set_id */
+#include "half_power.h"      /* half_power_next / half_power_hb_divisor */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_rom_sys.h"
@@ -69,6 +70,9 @@ static volatile bool s_pairing_active = false;
 
 /* ── Local pressed-key bitmap (maintained for PKT_HEARTBEAT) ── */
 static uint8_t s_pressed_bitmap[RF_HALF_BITMAP_BYTES];
+
+/* Last keyboard activity (ms, esp_timer). Drives the power state machine. */
+static volatile uint32_t s_last_activity_ms = 0;
 
 /* ── Retry state: one pending retry stored on MAX_RT ──────────── */
 static volatile bool           s_has_pending_retry = false;
@@ -186,6 +190,8 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle,
 {
     (void)kbd_handle;
     (void)user_data;
+
+    s_last_activity_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
     /* Delegate to half_diff_emit: it updates the bitmap and calls tx_key_event
      * for each change (releases first, then new presses). */
@@ -308,6 +314,16 @@ static void heartbeat_timer_cb(void *arg)
 {
     (void)arg;
 
+    /* Power state -> heartbeat throttle. The 100 ms timer keeps firing (cheap);
+     * we only TX the heartbeat every Nth tick when idle, cutting NRF TX. Key
+     * events (event-driven) are unaffected -> typing latency unchanged. */
+    static uint32_t s_hb_tick = 0;
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    half_power_state_t pstate = half_power_next(s_last_activity_ms, now_ms);
+    uint8_t hb_div = half_power_hb_divisor(pstate);
+    bool emit_hb = (s_hb_tick % hb_div) == 0;
+    s_hb_tick++;
+
     /* Best-effort retry for the last failed key event */
     if (s_has_pending_retry) {
         uint8_t buf[3];
@@ -320,37 +336,40 @@ static void heartbeat_timer_cb(void *arg)
         s_has_pending_retry = false;
     }
 
-    /* Build and transmit PKT_HEARTBEAT */
-    rf_heartbeat_t hb;
-    memset(&hb, 0, sizeof(hb));
-    memcpy(hb.bitmap, s_pressed_bitmap, RF_HALF_BITMAP_BYTES);
-    hb.batt_dV = 0;   /* MVP: battery not measured */
-    /* link_q = retransmit percentage (0..100): Σ ARC_CNT × 100 / (tx_count × 3).
-     * 0 = pristine, 100 = every packet maxing all 3 retries. Catches a degrading
-     * link before packets are fully lost. */
-    {
-        uint32_t txc = rf_tx_count, rsum = rf_tx_retr_sum;
-        hb.link_q = (txc > 0) ? (uint8_t)((rsum * 100u) / (txc * 3u)) : 0;
-        rf_tx_retr_sum = 0;
-        rf_tx_count    = 0;
-    }
-    s_stat_last_lq = hb.link_q;
-    hb.seq     = s_seq++;
-    s_stat_maxrt += rf_tx_max_rt_count;   /* accumulate for the 10 s status */
-    rf_tx_max_rt_count = 0;   /* still cleared (used elsewhere for debug) */
+    /* Build and transmit PKT_HEARTBEAT — gated by power state */
+    if (emit_hb) {
+        rf_heartbeat_t hb;
+        memset(&hb, 0, sizeof(hb));
+        memcpy(hb.bitmap, s_pressed_bitmap, RF_HALF_BITMAP_BYTES);
+        hb.batt_dV = 0;   /* MVP: battery not measured */
+        /* link_q = retransmit percentage (0..100): Σ ARC_CNT × 100 / (tx_count × 3).
+         * 0 = pristine, 100 = every packet maxing all 3 retries. Catches a degrading
+         * link before packets are fully lost. */
+        {
+            uint32_t txc = rf_tx_count, rsum = rf_tx_retr_sum;
+            hb.link_q = (txc > 0) ? (uint8_t)((rsum * 100u) / (txc * 3u)) : 0;
+            rf_tx_retr_sum = 0;
+            rf_tx_count    = 0;
+        }
+        s_stat_last_lq = hb.link_q;
+        hb.seq     = s_seq++;
+        s_stat_maxrt += rf_tx_max_rt_count;   /* accumulate for the 10 s status */
+        rf_tx_max_rt_count = 0;   /* still cleared (used elsewhere for debug) */
 
-    uint8_t buf[9];
-    rf_encode_heartbeat(buf, &hb);
-    half_spi_lock();
-    bool ok = rf_driver_send(&s_radio, buf, 9);
-    half_spi_unlock();
-    if (!ok) {
-        ESP_LOGD(TAG, "heartbeat TX failed (MAX_RT)");
+        uint8_t buf[9];
+        rf_encode_heartbeat(buf, &hb);
+        half_spi_lock();
+        bool ok = rf_driver_send(&s_radio, buf, 9);
+        half_spi_unlock();
+        if (!ok) {
+            ESP_LOGD(TAG, "heartbeat TX failed (MAX_RT)");
+        }
+
+        s_stat_hb_total++;
+        if (ok) s_stat_hb_ok++;
     }
 
     /* ── 10 s console status (100 × 100 ms ticks) ─────────────── */
-    s_stat_hb_total++;
-    if (ok) s_stat_hb_ok++;
     static uint32_t s_stat_ticks = 0;
     if (++s_stat_ticks >= 100) {
         s_stat_ticks = 0;
@@ -529,6 +548,7 @@ static void half_scan_task(void *arg)
         .name            = "half_hb",
     };
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &hb_timer));
+    s_last_activity_ms = (uint32_t)(esp_timer_get_time() / 1000);
     ESP_ERROR_CHECK(esp_timer_start_periodic(hb_timer, 100 * 1000));   /* 100 ms in µs */
 
     ESP_LOGI(TAG, "matrix + NRF PTX + heartbeat timer running");
