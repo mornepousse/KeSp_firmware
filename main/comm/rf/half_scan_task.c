@@ -74,6 +74,12 @@ static uint8_t s_pressed_bitmap[RF_HALF_BITMAP_BYTES];
 /* Last keyboard activity (ms, esp_timer). Drives the power state machine. */
 static volatile uint32_t s_last_activity_ms = 0;
 
+/* ── Sleep/wake plumbing: handles + configs kept at file scope ─ */
+static esp_timer_handle_t       s_hb_timer  = NULL;
+static keyboard_btn_handle_t    s_kbd       = NULL;
+static keyboard_btn_config_t    s_kbd_cfg;        /* kept for recreate after wake */
+static keyboard_btn_cb_config_t s_kbd_cb_cfg;     /* kept for re-register after wake */
+
 /* ── Retry state: one pending retry stored on MAX_RT ──────────── */
 static volatile bool           s_has_pending_retry = false;
 static volatile rf_key_event_t s_pending_retry;
@@ -508,7 +514,7 @@ static void half_scan_task(void *arg)
     for (int i = 0; i < MATRIX_ROWS; i++) output_gpios[i] = row_gpios[i];
     for (int i = 0; i < MATRIX_COLS; i++) input_gpios[i]  = col_gpios[i];
 
-    keyboard_btn_config_t kbd_cfg = {
+    s_kbd_cfg = (keyboard_btn_config_t){
         .output_gpios     = output_gpios,
         .input_gpios      = input_gpios,
         .output_gpio_num  = MATRIX_ROWS,
@@ -521,35 +527,33 @@ static void half_scan_task(void *arg)
         .core_id          = 0,
     };
 
-    keyboard_btn_handle_t s_kbd = NULL;
-    esp_err_t res = keyboard_button_create(&kbd_cfg, &s_kbd);
+    esp_err_t res = keyboard_button_create(&s_kbd_cfg, &s_kbd);
     if (res != ESP_OK || s_kbd == NULL) {
         ESP_LOGE(TAG, "keyboard_button_create failed: %d", res);
         vTaskDelay(portMAX_DELAY);
         return;
     }
 
-    keyboard_btn_cb_config_t cb_cfg = {
+    s_kbd_cb_cfg = (keyboard_btn_cb_config_t){
         .event     = KBD_EVENT_PRESSED,   /* fires on any matrix change */
         .callback  = keyboard_btn_cb,
         .user_data = NULL,
     };
-    res = keyboard_button_register_cb(s_kbd, cb_cfg, NULL);
+    res = keyboard_button_register_cb(s_kbd, s_kbd_cb_cfg, NULL);
     if (res != ESP_OK) {
         ESP_LOGE(TAG, "keyboard_button_register_cb failed: %d", res);
     }
 
     /* Start heartbeat timer — 100 ms periodic */
-    esp_timer_handle_t hb_timer;
     esp_timer_create_args_t timer_args = {
         .callback        = heartbeat_timer_cb,
         .arg             = NULL,
         .dispatch_method = ESP_TIMER_TASK,
         .name            = "half_hb",
     };
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &hb_timer));
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_hb_timer));
     s_last_activity_ms = (uint32_t)(esp_timer_get_time() / 1000);
-    ESP_ERROR_CHECK(esp_timer_start_periodic(hb_timer, 100 * 1000));   /* 100 ms in µs */
+    ESP_ERROR_CHECK(esp_timer_start_periodic(s_hb_timer, 100 * 1000));   /* 100 ms in µs */
 
     ESP_LOGI(TAG, "matrix + NRF PTX + heartbeat timer running");
 
@@ -557,6 +561,21 @@ static void half_scan_task(void *arg)
     for (;;) {
         vTaskDelay(portMAX_DELAY);
     }
+}
+
+/* ── Sleep/wake helpers ─────────────────────────────────────── */
+void half_scan_stop_for_sleep(void)
+{
+    if (s_hb_timer) esp_timer_stop(s_hb_timer);
+    if (s_kbd) { keyboard_button_delete(s_kbd); s_kbd = NULL; }
+}
+
+void half_scan_restart_after_wake(void)
+{
+    keyboard_button_create(&s_kbd_cfg, &s_kbd);
+    keyboard_button_register_cb(s_kbd, s_kbd_cb_cfg, NULL);
+    s_last_activity_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    if (s_hb_timer) esp_timer_start_periodic(s_hb_timer, 100 * 1000);
 }
 
 /* ── Public API ─────────────────────────────────────────────── */

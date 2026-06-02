@@ -5,6 +5,12 @@
  * Called from app_main() in the HALF role branch. */
 void half_scan_task_start(void);
 
+/* Stop the heartbeat timer + delete the keyboard_button scan (for light-sleep).
+ * half_scan_restart_after_wake() recreates them and resets the activity clock so
+ * the half resumes in ACTIVE; the recreated scan immediately re-detects a held key. */
+void half_scan_stop_for_sleep(void);
+void half_scan_restart_after_wake(void);
+
 #ifdef TEST_HOST
 /* In test builds: provide a minimal keyboard_btn_data_t stub (matches the real
  * component struct members used by half_diff_emit). */
