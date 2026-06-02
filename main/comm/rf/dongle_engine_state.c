@@ -35,6 +35,7 @@ uint8_t usb_bl_state = 0;
 #include "espnow_msg.h"
 #include "nvs.h"                    /* nvs_open, nvs_get_blob, nvs_close */
 #include "hid_report.h"             /* hid_report_get_modifiers() */
+#include "rf_rx_task.h"             /* rf_rx_copy_peer_macs() — live peer MACs */
 #include "keyboard_config.h"        /* LAYERS, MAX_LAYOUT_NAME_LENGTH */
 #include "keymap.h"                 /* default_layout_names */
 #include "esp_log.h"
@@ -43,24 +44,11 @@ uint8_t usb_bl_state = 0;
 void layer_changed(void)
 {
 #if CONFIG_KASE_HAS_ESPNOW
-    /* Lazy-load paired half MACs from NVS "rf" on first call.
-     * Safe: layer_changed() is always called from rf_rx_task (single task).
-     * Static variables are task-local in effect (no concurrent access). */
-    static uint8_t mac_left[6]  = {0};
-    static uint8_t mac_right[6] = {0};
-    static bool    macs_loaded  = false;
-
-    if (!macs_loaded) {
-        nvs_handle_t h;
-        if (nvs_open("rf", NVS_READONLY, &h) == ESP_OK) {
-            size_t sz = 6;
-            nvs_get_blob(h, "mac_left",  mac_left,  &sz);
-            sz = 6;
-            nvs_get_blob(h, "mac_right", mac_right, &sz);
-            nvs_close(h);
-        }
-        macs_loaded = true;
-    }
+    /* Live paired-half MACs from the RX task (loaded at boot + refreshed on
+     * every pairing). Avoids a stale one-shot NVS cache that required a dongle
+     * reboot before layer/state push would resume after a re-pairing. */
+    uint8_t mac_left[6], mac_right[6];
+    rf_rx_copy_peer_macs(mac_left, mac_right);
 
     bool has_left  = mac_left[0]  || mac_left[1]  || mac_left[2]  ||
                      mac_left[3]  || mac_left[4]  || mac_left[5];

@@ -21,6 +21,12 @@ typedef struct {
 
 void rf_rx_get_status(rf_link_status_t *out);
 
+/* Copy the current paired-half WiFi MACs (live copy: loaded at boot and
+ * refreshed on every successful pairing). For ESP-NOW senders (status push,
+ * layer/state push) so they never rely on a stale one-shot NVS cache.
+ * All-zero MAC = that half is not paired. */
+void rf_rx_copy_peer_macs(uint8_t mac_left[6], uint8_t mac_right[6]);
+
 /* Signal quality derivation — pure function, host-testable.
  * Returns 0..255 link quality (255 = best, 0 = link down/timed out).
  * See rf_rx_task.c for the age/retry mapping. */

@@ -505,6 +505,13 @@ void rf_rx_get_status(rf_link_status_t *out)
     out->link_q_right = s_link_q_right;
 }
 
+void rf_rx_copy_peer_macs(uint8_t mac_left[6], uint8_t mac_right[6])
+{
+    /* Live copy maintained by this task (loaded at boot, refreshed on pairing). */
+    memcpy(mac_left,  s_pair_mac_left,  6);
+    memcpy(mac_right, s_pair_mac_right, 6);
+}
+
 /*
  * status_push_cb — periodic esp_timer callback (5 s period).
  *
