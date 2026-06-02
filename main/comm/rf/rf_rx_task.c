@@ -481,9 +481,12 @@ bool rf_rx_start(void)
     ESP_LOGI(TAG, "RF RX started (L=%d R=%d)", s_left.present, s_right.present);
 
     /* ── 5 s periodic status push to paired halves ───────────────
-     * Created AFTER ESP-NOW is initialized (called from main.c after
-     * espnow_link_init()). The callback is safe from the esp_timer task
-     * context: no SPI, no portMAX_DELAY mutex (see status_push_cb comment). */
+     * NB: rf_rx_start() runs just BEFORE espnow_link_init() in main.c, so the
+     * timer is created before ESP-NOW is up — but the first tick fires at +5 s,
+     * by which time espnow_link_init() (synchronous, ms) has completed, so
+     * status_push_cb's espnow_send() is safe. The callback is safe from the
+     * esp_timer task context: no SPI, no portMAX_DELAY mutex (see
+     * status_push_cb comment). */
     const esp_timer_create_args_t status_args = {
         .callback = status_push_cb,
         .name     = "status_push_tick",
