@@ -2,8 +2,6 @@
 #include "cdc_binary_cmds.h"
 #include "cdc_internal.h"
 #include "ks_monitor.h"
-#include "esp_heap_caps.h"
-#include <limits.h>
 #include "keyboard_config.h"
 #include "keyboard_task.h"
 #include "keymap.h"
@@ -24,6 +22,10 @@
 #include "matrix_scan.h"
 #if CONFIG_KASE_HAS_RF_RX
 #include "rf_rx_task.h"   /* rf_rx_pair_start */
+/* From dongle_engine_state.c — battery cache accessor */
+extern void dongle_cache_get_battery(uint8_t slot,
+                                     uint8_t *batt_dV, uint8_t *soc_pct,
+                                     uint8_t *charging, uint32_t *age_ms_out);
 #endif
 
 /* ── System ─────────────────────────────────────────────────────── */
@@ -1038,9 +1040,6 @@ static void bin_cmd_monitor(uint8_t cmd, const uint8_t *p, uint16_t l)
 
     /* RF + battery (dongle only) */
 #if CONFIG_KASE_HAS_RF_RX
-    extern void dongle_cache_get_battery(uint8_t slot,
-                                         uint8_t *batt_dV, uint8_t *soc_pct,
-                                         uint8_t *charging, uint32_t *age_ms_out);
     m.flags |= KS_MON_F_HAS_RF;
     rf_link_status_t st;
     rf_rx_get_status(&st);
@@ -1048,13 +1047,11 @@ static void bin_cmd_monitor(uint8_t cmd, const uint8_t *p, uint16_t l)
     if (st.link_right) m.flags |= KS_MON_F_LINK_R;
     m.sig_left   = rf_signal_q255(st.link_left,  st.hb_age_left_ms,  st.link_q_left);
     m.sig_right  = rf_signal_q255(st.link_right, st.hb_age_right_ms, st.link_q_right);
-    uint32_t age_l_ms = st.hb_age_left_ms;
-    uint32_t age_r_ms = st.hb_age_right_ms;
-    m.hb_age_l_ms = (age_l_ms > 0xFFFFu) ? 0xFFFFu : (uint16_t)age_l_ms;
-    m.hb_age_r_ms = (age_r_ms > 0xFFFFu) ? 0xFFFFu : (uint16_t)age_r_ms;
+    m.hb_age_l_ms = (st.hb_age_left_ms  > 0xFFFFu) ? 0xFFFFu : (uint16_t)st.hb_age_left_ms;
+    m.hb_age_r_ms = (st.hb_age_right_ms > 0xFFFFu) ? 0xFFFFu : (uint16_t)st.hb_age_right_ms;
     /* Battery: mirror bin_cmd_battery (0xB6) data path from dongle_engine_state.c */
     {
-        uint8_t dV, soc, chg; uint32_t age;
+        uint8_t dV, soc, chg; uint32_t age; /* age intentionally dropped — no batt_age field in ks_monitor_t */
         dongle_cache_get_battery(0, &dV, &soc, &chg, &age);
         m.batt_l_dv  = dV;
         m.batt_l_soc = soc;
