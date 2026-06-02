@@ -431,6 +431,14 @@ bool rf_rx_start(void)
     rf_apply_set_id(&rcfg, set_id, 0x02);   /* right → slot 0x02 */
     s_lcfg = lcfg; s_rcfg = rcfg;           /* keep live config for the radio watchdog */
 
+    /* Load paired half MACs from NVS at boot so status_push_cb (and layer/state
+     * push) can send EN_INFO_STATUS immediately — without waiting for a pairing
+     * session. These were previously only populated in rf_rx_pair_start(), so a
+     * plain reboot left them zeroed and the ESP-NOW status link stayed down
+     * until a re-pairing. s_pair_mac_* is the single source of truth, also
+     * refreshed on each successful pairing. */
+    rf_pairing_load_peers_dongle(s_pair_mac_left, s_pair_mac_right, &s_pair_paired_count);
+
     /* Park BOTH CSN HIGH before initialising either radio. The dongle shares
      * one SPI bus between NRF1 (csn=13) and NRF2 (csn=1 — a UART0 strap pin
      * that floats LOW at reset). If RIGHT's CSN is still floating during
