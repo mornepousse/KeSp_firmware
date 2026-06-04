@@ -608,15 +608,15 @@ Snapshot consolide de l'etat live du clavier (et de ses moities sans fil). Concu
 | 16     | u8     | `sig_right`    | Idem droite                                                       |
 | 17     | u16 LE | `hb_age_L_ms`  | ms depuis le dernier heartbeat de la moitie gauche (tronque a u16, sature a 0xFFFF — RF_STATUS utilise u32 pour ces champs) |
 | 19     | u16 LE | `hb_age_R_ms`  | Idem droite (meme troncature u16/0xFFFF)                          |
-| 21     | u8     | `batt_L_dV`    | Tension batterie gauche x10 (0 = inconnu)                         |
-| 22     | u8     | `batt_L_soc`   | State of charge gauche 0..100 %                                   |
-| 23     | u8     | `batt_L_chg`   | 0 = decharge, 1 = en charge                                       |
-| 24     | u8     | `batt_R_dV`    | Tension batterie droite x10 (0 = inconnu)                         |
-| 25     | u8     | `batt_R_soc`   | State of charge droite 0..100 %                                   |
-| 26     | u8     | `batt_R_chg`   | 0 = decharge, 1 = en charge                                       |
+| 21     | u8     | `batt_L_dV`    | Tension batterie gauche x10. `0xFF` = inconnu (0 si `has_rf=0`)   |
+| 22     | u8     | `batt_L_soc`   | State of charge gauche 0..100 %. `0xFF` = inconnu                 |
+| 23     | u8     | `batt_L_chg`   | 0 = decharge, 1 = en charge. `0xFF` = inconnu                     |
+| 24     | u8     | `batt_R_dV`    | Tension batterie droite x10. `0xFF` = inconnu (0 si `has_rf=0`)   |
+| 25     | u8     | `batt_R_soc`   | State of charge droite 0..100 %. `0xFF` = inconnu                 |
+| 26     | u8     | `batt_R_chg`   | 0 = decharge, 1 = en charge. `0xFF` = inconnu                     |
 | 27     | u8     | `bt_slot`      | Slot Bluetooth actif (0–2 ; `BT_MAX_DEVICES = 3`)                 |
 
-Note: dans ce snapshot, les champs batterie utilisent 0 = inconnu (et non 0xFF comme la commande BATTERY 0xB6) — format consolide simplifie.
+Note batterie : sur le dongle, les champs batterie sont relayes tels quels depuis le cache (meme source que BATTERY 0xB6) → `0xFF` = inconnu / jamais vu. Sur un clavier autonome (`has_rf=0`) ces offsets valent 0. Cote soft : traiter `batt_*_dV` (ou `_soc`) == `0xFF`, et 0 quand `has_rf=0`, comme "pas de donnee" (afficher "—").
 
 **Flags (offset 1) :**
 
@@ -659,8 +659,8 @@ def parse_monitor(payload: bytes) -> dict:
         sig_left=sig_l if has_rf else None,
         sig_right=sig_r if has_rf else None,
         hb_age_L_ms=hb_l, hb_age_R_ms=hb_r,
-        batt_L=(bl_dv / 10, bl_soc, bool(bl_chg)) if bl_dv else None,
-        batt_R=(br_dv / 10, br_soc, bool(br_chg)) if br_dv else None,
+        batt_L=(bl_dv / 10, bl_soc, bool(bl_chg)) if bl_dv not in (0, 0xFF) else None,
+        batt_R=(br_dv / 10, br_soc, bool(br_chg)) if br_dv not in (0, 0xFF) else None,
         bt_slot=bt_slot,
     )
 ```
@@ -700,8 +700,11 @@ public class MonitorSnapshot
 
     // Derived
     public bool TempAvailable => TempC != -128;
-    public double BattLVoltage => BattLdV / 10.0;
-    public double BattRVoltage => BattRdV / 10.0;
+    // Battery unknown sentinel: 0xFF (dongle cache) or 0 when !HasRf.
+    public bool BattLValid => BattLdV != 0 && BattLdV != 0xFF;
+    public bool BattRValid => BattRdV != 0 && BattRdV != 0xFF;
+    public double? BattLVoltage => BattLValid ? BattLdV / 10.0 : (double?)null;
+    public double? BattRVoltage => BattRValid ? BattRdV / 10.0 : (double?)null;
 
     public static MonitorSnapshot Parse(byte[] p)
     {

@@ -207,8 +207,9 @@ def test_monitor(t: TestRunner):
         bt_slot = p[27]
         print(f"         fmt={fmt} flags=0x{flags:02x} up={uptime}s heap={heap_kb}KB "
               f"temp={temp} layer={layer} wpm={wpm} keys={keys}")
-        bl_v = f"{bl_dv/10:.1f}V" if bl_dv else "?"
-        br_v = f"{br_dv/10:.1f}V" if br_dv else "?"
+        # battery unknown sentinel: 0xFF (dongle cache) or 0 (when !has_rf)
+        bl_v = f"{bl_dv/10:.1f}V" if bl_dv not in (0, 0xFF) else "?"
+        br_v = f"{br_dv/10:.1f}V" if br_dv not in (0, 0xFF) else "?"
         print(f"         sig L/R={sig_l}/{sig_r} hb_age L/R={hb_l}/{hb_r}ms "
               f"battL={bl_v}/{bl_soc}%/chg{bl_chg} "
               f"battR={br_v}/{br_soc}%/chg{br_chg} bt_slot={bt_slot}")
