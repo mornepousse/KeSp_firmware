@@ -32,6 +32,38 @@
 #define MOUSE_BTN_RIGHT             0x02
 #define MOUSE_BTN_MIDDLE            0x04
 
+/* ── u16 LE helpers ─────────────────────────────────────────────── */
+static void put_u16le(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static uint16_t get_u16le(const uint8_t *p) { return (uint16_t)(p[0] | ((uint16_t)p[1] << 8)); }
+
+/* ── cfg encode/decode (pure, host-testable) ────────────────────── */
+uint16_t trackpad_cfg_encode(uint8_t *buf, const trackpad_cfg_t *c)
+{
+    buf[0] = c->fmt;
+    put_u16le(&buf[1], c->base);
+    put_u16le(&buf[3], c->accel);
+    put_u16le(&buf[5], c->gain_max);
+    return TRACKPAD_CFG_SIZE;
+}
+
+bool trackpad_cfg_decode(const uint8_t *buf, uint16_t len, trackpad_cfg_t *c)
+{
+    const uint8_t *p;
+    if (len >= TRACKPAD_CFG_SIZE) {
+        c->fmt = buf[0];
+        p = &buf[1];
+    } else if (len >= 6) {
+        c->fmt = TRACKPAD_CFG_FMT;
+        p = buf;
+    } else {
+        return false;
+    }
+    c->base     = get_u16le(&p[0]);
+    c->accel    = get_u16le(&p[2]);
+    c->gain_max = get_u16le(&p[4]);
+    return true;
+}
+
 /* ── clamp8: clamp signed 16-bit to HID int8 delta range ── */
 static inline int8_t clamp8(int16_t v)
 {

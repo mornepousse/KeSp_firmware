@@ -214,6 +214,18 @@ def test_monitor(t: TestRunner):
               f"battL={bl_v}/{bl_soc}%/chg{bl_chg} "
               f"battR={br_v}/{br_soc}%/chg{br_chg} bt_slot={bt_slot}")
 
+def test_trackpad(t: TestRunner):
+    print("\n=== Trackpad accel cfg (0xB8) ===")
+    r = t.expect("TRACKPAD_GET", 0xB8, min_len=7, max_len=7,
+                 check_payload=lambda p: p[0] == 0x01)  # fmt=1
+    if r and len(r["payload"]) == 7:
+        p = r["payload"]
+        fmt = p[0]
+        base,     = struct.unpack_from("<H", p, 1)
+        accel,    = struct.unpack_from("<H", p, 3)
+        gain_max, = struct.unpack_from("<H", p, 5)
+        print(f"         fmt={fmt} base={base} accel={accel} gain_max={gain_max}")
+
 def test_tama(t: TestRunner):
     print("\n=== Tamagotchi ===")
     r = t.expect("TAMA_QUERY", 0xA0, min_len=20)
@@ -304,6 +316,7 @@ def main():
     test_ko(t)
     test_bluetooth(t)
     test_monitor(t)
+    test_trackpad(t)
     test_tama(t)
     test_features(t)
     test_ota_cycle(t)

@@ -22,6 +22,7 @@
 #include "matrix_scan.h"
 #if CONFIG_KASE_HAS_RF_RX
 #include "rf_rx_task.h"   /* rf_rx_pair_start */
+#include "trackpad.h"     /* trackpad_cfg_active, trackpad_cfg_apply_and_save */
 /* From dongle_engine_state.c — battery cache accessor */
 extern void dongle_cache_get_battery(uint8_t slot,
                                      uint8_t *batt_dV, uint8_t *soc_pct,
@@ -1069,6 +1070,30 @@ static void bin_cmd_monitor(uint8_t cmd, const uint8_t *p, uint16_t l)
 }
 
 #if CONFIG_KASE_HAS_RF_RX
+/* TRACKPAD_GET (0xB8): no payload → 7B cfg (fmt u8, base/accel/gain_max u16 LE) */
+static void bin_cmd_trackpad_get(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    (void)p; (void)l;
+    uint8_t buf[TRACKPAD_CFG_SIZE];
+    trackpad_cfg_encode(buf, trackpad_cfg_active());
+    ks_respond(cmd, KS_STATUS_OK, buf, TRACKPAD_CFG_SIZE);
+}
+
+/* TRACKPAD_SET (0xB9): payload 6B [base:u16 LE][accel:u16 LE][gain_max:u16 LE]
+ * Validates, applies live, persists to NVS, echoes applied cfg (7B). */
+static void bin_cmd_trackpad_set(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    if (l < 6) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
+    trackpad_cfg_t c;
+    if (!trackpad_cfg_decode(p, l, &c)) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
+    if (!trackpad_cfg_apply_and_save(&c)) { ks_respond_err(cmd, KS_STATUS_ERR_RANGE); return; }
+    uint8_t buf[TRACKPAD_CFG_SIZE];
+    trackpad_cfg_encode(buf, trackpad_cfg_active());
+    ks_respond(cmd, KS_STATUS_OK, buf, TRACKPAD_CFG_SIZE);   /* echo applied */
+}
+#endif /* CONFIG_KASE_HAS_RF_RX */
+
+#if CONFIG_KASE_HAS_RF_RX
 /* RF_PAIR_START: payload [reset:u8]. Opens a 30 s pairing window asynchronously
  * (the exchange runs in rf_rx_task). Responds immediately with
  * [set_id_hi, set_id_lo, paired_count]. */
@@ -1159,6 +1184,8 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     { KS_CMD_MONITOR,           bin_cmd_monitor },
 #if CONFIG_KASE_HAS_RF_RX
     { KS_CMD_RF_PAIR_START,     bin_cmd_rf_pair_start },
+    { KS_CMD_TRACKPAD_GET,      bin_cmd_trackpad_get },
+    { KS_CMD_TRACKPAD_SET,      bin_cmd_trackpad_set },
 #endif
     /* OTA */
     { KS_CMD_OTA_START,         bin_cmd_ota_start },

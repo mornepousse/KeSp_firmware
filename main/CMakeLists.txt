@@ -106,6 +106,8 @@ if(CONFIG_KASE_HAS_RF_RX)
         # trackpad packets received from the halves (approach B). The half only
         # forwards raw data, so it does not compile this.
         "periph/trackpad/trackpad_map.c"
+        # Runtime accel cfg store + NVS persistence (dongle only).
+        "periph/trackpad/trackpad_cfg.c"
     )
 endif()
 

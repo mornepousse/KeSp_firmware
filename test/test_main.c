@@ -29,6 +29,7 @@ extern void test_espnow_msg(void);
 extern void test_eink_pack(void);
 extern void test_trackpad_map(void);
 extern void test_trackpad_accel_curve(void);
+extern void test_trackpad_cfg(void);
 extern void test_rf_pairing(void);
 extern void test_rf_pairing_declared_slot(void);
 extern void test_espnow_peer_filter(void);
@@ -65,6 +66,7 @@ int main(void) {
     test_eink_pack();
     test_trackpad_map();
     test_trackpad_accel_curve();
+    test_trackpad_cfg();
     test_rf_pairing();
     test_rf_pairing_declared_slot();
     test_espnow_peer_filter();

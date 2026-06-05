@@ -35,6 +35,10 @@
 #include "espnow_link.h"
 #endif
 
+#if CONFIG_KASE_HAS_RF_RX
+#include "trackpad.h"
+#endif
+
 /* Runtime debug/experimental flags: set to 1 to skip starting the component for
  * isolation testing */
 #ifndef SKIP_STATUS_DISPLAY
@@ -278,6 +282,7 @@ void app_main(void) {
     leader_init();
     key_override_init();
     hid_report_init();
+    trackpad_cfg_load();   /* load persisted accel cfg before first trackpad packet */
     if (!rf_rx_start())
       ESP_LOGE(TAG, "RF RX failed to start (no radios?)");
 

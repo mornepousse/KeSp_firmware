@@ -222,12 +222,9 @@ static bool drain_radio(rf_radio_t *radio, hb_half_state_t *hb, uint8_t half)
             rf_trackpad_t tp;
             if (rf_decode_trackpad(buf, n, &tp)) {
                 static trackpad_state_t s_tp_state[2];   /* [HB_HALF_LEFT=0 / HB_HALF_RIGHT=1] */
-                static const trackpad_cfg_t s_tp_cfg = {
-                    .fmt = TRACKPAD_CFG_FMT, .base = 90, .accel = 40, .gain_max = 300,
-                };
                 trackpad_out_t out;
                 if (trackpad_map(tp.ge0, tp.ge1, tp.n_fingers, tp.rel_x, tp.rel_y,
-                                 &s_tp_cfg, &s_tp_state[half], &out)) {
+                                 trackpad_cfg_active(), &s_tp_state[half], &out)) {
                     hid_send_mouse(out.buttons, out.dx, out.dy, out.scroll_v);
                 }
             }

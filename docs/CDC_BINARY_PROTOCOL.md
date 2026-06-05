@@ -742,6 +742,42 @@ public class MonitorSnapshot
 
 ---
 
+#### TRACKPAD_GET (0xB8)
+Returns the active trackpad acceleration config (dongle only).
+
+- Request: payload vide
+- Response: `7 bytes`
+
+| Offset | Type   | Champ      | Description                                      |
+|-------:|--------|------------|--------------------------------------------------|
+| 0      | u8     | `fmt`      | = `0x01` — version du format                     |
+| 1      | u16 LE | `base`     | Gain de base x100 (ex. 90 = 0.90x)               |
+| 3      | u16 LE | `accel`    | Coefficient d'acceleration (ajoute par unite de vitesse / 100) |
+| 5      | u16 LE | `gain_max` | Gain maximum x100 (ex. 300 = 3.00x)              |
+
+Les gains sont exprimes en centièmes : 100 = 1.00x, 90 = 0.90x, 300 = 3.00x. La courbe appliquee est : `gain = clamp(base + accel * speed / 100, base, gain_max)`.
+
+Defauts usine : `base=90, accel=40, gain_max=300`.
+
+---
+
+#### TRACKPAD_SET (0xB9)
+Modifie la config d'acceleration trackpad, l'applique immediatement et la persiste en NVS (dongle only).
+
+- Request: `6 bytes` — `[base:u16 LE][accel:u16 LE][gain_max:u16 LE]`
+- Response: `7 bytes` — echo de la config appliquee (meme format que TRACKPAD_GET)
+- Erreur: `ERR_INVALID` si payload < 6 octets
+- Erreur: `ERR_RANGE` si hors bornes (`base < 1`, `base > gain_max`, `gain_max > 1000`, `accel > 1000`)
+
+**Exemple :** activer une courbe agressive (base=80, accel=60, gain_max=400) :
+```python
+import struct
+payload = struct.pack("<HHH", 80, 60, 400)   # 6 bytes
+ser.write(ks_frame(0xB9, payload))
+```
+
+---
+
 ### OTA (0xF0–0xFF)
 
 #### OTA_START (0xF0)

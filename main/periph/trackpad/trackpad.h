@@ -66,6 +66,16 @@ typedef struct {
 } trackpad_cfg_t;
 #define TRACKPAD_ACCEL_DEN   100
 
+/* ── Encode/decode helpers (pure, host-testable) ────────────────── */
+#define TRACKPAD_CFG_SIZE 7   /* fmt(1) + base(2) + accel(2) + gain_max(2), LE */
+uint16_t trackpad_cfg_encode(uint8_t *buf, const trackpad_cfg_t *c);   /* returns 7 */
+bool     trackpad_cfg_decode(const uint8_t *buf, uint16_t len, trackpad_cfg_t *c); /* accepts 7 (with fmt) or 6 (SET payload, no fmt) */
+
+/* ── Runtime config store (dongle only, not in TEST_HOST) ────────── */
+void                  trackpad_cfg_load(void);                       /* boot: NVS -> active (or defaults) */
+const trackpad_cfg_t *trackpad_cfg_active(void);                     /* current active cfg */
+bool                  trackpad_cfg_apply_and_save(const trackpad_cfg_t *c); /* validate, apply live, persist */
+
 /* ── Pure gesture-to-HID mapping function — host-testable ──────────
  *
  * Maps raw IQS5xx fields to trackpad_out_t output fields.
