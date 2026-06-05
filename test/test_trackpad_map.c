@@ -16,6 +16,7 @@
  */
 #include "test_framework.h"
 #include "../main/periph/trackpad/trackpad.h"
+#include <string.h>
 
 /* Mouse button bits (mirror trackpad_map.c's private defines) */
 #define BTN_LEFT   0x01
@@ -185,4 +186,67 @@ void test_trackpad_map(void)
     TEST_ASSERT_EQ(g_out.scroll_v,  8,    "scroll-mutex: scroll_v must be 8");
     TEST_ASSERT_EQ(g_out.scroll_h,  6,    "scroll-mutex: scroll_h must be 50/8=6");
     TEST_ASSERT_EQ(g_out.buttons,   0,    "scroll-mutex: buttons must be 0");
+}
+
+/*
+ * test_trackpad_accel_curve — verifies the acceleration formula:
+ *   speed = max(|rel_x|, |rel_y|)
+ *   gain  = clamp(base + accel*speed/TRACKPAD_ACCEL_DEN, base, gain_max)
+ *   dx    = clamp8(rel_x * gain / 100)
+ *
+ * Config: base=90, accel=40, gain_max=300.
+ *
+ * Expected values (computed with integer division):
+ *   rel=(2,0):   speed=2,   gain=90+40*2/100=90+0=90,   dx=clamp8(2*90/100)=clamp8(1)=1
+ *   rel=(60,0):  speed=60,  gain=90+40*60/100=90+24=114, dx=clamp8(60*114/100)=clamp8(68)=68
+ *   rel=(200,0): speed=200, gain=90+40*200/100=90+80=170, dx=clamp8(200*170/100)=clamp8(340)=127 (clamped)
+ *   Monotonicity: dx at speed=50 (=55) >= dx at speed=5 (=4)
+ */
+void test_trackpad_accel_curve(void)
+{
+    TEST_SUITE("trackpad_accel_curve");
+
+    static const trackpad_cfg_t g_accel_cfg = {
+        .fmt = TRACKPAD_CFG_FMT, .base = 90, .accel = 40, .gain_max = 300
+    };
+
+    trackpad_out_t out;
+    trackpad_state_t st;
+
+    /* ── Case 1: slow movement — gain ≈ base, low amplification ─── */
+    /* speed=2, gain=90+40*2/100=90+0=90, dx=clamp8(2*90/100)=clamp8(1)=1 */
+    memset(&st, 0, sizeof(st));
+    bool sent = trackpad_map(0x00, 0x00, 1, 2, 0, &g_accel_cfg, &st, &out);
+    TEST_ASSERT(sent,              "accel-slow: should_send must be true");
+    TEST_ASSERT_EQ(out.dx, 1,     "accel-slow: dx=1 (speed=2, gain=90)");
+    TEST_ASSERT_EQ(out.dy, 0,     "accel-slow: dy=0");
+
+    /* ── Case 2: medium movement — gain increased by accel ────────── */
+    /* speed=60, gain=90+40*60/100=90+24=114, dx=clamp8(60*114/100)=clamp8(68)=68 */
+    memset(&st, 0, sizeof(st));
+    sent = trackpad_map(0x00, 0x00, 1, 60, 0, &g_accel_cfg, &st, &out);
+    TEST_ASSERT(sent,              "accel-med: should_send must be true");
+    TEST_ASSERT_EQ(out.dx, 68,    "accel-med: dx=68 (speed=60, gain=114)");
+    TEST_ASSERT_EQ(out.dy, 0,     "accel-med: dy=0");
+
+    /* ── Case 3: large movement — clamp8 ceiling ──────────────────── */
+    /* speed=200, gain=90+40*200/100=90+80=170, dx=clamp8(200*170/100)=clamp8(340)=127 */
+    memset(&st, 0, sizeof(st));
+    sent = trackpad_map(0x00, 0x00, 1, 200, 0, &g_accel_cfg, &st, &out);
+    TEST_ASSERT(sent,              "accel-large: should_send must be true");
+    TEST_ASSERT_EQ(out.dx, 127,   "accel-large: dx=127 (clamped, speed=200, gain=170)");
+    TEST_ASSERT_EQ(out.dy, 0,     "accel-large: dy=0");
+
+    /* ── Case 4: monotonicity — faster movement → higher effective gain ─ */
+    /* speed=5:  gain=90+40*5/100=90+2=92,  dx=clamp8(5*92/100)=clamp8(4)=4  */
+    /* speed=50: gain=90+40*50/100=90+20=110, dx=clamp8(50*110/100)=clamp8(55)=55 */
+    trackpad_out_t out_slow, out_fast;
+    trackpad_state_t st_slow, st_fast;
+    memset(&st_slow, 0, sizeof(st_slow));
+    memset(&st_fast, 0, sizeof(st_fast));
+    trackpad_map(0x00, 0x00, 1,  5, 0, &g_accel_cfg, &st_slow, &out_slow);
+    trackpad_map(0x00, 0x00, 1, 50, 0, &g_accel_cfg, &st_fast, &out_fast);
+    TEST_ASSERT_EQ(out_slow.dx, 4,  "accel-mono: dx at speed=5 is 4");
+    TEST_ASSERT_EQ(out_fast.dx, 55, "accel-mono: dx at speed=50 is 55");
+    TEST_ASSERT(out_fast.dx > out_slow.dx, "accel-mono: faster input → larger dx (monotone)");
 }
