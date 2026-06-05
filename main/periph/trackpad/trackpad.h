@@ -14,7 +14,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "rf_packet.h"    /* rf_trackpad_t */
 
 /* Initialize trackpad hardware:
  *   - I2C master init on SDA=GPIO40, SCL=GPIO38 at 400 kHz
@@ -39,31 +38,48 @@ void trackpad_suspend(void);
 void trackpad_resume(void);
 
 /* ── Gesture state held across calls to trackpad_map ────────────────
- * The caller (trackpad_task) owns one instance and resets it to zeros at
- * startup. The map function mutates it as gestures progress. */
+ * The caller (trackpad_task / dongle RX) owns one instance and resets it to
+ * zeros at startup. The map function mutates it as gestures progress. */
 typedef struct {
     bool    pending_release;   /* true → emit a button-release packet next call */
     bool    drag_active;       /* true → left button held due to press-and-hold */
     uint8_t peak_fingers;      /* highest n_fingers seen in current touch session */
 } trackpad_state_t;
 
+/* ── HID mouse output from trackpad_map ─────────────────────────────
+ * Produced by the dongle (approach B) from raw NRF fields. */
+typedef struct {
+    int8_t  dx, dy;
+    uint8_t buttons;     /* 0x01 L, 0x02 R, 0x04 M */
+    int8_t  scroll_v, scroll_h;
+} trackpad_out_t;
+
+/* ── Acceleration / sensitivity config for trackpad_map ─────────────
+ * Task 1 default: base=100, accel=0, gain_max=100 → gain 1.0 (behaviour-preserving).
+ * Task 2 will tune the curve; Task 3 will expose it via CDC/NVS. */
+#define TRACKPAD_CFG_FMT   0x01
+typedef struct {
+    uint8_t  fmt;
+    uint16_t base;       /* gain ×100 (100 = 1.00x) */
+    uint16_t accel;
+    uint16_t gain_max;
+} trackpad_cfg_t;
+#define TRACKPAD_ACCEL_DEN   100
+
 /* ── Pure gesture-to-HID mapping function — host-testable ──────────
  *
- * Maps raw IQS5xx fields to rf_trackpad_t output fields.
+ * Maps raw IQS5xx fields to trackpad_out_t output fields.
  * No I/O, no FreeRTOS calls, no global state reads.
  *
  * Supported gestures (v2):
- *   - 1-finger cursor             → dx, dy
+ *   - 1-finger cursor             → dx, dy (accel curve applied)
  *   - 1-finger single tap         → left click pulse  (button 0x01)
- *   - 2-finger tap                → right click pulse (button 0x02)  ← v2
- *   - 3-finger tap                → middle click pulse (button 0x04) ← v2
+ *   - 2-finger tap                → right click pulse (button 0x02)
+ *   - 3-finger tap                → middle click pulse (button 0x04)
  *     (detected via peak_fingers tracked across the touch session)
- *   - 2-finger swipe (Scroll evt) → scroll_v / scroll_h               ← v2 (h)
+ *   - 2-finger swipe (Scroll evt) → scroll_v / scroll_h
  *   - Press-and-hold              → hold left button while moving;
- *     released when fingers leave the surface.                        ← v2 (drag)
- *
- * Cursor sensitivity is scaled by IQS5XX_SENS_NUM/IQS5XX_SENS_DEN
- * (compile-time tunable in trackpad.c — default 1.0).
+ *     released when fingers leave the surface.
  *
  * Parameters:
  *   ge0              GestureEvents0 byte (data[0] from 9-byte read block)
@@ -71,13 +87,14 @@ typedef struct {
  *   n_fingers        NumberOfFingers byte (data[4])
  *   rel_x            RelativeX signed 16-bit (data[5..6] big-endian decoded)
  *   rel_y            RelativeY signed 16-bit (data[7..8] big-endian decoded)
+ *   cfg              Acceleration/sensitivity config (neutral default → gain 1.0)
  *   state            In/out gesture state (see trackpad_state_t)
  *   out              Output: filled with dx, dy, buttons, scroll_v, scroll_h.
- *                    seq is NOT set here — caller sets out->seq = s_seq++ after return.
  *
  * Returns true if a packet should be sent (activity gate passed).
  * Returns false if all output fields are zero and no button event — caller drops.
  */
 bool trackpad_map(uint8_t ge0, uint8_t ge1, uint8_t n_fingers,
                   int16_t rel_x, int16_t rel_y,
-                  trackpad_state_t *state, rf_trackpad_t *out);
+                  const trackpad_cfg_t *cfg,
+                  trackpad_state_t *state, trackpad_out_t *out);

@@ -30,7 +30,7 @@ add_executable(test_runner
     test_eink_pack.c
     ../main/periph/eink/eink.c
     test_trackpad_map.c
-    ../main/periph/trackpad/trackpad.c
+    ../main/periph/trackpad/trackpad_map.c
     test_rf_pairing.c
     ../main/comm/rf/rf_pairing.c
     test_espnow_peer_filter.c

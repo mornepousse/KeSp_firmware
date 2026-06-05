@@ -102,6 +102,10 @@ if(CONFIG_KASE_HAS_RF_RX)
         "comm/rf/rf_rx_task.c"
         "comm/rf/heartbeat.c"
         "comm/rf/dongle_engine_state.c"
+        # Pure trackpad gesture+accel mapping: the dongle applies it on the raw
+        # trackpad packets received from the halves (approach B). The half only
+        # forwards raw data, so it does not compile this.
+        "periph/trackpad/trackpad_map.c"
     )
 endif()
 

@@ -37,9 +37,9 @@ typedef struct {
 } rf_heartbeat_t;
 
 typedef struct {
-    int8_t  dx, dy;
-    uint8_t buttons;   /* 3 bits */
-    int8_t  scroll_v, scroll_h;
+    uint8_t ge0, ge1;
+    uint8_t n_fingers;
+    int16_t rel_x, rel_y;
     uint8_t seq;
 } rf_trackpad_t;
 
@@ -75,13 +75,13 @@ static inline uint16_t rf_encode_heartbeat(uint8_t *buf, const rf_heartbeat_t *h
 static inline uint16_t rf_encode_trackpad(uint8_t *buf, const rf_trackpad_t *t)
 {
     buf[0] = (PKT_TYPE_TRACKPAD << 4);
-    buf[1] = (uint8_t)t->dx;
-    buf[2] = (uint8_t)t->dy;
-    buf[3] = (uint8_t)((t->buttons & 0x07) << 5);  /* buttons in top 3 bits */
-    buf[4] = (uint8_t)t->scroll_v;
-    buf[5] = (uint8_t)t->scroll_h;
-    buf[6] = t->seq;
-    return 7;
+    buf[1] = t->ge0; buf[2] = t->ge1; buf[3] = t->n_fingers;
+    buf[4] = (uint8_t)((uint16_t)t->rel_x >> 8);
+    buf[5] = (uint8_t)((uint16_t)t->rel_x & 0xFF);
+    buf[6] = (uint8_t)((uint16_t)t->rel_y >> 8);
+    buf[7] = (uint8_t)((uint16_t)t->rel_y & 0xFF);
+    buf[8] = t->seq;
+    return 9;
 }
 
 /* PKT_PAIR_REQ: 8 bytes — type 0xF, the half's 6-byte WiFi STA MAC, then the
@@ -138,13 +138,11 @@ static inline bool rf_decode_heartbeat(const uint8_t *buf, uint16_t len, rf_hear
 
 static inline bool rf_decode_trackpad(const uint8_t *buf, uint16_t len, rf_trackpad_t *t)
 {
-    if (len < 7 || rf_packet_type(buf, len) != PKT_TYPE_TRACKPAD) return false;
-    t->dx = (int8_t)buf[1];
-    t->dy = (int8_t)buf[2];
-    t->buttons  = (buf[3] >> 5) & 0x07;
-    t->scroll_v = (int8_t)buf[4];
-    t->scroll_h = (int8_t)buf[5];
-    t->seq = buf[6];
+    if (len < 9 || rf_packet_type(buf, len) != PKT_TYPE_TRACKPAD) return false;
+    t->ge0 = buf[1]; t->ge1 = buf[2]; t->n_fingers = buf[3];
+    t->rel_x = (int16_t)((uint16_t)(buf[4] << 8) | buf[5]);
+    t->rel_y = (int16_t)((uint16_t)(buf[6] << 8) | buf[7]);
+    t->seq = buf[8];
     return true;
 }
 

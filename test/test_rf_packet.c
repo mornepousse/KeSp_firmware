@@ -55,25 +55,25 @@ static void test_rf_heartbeat_roundtrip(void)
 
 static void test_rf_trackpad_roundtrip(void)
 {
-    uint8_t buf[32];
-    rf_trackpad_t t = { .dx = -5, .dy = 12, .buttons = 0x05,
-                        .scroll_v = -1, .scroll_h = 3, .seq = 9 };
+    uint8_t buf[16];
+    rf_trackpad_t t = { .ge0=0x01, .ge1=0x02, .n_fingers=2, .rel_x=-300, .rel_y=1234, .seq=9 };
     uint16_t n = rf_encode_trackpad(buf, &t);
-    TEST_ASSERT_EQ(n, 7, "trackpad encode length");
-
+    TEST_ASSERT_EQ(n, 9, "trackpad encode length");
     rf_trackpad_t td;
     TEST_ASSERT(rf_decode_trackpad(buf, n, &td), "tp decode ok");
-    TEST_ASSERT_EQ(td.dx, -5, "tp dx negative");
-    TEST_ASSERT_EQ(td.dy, 12, "tp dy");
-    TEST_ASSERT_EQ(td.buttons, 0x05, "tp buttons");
-    TEST_ASSERT_EQ(td.scroll_v, -1, "tp scroll_v negative");
-    TEST_ASSERT_EQ(td.scroll_h, 3, "tp scroll_h");
+    TEST_ASSERT_EQ(td.ge0, 0x01, "tp ge0");
+    TEST_ASSERT_EQ(td.ge1, 0x02, "tp ge1");
+    TEST_ASSERT_EQ(td.n_fingers, 2, "tp nfingers");
+    TEST_ASSERT_EQ(td.rel_x, -300, "tp rel_x BE signed");
+    TEST_ASSERT_EQ(td.rel_y, 1234, "tp rel_y BE");
+    TEST_ASSERT_EQ(td.seq, 9, "tp seq");
+    TEST_ASSERT(!rf_decode_trackpad(buf, 8, &td), "tp short rejected");
 }
 
 static void test_rf_decode_rejects(void)
 {
     uint8_t buf[32];
-    rf_trackpad_t t = { .dx = 1, .dy = 1, .buttons = 0, .scroll_v = 0, .scroll_h = 0, .seq = 1 };
+    rf_trackpad_t t = { .ge0 = 0, .ge1 = 0, .n_fingers = 1, .rel_x = 1, .rel_y = 0, .seq = 1 };
     uint16_t n = rf_encode_trackpad(buf, &t);
 
     rf_key_event_t d;

@@ -18,7 +18,7 @@
 
 /* ── Host-safe includes (no ESP-IDF) ── */
 #include "trackpad.h"
-#include "rf_packet.h"      /* rf_trackpad_t — host-safe (stdint/stdbool only) */
+#include "rf_packet.h"      /* rf_trackpad_t, rf_encode_trackpad — host-safe */
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -53,148 +53,8 @@
 #define IQS5XX_READ_START_ADDR        0x000D   /* GestureEvents0 */
 #define IQS5XX_READ_BYTE_COUNT        9        /* 0x000D..0x0015 → through RelY LSB */
 
-/* ── Tunable constants (outside TEST_HOST guard — used by trackpad_map) ── */
-#define IQS5XX_SCROLL_DIV             8        /* divide rel for scroll speed; tune at bench */
+/* ── Driver-only constants (inside TEST_HOST guard below) ── */
 #define IQS5XX_EXPLICIT_END_WINDOW    1        /* 1 = write 0xEEEE after read */
-#define IQS5XX_INVERT_X               0        /* 1 = negate dx — verify at bench */
-#define IQS5XX_INVERT_Y               0        /* 1 = negate dy — verify at bench */
-
-/* Cursor sensitivity scaling: dx,dy are multiplied by SENS_NUM/SENS_DEN.
- * Default 1.0 (3/3) preserves existing feel; bump SENS_NUM to e.g. 4 or 5 for
- * faster cursor without losing precision (clamp at int8 happens after). */
-#define IQS5XX_SENS_NUM               3
-#define IQS5XX_SENS_DEN               3
-
-/* HID mouse button bits (matches USB HID standard button report) */
-#define MOUSE_BTN_LEFT                0x01
-#define MOUSE_BTN_RIGHT               0x02
-#define MOUSE_BTN_MIDDLE              0x04
-
-/* ── clamp8: pure, host-safe ─────────────────────────────────────────
- * Clamp a signed 16-bit value to the HID int8_t mouse delta range.
- * Upper bound is +127 (not +128) for symmetry with -127. */
-static inline int8_t clamp8(int16_t v)
-{
-    if (v >  127) return  127;
-    if (v < -127) return -127;
-    return (int8_t)v;
-}
-
-/* ── trackpad_map: pure, host-safe (v2) ─────────────────────────────
- *
- * Maps raw IQS5xx gesture fields to an rf_trackpad_t output.
- * No I/O, no FreeRTOS calls, no global state reads.
- *
- * Gesture precedence (most → least specific):
- *   1. Press-and-hold      → drag: left button held while fingers stay down,
- *                            released on n_fingers=0.
- *   2. Scroll gesture      → scroll_v / scroll_h (both axes), suppresses cursor.
- *   3. Tap (1F/2F/3F)      → button pulse press; next call emits release.
- *   4. Cursor movement     → dx, dy scaled by IQS5XX_SENS_NUM/DEN.
- *
- * 3-finger tap detection is synthesized: we track the peak number of fingers
- * seen during the current touch session (in state) and route a tap event to
- * MIDDLE if peak ≥ 3. The chip itself doesn't emit a 3F-tap event.
- *
- * Returns true if a packet should be sent (activity gate passed).
- */
-bool trackpad_map(uint8_t ge0, uint8_t ge1, uint8_t n_fingers,
-                  int16_t rel_x, int16_t rel_y,
-                  trackpad_state_t *state, rf_trackpad_t *out)
-{
-    /* Zero the output; caller sets seq after return */
-    out->dx       = 0;
-    out->dy       = 0;
-    out->buttons  = 0;
-    out->scroll_v = 0;
-    out->scroll_h = 0;
-
-    bool force_send = false;
-
-    /* ── Axis inversion (compile-time flags; default off) ── */
-    if (IQS5XX_INVERT_X) rel_x = (int16_t)(-rel_x);
-    if (IQS5XX_INVERT_Y) rel_y = (int16_t)(-rel_y);
-
-    /* ── Track peak fingers across the current touch session ──
-     * Resets to 0 below when n_fingers returns to 0. */
-    if (n_fingers > state->peak_fingers) state->peak_fingers = n_fingers;
-
-    /* ── Drag: press-and-hold engages drag; releases when fingers leave ── */
-    bool press_hold = (ge0 & IQS5XX_GEST0_PRESS_HOLD) != 0;
-    bool just_ended_drag = false;
-    if (press_hold && !state->drag_active) {
-        state->drag_active = true;
-        force_send         = true;
-    }
-    if (state->drag_active) {
-        if (n_fingers == 0) {
-            /* Fingers lifted → release the drag with one buttons=0 packet */
-            state->drag_active = false;
-            just_ended_drag    = true;
-            force_send         = true;
-            /* buttons stays 0x00 → that's the release */
-        } else {
-            /* Still dragging → hold left button down */
-            out->buttons |= MOUSE_BTN_LEFT;
-        }
-    }
-
-    /* ── Scroll vs cursor (scroll gesture takes priority over movement) ── */
-    bool scroll_active = (ge1 & IQS5XX_GEST1_SCROLL) != 0;
-    if (scroll_active) {
-        /* 2-finger scroll, both axes */
-        out->scroll_v = clamp8((int16_t)(rel_y / IQS5XX_SCROLL_DIV));
-        out->scroll_h = clamp8((int16_t)(rel_x / IQS5XX_SCROLL_DIV));
-        /* dx, dy remain 0 — scroll suppresses cursor */
-    } else if (!state->drag_active || n_fingers > 0) {
-        /* Cursor movement (also valid while dragging to drag-move).
-         * Sensitivity scaling: multiply RelX/Y by SENS_NUM/SENS_DEN. */
-        int32_t sx = (int32_t)rel_x * IQS5XX_SENS_NUM / IQS5XX_SENS_DEN;
-        int32_t sy = (int32_t)rel_y * IQS5XX_SENS_NUM / IQS5XX_SENS_DEN;
-        out->dx = clamp8((int16_t)sx);
-        out->dy = clamp8((int16_t)sy);
-    }
-
-    /* ── Tap state machine (multi-finger aware) ──
-     * - 2-finger tap event (GE1 bit 0) is dedicated → right click.
-     * - SingleTap event (GE0 bit 0) is routed by peak_fingers:
-     *     peak ≥ 3 → middle click; otherwise left click.
-     * Drag is exclusive: don't synthesize taps in the same iteration as a drag
-     * start or just-ended drag (the IQS5xx may emit a SingleTap on hold-release). */
-    bool two_finger_tap = (ge1 & IQS5XX_GEST1_TWO_FINGER_TAP) != 0;
-    bool single_tap     = (ge0 & IQS5XX_GEST0_SINGLE_TAP)     != 0;
-
-    if (state->pending_release) {
-        out->buttons          = 0x00;
-        state->pending_release = false;
-        force_send             = true;
-    } else if (!state->drag_active && !just_ended_drag) {
-        if (two_finger_tap) {
-            out->buttons           = MOUSE_BTN_RIGHT;
-            state->pending_release = true;
-            force_send             = true;
-        } else if (single_tap) {
-            out->buttons           = (state->peak_fingers >= 3)
-                                    ? MOUSE_BTN_MIDDLE
-                                    : MOUSE_BTN_LEFT;
-            state->pending_release = true;
-            force_send             = true;
-        }
-    }
-
-    /* ── Reset peak fingers when surface is empty (new touch starts fresh) ── */
-    if (n_fingers == 0) state->peak_fingers = 0;
-
-    /* ── Activity gate ── */
-    bool send = force_send
-             || (out->dx       != 0)
-             || (out->dy       != 0)
-             || (out->scroll_v != 0)
-             || (out->scroll_h != 0)
-             || (out->buttons  != 0x00);
-
-    return send;
-}
 
 #ifndef TEST_HOST
 
@@ -229,9 +89,6 @@ extern rf_radio_t s_radio;
 
 /* ── ShowReset ACK state — cleared after first successful ACK write ── */
 static bool s_need_reset_ack = true;
-
-/* ── Gesture state — held across calls to trackpad_map (caller-owned). ── */
-static trackpad_state_t s_tp_state = {0};
 
 /* ── Trackpad task handle — needed for suspend/resume during light-sleep ── */
 static TaskHandle_t s_tp_task = NULL;
@@ -409,25 +266,14 @@ static void trackpad_task(void *arg)
             }
         }
 
-        /* ── Step 5: Map gesture fields → HID output ────────────────── */
-        rf_trackpad_t tp;
-        bool should_send = trackpad_map(ge0, ge1, n_fingers,
-                                        rel_x, rel_y,
-                                        &s_tp_state, &tp);
-
-        /* ── Step 6: Activity gate ───────────────────────────────────── */
-        if (!should_send) {
-            /* All fields zero, no button event — drop silently.
-             * No log here: this is the common idle case (hot path). */
-            continue;
-        }
-
-        /* ── Step 7: Encode and transmit ────────────────────────────── */
-        tp.seq = s_seq++;
-        uint8_t buf[7];
+        /* ── Step 5: Encode raw + transmit (mapping now done on the dongle) ── */
+        if (ge0==0 && ge1==0 && n_fingers==0 && rel_x==0 && rel_y==0) continue; /* idle gate */
+        rf_trackpad_t tp = { .ge0=ge0, .ge1=ge1, .n_fingers=n_fingers,
+                             .rel_x=rel_x, .rel_y=rel_y, .seq=s_seq++ };
+        uint8_t buf[9];
         rf_encode_trackpad(buf, &tp);
         half_spi_lock();
-        rf_driver_send(&s_radio, buf, 7);
+        rf_driver_send(&s_radio, buf, 9);
         half_spi_unlock();
     }
 }

@@ -2,7 +2,7 @@
  * test_trackpad_map.c — Host tests for trackpad_map() pure function (v2).
  *
  * Contract under test:
- *   - 1-finger movement      → dx/dy (sensitivity-scaled, clamped to int8)
+ *   - 1-finger movement      → dx/dy (gain 1.0 with neutral cfg, clamped to int8)
  *   - 1-finger single tap    → buttons=LEFT, pending_release=true
  *   - 2-finger tap           → buttons=RIGHT, pending_release=true
  *   - 3-finger tap           → buttons=MIDDLE (synthesized via peak_fingers ≥ 3)
@@ -17,14 +17,19 @@
 #include "test_framework.h"
 #include "../main/periph/trackpad/trackpad.h"
 
-/* Mouse button bits (mirror trackpad.c's private defines) */
+/* Mouse button bits (mirror trackpad_map.c's private defines) */
 #define BTN_LEFT   0x01
 #define BTN_RIGHT  0x02
 #define BTN_MIDDLE 0x04
 
 /* Helpers */
-static rf_trackpad_t     g_out;
+static trackpad_out_t    g_out;
 static trackpad_state_t  g_state;
+
+/* Neutral config: base=100, accel=0, gain_max=100 → gain 1.0 */
+static const trackpad_cfg_t g_cfg = {
+    .fmt = TRACKPAD_CFG_FMT, .base = 100, .accel = 0, .gain_max = 100
+};
 
 static void reset_state(void)
 {
@@ -36,7 +41,7 @@ static void reset_state(void)
 static bool call_map(uint8_t ge0, uint8_t ge1, uint8_t n_fingers,
                      int16_t rx, int16_t ry)
 {
-    return trackpad_map(ge0, ge1, n_fingers, rx, ry, &g_state, &g_out);
+    return trackpad_map(ge0, ge1, n_fingers, rx, ry, &g_cfg, &g_state, &g_out);
 }
 
 void test_trackpad_map(void)
@@ -57,10 +62,17 @@ void test_trackpad_map(void)
     reset_state();
     sent = call_map(0x00, 0x00, 1, 50, -20);
     TEST_ASSERT(sent,               "movement: should_send must be true");
-    TEST_ASSERT_EQ(g_out.dx,  50,  "movement: dx must be 50 (sens=1.0)");
+    TEST_ASSERT_EQ(g_out.dx,  50,  "movement: dx must be 50 (gain=1.0)");
     TEST_ASSERT_EQ(g_out.dy, -20,  "movement: dy must be -20");
     TEST_ASSERT_EQ(g_out.scroll_v, 0, "movement: scroll_v must be 0");
     TEST_ASSERT_EQ(g_out.buttons,  0, "movement: buttons must be 0");
+
+    /* ── Case 2b: 1-finger move rel=(10,-4) → dx=10, dy=-4 ──────── */
+    reset_state();
+    sent = call_map(0x00, 0x00, 1, 10, -4);
+    TEST_ASSERT(sent,               "move-10: should_send must be true");
+    TEST_ASSERT_EQ(g_out.dx,  10,  "move-10: dx must be 10");
+    TEST_ASSERT_EQ(g_out.dy,  -4,  "move-10: dy must be -4");
 
     /* ── Case 3: Clamp positive — rel_x=200 → dx=127 ────────────── */
     reset_state();

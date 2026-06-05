@@ -38,6 +38,7 @@ uint8_t rf_signal_q255(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
 
 #include "rf_driver.h"
 #include "rf_packet.h"
+#include "trackpad.h"
 #include "heartbeat.h"
 #include "board_rf.h"
 #include "rf_pairing.h"   /* rf_pairing_load_set_id_dongle, rf_apply_set_id */
@@ -217,10 +218,15 @@ static bool drain_radio(rf_radio_t *radio, hb_half_state_t *hb, uint8_t half)
         } else if (type == PKT_TYPE_TRACKPAD) {
             rf_trackpad_t tp;
             if (rf_decode_trackpad(buf, n, &tp)) {
-                /* Forward mouse data directly — bypasses keyboard engine cycle.
-                 * hid_send_mouse signature: (buttons, x, y, wheel).
-                 * scroll_h is always 0 (out of v1 scope; no horizontal wheel arg). */
-                hid_send_mouse(tp.buttons, tp.dx, tp.dy, tp.scroll_v);
+                static trackpad_state_t s_tp_state;
+                static const trackpad_cfg_t s_tp_cfg = {
+                    .fmt = TRACKPAD_CFG_FMT, .base = 100, .accel = 0, .gain_max = 100,
+                };
+                trackpad_out_t out;
+                if (trackpad_map(tp.ge0, tp.ge1, tp.n_fingers, tp.rel_x, tp.rel_y,
+                                 &s_tp_cfg, &s_tp_state, &out)) {
+                    hid_send_mouse(out.buttons, out.dx, out.dy, out.scroll_v);
+                }
             }
         }
     }
