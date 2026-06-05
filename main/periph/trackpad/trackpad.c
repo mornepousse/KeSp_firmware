@@ -1,19 +1,16 @@
 /*
  * trackpad.c — IQS5xx trackpad driver for KaSe half firmware.
  *
- * Skeleton status (after Plan IQS5xx-v1):
- *   REAL:  I2C init, RST pulse, RDY ISR + semaphore, I2C probe.
- *   REAL:  IQS5xx register read (9-byte block, GestureEvents0..RelY).
- *   REAL:  trackpad_map() — pure gesture-to-HID mapping (host-testable).
- *   REAL:  rf_encode_trackpad + half_spi_lock + rf_driver_send (send path).
+ * Responsibilities: I2C init, RST pulse, RDY ISR + semaphore, I2C probe,
+ * IQS5xx register read (9-byte block, GestureEvents0..RelY), raw-frame
+ * encode (rf_encode_trackpad) and RF send via half_spi_lock + rf_driver_send.
+ *
+ * Gesture-to-HID mapping lives in trackpad_map.c (host-testable).
  *
  * The PCB is reversible: both halves compile this module. Runtime probe
  * (I2C ACK check) determines whether the trackpad is mounted.
  *
  * s_radio is exposed as a non-static extern from half_scan_task.c.
- *
- * TEST_HOST guard: trackpad_map() and clamp8() are outside the guard
- * so they can be compiled and tested on the host without ESP-IDF.
  */
 
 /* ── Host-safe includes (no ESP-IDF) ── */
@@ -32,12 +29,6 @@
 #define IQS5XX_REG_RELATIVE_Y         0x0016   /* int16, big-endian */
 #define IQS5XX_REG_SYSTEM_CONTROL_0   0x0431   /* ACK_RESET bit — VERIFY at bench */
 #define IQS5XX_REG_END_WINDOW         0xEEEE   /* End Communication Window */
-
-/* ── Gesture event bitmasks (IQS5xx-B000) ───────────────────────── */
-#define IQS5XX_GEST0_SINGLE_TAP       0x01     /* GE0 bit 0 — single tap (any finger count) */
-#define IQS5XX_GEST0_PRESS_HOLD       0x02     /* GE0 bit 1 — press-and-hold → start drag */
-#define IQS5XX_GEST1_TWO_FINGER_TAP   0x01     /* GE1 bit 0 — 2-finger tap → right click */
-#define IQS5XX_GEST1_SCROLL           0x02     /* GE1 bit 1 — 2-finger scroll (vertical + horizontal) */
 
 /* ── SystemInfo0 bitmasks ── */
 #define IQS5XX_SYSINFO0_SHOW_RESET    0x80     /* bit 7 — set after reset */
@@ -267,7 +258,13 @@ static void trackpad_task(void *arg)
         }
 
         /* ── Step 5: Encode raw + transmit (mapping now done on the dongle) ── */
-        if (ge0==0 && ge1==0 && n_fingers==0 && rel_x==0 && rel_y==0) continue; /* idle gate */
+        /* Forward every report except pure idle repeats. A finger-lift frame
+         * (all-zero but s_prev_nf > 0) MUST be sent so the dongle's
+         * trackpad_map can release a held drag / pending tap. */
+        static uint8_t s_prev_nf = 0;
+        bool idle = (ge0==0 && ge1==0 && n_fingers==0 && rel_x==0 && rel_y==0);
+        if (idle && s_prev_nf == 0) continue;
+        s_prev_nf = n_fingers;
         rf_trackpad_t tp = { .ge0=ge0, .ge1=ge1, .n_fingers=n_fingers,
                              .rel_x=rel_x, .rel_y=rel_y, .seq=s_seq++ };
         uint8_t buf[9];
