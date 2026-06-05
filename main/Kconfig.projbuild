@@ -65,6 +65,18 @@ config KASE_HAS_RF_TX
         Compiles NRF24L01+ TX path (rf_driver_init_tx, rf_driver_send)
         and half_scan_task.c. Half role only.
 
+config KASE_NRF_LINE_TEST
+    bool "NRF line short-circuit test at boot (bring-up diagnostic)"
+    default n
+    depends on KASE_HAS_RF_RX
+    help
+        Dongle bring-up tool. At boot, before radio init, drives each NRF line
+        (SPI MOSI/MISO/SCK + per-radio CSN/CE/IRQ) and detects solder bridges
+        between them. Bidirectional, so immune to a line's own idle pull-up
+        (IRQ lines idle high). Logs results (ESP_LOGW tag "rf_line_test") — needs
+        a console to read (pair with CONFIG_ESP_CONSOLE_UART_DEFAULT, since the
+        dongle is CONSOLE_NONE in production). Leave off in production.
+
 config KASE_HAS_ESPNOW
     bool
     default y if KASE_DEVICE_ROLE_DONGLE

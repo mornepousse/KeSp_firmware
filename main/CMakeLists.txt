@@ -130,6 +130,11 @@ if(CONFIG_KASE_HAS_RF_RX OR CONFIG_KASE_HAS_RF_TX)
     list(APPEND srcs "comm/rf/rf_pairing.c")
 endif()
 
+# NRF line short-circuit bring-up diagnostic — only when explicitly enabled
+if(CONFIG_KASE_NRF_LINE_TEST)
+    list(APPEND srcs "comm/rf/rf_line_test.c")
+endif()
+
 # Trackpad IQS5xx skeleton — half role only (compiled on both halves; runtime probe)
 if(CONFIG_KASE_HAS_TRACKPAD)
     list(APPEND srcs "periph/trackpad/trackpad.c")

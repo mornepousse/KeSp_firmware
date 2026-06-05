@@ -42,6 +42,9 @@ uint8_t rf_signal_q255(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
 #include "heartbeat.h"
 #include "board_rf.h"
 #include "rf_pairing.h"   /* rf_pairing_load_set_id_dongle, rf_apply_set_id */
+#if CONFIG_KASE_NRF_LINE_TEST
+#include "rf_line_test.h"
+#endif
 #include "keyboard_config.h"
 #include "hid_transport.h"
 #include "cdc_binary_protocol.h"   /* ks_respond, KS_CMD_MATRIX_TEST */
@@ -412,6 +415,9 @@ static void rf_rx_task(void *arg)
 
 bool rf_rx_start(void)
 {
+#if CONFIG_KASE_NRF_LINE_TEST
+    rf_line_test_run();   /* bring-up: detect NRF line solder bridges (see Kconfig) */
+#endif
     s_evt_sem = xSemaphoreCreateBinary();
 
     rf_radio_cfg_t lcfg = board_rf_left_cfg();

@@ -25,6 +25,10 @@ CONFIG_LWIP_IPV6=n
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 # Console inherits CONFIG_ESP_CONSOLE_NONE from base. For dongle bring-up,
 # temporarily add CONFIG_ESP_CONSOLE_UART_DEFAULT=y + rm sdkconfig + rebuild.
+# NRF radio bring-up on a fresh board: add CONFIG_ESP_CONSOLE_UART_DEFAULT=y +
+# CONFIG_KASE_NRF_LINE_TEST=y, rebuild, flash, read /dev/ttyUSB0 (CH340). It runs
+# a bidirectional short test on the 9 NRF lines at boot and logs any solder bridge
+# (tag "rf_line_test"), then probe csn=.. -> OK once the radios answer on SPI.
 
 # --- TinyUSB : descriptors specific to dongle (CDC/HID enable in base defaults) ---
 CONFIG_TINYUSB_DESC_USE_ESPRESSIF_VID=y
