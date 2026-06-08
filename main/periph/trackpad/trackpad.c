@@ -47,6 +47,31 @@
 /* ── Driver-only constants (inside TEST_HOST guard below) ── */
 #define IQS5XX_EXPLICIT_END_WINDOW    1        /* 1 = write 0xEEEE after read */
 
+/* ── Pure helpers — compiled in both TEST_HOST and firmware builds ── */
+
+void tp_parse_raw(const uint8_t data[9], tp_frame_t *out)
+{
+    out->ge0       = data[0];
+    out->ge1       = data[1];
+    out->sysinfo0  = data[2];
+    /* data[3] = SystemInfo1 — not used */
+    out->n_fingers = data[4];
+    out->rel_x     = (int16_t)(((uint16_t)data[5] << 8) | data[6]);
+    out->rel_y     = (int16_t)(((uint16_t)data[7] << 8) | data[8]);
+}
+
+bool tp_should_skip_idle(uint8_t ge0, uint8_t ge1, uint8_t n_fingers,
+                         int16_t rel_x, int16_t rel_y, uint8_t prev_nf)
+{
+    bool idle = (ge0 == 0 && ge1 == 0 && n_fingers == 0 && rel_x == 0 && rel_y == 0);
+    return idle && (prev_nf == 0);
+}
+
+bool tp_is_show_reset(uint8_t sysinfo0)
+{
+    return (sysinfo0 & IQS5XX_SYSINFO0_SHOW_RESET) != 0;
+}
+
 #ifndef TEST_HOST
 
 /* ── ESP-IDF-dependent includes ── */
@@ -220,12 +245,14 @@ static void trackpad_task(void *arg)
 #endif
 
         /* ── Step 3: Extract fields from read block ─────────────────── */
-        uint8_t  ge0       = data[0];   /* GestureEvents0 */
-        uint8_t  ge1       = data[1];   /* GestureEvents1 */
-        uint8_t  sysinfo0  = data[2];   /* SystemInfo0 — ShowReset = bit7 */
-        uint8_t  n_fingers = data[4];   /* NumberOfFingers */
-        int16_t  rel_x     = (int16_t)((data[5] << 8) | data[6]);
-        int16_t  rel_y     = (int16_t)((data[7] << 8) | data[8]);
+        tp_frame_t frame;
+        tp_parse_raw(data, &frame);
+        uint8_t  ge0       = frame.ge0;
+        uint8_t  ge1       = frame.ge1;
+        uint8_t  sysinfo0  = frame.sysinfo0;
+        uint8_t  n_fingers = frame.n_fingers;
+        int16_t  rel_x     = frame.rel_x;
+        int16_t  rel_y     = frame.rel_y;
 
         /* ── Step 4: ShowReset ACK (once after hardware reset) ───────── */
         /* On first read after RST pulse, ShowReset (sysinfo0 bit7) is set.
@@ -234,7 +261,7 @@ static void trackpad_task(void *arg)
          * Register address and bit position: VERIFY against IQS5xx-B000
          * datasheet (spec §7 item 6). Expected: addr=0x0431, bit1=0x02. */
         if (s_need_reset_ack) {
-            if (sysinfo0 & IQS5XX_SYSINFO0_SHOW_RESET) {
+            if (tp_is_show_reset(sysinfo0)) {
                 uint8_t ack_cmd[3] = {
                     (IQS5XX_REG_SYSTEM_CONTROL_0 >> 8) & 0xFF,   /* 0x04 */
                     (IQS5XX_REG_SYSTEM_CONTROL_0)      & 0xFF,   /* 0x31 */
@@ -262,8 +289,7 @@ static void trackpad_task(void *arg)
          * (all-zero but s_prev_nf > 0) MUST be sent so the dongle's
          * trackpad_map can release a held drag / pending tap. */
         static uint8_t s_prev_nf = 0;
-        bool idle = (ge0==0 && ge1==0 && n_fingers==0 && rel_x==0 && rel_y==0);
-        if (idle && s_prev_nf == 0) continue;
+        if (tp_should_skip_idle(ge0, ge1, n_fingers, rel_x, rel_y, s_prev_nf)) continue;
         s_prev_nf = n_fingers;
         rf_trackpad_t tp = { .ge0=ge0, .ge1=ge1, .n_fingers=n_fingers,
                              .rel_x=rel_x, .rel_y=rel_y, .seq=s_seq++ };

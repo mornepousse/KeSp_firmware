@@ -30,6 +30,7 @@ extern void test_eink_pack(void);
 extern void test_trackpad_map(void);
 extern void test_trackpad_accel_curve(void);
 extern void test_trackpad_cfg(void);
+extern void test_trackpad_core(void);
 extern void test_rf_pairing(void);
 extern void test_rf_pairing_declared_slot(void);
 extern void test_espnow_peer_filter(void);
@@ -38,6 +39,8 @@ extern void test_rf_signal_q255(void);
 extern void test_half_power(void);
 extern void test_half_battery(void);
 extern void test_cdc_monitor(void);
+extern void test_cdc_rx_feed(void);
+extern void test_keycode_report(void);
 
 int main(void) {
     printf("KeSp Firmware Unit Tests\n");
@@ -67,6 +70,7 @@ int main(void) {
     test_trackpad_map();
     test_trackpad_accel_curve();
     test_trackpad_cfg();
+    test_trackpad_core();
     test_rf_pairing();
     test_rf_pairing_declared_slot();
     test_espnow_peer_filter();
@@ -75,6 +79,8 @@ int main(void) {
     test_half_power();
     test_half_battery();
     test_cdc_monitor();
+    test_cdc_rx_feed();
+    test_keycode_report();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);

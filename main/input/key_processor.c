@@ -80,7 +80,16 @@ static bool is_new_press(uint8_t row, uint8_t col);
 
 static bool detect_internal_function(int16_t keycode)
 {
-    if (keycode >= TO_L0 && keycode < K_OSM_BASE) {
+    /* Only capture keycodes that process_matrix_changes actually handles:
+     * TO layers (apply_toggle_layer) and BT actions (dispatch_internal_function).
+     * Macros (0x1500..0x2800) live in the same span but are handled by
+     * expand_macro — capturing them here would starve a co-pressed TO/BT key
+     * of the single keypress_internal_function slot. */
+    bool is_to = (keycode >= TO_L0 && keycode <= TO_L9);
+    /* Whole BT keycode block 0x2900..0x2F00 (0x2D00 is an unused slot — no
+     * keymap emits it, so leaving it inside the range is harmless). */
+    bool is_bt = (keycode >= K_BT_NEXT && keycode <= BT_TOGGLE);
+    if (is_to || is_bt) {
         if (keypress_internal_function == 0) {
             keypress_internal_function = keycode;
             return true;
@@ -258,11 +267,11 @@ static void detect_releases(void)
 /* Track Shift release for double-tap Caps Lock */
 static bool prev_shift_pressed = false;
 
-static bool any_shift_pressed_now(void)
+static bool any_shift_pressed_now(uint8_t layer)
 {
     for (uint8_t i = 0; i < 6; i++) {
         if (current_press_col[i] == INVALID_KEY_POS) continue;
-        uint16_t kc = keymaps[current_layout][current_press_row[i]][current_press_col[i]];
+        uint16_t kc = keymaps[layer][current_press_row[i]][current_press_col[i]];
         if (kc == HID_KEY_SHIFT_LEFT || kc == HID_KEY_SHIFT_RIGHT)
             return true;
     }
@@ -274,19 +283,17 @@ void build_keycode_report(void)
     tap_injected_slots = 0;
     macro_hold_mods = 0;
 
-    /* Shift release detection for double-tap Caps Lock */
-    bool shift_now = any_shift_pressed_now();
-    if (prev_shift_pressed && !shift_now)
-        shift_double_tap_release();
-    prev_shift_pressed = shift_now;
-
     /* Step 1: detect releases and resolve pending tap/holds */
     detect_releases();
 
-    /* Step 2: first pass — resolve MO layers so active_layer is correct for all keys */
+    /* Step 2: first pass — resolve MO layers so active_layer is correct for
+     * all keys. Read every key from the layer active at the START of this
+     * cycle (base_layer) so the result does not depend on the iteration order
+     * of simultaneously-pressed MO keys. */
+    uint8_t base_layer = current_layout;
     for (uint8_t i = 0; i < 6; i++) {
         if (current_press_col[i] == INVALID_KEY_POS) continue;
-        uint16_t kc = keymaps[current_layout][current_press_row[i]][current_press_col[i]];
+        uint16_t kc = keymaps[base_layer][current_press_row[i]][current_press_col[i]];
         apply_momentary_layer(kc, i);
     }
 
@@ -296,6 +303,14 @@ void build_keycode_report(void)
     if (lt_layer >= 0) active_layer = (uint8_t)lt_layer;
     int8_t osl_layer = osl_get_layer();
     if (osl_layer >= 0) active_layer = (uint8_t)osl_layer;
+
+    /* Shift release detection for double-tap Caps Lock — evaluated on the
+     * active layer so a Shift reached via an LT/OSL layer is still seen
+     * (reading current_layout here would miss it). */
+    bool shift_now = any_shift_pressed_now(active_layer);
+    if (prev_shift_pressed && !shift_now)
+        shift_double_tap_release();
+    prev_shift_pressed = shift_now;
 
     uint8_t th_mods = tap_hold_get_active_mods();
     bool has_normal_press = false;

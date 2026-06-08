@@ -31,7 +31,9 @@ add_executable(test_runner
     ../main/periph/eink/eink.c
     test_trackpad_map.c
     test_trackpad_cfg.c
+    test_trackpad_core.c
     ../main/periph/trackpad/trackpad_map.c
+    ../main/periph/trackpad/trackpad.c
     test_rf_pairing.c
     ../main/comm/rf/rf_pairing.c
     test_espnow_peer_filter.c
@@ -45,6 +47,10 @@ add_executable(test_runner
     ../main/comm/rf/half_battery.c
     test_cdc_monitor.c
     ../main/comm/cdc/ks_monitor.c
+    test_cdc_rx_feed.c
+    ../main/comm/cdc/cdc_binary_protocol.c
+    test_keycode_report.c
+    ../main/input/key_processor.c
     test_main.c
 )
 
@@ -55,4 +61,7 @@ target_include_directories(test_runner PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/periph/trackpad
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/rf
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/espnow
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/input
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/ble
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/tama
 )

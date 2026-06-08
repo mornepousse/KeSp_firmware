@@ -2,7 +2,9 @@
 #include "cdc_binary_protocol.h"
 #include "cdc_internal.h"
 
-/* ── CRC-8/MAXIM (polynomial 0x31, init 0x00) ──────────────────── */
+/* ── CRC-8: polynomial 0x31, init 0x00, MSB-first, no reflection ──
+ * NOT the catalogued CRC-8/MAXIM (which is reflected). See
+ * docs/CDC_BINARY_PROTOCOL.md for the reference impl + test vectors. */
 
 uint8_t ks_crc8(const uint8_t *data, uint16_t len)
 {
@@ -130,6 +132,12 @@ void ks_rx_reset(void)
 uint16_t ks_rx_feed(const char *data, uint16_t len)
 {
     uint16_t consumed = 0;
+    /* True once a frame header has been committed in THIS call (magic1
+     * confirmed — stays set even when an oversized header resets state to
+     * IDLE). Distinguishes "buffer starts with non-binary → text" (return 0)
+     * from "stray byte after a frame/overflow → keep scanning" so a later
+     * valid frame in the same buffer is not lost. */
+    bool progressed = false;
 
     for (uint16_t i = 0; i < len; i++) {
         uint8_t b = (uint8_t)data[i];
@@ -139,10 +147,12 @@ uint16_t ks_rx_feed(const char *data, uint16_t len)
             if (b == KS_MAGIC_0) {
                 bin_rx.state = KS_RX_MAGIC1;
                 consumed = i + 1;
-            } else {
-                /* Not binary — return 0 to let caller handle as text */
+            } else if (!progressed) {
+                /* Buffer doesn't start with a frame — let caller treat as text */
                 return 0;
             }
+            /* else: stray byte after a committed frame/overflow — skip it and
+             * keep scanning for the next magic in this buffer */
             break;
 
         case KS_RX_MAGIC1:
@@ -150,10 +160,13 @@ uint16_t ks_rx_feed(const char *data, uint16_t len)
                 bin_rx.state = KS_RX_HEADER;
                 bin_rx.hdr_pos = 0;
                 consumed = i + 1;
+                progressed = true;
             } else {
-                /* 'K' followed by non-'S' — not binary. Rewind. */
                 bin_rx.state = KS_RX_IDLE;
-                return 0;
+                if (!progressed)
+                    return 0;  /* 'K' not followed by 'S' at buffer start → text */
+                /* else: false magic mid-stream (e.g. after an overflow reset)
+                 *       — skip this byte, keep scanning for the next frame */
             }
             break;
 

@@ -31,9 +31,17 @@ Offset  Size  Field
 
 ## CRC-8
 
-Polynomial: **0x31** (CRC-8/MAXIM), init 0x00, no reflection.
+Polynomial: **0x31**, init 0x00, MSB-first, **no input/output reflection**, no final XOR.
 Computed over payload bytes only (not the header).
-Empty payload → CRC = 0x00.
+
+> ⚠️ This is **not** the catalogued CRC-8/MAXIM (which is reflected, poly 0x8C).
+> It is a plain MSB-first CRC-8 with polynomial 0x31. Use the reference
+> implementation below verbatim — do not pull a library "CRC-8/MAXIM".
+
+Test vectors:
+- Empty payload → `0x00`
+- `[0x01]` → `0x31`
+- `[0x4B, 0x53]` → `0xBE`
 
 ```c
 uint8_t crc8(const uint8_t *data, uint16_t len) {

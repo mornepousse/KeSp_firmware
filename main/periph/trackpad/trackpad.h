@@ -37,6 +37,38 @@ void trackpad_start(void);
 void trackpad_suspend(void);
 void trackpad_resume(void);
 
+/* ── Raw IQS5xx frame — parsed fields from the 9-byte I2C read block ──────
+ * Reading starts at GestureEvents0 (0x000D). Layout on wire:
+ *   data[0]=GE0, data[1]=GE1, data[2]=SysInfo0, data[3]=SysInfo1 (unused),
+ *   data[4]=NumFingers, data[5..6]=RelX (big-endian), data[7..8]=RelY (big-endian).
+ * Produced by tp_parse_raw(); host-safe and hardware-safe. */
+typedef struct {
+    uint8_t  ge0;        /* GestureEvents0 */
+    uint8_t  ge1;        /* GestureEvents1 */
+    uint8_t  sysinfo0;   /* SystemInfo0, bit 7 = ShowReset */
+    uint8_t  n_fingers;  /* NumberOfFingers */
+    int16_t  rel_x;      /* RelativeX, big-endian decoded */
+    int16_t  rel_y;      /* RelativeY, big-endian decoded */
+} tp_frame_t;
+
+/* Parse the 9-byte IQS5xx I2C read block into structured fields.
+ * Pure: no I/O, no global state. */
+void tp_parse_raw(const uint8_t data[9], tp_frame_t *out);
+
+/* Return true if the frame should be silently dropped.
+ * Drops only when all fields are zero AND no finger was down before
+ * (prev_nf == 0).  A finger-lift frame (idle but prev_nf > 0) must NOT
+ * be dropped so the dongle can release any pending gesture state.
+ * Pure: no I/O, no global state. */
+bool tp_should_skip_idle(uint8_t ge0, uint8_t ge1, uint8_t n_fingers,
+                         int16_t rel_x, int16_t rel_y, uint8_t prev_nf);
+
+/* Return true if the ShowReset bit (bit 7 of SystemInfo0) is set.
+ * When true: acknowledge with ACK_RESET write and discard the current
+ * frame — motion data is garbage immediately after a hardware reset.
+ * Pure: no I/O, no global state. */
+bool tp_is_show_reset(uint8_t sysinfo0);
+
 /* ── Gesture state held across calls to trackpad_map ────────────────
  * The caller (trackpad_task / dongle RX) owns one instance and resets it to
  * zeros at startup. The map function mutates it as gestures progress. */
