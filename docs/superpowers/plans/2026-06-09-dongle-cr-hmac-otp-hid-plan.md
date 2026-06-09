@@ -325,9 +325,11 @@ This wires `otp_proto` to USB and to the real hooks. Target-only (no host test �
 
 ---
 
-## Task 7: KeePassXC VID/PID patch (host repo)
+## Task 7: KeePassXC VID/PID patch + host provisioning tool (Rust)
 
-- [ ] Produce a patch against KeePassXC `src/keys/drivers/YubiKeyInterfaceUSB.cpp` adding the KaSe dongle VID `0x303a` and PID `0x4001` to the `vids[]`/`pids[]` arrays, mirroring commit `e4326fb` (OnlyKey). Save it as `docs/keepassxc-kase-vid.patch` in this repo with build instructions, and (optionally) open an upstream PR. Document in `docs/CDC_BINARY_PROTOCOL.md` or a new `docs/SECURITY_KEY.md` how to provision a slot (via the controller / `KS_CMD_SEC_SET_SLOT`) and configure KeePassXC to use the dongle as a challenge-response key. Commit.
+- [ ] Produce a patch against KeePassXC `src/keys/drivers/YubiKeyInterfaceUSB.cpp` adding the KaSe dongle VID `0x303a` and PID `0x4001` to the `vids[]`/`pids[]` arrays, mirroring commit `e4326fb` (OnlyKey). Save it as `docs/keepassxc-kase-vid.patch` in this repo with build instructions, and (optionally) open an upstream PR.
+- [ ] **Host provisioning tool — write it in RUST** (decided 2026-06-09). A small CLI (`kase-sec`) that speaks the CDC binary protocol (KS/KR frames, CRC-8) to the dongle to provision/clear/list slots: e.g. `kase-sec provision --slot 0 --secret <base32|hex>` → `KS_CMD_SEC_SET_SLOT`. Rationale: this is the natural place to use Rust on this project — host-side, greenfield, isolated, zero firmware FFI pain, and a great ecosystem fit (`clap` for CLI, `serialport`/`hidapi`, `hmac`/`sha1` for cross-checking). It scratches the original "learn Rust + fun" goal that started this whole effort, on terrain where Rust wins (the firmware stays C). Do NOT extend the C#/WPF controller for this — new Rust crate instead. Suggested location: a `tools/kase-sec/` Rust crate in this repo, or its own repo.
+- [ ] Document in a new `docs/SECURITY_KEY.md` how to provision a slot (via `kase-sec`) and configure KeePassXC to use the dongle as a challenge-response key. Commit.
 
 ---
 
