@@ -41,6 +41,7 @@ void sec_cmd_build_list(uint8_t *out, uint16_t *out_len)
 
 #ifndef TEST_HOST
 #include "cdc_binary_protocol.h"
+#include "cr_hmac.h"
 
 static void bin_cmd_sec_set_slot(uint8_t cmd_id, const uint8_t *payload, uint16_t len)
 {
@@ -73,10 +74,28 @@ static void bin_cmd_sec_list(uint8_t cmd_id, const uint8_t *payload, uint16_t le
     ks_respond(cmd_id, KS_STATUS_OK, buf, out_len);
 }
 
+/* HMAC-SHA1 known-answer self-test (validates cr_hmac on real hardware without
+ * needing a keypress). RFC 2202 case 1: key=0x0b x20, data="Hi There" ->
+ * b617318655057264e28bc0b6fb378c8ef146be00. Returns the 20-byte digest. */
+static void bin_cmd_sec_selftest(uint8_t cmd_id, const uint8_t *payload, uint16_t len)
+{
+    (void)payload; (void)len;
+    static const uint8_t key[20] = {
+        0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,
+        0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b };
+    static const uint8_t msg[8] = { 'H','i',' ','T','h','e','r','e' };
+    uint8_t out[20];
+    if (cr_hmac_sha1(key, sizeof(key), msg, sizeof(msg), out))
+        ks_respond(cmd_id, KS_STATUS_OK, out, sizeof(out));
+    else
+        ks_respond_err(cmd_id, KS_STATUS_ERR_INVALID);
+}
+
 static const ks_bin_cmd_entry_t sec_cmd_table[] = {
     { KS_CMD_SEC_SET_SLOT,   bin_cmd_sec_set_slot   },
     { KS_CMD_SEC_CLEAR_SLOT, bin_cmd_sec_clear_slot },
     { KS_CMD_SEC_LIST,       bin_cmd_sec_list       },
+    { KS_CMD_SEC_SELFTEST,   bin_cmd_sec_selftest   },
 };
 
 void cdc_sec_cmds_init(void)
