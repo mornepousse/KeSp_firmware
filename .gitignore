@@ -13,3 +13,6 @@ build_v2
 /build_half_left
 /build_half_right
 build_*/
+
+# Python bytecode caches
+__pycache__/
