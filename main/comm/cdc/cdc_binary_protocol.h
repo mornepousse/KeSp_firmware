@@ -111,6 +111,11 @@ typedef enum {
     KS_CMD_TRACKPAD_GET     = 0xB8,  /* get trackpad accel cfg (trackpad_cfg_t, 7B) */
     KS_CMD_TRACKPAD_SET     = 0xB9,  /* set accel cfg (payload 6B: base,accel,gain_max LE) */
 
+    /* Security key provisioning (dongle) — write-only, no secret read-back (0xC0-0xC2) */
+    KS_CMD_SEC_SET_SLOT     = 0xC0,
+    KS_CMD_SEC_CLEAR_SLOT   = 0xC1,
+    KS_CMD_SEC_LIST         = 0xC2,
+
     /* OTA (0xF0-0xFF) */
     KS_CMD_OTA_START        = 0xF0,
     KS_CMD_OTA_DATA         = 0xF1,

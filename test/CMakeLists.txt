@@ -55,6 +55,8 @@ add_executable(test_runner
     ../main/security/sec_confirm.c
     test_sec_store.c
     ../main/security/sec_store.c
+    test_cdc_sec.c
+    ../main/comm/cdc/cdc_sec_cmds.c
     test_main.c
 )
 
@@ -69,4 +71,5 @@ target_include_directories(test_runner PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/ble
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/tama
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/security
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/cdc
 )
