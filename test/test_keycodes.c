@@ -35,6 +35,11 @@
 
 #define K_IS_ADVANCED(kc) ((kc) > 0x00FF)
 
+#define K_SEC_BASE    0x3E00
+#define K_SEC_CONFIRM 0x3E00
+#define K_IS_SEC(kc)  (((kc) & 0xFF00) == K_SEC_BASE)
+#define K_SEC_TYPE(kc) ((kc) & 0xFF)
+
 #define MOD_LCTL 0x01
 #define MOD_LSFT 0x02
 #define MOD_LALT 0x04
@@ -139,6 +144,16 @@ static void test_special_keycodes(void) {
     TEST_ASSERT(!K_IS_ADVANCED(0x00), "K_NO is not advanced");
 }
 
+/* Security keycodes (0x3E00 block) */
+static void test_keycode_sec_confirm(void)
+{
+    TEST_ASSERT_EQ(K_SEC_CONFIRM, 0x3E00, "K_SEC_CONFIRM = 0x3E00");
+    TEST_ASSERT(K_IS_SEC(K_SEC_CONFIRM), "K_IS_SEC true for K_SEC_CONFIRM");
+    TEST_ASSERT(!K_IS_SEC(0x3D00), "K_IS_SEC false for K_OVERRIDE base");
+    TEST_ASSERT(!K_IS_SEC(0x4000), "K_IS_SEC false for LT base");
+    TEST_ASSERT_EQ(K_SEC_TYPE(K_SEC_CONFIRM), 0x00, "K_SEC_TYPE extracts low byte");
+}
+
 /* ── Suite runner ────────────────────────────────────────────────── */
 
 void test_keycodes(void) {
@@ -153,4 +168,5 @@ void test_keycodes(void) {
     TEST_RUN(test_td_encoding);
     TEST_RUN(test_no_cross_detection);
     TEST_RUN(test_special_keycodes);
+    TEST_RUN(test_keycode_sec_confirm);
 }

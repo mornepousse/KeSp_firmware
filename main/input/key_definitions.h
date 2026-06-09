@@ -417,6 +417,13 @@ static const uint16_t TO_L9 = 0x1400;
 #define K_IS_OVERRIDE(kc)            (((kc) & 0xFF00) == K_OVERRIDE_BASE)
 #define K_OVERRIDE_INDEX(kc)         ((kc) & 0xFF)
 
+/* Security key actions — 0x3E00 block (free advanced range; rides
+ * process_advanced_key dispatch, avoids int16_t sign issues of >=0x8000) */
+#define K_SEC_BASE                   0x3E00
+#define K_SEC_CONFIRM                0x3E00  /* authorize a pending CR request */
+#define K_IS_SEC(kc)                 (((kc) & 0xFF00) == K_SEC_BASE)
+#define K_SEC_TYPE(kc)               ((kc) & 0xFF)
+
 /* Layer-Tap: hold = activate layer, tap = send keycode */
 #define K_LT_BASE                    0x4000
 #define K_LT(layer, kc)             (K_LT_BASE | ((layer) << 8) | (kc))
