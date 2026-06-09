@@ -86,12 +86,17 @@ endif()
 
 # Dongle CDC stubs (no-op symbols for tama/bt/display referenced by cdc_binary_cmds.c)
 # and dongle-specific binary commands (RF status, pair list/reset, battery).
+# Also: OTP security key stack (cr_crc16, otp_proto, cr_hmac, otp_hid) — dongle only.
 if(CONFIG_KASE_DEVICE_ROLE_DONGLE)
     list(APPEND srcs
         "comm/cdc/cdc_dongle_stubs.c"
         "comm/cdc/cdc_dongle_cmds.c"
         "security/sec_store.c"
         "comm/cdc/cdc_sec_cmds.c"
+        "security/cr_crc16.c"
+        "security/otp_proto.c"
+        "security/cr_hmac.c"
+        "security/otp_hid.c"
     )
 endif()
 
@@ -184,6 +189,7 @@ set(priv_requires
                 # Harmless on dongle/half (BT disabled in their sdkconfig → compiles to ~nothing).
     esp_driver_tsens  # CPU temperature sensor — fastfetch e-ink dashboard (half)
     spi_flash         # esp_flash_get_size / esp_partition_* — dashboard flash stats
+    mbedtls           # HMAC-SHA1 for OTP HID (cr_hmac.c, dongle only)
 )
 
 if(CONFIG_KASE_HAS_DISPLAY)
