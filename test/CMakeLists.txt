@@ -57,6 +57,8 @@ add_executable(test_runner
     ../main/security/sec_store.c
     test_cdc_sec.c
     ../main/comm/cdc/cdc_sec_cmds.c
+    test_cr_crc16.c
+    ../main/security/cr_crc16.c
     test_main.c
 )
 
