@@ -176,6 +176,10 @@ void app_main(void) {
 #if CONFIG_KASE_DEVICE_ROLE_DONGLE
     extern void cdc_dongle_cmds_init(void);
     cdc_dongle_cmds_init();
+    extern void sec_store_init(void);
+    extern void cdc_sec_cmds_init(void);
+    sec_store_init();
+    cdc_sec_cmds_init();
 #endif
   }
 

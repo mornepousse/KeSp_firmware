@@ -15,6 +15,9 @@ set(srcs
     "comm/cdc/cdc_binary_cmds.c"
     "comm/cdc/ks_monitor.c"
 
+    # Security confirmation gate — compiled for all roles (key_processor calls it)
+    "security/sec_confirm.c"
+
     # Engine (always compiled — runs on both keyboard and dongle)
     "input/key_processor.c"
     "input/tap_hold.c"
@@ -87,6 +90,8 @@ if(CONFIG_KASE_DEVICE_ROLE_DONGLE)
     list(APPEND srcs
         "comm/cdc/cdc_dongle_stubs.c"
         "comm/cdc/cdc_dongle_cmds.c"
+        "security/sec_store.c"
+        "comm/cdc/cdc_sec_cmds.c"
     )
 endif()
 
@@ -206,6 +211,7 @@ idf_component_register(
         "."
         "sys"
         "app"
+        "security"
         "display"
         "display/oled"
         "display/round"
