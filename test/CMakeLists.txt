@@ -51,6 +51,8 @@ add_executable(test_runner
     ../main/comm/cdc/cdc_binary_protocol.c
     test_keycode_report.c
     ../main/input/key_processor.c
+    test_sec_confirm.c
+    ../main/security/sec_confirm.c
     test_main.c
 )
 
@@ -64,4 +66,5 @@ target_include_directories(test_runner PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/input
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/ble
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/tama
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/security
 )
