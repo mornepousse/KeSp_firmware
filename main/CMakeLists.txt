@@ -97,6 +97,12 @@ if(CONFIG_KASE_DEVICE_ROLE_DONGLE)
         "security/otp_proto.c"
         "security/cr_hmac.c"
         "security/otp_hid.c"
+        # OpenPGP smartcard (Phase 0): CCID class driver + applet. apdu.c,
+        # openpgp_card.c and openpgp_do.c were host-test-only until now.
+        "security/ccid.c"
+        "security/openpgp_card.c"
+        "security/apdu.c"
+        "security/openpgp_do.c"
     )
 endif()
 
