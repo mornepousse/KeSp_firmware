@@ -45,6 +45,7 @@ extern void test_sec_confirm(void);
 extern void test_sec_store(void);
 extern void test_cdc_sec(void);
 extern void test_cr_crc16(void);
+extern void test_otp_proto(void);
 
 int main(void) {
     printf("KeSp Firmware Unit Tests\n");
@@ -89,6 +90,7 @@ int main(void) {
     test_sec_store();
     test_cdc_sec();
     test_cr_crc16();
+    test_otp_proto();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);
