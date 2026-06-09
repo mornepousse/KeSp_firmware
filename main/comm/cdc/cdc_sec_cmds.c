@@ -45,11 +45,10 @@ void sec_cmd_build_list(uint8_t *out, uint16_t *out_len)
 static void bin_cmd_sec_set_slot(uint8_t cmd_id, const uint8_t *payload, uint16_t len)
 {
     uint8_t idx, type, slen; char label[SEC_LABEL_LEN]; uint8_t secret[SEC_SECRET_MAX];
-    if (!sec_cmd_parse_set_slot(payload, len, &idx, &type, label, secret, &slen)) {
-        ks_respond_err(cmd_id, KS_STATUS_ERR_INVALID);
-        return;
-    }
-    if (!sec_store_set_slot(idx, type, label, secret, slen)) {
+    bool parsed = sec_cmd_parse_set_slot(payload, len, &idx, &type, label, secret, &slen);
+    bool stored = parsed && sec_store_set_slot(idx, type, label, secret, slen);
+    memset(secret, 0, sizeof(secret));   /* scrub transient key material */
+    if (!stored) {
         ks_respond_err(cmd_id, KS_STATUS_ERR_INVALID);
         return;
     }
@@ -68,7 +67,7 @@ static void bin_cmd_sec_clear_slot(uint8_t cmd_id, const uint8_t *payload, uint1
 static void bin_cmd_sec_list(uint8_t cmd_id, const uint8_t *payload, uint16_t len)
 {
     (void)payload; (void)len;
-    uint8_t buf[1 + SEC_N_SLOTS * (2 + SEC_LABEL_LEN)];
+    uint8_t buf[SEC_CMD_LIST_MAX];
     uint16_t out_len = 0;
     sec_cmd_build_list(buf, &out_len);
     ks_respond(cmd_id, KS_STATUS_OK, buf, out_len);

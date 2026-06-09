@@ -178,7 +178,7 @@ void app_main(void) {
     cdc_dongle_cmds_init();
     extern void sec_store_init(void);
     extern void cdc_sec_cmds_init(void);
-    sec_store_init();
+    if (!safe_mode) sec_store_init();   /* NVS read — skip under safe boot */
     cdc_sec_cmds_init();
 #endif
   }

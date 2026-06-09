@@ -9,6 +9,7 @@ bool sec_store_set_slot(uint8_t idx, uint8_t type, const char *label,
                         const uint8_t *secret, uint8_t secret_len)
 {
     if (idx >= SEC_N_SLOTS) return false;
+    if (type == SEC_SLOT_EMPTY) return false;   /* would persist an unreachable secret */
     if (secret_len > SEC_SECRET_MAX) return false;
     if (secret_len > 0 && secret == NULL) return false;
     sec_slot_t *s = &s_slots[idx];

@@ -45,6 +45,9 @@ static void test_bounds(void)
     uint8_t k2[4] = {1,2,3,4};
     TEST_ASSERT(sec_store_set_slot(1, SEC_SLOT_HMAC_SHA1, NULL, k2, 4),
                 "NULL label accepted");
+    /* type = SEC_SLOT_EMPTY rejected (would persist an unreachable secret) */
+    TEST_ASSERT(!sec_store_set_slot(2, SEC_SLOT_EMPTY, "x", k2, 4),
+                "type=EMPTY rejected");
 }
 
 void test_sec_store(void)
