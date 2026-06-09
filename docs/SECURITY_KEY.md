@@ -73,19 +73,37 @@ uses VID `0x303a` (Espressif) / PID `0x4001`, so it must be added to KeePassXC's
 a small change, with upstream precedent (OnlyKey was added the same way, commit `e4326fb`).
 We do **not** spoof Yubico's VID (USB-IF / trust).
 
-In `src/keys/drivers/YubiKeyInterfaceUSB.cpp`, add the KaSe VID/PID to the `vids[]`/`pids[]`
-arrays (exact lines vary by KeePassXC version — regenerate the diff against your checkout):
+KeePassXC keeps two arrays in `src/keys/drivers/YubiKeyInterfaceUSB.cpp`:
+`vids[] = {YUBICO_VID, ONLYKEY_VID}` and a `pids[] = {YUBIKEY_PID, …, ONLYKEY_PID}`,
+iterated by `yk_open_key_vid_pid(vids, …, pids, …)`. Adding the KaSe VID to `vids[]`
+and the KaSe PID to `pids[]` makes it open our dongle. (The `*_VID`/`*_PID` constants
+live in the bundled `thirdparty/ykcore/ykcore.h`.)
 
-```diff
-- static const int vids[] = {YUBICO_VID, ONLYKEY_VID};
-+ #define KASE_DONGLE_VID 0x303a
-+ #define KASE_DONGLE_PID 0x4001
-+ static const int vids[] = {YUBICO_VID, ONLYKEY_VID, KASE_DONGLE_VID};
-  // ... and add KASE_DONGLE_PID to the corresponding pids[] / yk_open_key_vid_pid loop
+A ready-to-apply patch is in this repo:
+
+```bash
+# from a KeePassXC source checkout:
+git apply /path/to/KaSe_firmware/docs/keepassxc-kase-vid.patch
+#   or, if line numbers drifted on your version:
+patch -p1 --fuzz=3 < /path/to/KaSe_firmware/docs/keepassxc-kase-vid.patch
+# then build KeePassXC.
 ```
 
-Build KeePassXC from the patched source (or maintain it as a downstream patch / upstream PR).
-For `ykchalresp` / `pam_yubico`, the analogous whitelist is in `ykpers` `ykcore/ykcore.c`.
+The patch adds (verbatim):
+```diff
+-static const int vids[] = {YUBICO_VID, ONLYKEY_VID};
++#define KASE_DONGLE_VID 0x303a
++#define KASE_DONGLE_PID 0x4001
++static const int vids[] = {YUBICO_VID, ONLYKEY_VID, KASE_DONGLE_VID};
+ ...
+-                           ONLYKEY_PID};
++                           ONLYKEY_PID,
++                           KASE_DONGLE_PID};
+```
+
+Build KeePassXC from the patched source (downstream patch or upstream PR). For
+`ykchalresp` / `pam_yubico`, the analogous whitelist is in `ykpers` `ykcore/ykcore.c`
+(`yubico_pids[]`) — add `0x4001` there if you use those tools.
 
 ---
 

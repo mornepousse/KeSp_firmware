@@ -1,0 +1,34 @@
+# KeePassXC — recognise the KaSe dongle as a challenge-response key.
+#
+# Stock KeePassXC filters YubiKey-compatible devices by USB VID/PID (Yubico
+# 0x1050 + OnlyKey). The KaSe dongle uses VID 0x303a (Espressif) / PID 0x4001,
+# so it must be added to the whitelist — same approach as the merged OnlyKey
+# support (KeePassXC commit e4326fb). We do NOT spoof Yubico's VID.
+#
+# Apply against a KeePassXC source checkout:
+#     git apply docs/keepassxc-kase-vid.patch        (run from the keepassxc repo root)
+#   or, if line numbers drifted on your version:
+#     patch -p1 --fuzz=3 < docs/keepassxc-kase-vid.patch
+# then build KeePassXC. (The VID/PID arrays live in src/keys/drivers/;
+# YUBICO_VID/ONLYKEY_PID/etc. are defined in thirdparty/ykcore/ykcore.h.)
+--- a/src/keys/drivers/YubiKeyInterfaceUSB.cpp
++++ b/src/keys/drivers/YubiKeyInterfaceUSB.cpp
+@@
+-static const int vids[] = {YUBICO_VID, ONLYKEY_VID};
++// KaSe dongle (ESP32-S3) — YubiKey-compatible HMAC-SHA1 challenge-response.
++#define KASE_DONGLE_VID 0x303a
++#define KASE_DONGLE_PID 0x4001
++static const int vids[] = {YUBICO_VID, ONLYKEY_VID, KASE_DONGLE_VID};
+ static const int pids[] = {YUBIKEY_PID,
+                            NEO_OTP_PID,
+                            NEO_OTP_CCID_PID,
+                            NEO_OTP_U2F_PID,
+                            NEO_OTP_U2F_CCID_PID,
+                            YK4_OTP_PID,
+                            YK4_OTP_U2F_PID,
+                            YK4_OTP_CCID_PID,
+                            YK4_OTP_U2F_CCID_PID,
+                            PLUS_U2F_OTP_PID,
+-                           ONLYKEY_PID};
++                           ONLYKEY_PID,
++                           KASE_DONGLE_PID};
