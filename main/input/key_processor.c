@@ -22,6 +22,7 @@
 #include "leader.h"
 #include "key_features.h"
 #include "tama_engine.h"
+#include "sec_confirm.h"
 #include "esp_log.h"
 
 static const char *TAG = "KEY_PROC";
@@ -224,6 +225,7 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
         }
         return grave_esc_resolve(mods);
     }
+    if (kc == K_SEC_CONFIRM) { sec_confirm_authorize(); return 0; }
     if (kc == K_LAYER_LOCK){ layer_lock_toggle(); return 0; }
     if (kc == K_TAMA_FEED)     { if (is_new_press(row, col)) tama_engine_action(TAMA2_ACTION_FEED); return 0; }
     if (kc == K_TAMA_PLAY)     { if (is_new_press(row, col)) tama_engine_action(TAMA2_ACTION_PLAY); return 0; }

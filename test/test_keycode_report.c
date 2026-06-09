@@ -24,6 +24,7 @@
 #include "hid_bluetooth_manager.h"
 #include "keyboard_task.h"
 #include "keyboard_actions.h"
+#include "sec_confirm.h"
 
 /* ── Constantes HID locales (évite la chaîne key_definitions.h/tinyusb) ── */
 #define T_KC_A      0x04u
@@ -39,6 +40,7 @@
 #define T_MACRO_1 0x1500u  /* MACRO_1 */
 #define T_OSL_1  0x3101u   /* K_OSL(1) = K_OSL_BASE | 1 */
 #define T_MOD_LSFT 0x02u   /* MOD_LSFT */
+#define T_K_SEC_CONFIRM 0x3E00u
 
 /* ── Définitions de tous les globals externes requis par key_processor.c ── */
 
@@ -625,6 +627,23 @@ static void test_kp_double_mo_resolves_from_base_layer(void)
                    "double MO simultané : résolution depuis la couche de base (→ couche 2)");
 }
 
+/* 19. K_SEC_CONFIRM : press → authorize pending request, absorbed (not emitted) */
+static void test_kp_sec_confirm_authorizes(void)
+{
+    reset_kp_state();
+    sec_confirm_reset();
+    sec_confirm_arm(2, 0);                 /* pending request for slot 2 */
+    keymaps[0][0][0] = T_K_SEC_CONFIRM;
+    press_key(0, 0, 0);
+    build_keycode_report();
+
+    uint8_t slot = 0xFF;
+    sec_confirm_state_t st = sec_confirm_poll(1, &slot);
+    TEST_ASSERT_EQ(st, SEC_CONFIRM_AUTHORIZED, "K_SEC_CONFIRM press authorizes pending");
+    TEST_ASSERT_EQ(slot, 2, "authorized slot = 2");
+    TEST_ASSERT_EQ(keycodes[0], 0, "K_SEC_CONFIRM absorbed (not in HID report)");
+}
+
 /* ══════════════════════════════════════════════════════════════════════ */
 /* Suite runner                                                          */
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -651,4 +670,5 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_macro_does_not_starve_to);
     TEST_RUN(test_kp_shift_detected_on_active_osl_layer);
     TEST_RUN(test_kp_double_mo_resolves_from_base_layer);
+    TEST_RUN(test_kp_sec_confirm_authorizes);
 }
