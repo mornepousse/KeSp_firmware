@@ -2,7 +2,6 @@
  * Pure (no NVS/HW); compiled for all roles so key_processor can call it. */
 #pragma once
 #include <stdint.h>
-#include <stdbool.h>
 
 #define SEC_CONFIRM_TIMEOUT_MS 15000u
 
@@ -10,11 +9,11 @@ typedef enum {
     SEC_CONFIRM_IDLE = 0,
     SEC_CONFIRM_PENDING,
     SEC_CONFIRM_AUTHORIZED,
-    SEC_CONFIRM_TIMEDOUT,
+    SEC_CONFIRM_TIMEDOUT, /* return-only signal from poll(); s_state never holds this value */
 } sec_confirm_state_t;
 
 void sec_confirm_reset(void);
-/* Arm a pending request for `slot`, stamped at now_ms. Overwrites any prior pending. */
+/* Arm a pending request for `slot`, stamped at now_ms. Overwrites any prior state, including an unconsumed AUTHORIZED grant. */
 void sec_confirm_arm(uint8_t slot, uint32_t now_ms);
 /* Physical confirm key pressed: PENDING -> AUTHORIZED; no-op otherwise. */
 void sec_confirm_authorize(void);

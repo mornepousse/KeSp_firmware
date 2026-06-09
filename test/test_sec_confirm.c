@@ -36,8 +36,19 @@ static void test_rearm_overwrites_slot(void)
     sec_confirm_arm(3, 1050);
     sec_confirm_authorize();
     uint8_t slot = 0xFF;
-    sec_confirm_poll(1060, &slot);
+    TEST_ASSERT_EQ(sec_confirm_poll(1060, &slot), SEC_CONFIRM_AUTHORIZED, "re-arm then authorize -> AUTHORIZED");
     TEST_ASSERT_EQ(slot, 3, "re-arm overwrites slot");
+}
+
+static void test_arm_while_authorized(void)
+{
+    sec_confirm_reset();
+    sec_confirm_arm(1, 1000);
+    sec_confirm_authorize();          /* AUTHORIZED, not yet polled */
+    sec_confirm_arm(2, 1100);         /* re-arm discards the grant */
+    uint8_t slot = 0xFF;
+    TEST_ASSERT_EQ(sec_confirm_poll(1100, &slot), SEC_CONFIRM_PENDING,
+                   "arm after authorize discards grant -> PENDING");
 }
 
 void test_sec_confirm(void)
@@ -47,4 +58,5 @@ void test_sec_confirm(void)
     TEST_RUN(test_timeout);
     TEST_RUN(test_authorize_without_arm);
     TEST_RUN(test_rearm_overwrites_slot);
+    TEST_RUN(test_arm_while_authorized);
 }
