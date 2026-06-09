@@ -53,6 +53,8 @@ add_executable(test_runner
     ../main/input/key_processor.c
     test_sec_confirm.c
     ../main/security/sec_confirm.c
+    test_sec_store.c
+    ../main/security/sec_store.c
     test_main.c
 )
 
