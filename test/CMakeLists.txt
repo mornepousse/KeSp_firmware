@@ -61,6 +61,12 @@ add_executable(test_runner
     ../main/security/cr_crc16.c
     test_otp_proto.c
     ../main/security/otp_proto.c
+    test_apdu.c
+    ../main/security/apdu.c
+    test_openpgp_do.c
+    ../main/security/openpgp_do.c
+    test_openpgp_card.c
+    ../main/security/openpgp_card.c
     test_main.c
 )
 
