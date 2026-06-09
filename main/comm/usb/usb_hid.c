@@ -23,6 +23,8 @@ volatile uint8_t hid_led_state = 0;
 #define EPNUM_HID         0x83  /* EP3 IN  (interrupt) */
 #if CONFIG_KASE_DEVICE_ROLE_DONGLE
 #define EPNUM_OTP_HID     0x84  /* EP4 IN  (interrupt) — OTP HID instance 1 */
+#define EPNUM_CCID_OUT    0x05  /* EP5 OUT (bulk) — CCID smartcard */
+#define EPNUM_CCID_IN     0x85  /* EP5 IN  (bulk) — CCID smartcard */
 #endif
 
 /* Explicit device descriptor (overrides TinyUSB default) */
@@ -103,15 +105,61 @@ static const uint8_t otp_hid_report_descriptor[] = {
     HID_COLLECTION_END                                      /* 0xC0 */
 };
 
-/* Total config-descriptor length for dongle: CDC + HID kbd/mouse + HID OTP */
-#define TUSB_DESC_TOTAL_LEN_OTP \
-    (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN + TUD_HID_DESC_LEN)
+/* CCID functional descriptor (USB CCID Rev 1.1 §5.1) — single slot, T=1, short+extended APDU.
+ * Cross-check every field against the spec and a real reader (e.g. a YubiKey) before trusting. */
+#define KASE_CCID_DESC \
+    0x36, 0x21,                 /* bLength=54, bDescriptorType=0x21 (CCID) */ \
+    0x10, 0x01,                 /* bcdCCID = 1.10 */ \
+    0x00,                       /* bMaxSlotIndex = 0 (one slot) */ \
+    0x07,                       /* bVoltageSupport = 5.0/3.0/1.8 */ \
+    0x02, 0x00, 0x00, 0x00,     /* dwProtocols = T=1 */ \
+    0xA0, 0x0F, 0x00, 0x00,     /* dwDefaultClock = 4000 kHz */ \
+    0xA0, 0x0F, 0x00, 0x00,     /* dwMaximumClock = 4000 kHz */ \
+    0x00,                       /* bNumClockSupported = 0 (only default) */ \
+    0x80, 0x25, 0x00, 0x00,     /* dwDataRate = 9600 */ \
+    0x80, 0x25, 0x00, 0x00,     /* dwMaxDataRate = 9600 */ \
+    0x00,                       /* bNumDataRatesSupported = 0 */ \
+    0xFE, 0x00, 0x00, 0x00,     /* dwMaxIFSD = 254 */ \
+    0x00, 0x00, 0x00, 0x00,     /* dwSynchProtocols = 0 */ \
+    0x00, 0x00, 0x00, 0x00,     /* dwMechanical = 0 */ \
+    0x40, 0x08, 0x04, 0x00,     /* dwFeatures = 0x00040840 (LE): 0x00000040 automatic
+                                 * parameters negotiation + 0x00040000 short+extended
+                                 * APDU level exchange (the bit scdaemon requires). This
+                                 * is the field scdaemon is pickiest about and the #1
+                                 * de-risk knob: if gpg --card-status does not enumerate
+                                 * the reader, tune this first — cross-check vs a real
+                                 * YubiKey (lsusb -v) and USB CCID Rev 1.1 §5.1. */ \
+    0x0F, 0x01, 0x00, 0x00,     /* dwMaxCCIDMessageLength = 271 (short) — raise for extended */ \
+    0xFF,                       /* bClassGetResponse = echo */ \
+    0xFF,                       /* bClassEnvelope = echo */ \
+    0x00, 0x00,                 /* wLcdLayout = none */ \
+    0x00,                       /* bPINSupport = 0 (no pinpad; PIN over APDU) */ \
+    0x01                        /* bMaxCCIDBusySlots = 1 */
 
-/* Configuration descriptor for dongle (4 interfaces):
- *   0 = CDC Communication, 1 = CDC Data, 2 = HID kbd/mouse, 3 = HID OTP */
+/* Interface 4: CCID smartcard reader (class 0x0B). No TinyUSB macro exists. */
+#define TUD_CCID_DESC_LEN (9 + 54 + 7 + 7)   /* itf + CCID class desc + 2 EP */
+#define KASE_CCID_ITF_DESC(_itfnum, _stridx, _epout, _epin) \
+    /* Interface descriptor */ \
+    /* Interface: bNumEndpoints=2, class 0x0B (CCID), subclass 0x00, \
+     * bInterfaceProtocol=0x00 (bulk; 0x01/0x02 would be ICCD) */ \
+    9, TUSB_DESC_INTERFACE, _itfnum, 0, 2, TUSB_CLASS_SMART_CARD, 0x00, 0x00, _stridx, \
+    /* CCID functional/class descriptor (54 bytes) */ \
+    KASE_CCID_DESC, \
+    /* Bulk OUT endpoint */ \
+    7, TUSB_DESC_ENDPOINT, _epout, TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0, \
+    /* Bulk IN endpoint */ \
+    7, TUSB_DESC_ENDPOINT, _epin, TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0
+
+/* Total config-descriptor length for dongle: CDC + HID kbd/mouse + HID OTP + CCID */
+#define TUSB_DESC_TOTAL_LEN_OTP \
+    (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN + TUD_HID_DESC_LEN \
+     + TUD_CCID_DESC_LEN)
+
+/* Configuration descriptor for dongle (5 interfaces):
+ *   0 = CDC Communication, 1 = CDC Data, 2 = HID kbd/mouse, 3 = HID OTP, 4 = CCID */
 static const uint8_t hid_cdc_otp_configuration_descriptor[] = {
-    /* Config 1: 4 interfaces total, 100 mA */
-    TUD_CONFIG_DESCRIPTOR(1, 4, 0, TUSB_DESC_TOTAL_LEN_OTP,
+    /* Config 1: 5 interfaces total, 100 mA */
+    TUD_CONFIG_DESCRIPTOR(1, 5, 0, TUSB_DESC_TOTAL_LEN_OTP,
                           TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
     /* CDC (Communication + Data): interfaces 0 and 1 */
     TUD_CDC_DESCRIPTOR(0, 4, EPNUM_CDC_NOTIF, 8,
@@ -122,6 +170,8 @@ static const uint8_t hid_cdc_otp_configuration_descriptor[] = {
     /* HID OTP: interface 3 (instance 1, no boot protocol) */
     TUD_HID_DESCRIPTOR(3, 6, HID_ITF_PROTOCOL_NONE,
                        sizeof(otp_hid_report_descriptor), EPNUM_OTP_HID, 8, 5),
+    /* CCID smartcard reader: interface 4 */
+    KASE_CCID_ITF_DESC(4, 7, EPNUM_CCID_OUT, EPNUM_CCID_IN),
 };
 
 /* Extended string table for dongle (index 6 = OTP interface name) */
@@ -133,6 +183,7 @@ static const char *hid_string_descriptor_otp[] = {
     PRODUCT_NAME " CDC",          /* 4: CDC serial port interface */
     PRODUCT_NAME " Keyboard",     /* 5: HID keyboard interface */
     PRODUCT_NAME " OTP",          /* 6: HID OTP interface */
+    PRODUCT_NAME " CCID",         /* 7: CCID smartcard interface */
 };
 #endif /* CONFIG_KASE_DEVICE_ROLE_DONGLE */
 
