@@ -25,5 +25,6 @@ bool    sec_store_clear_slot(uint8_t idx);
 uint8_t sec_store_count(void);
 uint8_t sec_store_type(uint8_t idx);
 const char *sec_store_label(uint8_t idx);
-/* INTERNAL — firmware-only, never exposed over CDC. */
+/* INTERNAL — firmware-only, never exposed over CDC.
+ * `out` must be at least SEC_SECRET_MAX bytes. */
 bool    sec_store_get_secret(uint8_t idx, uint8_t *out, uint8_t *out_len);

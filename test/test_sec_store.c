@@ -35,6 +35,16 @@ static void test_bounds(void)
     uint8_t big[65] = {0};
     TEST_ASSERT(!sec_store_set_slot(0, SEC_SLOT_HMAC_SHA1, "x", big, 65), "secret_len > max rejected");
     TEST_ASSERT(sec_store_get_secret(2, key, NULL) == false, "get empty slot fails");
+    /* I-2: NULL secret with nonzero len rejected */
+    TEST_ASSERT(!sec_store_set_slot(0, SEC_SLOT_HMAC_SHA1, "x", NULL, 4),
+                "NULL secret + len>0 rejected");
+    /* secret_len = 0 is valid (e.g. label-only slot) */
+    TEST_ASSERT(sec_store_set_slot(0, SEC_SLOT_HMAC_SHA1, "x", NULL, 0),
+                "secret_len=0 accepted");
+    /* label = NULL handled */
+    uint8_t k2[4] = {1,2,3,4};
+    TEST_ASSERT(sec_store_set_slot(1, SEC_SLOT_HMAC_SHA1, NULL, k2, 4),
+                "NULL label accepted");
 }
 
 void test_sec_store(void)

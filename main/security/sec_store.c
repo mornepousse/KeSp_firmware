@@ -1,7 +1,7 @@
 #include "sec_store.h"
 #include <string.h>
 
-static void sec_store_persist(void);   /* defined per-target below */
+static bool sec_store_persist(void);   /* defined per-target below */
 
 static sec_slot_t s_slots[SEC_N_SLOTS];
 
@@ -10,6 +10,7 @@ bool sec_store_set_slot(uint8_t idx, uint8_t type, const char *label,
 {
     if (idx >= SEC_N_SLOTS) return false;
     if (secret_len > SEC_SECRET_MAX) return false;
+    if (secret_len > 0 && secret == NULL) return false;
     sec_slot_t *s = &s_slots[idx];
     memset(s, 0, sizeof(*s));
     s->type = type;
@@ -20,16 +21,14 @@ bool sec_store_set_slot(uint8_t idx, uint8_t type, const char *label,
         s->label[SEC_LABEL_LEN - 1] = '\0';
     }
     if (secret && secret_len) memcpy(s->secret, secret, secret_len);
-    sec_store_persist();
-    return true;
+    return sec_store_persist();
 }
 
 bool sec_store_clear_slot(uint8_t idx)
 {
     if (idx >= SEC_N_SLOTS) return false;
     memset(&s_slots[idx], 0, sizeof(s_slots[idx]));
-    sec_store_persist();
-    return true;
+    return sec_store_persist();
 }
 
 uint8_t sec_store_count(void)
@@ -60,12 +59,19 @@ bool sec_store_get_secret(uint8_t idx, uint8_t *out, uint8_t *out_len)
 }
 
 #ifndef TEST_HOST
+#include "esp_log.h"
 #include "nvs_utils.h"
 #include "keyboard_config.h"   /* STORAGE_NAMESPACE */
-static void sec_store_persist(void)
+static const char *TAG = "sec_store";
+static bool sec_store_persist(void)
 {
-    nvs_save_blob_with_total(STORAGE_NAMESPACE, "sec_slots", s_slots,
-                             sizeof(s_slots), "sec_slots_ver", 1);
+    esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "sec_slots", s_slots,
+                                             sizeof(s_slots), "sec_slots_ver", 1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "persist failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    return true;
 }
 void sec_store_init(void)
 {
@@ -74,6 +80,6 @@ void sec_store_init(void)
                              sizeof(s_slots), "sec_slots_ver", &ver);
 }
 #else
-static void sec_store_persist(void) { /* host: no NVS */ }
+static bool sec_store_persist(void) { return true; }
 void sec_store_init(void) { memset(s_slots, 0, sizeof(s_slots)); }
 #endif
