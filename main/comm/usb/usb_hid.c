@@ -8,6 +8,7 @@
 #include "keyboard_config.h"
 #if CONFIG_KASE_DEVICE_ROLE_DONGLE
 #include "otp_proto.h"
+#include "ccid.h"
 #endif
 
 static const char *TAG_UD = "USB_DESCRIPTORS";
@@ -23,8 +24,10 @@ volatile uint8_t hid_led_state = 0;
 #define EPNUM_HID         0x83  /* EP3 IN  (interrupt) */
 #if CONFIG_KASE_DEVICE_ROLE_DONGLE
 #define EPNUM_OTP_HID     0x84  /* EP4 IN  (interrupt) — OTP HID instance 1 */
-#define EPNUM_CCID_OUT    0x05  /* EP5 OUT (bulk) — CCID smartcard */
-#define EPNUM_CCID_IN     0x85  /* EP5 IN  (bulk) — CCID smartcard */
+/* DE-RISK EXPERIMENT (uncommitted): S3 FS DFIFO can't fit a 5th IN endpoint
+ * (CCID 64B bulk) alongside CDC+HID+OTP. Drop OTP-HID, put CCID on EP4. */
+#define EPNUM_CCID_OUT    0x04  /* EP4 OUT (bulk) — CCID smartcard */
+#define EPNUM_CCID_IN     0x84  /* EP4 IN  (bulk) — CCID smartcard */
 #endif
 
 /* Explicit device descriptor (overrides TinyUSB default) */
@@ -150,16 +153,18 @@ static const uint8_t otp_hid_report_descriptor[] = {
     /* Bulk IN endpoint */ \
     7, TUSB_DESC_ENDPOINT, _epin, TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0
 
-/* Total config-descriptor length for dongle: CDC + HID kbd/mouse + HID OTP + CCID */
+/* Total config-descriptor length for dongle.
+ * DE-RISK EXPERIMENT (uncommitted): OTP-HID dropped to free DFIFO for CCID
+ * (S3 FS can't fit a 5th IN endpoint). So: CDC + HID kbd/mouse + CCID. */
 #define TUSB_DESC_TOTAL_LEN_OTP \
-    (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN + TUD_HID_DESC_LEN \
+    (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN \
      + TUD_CCID_DESC_LEN)
 
-/* Configuration descriptor for dongle (5 interfaces):
- *   0 = CDC Communication, 1 = CDC Data, 2 = HID kbd/mouse, 3 = HID OTP, 4 = CCID */
+/* Configuration descriptor for dongle (4 interfaces — DE-RISK, OTP-HID removed):
+ *   0 = CDC Communication, 1 = CDC Data, 2 = HID kbd/mouse, 3 = CCID */
 static const uint8_t hid_cdc_otp_configuration_descriptor[] = {
-    /* Config 1: 5 interfaces total, 100 mA */
-    TUD_CONFIG_DESCRIPTOR(1, 5, 0, TUSB_DESC_TOTAL_LEN_OTP,
+    /* Config 1: 4 interfaces total, 100 mA */
+    TUD_CONFIG_DESCRIPTOR(1, 4, 0, TUSB_DESC_TOTAL_LEN_OTP,
                           TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
     /* CDC (Communication + Data): interfaces 0 and 1 */
     TUD_CDC_DESCRIPTOR(0, 4, EPNUM_CDC_NOTIF, 8,
@@ -167,11 +172,8 @@ static const uint8_t hid_cdc_otp_configuration_descriptor[] = {
     /* HID keyboard boot: interface 2 (existing kbd/mouse instance 0) */
     TUD_HID_DESCRIPTOR(2, 5, HID_ITF_PROTOCOL_KEYBOARD,
                        sizeof(hid_report_descriptor), EPNUM_HID, 16, 1),
-    /* HID OTP: interface 3 (instance 1, no boot protocol) */
-    TUD_HID_DESCRIPTOR(3, 6, HID_ITF_PROTOCOL_NONE,
-                       sizeof(otp_hid_report_descriptor), EPNUM_OTP_HID, 8, 5),
-    /* CCID smartcard reader: interface 4 */
-    KASE_CCID_ITF_DESC(4, 7, EPNUM_CCID_OUT, EPNUM_CCID_IN),
+    /* CCID smartcard reader: interface 3 (was 4; OTP-HID dropped for the de-risk) */
+    KASE_CCID_ITF_DESC(3, 7, EPNUM_CCID_OUT, EPNUM_CCID_IN),
 };
 
 /* Extended string table for dongle (index 6 = OTP interface name) */
@@ -334,6 +336,11 @@ void tinyusb_hid_init(void)
 
 void kase_tinyusb_init(void)
 {
+#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+    /* Force-link the CCID class driver so its strong usbd_app_driver_get_cb
+     * overrides the weak default before tinyusb_driver_install() reads it. */
+    ccid_init();
+#endif
     tinyusb_hid_init();
     tinyusb_cdc_acm_init();
 }

@@ -49,12 +49,16 @@ static const char *TAG = "CCID";
 #define CCID_BUF_SZ              512
 
 /* ------------------------------------------------------------------ */
-/* ATR for IccPowerOn (OpenPGP-style T=1). Validated on hardware in the         */
-/* de-risk step, not here.                                                      */
+/* ATR for IccPowerOn (OpenPGP-style T=1).                                      */
+/* The ATR advertises T=1 + T=15 global bytes, so a TCK check byte is           */
+/* MANDATORY (ISO 7816-3): TCK = XOR of all bytes from T0 to the last           */
+/* historical byte. Here XOR(DA..00) = 0xCD. Without it scdaemon rejects the    */
+/* card with "update_param_by_atr failed: -1" (validated on hardware).          */
 /* ------------------------------------------------------------------ */
 static const uint8_t s_atr[] = {
     0x3B,0xDA,0x18,0xFF,0x81,0xB1,0xFE,0x75,0x1F,0x03,
-    0x00,0x31,0x84,0x73,0x80,0x01,0x80,0x00,0x90,0x00
+    0x00,0x31,0x84,0x73,0x80,0x01,0x80,0x00,0x90,0x00,
+    0xCD   /* TCK = XOR(T0..last historical) */
 };
 
 /* ------------------------------------------------------------------ */
@@ -294,4 +298,17 @@ usbd_class_driver_t const *usbd_app_driver_get_cb(uint8_t *driver_count)
 {
     *driver_count = 1;
     return &ccid_driver;
+}
+
+/* MUST be called from force-linked code (kase_tinyusb_init).
+ *
+ * usbd_app_driver_get_cb above is a *strong* override of a *weak* default in
+ * libtinyusb.a. But ccid.c exports no other referenced symbol, so without this
+ * call the linker never pulls ccid.c.obj from libmain.a — the weak (empty)
+ * default wins, no CCID app driver is registered, and SET_CONFIGURATION asserts
+ * (process_set_config: no driver claims the CCID interface). This reference
+ * forces the object in so our strong symbol takes effect. Do not remove. */
+void ccid_init(void)
+{
+    ESP_LOGI(TAG, "CCID class driver registered (app driver hook linked)");
 }

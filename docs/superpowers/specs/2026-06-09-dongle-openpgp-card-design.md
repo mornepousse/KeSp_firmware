@@ -89,6 +89,38 @@ firmware to answer it:
   document it; if it needs pcscd Info.plist, fall back to forcing the internal driver.
 - This is the start of `ccid.c` + the SELECT path of `openpgp_card.c`.
 
+## 6b. Phase 0 — RESULT (2026-06-09): ✅ PASS
+
+De-risked on hardware (dongle flashed via CH340, `gpg`/`scdaemon` 2.4.9 via `nix-shell -p gnupg`,
+UART0 console temporarily enabled on GPIO43/44 to read TinyUSB logs). **The #1 unknown is
+resolved: scdaemon's internal CCID driver enumerates our `303a:4001` device by USB class 0x0B,
+selects it as a reader, powers it on, negotiates T=1 params, and exchanges APDUs — the OpenPGP
+`SELECT (AID D27600012401)` returns `0x9000`.** No VID whitelist issue, no udev rule beyond the
+existing `99-local.rules`, no pcscd. The Dell's built-in Broadcom `0A5C:5843` reader coexists
+(scdaemon enumerates all CCID readers; ours is reader 2).
+
+Three real defects were found and fixed during bring-up (the descriptor/applet host-foundation
+was correct; these were integration bugs):
+1. **Linker dead-strips `ccid.c.obj`.** Its only export was the *weak* `usbd_app_driver_get_cb`
+   override; with nothing referencing it, the linker kept the empty weak default in
+   `libtinyusb.a` → 0 app drivers → `process_set_config` assert (no driver claims the CCID
+   interface) → device never configured. **Fix:** `ccid_init()` called from the force-linked
+   `kase_tinyusb_init()` pulls the object in so the strong symbol wins.
+2. **ESP32-S3 FS DFIFO can't fit a 5th IN endpoint.** Adding CCID's 64-byte bulk-IN alongside
+   CDC-notif + CDC-in + HID-kbd + HID-OTP overflows the device TX-FIFO RAM (`dfifo_alloc`
+   assert in `dcd_edpt_open`). **The dongle cannot expose CDC + HID-kbd + HID-OTP + CCID at
+   once.** For the de-risk, OTP-HID was dropped and CCID placed on EP4 (4 IN endpoints, fits).
+   → **OPEN DESIGN DECISION (Phase 1): OTP-HID (CR-HMAC) vs CCID coexistence** — options: drop
+   OTP-HID (OpenPGP supersedes it), make them mutually exclusive (build flag / runtime), or drop
+   CDC when CCID is active. Supersedes spec §10 item 6.
+3. **ATR was missing the mandatory TCK.** The T=1/T=15 ATR had no checksum byte →
+   `update_param_by_atr failed: -1`. **Fix:** appended `TCK = XOR(T0..last) = 0xCD`.
+
+Remaining (Phase 1, not Phase 0): the applet returns `6A88` to `GET DATA 4F` because the DO
+store is empty, so `gpg --card-status` prints "no supported card application found" *after* a
+successful SELECT. Populating a default AID DO (0x4F) + the essential DOs makes `--card-status`
+print the card. This is Phase-1 applet work (§7), with its own host tests.
+
 ## 7. Phase 1 — minimal viable signing card (≈4–6 weeks)
 
 - **CCID transport** (`ccid.c`): full bulk framing — IccPowerOn/Off, GetSlotStatus, XfrBlock,
