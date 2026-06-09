@@ -1,3 +1,4 @@
+/* main/comm/cdc/cdc_sec_cmds.c — CDC provisioning for write-only secret slots (dongle). */
 #include "cdc_sec_cmds.h"
 #include <string.h>
 
@@ -24,9 +25,10 @@ void sec_cmd_build_list(uint8_t *out, uint16_t *out_len)
     uint16_t n = 1;                          /* reserve count byte */
     uint8_t count = 0;
     for (uint8_t i = 0; i < SEC_N_SLOTS; i++) {
-        if (sec_store_type(i) == SEC_SLOT_EMPTY) continue;
+        uint8_t t = sec_store_type(i);
+        if (t == SEC_SLOT_EMPTY) continue;
         out[n++] = i;
-        out[n++] = sec_store_type(i);
+        out[n++] = t;
         const char *lbl = sec_store_label(i);
         memset(&out[n], 0, SEC_LABEL_LEN);
         if (lbl) strncpy((char *)&out[n], lbl, SEC_LABEL_LEN - 1);
