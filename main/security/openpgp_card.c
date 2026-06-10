@@ -38,7 +38,7 @@ static const openpgp_card_hooks_t *s_hooks;
 
 static bool    s_selected;
 static bool    s_pw1_sign_verified;  /* mode 0x81 — required for PSO:CDS */
-static bool    s_pw1_user_verified;  /* mode 0x82 — required for decrypt etc. */
+static bool    s_pw1_user_verified;  /* mode 0x82 — gate for PSO:DECIPHER (Phase 2); write-only in Phase 1 */
 static bool    s_pw3_verified;
 static uint8_t s_pw1_retry;          /* shared counter for both PW1 modes */
 static uint8_t s_pw3_retry;
@@ -162,8 +162,8 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         /* Correct PIN — reset counter and set the mode-specific flag */
         *retry = (is_pw1 ? PW1_RETRY_MAX : PW3_RETRY_MAX);
         if      (a.p2 == 0x81) s_pw1_sign_verified = true;
-        else if (a.p2 == 0x82) s_pw1_user_verified = true;
-        else                   s_pw3_verified       = true;
+        else if (a.p2 == 0x82) s_pw1_user_verified = true;  /* 0x82: decrypt/other gate — consumed in Phase 2 */
+        else                   s_pw3_verified       = true;  /* 0x83 */
         return sw_only(out, out_max, SW_OK);
     }
 

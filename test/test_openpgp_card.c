@@ -87,7 +87,7 @@ static void do_select(uint8_t *cmd, uint8_t *rsp)
 
 static void test_select_ok(void)
 {
-    openpgp_card_hooks_t h = { fake_sign, fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
     openpgp_card_init(&h);
     g_confirm_retval = 1;
 
@@ -105,7 +105,7 @@ static void test_select_ok(void)
 
 static void test_sign_requires_pin(void)
 {
-    openpgp_card_hooks_t h = { fake_sign, fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
     openpgp_card_init(&h);
     g_confirm_retval = 1;
 
@@ -136,7 +136,7 @@ static void test_sign_requires_pin(void)
 
 static void test_sign_uif_gate(void)
 {
-    openpgp_card_hooks_t h = { fake_sign, fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
     openpgp_card_init(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -185,7 +185,7 @@ static void test_sign_uif_gate(void)
 
 static void test_pin_retry_counter(void)
 {
-    openpgp_card_hooks_t h = { fake_sign, fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
     openpgp_card_init(&h);
     g_confirm_retval = 1;
 
@@ -219,19 +219,20 @@ static void test_pin_retry_counter(void)
    P2=0x82 alone must NOT open the signing gate. */
 static void test_verify_81_gates_sign(void)
 {
-    openpgp_card_hooks_t h = { fake_sign, fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
     openpgp_card_init(&h);
     g_confirm_retval = 1;
 
-    uint8_t cmd[64], rsp[300];
+    uint8_t cmd[64], rsp[256];
     uint16_t clen, rlen;
     uint8_t hash[20];
     memset(hash, 0xCC, 20);
+    uint8_t pw1[] = {'1','2','3','4','5','6'};
 
     do_select(cmd, rsp);
 
     /* VERIFY 0x82 alone must NOT satisfy the signing gate */
-    clen = build_verify(0x82, (const uint8_t *)"123456", 6, cmd);
+    clen = build_verify(0x82, pw1, sizeof(pw1), cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY 82 ok");
 
@@ -240,7 +241,7 @@ static void test_verify_81_gates_sign(void)
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6982, "PSO:CDS still gated after 82 only");
 
     /* VERIFY 0x81 satisfies the signing gate */
-    clen = build_verify(0x81, (const uint8_t *)"123456", 6, cmd);
+    clen = build_verify(0x81, pw1, sizeof(pw1), cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY 81 ok");
 
@@ -252,12 +253,13 @@ static void test_verify_81_gates_sign(void)
 /* Wrong PIN on P2=0x81 and P2=0x82 decrement the SAME PW1 retry counter. */
 static void test_verify_81_82_share_retries(void)
 {
-    openpgp_card_hooks_t h = { fake_sign, fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
     openpgp_card_init(&h);
     g_confirm_retval = 1;
 
-    uint8_t cmd[64], rsp[300];
+    uint8_t cmd[64], rsp[256];
     uint16_t clen, rlen;
+    uint8_t pw1[] = {'1','2','3','4','5','6'};
 
     do_select(cmd, rsp);
 
@@ -270,6 +272,14 @@ static void test_verify_81_82_share_retries(void)
     clen = build_verify(0x82, (const uint8_t *)"000000", 6, cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x63C1, "82 wrong -> 1 left (shared)");
+
+    /* Correct PIN (on either mode) resets shared counter back to max */
+    clen = build_verify(0x81, pw1, sizeof(pw1), cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "81 correct after wrong attempts");
+    uint8_t check[5] = {0x00, 0x20, 0x00, 0x81, 0x00};
+    rlen = openpgp_card_apdu(check, 5, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x63C3, "counter reset to 3 after correct PIN");
 }
 
 void test_openpgp_card(void)
