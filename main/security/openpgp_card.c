@@ -99,6 +99,13 @@ static uint8_t s_pw1_len;
 static uint8_t s_pw3[PW_MAX_LEN];
 static uint8_t s_pw3_len;
 
+/* Imported private key — Signature slot only (Phase 1).
+ * algo 0x13 = ECDSA P-256.  Cleared and re-persisted by factory_reset(). */
+typedef struct { uint8_t set; uint8_t algo; uint8_t d[32]; } pgp_key_t;
+static pgp_key_t s_key;
+
+static bool key_persist(void); /* NVS on target, no-op on host; defined below */
+
 /* ------------------------------------------------------------------ */
 /* Internal helpers                                                    */
 /* ------------------------------------------------------------------ */
@@ -192,6 +199,61 @@ static bool uif_signing_required(void)
     return false;
 }
 
+/* BER-TLV sibling scanner.
+ * Scans TLV siblings in buf[0..buf_len-1] for the first occurrence of `tag`.
+ * Returns a pointer to the first value byte and sets *vlen_out; returns NULL
+ * if the tag is not found or the buffer is malformed/truncated.
+ * Supports 1-byte and 2-byte tags (multi-byte indicator: lower 5 bits == 0x1F).
+ * Supports short-form length (< 0x80) and 0x81 / 0x82 long-form lengths.
+ * NEVER reads out of bounds — treats any truncation as malformed. */
+static const uint8_t *tlv_find(const uint8_t *buf, uint16_t buf_len,
+                               uint16_t tag, uint16_t *vlen_out)
+{
+    if (!buf || buf_len == 0) return NULL;
+    uint16_t pos = 0;
+    while (pos < buf_len) {
+        /* --- tag --- */
+        uint16_t cur_tag;
+        if ((buf[pos] & 0x1Fu) == 0x1Fu) {
+            /* multi-byte tag: need one more byte, MSB must be 0 */
+            if (pos + 1u >= buf_len) return NULL;
+            cur_tag = ((uint16_t)buf[pos] << 8) | buf[pos + 1u];
+            pos += 2u;
+        } else {
+            cur_tag = buf[pos];
+            pos += 1u;
+        }
+        if (pos >= buf_len) return NULL;
+
+        /* --- length --- */
+        uint32_t vlen;
+        if (buf[pos] < 0x80u) {
+            vlen  = buf[pos];
+            pos  += 1u;
+        } else if (buf[pos] == 0x81u) {
+            if (pos + 1u >= buf_len) return NULL;
+            vlen  = buf[pos + 1u];
+            pos  += 2u;
+        } else if (buf[pos] == 0x82u) {
+            if (pos + 2u >= buf_len) return NULL;
+            vlen  = ((uint32_t)buf[pos + 1u] << 8) | buf[pos + 2u];
+            pos  += 3u;
+        } else {
+            return NULL; /* indefinite / reserved length form */
+        }
+
+        /* bounds check: value must fit in remaining buffer */
+        if ((uint32_t)pos + vlen > (uint32_t)buf_len) return NULL;
+
+        if (cur_tag == tag) {
+            if (vlen_out) *vlen_out = (uint16_t)vlen;
+            return buf + pos;
+        }
+        pos += (uint16_t)vlen;
+    }
+    return NULL; /* tag not found */
+}
+
 /* ------------------------------------------------------------------ */
 /* Public API — lifecycle                                              */
 /* ------------------------------------------------------------------ */
@@ -260,14 +322,23 @@ void openpgp_card_factory_reset(void)
     s_pw1_user_verified = false;
     s_pw3_verified      = false;
 
-    /* 2. Wipe DO store */
+    /* 2. Clear imported key */
+    memset(&s_key, 0, sizeof(s_key));
+    key_persist();
+
+    /* 3. Wipe DO store */
     openpgp_do_reset();
 
-    /* 3. Restore factory PINs and retry counters */
+    /* 4. Restore factory PINs and retry counters */
     pins_factory();
 
-    /* 4. Populate all factory-default DOs */
+    /* 5. Populate all factory-default DOs */
     openpgp_card_ensure_defaults();
+}
+
+bool openpgp_card_key_is_set(void)
+{
+    return s_key.set != 0;
 }
 
 void openpgp_card_set_serial(const uint8_t serial[4])
@@ -515,10 +586,113 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         return sw_only(out, out_max, SW_OK);
     }
 
+    /* ---- PUT DATA, odd (INS=0xDB) — Extended Header List key import ---- */
+    if (a.ins == 0xDB) {
+        /* Only P1P2 = 3FFF (key import) is supported in Phase 1 */
+        if (a.p1 != 0x3Fu || a.p2 != 0xFFu)
+            return sw_only(out, out_max, SW_WRONG_P1P2);
+        if (!s_pw3_verified)
+            return sw_only(out, out_max, SW_SEC_NOT_SAT);
+
+        /* Outer tag must be 0x4D */
+        if (a.lc < 2u || !a.data || a.data[0] != 0x4Du)
+            return sw_only(out, out_max, SW_WRONG_DATA);
+
+        /* Parse 4D length to locate the inner buffer */
+        uint16_t hdr = 1u; /* skip 4D tag byte */
+        uint32_t outer_vlen;
+        if (a.data[hdr] < 0x80u) {
+            outer_vlen = a.data[hdr]; hdr += 1u;
+        } else if (a.data[hdr] == 0x81u) {
+            if (hdr + 1u >= a.lc) return sw_only(out, out_max, SW_WRONG_DATA);
+            outer_vlen = a.data[hdr + 1u]; hdr += 2u;
+        } else if (a.data[hdr] == 0x82u) {
+            if (hdr + 2u >= a.lc) return sw_only(out, out_max, SW_WRONG_DATA);
+            outer_vlen = ((uint32_t)a.data[hdr + 1u] << 8) | a.data[hdr + 2u];
+            hdr += 3u;
+        } else {
+            return sw_only(out, out_max, SW_WRONG_DATA);
+        }
+        if ((uint32_t)hdr + outer_vlen > (uint32_t)a.lc)
+            return sw_only(out, out_max, SW_WRONG_DATA);
+
+        const uint8_t *inner     = a.data + hdr;
+        uint16_t       inner_len = (uint16_t)outer_vlen;
+
+        /* B6 (sig-slot CRT) must be present — Phase 1 only supports Sig slot.
+         * Absence of B6 (incl. the case where only B8/A4 is present) → 6A80. */
+        uint16_t b6_vlen = 0;
+        if (!tlv_find(inner, inner_len, 0x00B6u, &b6_vlen))
+            return sw_only(out, out_max, SW_WRONG_DATA);
+
+        /* 7F48: Cardholder private key template — (tag, length) pairs only,
+         * no values; each pair describes one element's byte-size in 5F48. */
+        uint16_t       tmpl_len = 0;
+        const uint8_t *tmpl     = tlv_find(inner, inner_len, 0x7F48u, &tmpl_len);
+        if (!tmpl) return sw_only(out, out_max, SW_WRONG_DATA);
+
+        /* Walk template to find 92 (private scalar) and compute its offset
+         * in 5F48.  Elements before 92 contribute their declared size. */
+        uint16_t d_offset = 0;
+        bool     found_92 = false;
+        uint16_t ti = 0;
+        while (ti < tmpl_len) {
+            /* Tag: 1 or 2 bytes */
+            uint16_t etag;
+            if ((tmpl[ti] & 0x1Fu) == 0x1Fu) {
+                if (ti + 1u >= tmpl_len) return sw_only(out, out_max, SW_WRONG_DATA);
+                etag = ((uint16_t)tmpl[ti] << 8) | tmpl[ti + 1u];
+                ti  += 2u;
+            } else {
+                etag = tmpl[ti]; ti += 1u;
+            }
+            if (ti >= tmpl_len) return sw_only(out, out_max, SW_WRONG_DATA);
+            /* Length field in template = declared size in 5F48 (no value here) */
+            uint16_t elen;
+            if (tmpl[ti] < 0x80u) {
+                elen = tmpl[ti]; ti += 1u;
+            } else if (tmpl[ti] == 0x81u) {
+                if (ti + 1u >= tmpl_len) return sw_only(out, out_max, SW_WRONG_DATA);
+                elen = tmpl[ti + 1u]; ti += 2u;
+            } else if (tmpl[ti] == 0x82u) {
+                if (ti + 2u >= tmpl_len) return sw_only(out, out_max, SW_WRONG_DATA);
+                elen = ((uint16_t)tmpl[ti + 1u] << 8) | tmpl[ti + 2u]; ti += 3u;
+            } else {
+                return sw_only(out, out_max, SW_WRONG_DATA);
+            }
+            if (etag == 0x92u) {
+                if (elen != 32u) return sw_only(out, out_max, SW_WRONG_DATA);
+                found_92 = true;
+                break;
+            }
+            d_offset += elen; /* accumulate offset of elements before 92 */
+        }
+        if (!found_92) return sw_only(out, out_max, SW_WRONG_DATA);
+
+        /* 5F48: concatenated key material; private scalar at [d_offset..d_offset+31] */
+        uint16_t       km_len = 0;
+        const uint8_t *km     = tlv_find(inner, inner_len, 0x5F48u, &km_len);
+        if (!km) return sw_only(out, out_max, SW_WRONG_DATA);
+        if ((uint32_t)d_offset + 32u > (uint32_t)km_len)
+            return sw_only(out, out_max, SW_WRONG_DATA);
+
+        /* Import key */
+        s_key.set  = 1u;
+        s_key.algo = 0x13u; /* ECDSA P-256 */
+        memcpy(s_key.d, km + d_offset, 32u);
+        key_persist();
+        return sw_only(out, out_max, SW_OK);
+    }
+
     /* ---- PSO: Compute Digital Signature (INS=0x2A, P1=0x9E, P2=0x9A) ---- */
     if (a.ins == 0x2A) {
         if (a.p1 != 0x9E || a.p2 != 0x9A)
             return sw_only(out, out_max, SW_WRONG_P1P2);
+
+        /* Referenced data check: key must be imported first */
+        if (!s_key.set)
+            return sw_only(out, out_max, SW_REF_NOT_FOUND);
+
         if (!s_pw1_sign_verified)
             return sw_only(out, out_max, SW_SEC_NOT_SAT);
 
@@ -529,13 +703,55 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
                 return sw_only(out, out_max, SW_COND_NOT_SAT);
         }
 
-        /* Invoke sign hook */
+        /* Invoke sign hook with private scalar */
         uint8_t  sig[256];
         uint16_t sig_len = 0;
-        if (!s_hooks->sign(a.data, a.lc, sig, &sig_len))
+        if (!s_hooks->sign(s_key.d, a.data, a.lc, sig, &sig_len))
             return sw_only(out, out_max, SW_COND_NOT_SAT);
+
+        /* Consume PW1 sign authorisation — exactly one signing per VERIFY 81 */
+        s_pw1_sign_verified = false;
+
+        /* Increment DS counter DO 0x93 (3-byte big-endian, persisted by DO store) */
+        {
+            const uint8_t *cv; uint16_t cn;
+            uint8_t ctr[3] = {0u, 0u, 0u};
+            if (openpgp_do_get(0x0093u, &cv, &cn) && cn == 3u)
+                memcpy(ctr, cv, 3u);
+            uint32_t cnt = ((uint32_t)ctr[0] << 16) |
+                           ((uint32_t)ctr[1] <<  8) | ctr[2];
+            cnt++;
+            ctr[0] = (uint8_t)(cnt >> 16);
+            ctr[1] = (uint8_t)((cnt >> 8) & 0xFFu);
+            ctr[2] = (uint8_t)(cnt & 0xFFu);
+            openpgp_do_put(0x0093u, ctr, 3u);
+        }
+
         return respond(out, out_max, sig, sig_len, SW_OK);
     }
 
     return sw_only(out, out_max, SW_INS_NOT_SUP);
 }
+
+/* ------------------------------------------------------------------ */
+/* key_persist — NVS on target, no-op on host                         */
+/* ------------------------------------------------------------------ */
+#ifndef TEST_HOST
+#include "esp_log.h"
+#include "nvs_utils.h"
+#include "keyboard_config.h"
+static const char *TAG = "openpgp_card";
+static bool key_persist(void)
+{
+    esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "pgp_key",
+                                             &s_key, sizeof(s_key),
+                                             "pgp_key_ver", 1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "key persist failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
+#else
+static bool key_persist(void) { return true; }
+#endif

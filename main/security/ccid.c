@@ -77,12 +77,13 @@ static uint8_t s_in_buf[CCID_BUF_SZ];    /* outgoing CCID response     */
 /* confirm, so these are placeholders. Real crypto (openpgp_crypto /   */
 /* mbedtls) and the sec_confirm touch gate are wired in Phase 1.       */
 /* ------------------------------------------------------------------ */
-static bool phase0_sign(const uint8_t *hash, uint16_t n,
+static bool phase0_sign(const uint8_t d[32],
+                        const uint8_t *hash, uint16_t n,
                         uint8_t *out, uint16_t *out_n)
 {
-    (void)hash; (void)n; (void)out;
+    (void)d; (void)hash; (void)n; (void)out;
     if (out_n) *out_n = 0;
-    return false;            /* no crypto yet */
+    return false;            /* no crypto yet — real impl in Task 7/8 */
 }
 
 static int phase0_confirm(void)

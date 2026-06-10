@@ -7,11 +7,14 @@
 /* Fake hooks                                                          */
 /* ------------------------------------------------------------------ */
 
-static int g_confirm_retval = 1;   /* 0=pending, 1=authorized, 2=deny */
+static int      g_confirm_retval      = 1;   /* 0=pending, 1=authorized, 2=deny */
+static uint8_t  g_fake_sign_last_d[32];      /* records d from last sign call    */
 
-static bool fake_sign(const uint8_t *hash, uint16_t n,
+static bool fake_sign(const uint8_t d[32],
+                      const uint8_t *hash, uint16_t n,
                       uint8_t *out, uint16_t *out_n)
 {
+    memcpy(g_fake_sign_last_d, d, 32);
     (void)hash; (void)n;
     /* canned 32-byte signature */
     memset(out, 0x42, 32);
@@ -72,6 +75,27 @@ static uint16_t build_get_data(uint8_t p1, uint8_t p2, uint8_t *buf)
     return 5;
 }
 
+/*
+ * Minimal key-import APDU: 00 DB 3F FF 2C 4D 2A B6 00 7F48 02 92 20 5F48 20 d[32]
+ *
+ * Inner content of 4D (42 bytes):
+ *   B6 00            — sig-slot CRT, empty
+ *   7F 48 02 92 20   — template: priv-key (92) is 32 bytes
+ *   5F 48 20 d[32]   — 32-byte key material
+ */
+static uint16_t build_key_import(const uint8_t d[32], uint8_t *buf)
+{
+    buf[0]  = 0x00; buf[1]  = 0xDB; buf[2]  = 0x3F; buf[3]  = 0xFF;
+    buf[4]  = 0x2Cu; /* Lc = 44 bytes of data */
+    buf[5]  = 0x4Du; buf[6]  = 0x2Au; /* outer tag 4D, inner len = 42 */
+    buf[7]  = 0xB6u; buf[8]  = 0x00u; /* B6 00: sig-slot CRT */
+    buf[9]  = 0x7Fu; buf[10] = 0x48u; buf[11] = 0x02u; /* 7F48 tag + len */
+    buf[12] = 0x92u; buf[13] = 0x20u; /* element: priv-key, 32 B */
+    buf[14] = 0x5Fu; buf[15] = 0x48u; buf[16] = 0x20u; /* 5F48 tag + len */
+    memcpy(buf + 17, d, 32);
+    return 49; /* 5 header + 44 data */
+}
+
 /* Extract status word from the last 2 bytes of a response */
 static uint16_t sw_of(const uint8_t *rsp, uint16_t len)
 {
@@ -100,8 +124,9 @@ static int find_index(const uint8_t *hay, uint16_t hlen,
 }
 
 /* ------------------------------------------------------------------ */
-/* Helper: drive SELECT, assert 9000                                   */
+/* Shared test helpers                                                 */
 /* ------------------------------------------------------------------ */
+
 static void do_select(uint8_t *cmd, uint8_t *rsp)
 {
     uint16_t clen = build_select(cmd, OPGP_AID, sizeof(OPGP_AID));
@@ -109,15 +134,47 @@ static void do_select(uint8_t *cmd, uint8_t *rsp)
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "SELECT returns 9000");
 }
 
-/* Helper: full card reset (hooks stored, DO store + PINs + DOs wiped to factory) */
 static void setup_card(openpgp_card_hooks_t *h)
 {
     openpgp_card_init(h);
     openpgp_card_factory_reset();
 }
 
+static void do_verify_pw3(uint8_t *cmd, uint8_t *rsp)
+{
+    static const uint8_t pw3[] = {'1','2','3','4','5','6','7','8'};
+    uint16_t clen = build_verify(0x83, pw3, sizeof(pw3), cmd);
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, 256);
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY PW3 returns 9000");
+}
+
+static void do_verify_pw1_sign(uint8_t *cmd, uint8_t *rsp)
+{
+    static const uint8_t pw1[] = {'1','2','3','4','5','6'};
+    uint16_t clen = build_verify(0x81, pw1, sizeof(pw1), cmd);
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, 256);
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY PW1 (81) returns 9000");
+}
+
+/* Import with the standard B6-00 format; PW3 must already be verified. */
+static void do_import_key(const uint8_t d[32], uint8_t *cmd, uint8_t *rsp)
+{
+    uint16_t clen = build_key_import(d, cmd);
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, 256);
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "key import returns 9000");
+}
+
+/* Disable UIF for signing; PW3 must already be verified. */
+static void do_disable_uif(uint8_t *cmd, uint8_t *rsp)
+{
+    static const uint8_t uif_off[] = {0x00, 0x20};
+    uint16_t clen = build_put_data(0x00, 0xD6, uif_off, sizeof(uif_off), cmd);
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, 256);
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "PUT DATA D6 disable UIF returns 9000");
+}
+
 /* ------------------------------------------------------------------ */
-/* Tests — existing (updated to use setup_card for PIN/DO state)       */
+/* Tests — existing (updated to work with key-present requirement)     */
 /* ------------------------------------------------------------------ */
 
 static void test_select_ok(void)
@@ -146,10 +203,14 @@ static void test_sign_requires_pin(void)
 
     uint8_t cmd[64], rsp[256];
 
-    /* SELECT first */
     do_select(cmd, rsp);
 
-    /* PSO:CDS before any VERIFY → 6982 security status not satisfied */
+    /* Import a key first (PW3 required) so PSO:CDS isn't gated by 6A88 */
+    do_verify_pw3(cmd, rsp);
+    static const uint8_t key_d[32] = {0xAA};
+    do_import_key(key_d, cmd, rsp);
+
+    /* PSO:CDS before PW1 VERIFY → 6982 (key set, PW1 not verified) */
     uint8_t hash[20];
     memset(hash, 0xAB, 20);
     uint16_t clen = build_pso_cds(hash, 20, cmd);
@@ -158,10 +219,7 @@ static void test_sign_requires_pin(void)
                    "PSO:CDS without VERIFY returns 6982");
 
     /* After VERIFY PW1 (mode 0x81 = signing mode) succeeds, signing works */
-    uint8_t pw1[] = {'1','2','3','4','5','6'};
-    clen = build_verify(0x81, pw1, sizeof(pw1), cmd);
-    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
-    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY PW1 (81) returns 9000");
+    do_verify_pw1_sign(cmd, rsp);
 
     clen = build_pso_cds(hash, 20, cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
@@ -179,11 +237,12 @@ static void test_sign_uif_gate(void)
 
     do_select(cmd, rsp);
 
-    /* VERIFY PW3 (admin) to allow PUT DATA */
-    uint8_t pw3[] = {'1','2','3','4','5','6','7','8'};
-    clen = build_verify(0x83, pw3, sizeof(pw3), cmd);
-    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
-    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY PW3 returns 9000");
+    /* VERIFY PW3 (admin) needed for key import and PUT DATA */
+    do_verify_pw3(cmd, rsp);
+
+    /* Import key so PSO:CDS can proceed past the 6A88 gate */
+    static const uint8_t key_d[32] = {0xBB};
+    do_import_key(key_d, cmd, rsp);
 
     /* PUT DATA: enable UIF for signing (DO 0xD6, byte[0]=0x01)
      * factory default already has D6={0x01,0x20}; this is idempotent */
@@ -193,10 +252,7 @@ static void test_sign_uif_gate(void)
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "PUT DATA UIF returns 9000");
 
     /* VERIFY PW1 (mode 0x81 = signing mode) */
-    uint8_t pw1[] = {'1','2','3','4','5','6'};
-    clen = build_verify(0x81, pw1, sizeof(pw1), cmd);
-    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
-    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY PW1 (81) returns 9000");
+    do_verify_pw1_sign(cmd, rsp);
 
     /* PSO:CDS with UIF enabled, confirm returns 1 (authorized) → 9000 */
     uint8_t hash[20];
@@ -210,6 +266,9 @@ static void test_sign_uif_gate(void)
     /* Verify that the canned signature is in the response data */
     TEST_ASSERT(rlen >= 34, "response contains 32 sig bytes + SW");
     TEST_ASSERT_EQ(rsp[0], 0x42, "first sig byte from fake_sign");
+
+    /* PW1 was consumed by the successful sign; re-verify before second attempt */
+    do_verify_pw1_sign(cmd, rsp);
 
     /* PSO:CDS with UIF enabled, confirm returns 2 (deny) → 6985 */
     clen = build_pso_cds(hash, 20, cmd);
@@ -263,11 +322,16 @@ static void test_verify_81_gates_sign(void)
     uint16_t clen, rlen;
     uint8_t hash[20];
     memset(hash, 0xCC, 20);
-    uint8_t pw1[] = {'1','2','3','4','5','6'};
 
     do_select(cmd, rsp);
 
+    /* Import a key so PSO:CDS is gated by PIN, not by missing key */
+    do_verify_pw3(cmd, rsp);
+    static const uint8_t key_d[32] = {0xCC};
+    do_import_key(key_d, cmd, rsp);
+
     /* VERIFY 0x82 alone must NOT satisfy the signing gate */
+    uint8_t pw1[] = {'1','2','3','4','5','6'};
     clen = build_verify(0x82, pw1, sizeof(pw1), cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY 82 ok");
@@ -319,11 +383,9 @@ static void test_verify_81_82_share_retries(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Tests — new (Task 3: factory DOs + constructed DOs)                 */
+/* Tests — Task 3: factory DOs + constructed DOs                      */
 /* ------------------------------------------------------------------ */
 
-/* factory_reset + SELECT; GET DATA 4F → 9000, 16 bytes, D2 76 prefix,
-   version 03 04 at offsets 6-7. */
 static void test_factory_defaults_aid(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
@@ -344,8 +406,6 @@ static void test_factory_defaults_aid(void)
     TEST_ASSERT_EQ(rsp[7], 0x04, "AID version byte[7] = 04");
 }
 
-/* GET DATA 6E → 9000; body length in [200,254); starts with 4F 10 D2;
-   contains C5 3C header; contains synthesised C4 TLV with live retries. */
 static void test_get_data_6e_constructed(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
@@ -363,22 +423,17 @@ static void test_get_data_6e_constructed(void)
     uint16_t dlen = (uint16_t)(rlen - 2);
     TEST_ASSERT(dlen >= 200 && dlen < 254, "6E data length in [200,254)");
 
-    /* Response body must start with 4F 10 D2 (4F TLV of 16-byte AID) */
     TEST_ASSERT_EQ(rsp[0], 0x4F, "6E body[0] = 4F");
     TEST_ASSERT_EQ(rsp[1], 0x10, "6E body[1] = 10 (AID len=16)");
     TEST_ASSERT_EQ(rsp[2], 0xD2, "6E body[2] = D2 (AID first byte)");
 
-    /* Must contain C5 TLV header: tag 0xC5, len 0x3C (60 decimal) */
     uint8_t c5_hdr[] = {0xC5, 0x3C};
     TEST_ASSERT(has_bytes(rsp, dlen, c5_hdr, 2), "6E contains C5 3C header");
 
-    /* Must contain synthesised C4 TLV: C4 07 00 10 00 10 03 00 03
-       (pw1_retry=3, pw3_retry=3 at factory-reset state) */
     uint8_t c4_factory[] = {0xC4, 0x07, 0x00, 0x10, 0x00, 0x10, 0x03, 0x00, 0x03};
     TEST_ASSERT(has_bytes(rsp, dlen, c4_factory, 9),
                 "6E contains synthesised C4 TLV (full counters)");
 
-    /* C4 must reflect live retry counters: fail one PW1 attempt then re-read */
     uint8_t wrong[] = {'X','X','X','X','X','X'};
     uint16_t vclen = build_verify(0x81, wrong, 6, cmd);
     openpgp_card_apdu(cmd, vclen, rsp, sizeof(rsp));
@@ -388,14 +443,11 @@ static void test_get_data_6e_constructed(void)
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000,
                    "GET DATA 6E after failed verify still returns 9000");
     dlen = (uint16_t)(rlen - 2);
-    /* pw1_retry decremented to 2, pw3_retry still 3 */
     uint8_t c4_after[] = {0xC4, 0x07, 0x00, 0x10, 0x00, 0x10, 0x02, 0x00, 0x03};
     TEST_ASSERT(has_bytes(rsp, dlen, c4_after, 9),
                 "C4 in 6E reflects decremented PW1 retry counter");
 }
 
-/* PW3 verify; PUT DATA C7 (20×0xAB) → 9000; GET DATA C5 → 60 B,
-   [0..19]=0xAB, [20]=0x00.  PUT DATA C7 with 19 B → 6A80. */
 static void test_fingerprint_slices(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
@@ -405,21 +457,14 @@ static void test_fingerprint_slices(void)
     uint16_t clen, rlen;
 
     do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
 
-    /* VERIFY PW3 */
-    uint8_t pw3[] = {'1','2','3','4','5','6','7','8'};
-    clen = build_verify(0x83, pw3, sizeof(pw3), cmd);
-    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
-    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY PW3 returns 9000");
-
-    /* PUT DATA C7 (20 × 0xAB) → 9000 */
     uint8_t fp20[20];
     memset(fp20, 0xAB, 20);
     clen = build_put_data(0x00, 0xC7, fp20, 20, cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "PUT DATA C7 (20B) returns 9000");
 
-    /* GET DATA C5 → 60 bytes; [0..19]=0xAB, [20]=0x00 */
     clen = build_get_data(0x00, 0xC5, cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DATA C5 returns 9000");
@@ -428,7 +473,6 @@ static void test_fingerprint_slices(void)
     TEST_ASSERT_EQ(rsp[19], 0xAB, "C5[19] = 0xAB (end of C7 slice)");
     TEST_ASSERT_EQ(rsp[20], 0x00, "C5[20] = 0x00 (next slot untouched)");
 
-    /* PUT DATA C7 with 19 bytes → 6A80 (wrong length) */
     uint8_t fp19[19];
     memset(fp19, 0xCC, 19);
     clen = build_put_data(0x00, 0xC7, fp19, 19, cmd);
@@ -436,7 +480,6 @@ static void test_fingerprint_slices(void)
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80, "PUT DATA C7 (19B) → 6A80");
 }
 
-/* GET DATA 65 → 9000; GET DATA 7A → 9000 with body 93 03 00 00 00. */
 static void test_get_data_65_7a(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
@@ -447,12 +490,10 @@ static void test_get_data_65_7a(void)
 
     do_select(cmd, rsp);
 
-    /* GET DATA 65 (Cardholder Related Data) → 9000 */
     clen = build_get_data(0x00, 0x65, cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DATA 65 returns 9000");
 
-    /* GET DATA 7A (Security support template) → 9000, body = 93 03 00 00 00 */
     clen = build_get_data(0x00, 0x7A, cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DATA 7A returns 9000");
@@ -468,9 +509,6 @@ static void test_get_data_65_7a(void)
 /* Tests — HW-validated fix: 5E login data + 7F74 general feature mgmt */
 /* ------------------------------------------------------------------ */
 
-/* GET DATA 5E (Login data) must return 9000 with 0 bytes, not 6A88.
- * gnupg do_learn_status aborts the whole chain on any 6A88 response,
- * so 5E must be present as an empty DO. */
 static void test_login_data_empty(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
@@ -487,9 +525,6 @@ static void test_login_data_empty(void)
     TEST_ASSERT_EQ(rlen - 2, 0, "5E data length is 0 bytes (empty)");
 }
 
-/* GET DATA 7F74 (General Feature Management) must return 9000 with
- * exactly {81 01 20}: template tag 81, len 1, value 0x20 (button present).
- * scdaemon derives extcap.has_button from this DO; without it "Button: no". */
 static void test_gf_management(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
@@ -509,8 +544,6 @@ static void test_gf_management(void)
     TEST_ASSERT_EQ(rsp[2], 0x20, "7F74 byte[2] = 0x20 (button present)");
 }
 
-/* GET DATA 6E body must contain the 7F74 TLV placed AFTER 5F52 and BEFORE 73.
- * Per OpenPGP 3.4 §4.4.3: 6E children = 4F, 5F52, 7F74, 73{...}. */
 static void test_6e_contains_7f74(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
@@ -527,16 +560,11 @@ static void test_6e_contains_7f74(void)
 
     uint16_t dlen = (uint16_t)(rlen - 2);
 
-    /* 6E body must contain the complete 7F74 TLV: 7F 74 03 81 01 20 */
     uint8_t gfm[] = {0x7F, 0x74, 0x03, 0x81, 0x01, 0x20};
     TEST_ASSERT(has_bytes(rsp, dlen, gfm, 6), "6E contains 7F 74 03 81 01 20");
 
-    /* Ordering: 7F74 TLV must appear AFTER 5F52 tag header and BEFORE 73.
-     * Note: 0x73 also appears inside HIST data, so search for {73 81} (the
-     * discretionary template tag followed by its long-form length marker)
-     * to distinguish the real 73 tag from data bytes. */
     uint8_t hist_hdr[]  = {0x5F, 0x52};
-    uint8_t disc_hdr[]  = {0x73, 0x81};  /* 73 tag + 0x81 = long-form len */
+    uint8_t disc_hdr[]  = {0x73, 0x81};
     int idx_5f52 = find_index(rsp, dlen, hist_hdr, 2);
     int idx_7f74 = find_index(rsp, dlen, gfm,      6);
     int idx_73   = find_index(rsp, dlen, disc_hdr,  2);
@@ -552,14 +580,11 @@ static void test_6e_contains_7f74(void)
 /* Tests — DO store capacity                                           */
 /* ------------------------------------------------------------------ */
 
-/* After factory_reset (19 factory DOs), one more DO must succeed,
-   proving MAX_ENTRIES was bumped beyond 16. */
 static void test_do_capacity(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
     setup_card(&h);
 
-    /* factory_reset stored 19 DOs; add a custom DO as the 20th */
     uint8_t extra[4] = {0xDE, 0xAD, 0xBE, 0xEF};
     TEST_ASSERT(openpgp_do_put(0x0101, extra, 4),
                 "20th DO put succeeds (MAX_ENTRIES >= 20)");
@@ -570,7 +595,6 @@ static void test_do_capacity(void)
     TEST_ASSERT_EQ(n, 4, "18th DO has correct length");
 }
 
-/* set_serial patches bytes [10..13] of the AID without disturbing the prefix. */
 static void test_set_serial(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
@@ -584,7 +608,6 @@ static void test_set_serial(void)
     uint8_t serial[4] = {0xDE, 0xAD, 0xBE, 0xEF};
     openpgp_card_set_serial(serial);
 
-    /* GET DATA 4F → 16 bytes; prefix intact; serial at [10..13] */
     clen = build_get_data(0x00, 0x4F, cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DATA 4F after set_serial → 9000");
@@ -596,6 +619,245 @@ static void test_set_serial(void)
     TEST_ASSERT_EQ(rsp[12], 0xBE, "AID serial[2] = BE");
     TEST_ASSERT_EQ(rsp[13], 0xEF, "AID serial[3] = EF");
 }
+
+/* ------------------------------------------------------------------ */
+/* Tests — Task 5: key import (PUT DATA 0xDB 3FFF) + DS counter       */
+/* ------------------------------------------------------------------ */
+
+/* Key import without PW3 → 6982; key not set afterwards. */
+static void test_key_import_requires_pw3(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    do_select(cmd, rsp);
+    /* Do NOT verify PW3 */
+
+    static const uint8_t d[32] = {0x11};
+    uint16_t clen = build_key_import(d, cmd);
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6982,
+                   "key import without PW3 returns 6982");
+    TEST_ASSERT(!openpgp_card_key_is_set(), "key not set after rejected import");
+}
+
+/* Full happy-path: PW3 → import → key_is_set; VERIFY 81 + UIF off → PSO:CDS 9000;
+   fake_sign received the correct private scalar. */
+static void test_key_import_ok_and_sign_uses_it(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+    g_confirm_retval = 1;
+
+    uint8_t cmd[64], rsp[256];
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    /* Distinctive private key */
+    uint8_t d[32];
+    for (int i = 0; i < 32; i++) d[i] = (uint8_t)(0x10 + i);
+
+    do_import_key(d, cmd, rsp);
+    TEST_ASSERT(openpgp_card_key_is_set(), "key_is_set after successful import");
+
+    /* Disable UIF for a clean sign test */
+    do_disable_uif(cmd, rsp);
+
+    do_verify_pw1_sign(cmd, rsp);
+
+    uint8_t hash[32];
+    memset(hash, 0xDE, 32);
+    uint16_t clen = build_pso_cds(hash, 32, cmd);
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "PSO:CDS with imported key returns 9000");
+
+    TEST_ASSERT(memcmp(g_fake_sign_last_d, d, 32) == 0,
+                "fake_sign received the imported private scalar");
+}
+
+/* B6 with a 3-byte reference value (84 01 01) must also be accepted. */
+static void test_key_import_b6_variant(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    /* Build APDU manually: B6 03 84 01 01 instead of B6 00 */
+    static const uint8_t d[32] = {0x22};
+    uint8_t inner[64];
+    uint16_t ii = 0;
+    inner[ii++]=0xB6; inner[ii++]=0x03;
+    inner[ii++]=0x84; inner[ii++]=0x01; inner[ii++]=0x01; /* B6 with ref */
+    inner[ii++]=0x7F; inner[ii++]=0x48; inner[ii++]=0x02; /* 7F48 tag+len */
+    inner[ii++]=0x92; inner[ii++]=0x20;                   /* priv-key, 32 B */
+    inner[ii++]=0x5F; inner[ii++]=0x48; inner[ii++]=0x20; /* 5F48 tag+len */
+    memcpy(inner + ii, d, 32); ii += 32;
+
+    cmd[0]=0x00; cmd[1]=0xDB; cmd[2]=0x3F; cmd[3]=0xFF;
+    cmd[4]=(uint8_t)(2u + ii);  /* Lc */
+    cmd[5]=0x4D; cmd[6]=(uint8_t)ii;
+    memcpy(cmd + 7, inner, ii);
+    uint16_t clen = (uint16_t)(7u + ii);
+
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000,
+                   "key import with B6 03 84 01 01 returns 9000");
+    TEST_ASSERT(openpgp_card_key_is_set(), "key_is_set after B6-variant import");
+}
+
+/* B8 (decrypt slot) instead of B6 (sig slot) → 6A80; key not set. */
+static void test_key_import_wrong_slot_b8(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    /* Same as build_key_import but with B8 instead of B6 */
+    static const uint8_t d[32] = {0x33};
+    uint16_t clen = build_key_import(d, cmd);
+    cmd[7] = 0xB8u; /* overwrite B6 tag with B8 */
+
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80,
+                   "key import with B8 (decrypt slot) returns 6A80");
+    TEST_ASSERT(!openpgp_card_key_is_set(), "key not set after B8 rejection");
+}
+
+/* 92 with length 16 (not 32) → 6A80 */
+static void test_key_import_bad_92_len(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    /* Build APDU: template says 92 10 (16 bytes, wrong) */
+    static const uint8_t d16[16] = {0x44};
+    uint8_t inner[64];
+    uint16_t ii = 0;
+    inner[ii++]=0xB6; inner[ii++]=0x00;
+    inner[ii++]=0x7F; inner[ii++]=0x48; inner[ii++]=0x02;
+    inner[ii++]=0x92; inner[ii++]=0x10; /* 16 bytes — wrong */
+    inner[ii++]=0x5F; inner[ii++]=0x48; inner[ii++]=0x10; /* 16 B payload */
+    memcpy(inner + ii, d16, 16); ii += 16;
+
+    cmd[0]=0x00; cmd[1]=0xDB; cmd[2]=0x3F; cmd[3]=0xFF;
+    cmd[4]=(uint8_t)(2u + ii);
+    cmd[5]=0x4D; cmd[6]=(uint8_t)ii;
+    memcpy(cmd + 7, inner, ii);
+    uint16_t clen = (uint16_t)(7u + ii);
+
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80,
+                   "key import with 92 len=16 returns 6A80");
+}
+
+/* Fresh card (no key), PW1 verified, UIF off → PSO:CDS returns 6A88. */
+static void test_sign_without_key_6a88(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+    g_confirm_retval = 1;
+
+    uint8_t cmd[64], rsp[256];
+    do_select(cmd, rsp);
+
+    /* Disable UIF (PW3 required) */
+    do_verify_pw3(cmd, rsp);
+    do_disable_uif(cmd, rsp);
+
+    /* Verify PW1 sign */
+    do_verify_pw1_sign(cmd, rsp);
+
+    /* PSO:CDS with PW1 verified but no key → 6A88 */
+    uint8_t hash[32]; memset(hash, 0xEE, 32);
+    uint16_t clen = build_pso_cds(hash, 32, cmd);
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A88,
+                   "PSO:CDS without imported key returns 6A88");
+}
+
+/* After one successful PSO:CDS, a second without re-VERIFY → 6982 (PW1 consumed). */
+static void test_sign_consumes_pw1(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+    g_confirm_retval = 1;
+
+    uint8_t cmd[64], rsp[256];
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    static const uint8_t d[32] = {0x55};
+    do_import_key(d, cmd, rsp);
+    do_disable_uif(cmd, rsp);
+    do_verify_pw1_sign(cmd, rsp);
+
+    uint8_t hash[32]; memset(hash, 0xAA, 32);
+    uint16_t clen = build_pso_cds(hash, 32, cmd);
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "first PSO:CDS returns 9000");
+
+    /* PW1 consumed — second PSO:CDS without re-VERIFY → 6982 */
+    clen = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6982,
+                   "second PSO:CDS without re-VERIFY returns 6982");
+}
+
+/* Two successful signs (each with its own VERIFY 81) → DS counter = 2. */
+static void test_ds_counter_increments(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+    g_confirm_retval = 1;
+
+    uint8_t cmd[64], rsp[256];
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    static const uint8_t d[32] = {0x66};
+    do_import_key(d, cmd, rsp);
+    do_disable_uif(cmd, rsp);
+
+    uint8_t hash[32]; memset(hash, 0xBB, 32);
+
+    /* First sign */
+    do_verify_pw1_sign(cmd, rsp);
+    uint16_t clen = build_pso_cds(hash, 32, cmd);
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "first sign returns 9000");
+
+    /* Second sign */
+    do_verify_pw1_sign(cmd, rsp);
+    clen = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "second sign returns 9000");
+
+    /* GET DATA 7A → Security Support Template: 93 03 00 00 02 */
+    clen = build_get_data(0x00, 0x7A, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DATA 7A returns 9000");
+    TEST_ASSERT_EQ(rlen - 2, 5, "7A body is 5 bytes");
+    TEST_ASSERT_EQ(rsp[0], 0x93, "7A[0] = 93");
+    TEST_ASSERT_EQ(rsp[1], 0x03, "7A[1] = 03 (len)");
+    TEST_ASSERT_EQ(rsp[2], 0x00, "DS counter[0] = 0");
+    TEST_ASSERT_EQ(rsp[3], 0x00, "DS counter[1] = 0");
+    TEST_ASSERT_EQ(rsp[4], 0x02, "DS counter[2] = 2");
+}
+
+/* ------------------------------------------------------------------ */
+/* Test suite entry point                                              */
+/* ------------------------------------------------------------------ */
 
 void test_openpgp_card(void)
 {
@@ -617,4 +879,13 @@ void test_openpgp_card(void)
     TEST_RUN(test_login_data_empty);
     TEST_RUN(test_gf_management);
     TEST_RUN(test_6e_contains_7f74);
+    /* Task 5: key import (PUT DATA 0xDB 3FFF) + DS counter + keyed sign */
+    TEST_RUN(test_key_import_requires_pw3);
+    TEST_RUN(test_key_import_ok_and_sign_uses_it);
+    TEST_RUN(test_key_import_b6_variant);
+    TEST_RUN(test_key_import_wrong_slot_b8);
+    TEST_RUN(test_key_import_bad_92_len);
+    TEST_RUN(test_sign_without_key_6a88);
+    TEST_RUN(test_sign_consumes_pw1);
+    TEST_RUN(test_ds_counter_increments);
 }

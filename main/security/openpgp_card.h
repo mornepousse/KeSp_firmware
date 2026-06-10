@@ -8,12 +8,13 @@
  * Injected dependencies — keeps the applet pure and host-testable,
  * mirroring the otp_proto_hooks_t pattern.
  *
- *  sign(hash, n, out, out_n)
- *      Compute a signature over `hash[0..n-1]`, write it to `out`,
+ *  sign(d, hash, n, out, out_n)
+ *      Compute a signature using private scalar `d[0..31]` (P-256,
+ *      big-endian) over `hash[0..n-1]`, write it to `out`,
  *      set *out_n to the number of bytes written.
  *      Returns true on success, false on error.
  *      On target: delegates to openpgp_crypto (mbedtls).
- *      In tests: returns a canned buffer.
+ *      In tests: records d, returns a canned buffer.
  *
  *  confirm()
  *      0 = not yet (treat as conditions not satisfied in host tests)
@@ -23,7 +24,8 @@
  *      In tests: returns a preset value.
  */
 typedef struct {
-    bool     (*sign)(const uint8_t *hash, uint16_t n,
+    bool     (*sign)(const uint8_t d[32],
+                     const uint8_t *hash, uint16_t n,
                      uint8_t *out, uint16_t *out_n);
     int      (*confirm)(void);
 } openpgp_card_hooks_t;
@@ -62,6 +64,12 @@ bool openpgp_card_ensure_defaults(void);
  * If the AID DO is absent it falls back to FACTORY_AID and creates the DO.
  */
 void openpgp_card_set_serial(const uint8_t serial[4]);
+
+/*
+ * Returns true if a private key has been successfully imported into the
+ * Signature slot via PUT DATA 0xDB 3FFF.  False on a fresh / factory-reset card.
+ */
+bool openpgp_card_key_is_set(void);
 
 /*
  * Process one command APDU (`in[0..in_len-1]`).
