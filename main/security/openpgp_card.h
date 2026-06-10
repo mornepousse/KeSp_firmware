@@ -29,11 +29,33 @@ typedef struct {
 } openpgp_card_hooks_t;
 
 /*
- * Initialise the applet, reset all state (PIN flags, retry counters,
- * selected flag, DO store), and store the hook pointers.
+ * Initialise the applet: store hook pointers and reset session state
+ * (selected flag, PW1/PW3 verified flags).  Does NOT wipe the DO store
+ * or restore factory PINs — call openpgp_card_factory_reset() for that.
  * Must be called once before openpgp_card_apdu().
  */
 void openpgp_card_init(const openpgp_card_hooks_t *hooks);
+
+/*
+ * Wipe all DOs, restore factory PINs / retry counters, reset session
+ * state, and repopulate all factory-default DOs.
+ * Safe to call at any time; used by tests and future admin commands.
+ */
+void openpgp_card_factory_reset(void);
+
+/*
+ * Populate any *missing* factory-default DOs without touching existing
+ * ones.  Called automatically by openpgp_card_factory_reset(); may also
+ * be called at target boot after openpgp_do_init() loads NVS state.
+ */
+void openpgp_card_ensure_defaults(void);
+
+/*
+ * Patch the 4-byte serial field inside the AID DO (bytes [10..13]).
+ * On target this is called with the efuse-derived MAC serial (Task 4).
+ * Has no effect if the AID DO has not been initialised yet.
+ */
+void openpgp_card_set_serial(const uint8_t serial[4]);
 
 /*
  * Process one command APDU (`in[0..in_len-1]`).

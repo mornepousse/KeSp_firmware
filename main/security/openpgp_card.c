@@ -31,6 +31,49 @@ static const uint8_t PW3_DEFAULT[8]  = {'1','2','3','4','5','6','7','8'};
 #define SW_WRONG_DATA      0x6A80u  /* incorrect data field */
 
 /* ------------------------------------------------------------------ */
+/* Factory-default Data Object values (OpenPGP 3.4)                   */
+/* ------------------------------------------------------------------ */
+
+/* AID 0x4F — 16 bytes.  Serial bytes [10..13] patched from efuse MAC on
+ * target (Task 4); left as 00 00 00 00 for host / first-boot. */
+static const uint8_t FACTORY_AID[16] = {
+    0xD2, 0x76, 0x00, 0x01, 0x24, 0x01,   /* RID + OpenPGP application 01 */
+    0x03, 0x04,                            /* version 3.4                  */
+    0xFF, 0x00,                            /* manufacturer 0xFF00 (test)   */
+    0x00, 0x00, 0x00, 0x00,               /* serial (host default)        */
+    0x00, 0x00                             /* RFU                          */
+};
+
+/* Historical bytes 0x5F52 — mirrors the ATR historical bytes */
+static const uint8_t FACTORY_HIST[10] = {
+    0x00, 0x31, 0x84, 0x73, 0x80, 0x01, 0x80, 0x00, 0x90, 0x00
+};
+
+/* Extended capabilities 0xC0 — 10 bytes:
+ * byte0 0x34 = key-import(0x20)|PW-status-changeable(0x10)|algo-attrs-changeable(0x04)
+ * bytes 6-7 = max special-DO length 0x0100 */
+static const uint8_t FACTORY_C0[10] = {
+    0x34, 0x00,  0x00, 0x00,  0x00, 0x00,  0x01, 0x00,  0x00, 0x00
+};
+
+/* Algorithm attributes: 0x13=ECDSA, 0x12=ECDH; OID = NIST P-256 */
+static const uint8_t FACTORY_C1[9] = {
+    0x13, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
+};
+static const uint8_t FACTORY_C2[9] = {
+    0x12, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
+};
+static const uint8_t FACTORY_C3[9] = {
+    0x13, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
+};
+
+/* UIF DOs: byte0 0x01=required, byte1 0x20=button-present.
+ * Signing ON by default; decryption and authentication off. */
+static const uint8_t FACTORY_D6[2] = {0x01, 0x20};
+static const uint8_t FACTORY_D7[2] = {0x00, 0x20};
+static const uint8_t FACTORY_D8[2] = {0x00, 0x20};
+
+/* ------------------------------------------------------------------ */
 /* State                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -38,7 +81,7 @@ static const openpgp_card_hooks_t *s_hooks;
 
 static bool    s_selected;
 static bool    s_pw1_sign_verified;  /* mode 0x81 — required for PSO:CDS */
-static bool    s_pw1_user_verified;  /* mode 0x82 — gate for PSO:DECIPHER (Phase 2); write-only in Phase 1 */
+static bool    s_pw1_user_verified;  /* mode 0x82 — gate for PSO:DECIPHER (Phase 2) */
 static bool    s_pw3_verified;
 static uint8_t s_pw1_retry;          /* shared counter for both PW1 modes */
 static uint8_t s_pw3_retry;
@@ -73,6 +116,40 @@ static uint16_t sw_only(uint8_t *out, uint16_t out_max, uint16_t sw)
     return respond(out, out_max, NULL, 0, sw);
 }
 
+/* BER-TLV appender — single-byte or two-byte tags, short/long-form length.
+ * Supports n = 0..255.  Returns new offset, or 0 on overflow / n>255. */
+static uint16_t tlv_append(uint8_t *buf, uint16_t max, uint16_t off,
+                            uint16_t tag, const uint8_t *v, uint16_t n)
+{
+    if (n > 255u) return 0;  /* would need 0x82 encoding — not needed here */
+
+    uint16_t tag_bytes = (tag > 0xFFu) ? 2u : 1u;
+    uint16_t len_bytes = (n >= 128u)   ? 2u : 1u;
+    uint32_t needed    = (uint32_t)tag_bytes + len_bytes + n;
+
+    if ((uint32_t)off + needed > (uint32_t)max) return 0;
+
+    if (tag > 0xFFu) {
+        buf[off++] = (uint8_t)(tag >> 8);
+        buf[off++] = (uint8_t)(tag & 0xFFu);
+    } else {
+        buf[off++] = (uint8_t)tag;
+    }
+
+    if (n >= 128u) {
+        buf[off++] = 0x81u;
+        buf[off++] = (uint8_t)n;
+    } else {
+        buf[off++] = (uint8_t)n;
+    }
+
+    if (n > 0u) {
+        if (v) memcpy(buf + off, v, n);
+        else   memset(buf + off, 0, n);
+    }
+    return (uint16_t)(off + n);
+}
+
 /* Check UIF DO 0xD6: returns true if touch confirmation is required. */
 static bool uif_signing_required(void)
 {
@@ -84,30 +161,94 @@ static bool uif_signing_required(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Public API                                                          */
+/* Public API — lifecycle                                              */
 /* ------------------------------------------------------------------ */
 
 void openpgp_card_init(const openpgp_card_hooks_t *hooks)
 {
     s_hooks = hooks;
 
-    /* Reset DO store */
-    openpgp_do_reset();
-
-    /* Reset applet state */
+    /* Reset session state only — DO store, PINs and retry counters are
+     * NOT touched here.  Call openpgp_card_factory_reset() for a full
+     * clean slate (tests, admin command). */
     s_selected          = false;
     s_pw1_sign_verified = false;
     s_pw1_user_verified = false;
     s_pw3_verified      = false;
-    s_pw1_retry         = PW1_RETRY_MAX;
-    s_pw3_retry         = PW3_RETRY_MAX;
-
-    /* Restore factory-default PINs */
-    memcpy(s_pw1, PW1_DEFAULT, PW1_DEFAULT_LEN);
-    s_pw1_len = PW1_DEFAULT_LEN;
-    memcpy(s_pw3, PW3_DEFAULT, PW3_DEFAULT_LEN);
-    s_pw3_len = PW3_DEFAULT_LEN;
 }
+
+void openpgp_card_ensure_defaults(void)
+{
+    const uint8_t *v;
+    uint16_t n;
+
+    /* Populate any absent factory DOs without touching existing ones. */
+#define ENSURE(tag_, data_, len_) \
+    do { if (!openpgp_do_get((tag_), &v, &n)) \
+             openpgp_do_put((tag_), (data_), (len_)); } while (0)
+
+    ENSURE(0x004F, FACTORY_AID,  16);
+    ENSURE(0x5F52, FACTORY_HIST, 10);
+    ENSURE(0x00C0, FACTORY_C0,   10);
+    ENSURE(0x00C1, FACTORY_C1,    9);
+    ENSURE(0x00C2, FACTORY_C2,    9);
+    ENSURE(0x00C3, FACTORY_C3,    9);
+    ENSURE(0x00C5, NULL,         60);  /* fingerprints: zero-filled   */
+    ENSURE(0x00C6, NULL,         60);  /* CA fingerprints: zero-filled */
+    ENSURE(0x00CD, NULL,         12);  /* generation timestamps: zero  */
+    ENSURE(0x00D6, FACTORY_D6,    2);
+    ENSURE(0x00D7, FACTORY_D7,    2);
+    ENSURE(0x00D8, FACTORY_D8,    2);
+    ENSURE(0x005B, NULL,          0);  /* name: empty                  */
+    ENSURE(0x5F2D, (const uint8_t *)"en", 2);
+    ENSURE(0x5F35, (const uint8_t *)"9",  1);
+    ENSURE(0x5F50, NULL,          0);  /* URL: empty                   */
+    ENSURE(0x0093, NULL,          3);  /* DS counter: zero             */
+
+#undef ENSURE
+}
+
+void openpgp_card_factory_reset(void)
+{
+    /* 1. Reset session state */
+    s_selected          = false;
+    s_pw1_sign_verified = false;
+    s_pw1_user_verified = false;
+    s_pw3_verified      = false;
+
+    /* 2. Wipe DO store */
+    openpgp_do_reset();
+
+    /* 3. Restore factory PINs and retry counters */
+    memcpy(s_pw1, PW1_DEFAULT, PW1_DEFAULT_LEN);
+    s_pw1_len   = PW1_DEFAULT_LEN;
+    memcpy(s_pw3, PW3_DEFAULT, PW3_DEFAULT_LEN);
+    s_pw3_len   = PW3_DEFAULT_LEN;
+    s_pw1_retry = PW1_RETRY_MAX;
+    s_pw3_retry = PW3_RETRY_MAX;
+
+    /* 4. Populate all factory-default DOs */
+    openpgp_card_ensure_defaults();
+}
+
+void openpgp_card_set_serial(const uint8_t serial[4])
+{
+    uint8_t aid[16];
+    const uint8_t *v;
+    uint16_t n;
+
+    if (openpgp_do_get(0x004F, &v, &n) && n == 16)
+        memcpy(aid, v, 16);
+    else
+        memcpy(aid, FACTORY_AID, 16);
+
+    memcpy(aid + 10, serial, 4);
+    openpgp_do_put(0x004F, aid, 16);
+}
+
+/* ------------------------------------------------------------------ */
+/* APDU dispatch                                                       */
+/* ------------------------------------------------------------------ */
 
 uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
                             uint8_t *out, uint16_t out_max)
@@ -145,7 +286,6 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         uint8_t *pin    = is_pw1 ? s_pw1 : s_pw3;
         uint8_t  pinlen = is_pw1 ? s_pw1_len : s_pw3_len;
 
-        /* Blocked? */
         if (*retry == 0)
             return sw_only(out, out_max, SW_AUTH_BLOCKED);
 
@@ -159,11 +299,11 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
             return sw_only(out, out_max, (uint16_t)(0x63C0u | *retry));
         }
 
-        /* Correct PIN — reset counter and set the mode-specific flag */
+        /* Correct PIN — reset counter, set mode-specific verified flag */
         *retry = (is_pw1 ? PW1_RETRY_MAX : PW3_RETRY_MAX);
         if      (a.p2 == 0x81) s_pw1_sign_verified = true;
-        else if (a.p2 == 0x82) s_pw1_user_verified = true;  /* 0x82: decrypt/other gate — consumed in Phase 2 */
-        else                   s_pw3_verified       = true;  /* 0x83 */
+        else if (a.p2 == 0x82) s_pw1_user_verified = true;
+        else                   s_pw3_verified       = true;
         return sw_only(out, out_max, SW_OK);
     }
 
@@ -172,6 +312,106 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         uint16_t       tag = ((uint16_t)a.p1 << 8) | a.p2;
         const uint8_t *v;
         uint16_t        n;
+
+        /* ---- 6E: Application Related Data (constructed) ---- */
+        if (tag == 0x006Eu) {
+            uint8_t  body[256];
+            uint16_t off = 0;
+
+            /* 4F: AID */
+            v = NULL; n = 0; openpgp_do_get(0x004F, &v, &n);
+            off = tlv_append(body, sizeof(body), off, 0x004Fu, v, n);
+
+            /* 5F52: Historical bytes (two-byte tag) */
+            v = NULL; n = 0; openpgp_do_get(0x5F52u, &v, &n);
+            off = tlv_append(body, sizeof(body), off, 0x5F52u, v, n);
+
+            /* 73: Discretionary DOs — build inner content first */
+            {
+                uint8_t  inner[256];
+                uint16_t ioff = 0;
+
+                v = NULL; n = 0; openpgp_do_get(0x00C0u, &v, &n);
+                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC0u, v, n);
+
+                v = NULL; n = 0; openpgp_do_get(0x00C1u, &v, &n);
+                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC1u, v, n);
+
+                v = NULL; n = 0; openpgp_do_get(0x00C2u, &v, &n);
+                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC2u, v, n);
+
+                v = NULL; n = 0; openpgp_do_get(0x00C3u, &v, &n);
+                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC3u, v, n);
+
+                /* C4: synthesised from live retry counters — never stored */
+                uint8_t c4[7] = {
+                    0x00, 0x10, 0x00, 0x10,
+                    s_pw1_retry, 0x00, s_pw3_retry
+                };
+                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC4u, c4, 7);
+
+                v = NULL; n = 0; openpgp_do_get(0x00C5u, &v, &n);
+                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC5u, v, n);
+
+                v = NULL; n = 0; openpgp_do_get(0x00C6u, &v, &n);
+                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC6u, v, n);
+
+                v = NULL; n = 0; openpgp_do_get(0x00CDu, &v, &n);
+                ioff = tlv_append(inner, sizeof(inner), ioff, 0xCDu, v, n);
+
+                v = NULL; n = 0; openpgp_do_get(0x00D6u, &v, &n);
+                ioff = tlv_append(inner, sizeof(inner), ioff, 0xD6u, v, n);
+
+                v = NULL; n = 0; openpgp_do_get(0x00D7u, &v, &n);
+                ioff = tlv_append(inner, sizeof(inner), ioff, 0xD7u, v, n);
+
+                v = NULL; n = 0; openpgp_do_get(0x00D8u, &v, &n);
+                ioff = tlv_append(inner, sizeof(inner), ioff, 0xD8u, v, n);
+
+                off = tlv_append(body, sizeof(body), off, 0x73u, inner, ioff);
+            }
+
+            return respond(out, out_max, body, off, SW_OK);
+        }
+
+        /* ---- 65: Cardholder Related Data (constructed) ---- */
+        if (tag == 0x0065u) {
+            uint8_t  body[64];
+            uint16_t off = 0;
+
+            v = NULL; n = 0; openpgp_do_get(0x005Bu, &v, &n);
+            off = tlv_append(body, sizeof(body), off, 0x5Bu, v, n);
+
+            v = NULL; n = 0; openpgp_do_get(0x5F2Du, &v, &n);
+            off = tlv_append(body, sizeof(body), off, 0x5F2Du, v, n);
+
+            v = NULL; n = 0; openpgp_do_get(0x5F35u, &v, &n);
+            off = tlv_append(body, sizeof(body), off, 0x5F35u, v, n);
+
+            return respond(out, out_max, body, off, SW_OK);
+        }
+
+        /* ---- 7A: Security Support Template (constructed) ---- */
+        if (tag == 0x007Au) {
+            uint8_t  body[16];
+            uint16_t off = 0;
+
+            v = NULL; n = 0; openpgp_do_get(0x0093u, &v, &n);
+            off = tlv_append(body, sizeof(body), off, 0x93u, v, n);
+
+            return respond(out, out_max, body, off, SW_OK);
+        }
+
+        /* ---- C4: PW status bytes (synthesised — never stored) ---- */
+        if (tag == 0x00C4u) {
+            uint8_t c4[7] = {
+                0x00, 0x10, 0x00, 0x10,
+                s_pw1_retry, 0x00, s_pw3_retry
+            };
+            return respond(out, out_max, c4, 7, SW_OK);
+        }
+
+        /* ---- All others: flat store lookup ---- */
         if (!openpgp_do_get(tag, &v, &n))
             return sw_only(out, out_max, SW_REF_NOT_FOUND);
         return respond(out, out_max, v, n, SW_OK);
@@ -181,7 +421,46 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
     if (a.ins == 0xDA) {
         if (!s_pw3_verified)
             return sw_only(out, out_max, SW_SEC_NOT_SAT);
+
         uint16_t tag = ((uint16_t)a.p1 << 8) | a.p2;
+
+        /* Fingerprint slices: C7/C8/C9 → write 20-byte slice into C5 */
+        if (tag == 0x00C7u || tag == 0x00C8u || tag == 0x00C9u) {
+            if (a.lc != 20)
+                return sw_only(out, out_max, SW_WRONG_DATA);
+            uint8_t        c5[60];
+            const uint8_t *cur; uint16_t cur_n;
+            if (openpgp_do_get(0x00C5u, &cur, &cur_n) && cur_n == 60)
+                memcpy(c5, cur, 60);
+            else
+                memset(c5, 0, 60);
+            uint16_t slice_off = (tag == 0x00C7u) ? 0u :
+                                 (tag == 0x00C8u) ? 20u : 40u;
+            memcpy(c5 + slice_off, a.data, 20);
+            if (!openpgp_do_put(0x00C5u, c5, 60))
+                return sw_only(out, out_max, SW_WRONG_DATA);
+            return sw_only(out, out_max, SW_OK);
+        }
+
+        /* Generation timestamp slices: CE/CF/D0 → write 4-byte slice into CD */
+        if (tag == 0x00CEu || tag == 0x00CFu || tag == 0x00D0u) {
+            if (a.lc != 4)
+                return sw_only(out, out_max, SW_WRONG_DATA);
+            uint8_t        cd[12];
+            const uint8_t *cur; uint16_t cur_n;
+            if (openpgp_do_get(0x00CDu, &cur, &cur_n) && cur_n == 12)
+                memcpy(cd, cur, 12);
+            else
+                memset(cd, 0, 12);
+            uint16_t slice_off = (tag == 0x00CEu) ? 0u :
+                                 (tag == 0x00CFu) ? 4u : 8u;
+            memcpy(cd + slice_off, a.data, 4);
+            if (!openpgp_do_put(0x00CDu, cd, 12))
+                return sw_only(out, out_max, SW_WRONG_DATA);
+            return sw_only(out, out_max, SW_OK);
+        }
+
+        /* Generic PUT DATA */
         if (!openpgp_do_put(tag, a.data, a.lc))
             return sw_only(out, out_max, SW_WRONG_DATA);
         return sw_only(out, out_max, SW_OK);
