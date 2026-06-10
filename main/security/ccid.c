@@ -187,9 +187,12 @@ static void ccid_send_wtx_cb(void *param)
  * returned and both arrive in the defer queue before the WTX transfer drains. */
 static void ccid_send_final_cb(void *param)
 {
-    (void)param;
+    uintptr_t retries = (uintptr_t)param;
     if (usbd_edpt_busy(s_rhport, s_ep_in)) {
-        usbd_defer_func(ccid_send_final_cb, NULL, false);
+        if (retries < 200)
+            usbd_defer_func(ccid_send_final_cb, (void *)(retries + 1), false);
+        else
+            ESP_LOGE(TAG, "final send abandoned after 200 retries");
         return;
     }
     s_final_queued = true;
@@ -218,21 +221,27 @@ static void ccid_worker(void *arg)
                               &s_out_buf[CCID_HDR_LEN], (uint16_t)dwLength,
                               &s_in_buf[CCID_HDR_LEN], CCID_BUF_SZ - CCID_HDR_LEN);
 
-        ESP_LOGD(TAG, "APDU in=%u out=%u SW=%02x%02x",
-                 (unsigned)dwLength, (unsigned)apdu_n,
-                 s_in_buf[CCID_HDR_LEN + apdu_n - 2],
-                 s_in_buf[CCID_HDR_LEN + apdu_n - 1]);
+        if (apdu_n >= 2) {
+            ESP_LOGD(TAG, "APDU in=%u out=%u SW=%02x%02x",
+                     (unsigned)dwLength, (unsigned)apdu_n,
+                     s_in_buf[CCID_HDR_LEN + apdu_n - 2],
+                     s_in_buf[CCID_HDR_LEN + apdu_n - 1]);
+        }
+
+        /* One-shot stack high-watermark log (mbedTLS ECDSA P-256 ~2-3 KB). */
+        static bool s_hwm_logged;
+        if (!s_hwm_logged) {
+            s_hwm_logged = true;
+            ESP_LOGD(TAG, "worker stack HWM: %u",
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        }
 
         s_resp_len = ccid_fill_header(RDR_TO_PC_DATA_BLOCK,
                                       s_cur_slot, s_cur_seq, apdu_n);
 
-        /* Wait briefly for any in-flight WTX to drain before scheduling the
-         * final response (up to 500 ms; a USB FS transfer drains in < 1 ms). */
-        for (int i = 0; i < 100 && usbd_edpt_busy(s_rhport, s_ep_in); i++)
-            vTaskDelay(pdMS_TO_TICKS(5));
-
-        /* Hand off to the tud_task for the actual usbd_edpt_xfer call.
-         * s_busy is cleared in ccid_drv_xfer when that transfer completes. */
+        /* s_in_buf and s_resp_len are written by the worker BEFORE usbd_defer_func().
+         * The FreeRTOS queue inside usbd_defer_func provides a full memory barrier
+         * (SMP spinlock), guaranteeing visibility from tud_task. Do not bypass it. */
         usbd_defer_func(ccid_send_final_cb, NULL, false);
     }
 }
@@ -257,6 +266,7 @@ static bool dongle_sign(const uint8_t d[32],
 static int dongle_confirm(void)
 {
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    const uint32_t deadline = now + SEC_CONFIRM_TIMEOUT_MS;
     sec_confirm_arm(CCID_CONFIRM_SLOT, now);
     uint32_t last_wtx = now;
     uint8_t  slot     = 0;
@@ -264,6 +274,7 @@ static int dongle_confirm(void)
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(20));
         now = (uint32_t)(esp_timer_get_time() / 1000);
+        if ((int32_t)(now - deadline) >= 0) return 2;   /* unconditional termination */
 
         sec_confirm_state_t st = sec_confirm_poll(now, &slot);
         if (st == SEC_CONFIRM_AUTHORIZED)
@@ -372,8 +383,10 @@ static bool ccid_drv_deinit(void)
 static void ccid_drv_reset(uint8_t rhport)
 {
     (void)rhport;
-    s_ep_out = 0;
-    s_ep_in  = 0;
+    s_ep_out       = 0;
+    s_ep_in        = 0;
+    s_busy         = false;
+    s_final_queued = false;
 }
 
 static uint16_t ccid_drv_open(uint8_t rhport,
@@ -485,7 +498,7 @@ void ccid_init(void)
     s_msg_ready = xSemaphoreCreateBinary();
     configASSERT(s_msg_ready);
 
-    BaseType_t rc = xTaskCreate(ccid_worker, "ccid", 4096, NULL, 5, &s_worker);
+    BaseType_t rc = xTaskCreate(ccid_worker, "ccid", 6144, NULL, 5, &s_worker);
     configASSERT(rc == pdPASS);
 
     ESP_LOGI(TAG, "CCID class driver registered (worker task running)");
