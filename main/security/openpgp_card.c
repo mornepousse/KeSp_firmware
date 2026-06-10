@@ -890,6 +890,7 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         s_keys[slot].algo   = algo;
         s_keys[slot].origin = 2u;   /* imported */
         memcpy(s_keys[slot].d, d, PGP_P256_SCALAR_BYTES);
+        memset(d, 0, sizeof(d));    /* scrub the transient scalar copy */
         if (!key_persist()) {
             memset(&s_keys[slot], 0, sizeof(s_keys[slot]));
             return sw_only(out, out_max, 0x6F00u);
@@ -1061,8 +1062,11 @@ void openpgp_card_load(void)
             s_keys[OPENPGP_SLOT_SIG].algo   = v1.algo;
             s_keys[OPENPGP_SLOT_SIG].origin = 2;      /* Phase 1 = import only */
             memcpy(s_keys[OPENPGP_SLOT_SIG].d, v1.d, 32);
-            key_persist();                             /* write v2 */
-            ESP_LOGI(TAG, "migrated Phase-1 SIG key to multi-slot blob");
+            if (key_persist())                         /* write v2 */
+                ESP_LOGI(TAG, "migrated Phase-1 SIG key to multi-slot blob");
+            else
+                ESP_LOGW(TAG, "Phase-1 key migration: v2 persist failed, "
+                              "will retry next boot");
         }
     }
 }
