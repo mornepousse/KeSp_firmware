@@ -953,10 +953,13 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
             /* NOTE: mode-82 verification is NOT consumed — the C4 validity
              * byte applies to PSO:CDS only (OpenPGP 3.4 §7.2.2). */
 
-            uint8_t shared[64]; uint16_t shared_n = 0;
+            uint8_t shared[32]; uint16_t shared_n = 0;
             if (!s_hooks->ecdh ||
                 !s_hooks->ecdh(k->d, p, p_n, shared, &shared_n))
                 return sw_only(out, out_max, SW_COND_NOT_SAT);
+            /* Defence-in-depth: never copy past the buffer if a future hook
+             * mis-reports its length (the contract fixes X25519 output at 32 B). */
+            if (shared_n > sizeof(shared)) shared_n = sizeof(shared);
             return respond(out, out_max, shared, shared_n, SW_OK);
         }
 
