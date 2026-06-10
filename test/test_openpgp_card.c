@@ -1276,6 +1276,32 @@ static void test_read_pubkey_wrong_slot(void)
                    "READ PUBKEY for auth slot (A4) → 6A88");
 }
 
+/* .pubkey hook NULL → 6A88 even when key is present.
+ * This test would have caught the original wiring bug in ccid.c where
+ * s_dongle_hooks.pubkey was left NULL, making INS 0x47 always dead. */
+static void test_read_pubkey_null_hook(void)
+{
+    /* Use a hooks struct where .pubkey is explicitly NULL */
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = NULL };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+
+    /* Import a real key so the 6A88 comes from the NULL hook, not missing key */
+    do_verify_pw3(cmd, rsp);
+    static const uint8_t d[32] = {0xEE};
+    do_import_key(d, cmd, rsp);
+
+    /* READ PUBLIC KEY (00 47 81 00 02 B6 00) → 6A88 because .pubkey is NULL */
+    clen = build_read_pubkey(0x81, 0xB6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A88,
+                   "READ PUBKEY with NULL .pubkey hook → 6A88");
+}
+
 /* ------------------------------------------------------------------ */
 /* Test suite entry point                                              */
 /* ------------------------------------------------------------------ */
@@ -1324,4 +1350,5 @@ void test_openpgp_card(void)
     TEST_RUN(test_read_pubkey_ok);
     TEST_RUN(test_read_pubkey_generate_unsupported);
     TEST_RUN(test_read_pubkey_wrong_slot);
+    TEST_RUN(test_read_pubkey_null_hook);
 }

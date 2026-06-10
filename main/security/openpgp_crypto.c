@@ -116,6 +116,33 @@ bool openpgp_crypto_selftest(void)
     } while (0);
     mbedtls_mpi_free(&r); mbedtls_mpi_free(&s); mbedtls_mpi_free(&dd);
     mbedtls_ecp_point_free(&Q); mbedtls_ecp_group_free(&grp);
-    ESP_LOGI(TAG, "selftest: %s", ok ? "PASS" : "FAIL");
-    return ok;
+    if (!ok) {
+        ESP_LOGE(TAG, "selftest: sign KAT failed");
+        return false;
+    }
+
+    /* KAT 2: pubkey derivation — Q = d·G for the same RFC 6979 A.2.5 scalar.
+     * Known public key coordinates (NIST / RFC 6979 A.2.5):
+     *   Ux = 60FED4BA255A9D31C961EB74C6356D68C049B8923B61FA6CE669622E60F29FB6
+     *   Uy = 7903FE1008B8BC99A41AE9E95628BC64F2F1B20C2D7E9F5177A3C294D4462299 */
+    static const uint8_t Ux[32] = {
+        0x60,0xFE,0xD4,0xBA,0x25,0x5A,0x9D,0x31,0xC9,0x61,0xEB,0x74,0xC6,0x35,0x6D,0x68,
+        0xC0,0x49,0xB8,0x92,0x3B,0x61,0xFA,0x6C,0xE6,0x69,0x62,0x2E,0x60,0xF2,0x9F,0xB6,
+    };
+    static const uint8_t Uy[32] = {
+        0x79,0x03,0xFE,0x10,0x08,0xB8,0xBC,0x99,0xA4,0x1A,0xE9,0xE9,0x56,0x28,0xBC,0x64,
+        0xF2,0xF1,0xB2,0x0C,0x2D,0x7E,0x9F,0x51,0x77,0xA3,0xC2,0x94,0xD4,0x46,0x22,0x99,
+    };
+    uint8_t pub[65];
+    bool pub_ok = openpgp_crypto_p256_pubkey(d, pub) &&
+                  pub[0] == 0x04 &&
+                  memcmp(pub + 1,  Ux, 32) == 0 &&
+                  memcmp(pub + 33, Uy, 32) == 0;
+    if (!pub_ok) {
+        ESP_LOGE(TAG, "selftest: pubkey KAT failed");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "selftest: PASS");
+    return true;
 }

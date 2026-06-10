@@ -289,9 +289,17 @@ static int dongle_confirm(void)
     }
 }
 
+/* Derive Q = d·G for READ PUBLIC KEY (INS 0x47 P1=0x81) — gpg keytocard reads
+ * the card's public key here to build the card-backed secret stub. */
+static bool dongle_pubkey(const uint8_t d[32], uint8_t out_pub[65])
+{
+    return openpgp_crypto_p256_pubkey(d, out_pub);
+}
+
 static const openpgp_card_hooks_t s_dongle_hooks = {
     .sign    = dongle_sign,
     .confirm = dongle_confirm,
+    .pubkey  = dongle_pubkey,
 };
 
 /* ------------------------------------------------------------------ */
