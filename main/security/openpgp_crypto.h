@@ -20,3 +20,18 @@ bool openpgp_crypto_selftest(void);
  * Validates 0 < d < n.  Scrubs the scalar copy on exit.
  * Returns false on bad args, invalid scalar, or mbedtls error. */
 bool openpgp_crypto_p256_pubkey(const uint8_t d[32], uint8_t out_pub[65]);
+
+/* X25519 (RFC 7748).  Scalar convention: big-endian, as received from gpg's
+ * MPI encoding (the implementation reverses + clamps internally). */
+
+/* Public key: out_le = X25519(d, basepoint 9), 32 B little-endian u. */
+bool openpgp_crypto_x25519_pubkey(const uint8_t d_be[32], uint8_t out_le[32]);
+
+/* Shared secret: out_le = X25519(d, peer), peer = 32 B LE u-coordinate. */
+bool openpgp_crypto_x25519_ecdh(const uint8_t d_be[32],
+                                const uint8_t peer_le[32],
+                                uint8_t out_le[32]);
+
+/* Generate a private scalar for `algo` (PGP_ALGO_ECDSA_P256 / PGP_ALGO_ECDH).
+ * Output big-endian (matches the import/store convention). */
+bool openpgp_crypto_genkey(uint8_t algo, uint8_t d_out[32]);

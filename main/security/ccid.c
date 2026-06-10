@@ -291,22 +291,40 @@ static int dongle_confirm(void)
 
 /* Derive the public key for READ PUBLIC KEY (INS 0x47 P1=0x81) — gpg keytocard
  * reads the card's public key here to build the card-backed secret stub.
- * Phase-2 Task 1: P-256 only; the X25519 branch + the .ecdh/.genkey hooks
- * land in Task 3.  Until then those two hooks stay NULL (applet-tolerated). */
+ * P-256 (ECDSA) -> 65 B uncompressed point; X25519 (ECDH) -> 32 B LE u. */
 static bool dongle_pubkey(uint8_t algo, const uint8_t d[32],
                           uint8_t *out, uint16_t *out_n)
 {
-    (void)algo;
+    if (algo == PGP_ALGO_ECDH) {
+        if (!openpgp_crypto_x25519_pubkey(d, out)) return false;
+        *out_n = 32;
+        return true;
+    }
     if (!openpgp_crypto_p256_pubkey(d, out)) return false;
     *out_n = 65;
     return true;
+}
+
+static bool dongle_ecdh(const uint8_t d[32], const uint8_t *peer, uint16_t peer_n,
+                        uint8_t *out, uint16_t *out_n)
+{
+    if (peer_n != 32) return false;
+    if (!openpgp_crypto_x25519_ecdh(d, peer, out)) return false;
+    *out_n = 32;
+    return true;
+}
+
+static bool dongle_genkey(uint8_t algo, uint8_t d_out[32])
+{
+    return openpgp_crypto_genkey(algo, d_out);
 }
 
 static const openpgp_card_hooks_t s_dongle_hooks = {
     .sign    = dongle_sign,
     .confirm = dongle_confirm,
     .pubkey  = dongle_pubkey,
-    /* .ecdh / .genkey wired in Task 3 (X25519) — NULL-tolerant until then */
+    .ecdh    = dongle_ecdh,
+    .genkey  = dongle_genkey,   /* used from Task 5; harmless before */
 };
 
 /* ------------------------------------------------------------------ */

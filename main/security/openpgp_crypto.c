@@ -3,8 +3,10 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "mbedtls/ecdsa.h"
+#include "mbedtls/ecdh.h"
 #include "mbedtls/ecp.h"
 #include "mbedtls/bignum.h"
+#include "openpgp_card.h"
 #include <string.h>
 
 static const char *TAG = "pgp_crypto";
@@ -85,6 +87,101 @@ bool openpgp_crypto_p256_pubkey(const uint8_t d[32], uint8_t out_pub[65])
     return ok;
 }
 
+static void be32_to_le(const uint8_t in[32], uint8_t out[32])
+{
+    for (int i = 0; i < 32; i++) out[i] = in[31 - i];
+}
+
+/* Load the X25519 scalar: BE→LE, RFC 7748 clamp (gpg sends pre-clamped
+ * scalars; re-clamping is idempotent and protects against bad imports),
+ * then read little-endian into the MPI. Scrubs the stack copy. */
+static int x25519_load_scalar(mbedtls_mpi *dd, const uint8_t d_be[32])
+{
+    uint8_t d_le[32];
+    be32_to_le(d_be, d_le);
+    d_le[0]  &= 0xF8;
+    d_le[31] = (uint8_t)((d_le[31] & 0x7F) | 0x40);
+    int rc = mbedtls_mpi_read_binary_le(dd, d_le, 32);
+    memset(d_le, 0, sizeof(d_le));
+    return rc;
+}
+
+bool openpgp_crypto_x25519_ecdh(const uint8_t d_be[32],
+                                const uint8_t peer_le[32],
+                                uint8_t out_le[32])
+{
+    if (!d_be || !peer_le || !out_le) return false;
+
+    mbedtls_ecp_group grp; mbedtls_ecp_point Qp; mbedtls_mpi dd, z;
+    mbedtls_ecp_group_init(&grp); mbedtls_ecp_point_init(&Qp);
+    mbedtls_mpi_init(&dd); mbedtls_mpi_init(&z);
+
+    bool ok = false;
+    do {
+        if (mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_CURVE25519)) break;
+        if (x25519_load_scalar(&dd, d_be)) break;
+        /* Montgomery point read: 32-byte little-endian u-coordinate. */
+        if (mbedtls_ecp_point_read_binary(&grp, &Qp, peer_le, 32)) break;
+        if (mbedtls_ecdh_compute_shared(&grp, &z, &Qp, &dd, rng_cb, NULL)) break;
+        if (mbedtls_mpi_write_binary_le(&z, out_le, 32)) break;
+        ok = true;
+    } while (0);
+
+    mbedtls_mpi_lset(&dd, 0);  /* scrub the scalar copy before free */
+    mbedtls_mpi_lset(&z, 0);   /* scrub the shared secret copy */
+    mbedtls_mpi_free(&dd); mbedtls_mpi_free(&z);
+    mbedtls_ecp_point_free(&Qp); mbedtls_ecp_group_free(&grp);
+    return ok;
+}
+
+bool openpgp_crypto_x25519_pubkey(const uint8_t d_be[32], uint8_t out_le[32])
+{
+    if (!d_be || !out_le) return false;
+
+    mbedtls_ecp_group grp; mbedtls_ecp_point Q; mbedtls_mpi dd;
+    mbedtls_ecp_group_init(&grp); mbedtls_ecp_point_init(&Q);
+    mbedtls_mpi_init(&dd);
+
+    bool ok = false;
+    do {
+        if (mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_CURVE25519)) break;
+        if (x25519_load_scalar(&dd, d_be)) break;
+        if (mbedtls_ecp_mul(&grp, &Q, &dd, &grp.G, rng_cb, NULL)) break;
+        size_t olen = 0;
+        if (mbedtls_ecp_point_write_binary(&grp, &Q, MBEDTLS_ECP_PF_UNCOMPRESSED,
+                                           &olen, out_le, 32)) break;
+        if (olen != 32) break;
+        ok = true;
+    } while (0);
+
+    mbedtls_mpi_lset(&dd, 0);
+    mbedtls_mpi_free(&dd);
+    mbedtls_ecp_point_free(&Q); mbedtls_ecp_group_free(&grp);
+    return ok;
+}
+
+bool openpgp_crypto_genkey(uint8_t algo, uint8_t d_out[32])
+{
+    if (!d_out) return false;
+    mbedtls_ecp_group_id gid;
+    if      (algo == PGP_ALGO_ECDSA_P256) gid = MBEDTLS_ECP_DP_SECP256R1;
+    else if (algo == PGP_ALGO_ECDH)       gid = MBEDTLS_ECP_DP_CURVE25519;
+    else return false;
+
+    mbedtls_ecp_group grp; mbedtls_mpi dd;
+    mbedtls_ecp_group_init(&grp); mbedtls_mpi_init(&dd);
+    bool ok = false;
+    do {
+        if (mbedtls_ecp_group_load(&grp, gid)) break;
+        if (mbedtls_ecp_gen_privkey(&grp, &dd, rng_cb, NULL)) break;
+        if (mbedtls_mpi_write_binary(&dd, d_out, 32)) break;  /* BE store */
+        ok = true;
+    } while (0);
+    mbedtls_mpi_lset(&dd, 0);
+    mbedtls_mpi_free(&dd); mbedtls_ecp_group_free(&grp);
+    return ok;
+}
+
 bool openpgp_crypto_selftest(void)
 {
     /* RFC 6979 A.2.5 P-256 test key; hash = SHA-256("sample") */
@@ -140,6 +237,36 @@ bool openpgp_crypto_selftest(void)
                   memcmp(pub + 33, Uy, 32) == 0;
     if (!pub_ok) {
         ESP_LOGE(TAG, "selftest: pubkey KAT failed");
+        return false;
+    }
+
+    /* KAT 3: X25519 — RFC 7748 §6.1.  Alice priv (REVERSED to BE for our
+     * API), Bob pub (LE wire format), expected shared K (LE). */
+    static const uint8_t alice_d_be[32] = {   /* reverse of 77076d0a...2c2a */
+        0x2A,0x2C,0xB9,0x1D,0xA5,0xFB,0x77,0xB1,0x2A,0x99,0xC0,0xEB,0x87,0x2F,0x4C,0xDF,
+        0x45,0x66,0xB2,0x51,0x72,0xC1,0x16,0x3C,0x7D,0xA5,0x18,0x73,0x0A,0x6D,0x07,0x77,
+    };
+    static const uint8_t alice_pub_le[32] = {
+        0x85,0x20,0xF0,0x09,0x89,0x30,0xA7,0x54,0x74,0x8B,0x7D,0xDC,0xB4,0x3E,0xF7,0x5A,
+        0x0D,0xBF,0x3A,0x0D,0x26,0x38,0x1A,0xF4,0xEB,0xA4,0xA9,0x8E,0xAA,0x9B,0x4E,0x6A,
+    };
+    static const uint8_t bob_pub_le[32] = {
+        0xDE,0x9E,0xDB,0x7D,0x7B,0x7D,0xC1,0xB4,0xD3,0x5B,0x61,0xC2,0xEC,0xE4,0x35,0x37,
+        0x3F,0x83,0x43,0xC8,0x5B,0x78,0x67,0x4D,0xAD,0xFC,0x7E,0x14,0x6F,0x88,0x2B,0x4F,
+    };
+    static const uint8_t shared_k_le[32] = {
+        0x4A,0x5D,0x9D,0x5B,0xA4,0xCE,0x2D,0xE1,0x72,0x8E,0x3B,0xF4,0x80,0x35,0x0F,0x25,
+        0xE0,0x7E,0x21,0xC9,0x47,0xD1,0x9E,0x33,0x76,0xF0,0x9B,0x3C,0x1E,0x16,0x17,0x42,
+    };
+    uint8_t xpub[32], xshared[32];
+    if (!openpgp_crypto_x25519_pubkey(alice_d_be, xpub) ||
+        memcmp(xpub, alice_pub_le, 32) != 0) {
+        ESP_LOGE(TAG, "selftest: X25519 pubkey KAT failed");
+        return false;
+    }
+    if (!openpgp_crypto_x25519_ecdh(alice_d_be, bob_pub_le, xshared) ||
+        memcmp(xshared, shared_k_le, 32) != 0) {
+        ESP_LOGE(TAG, "selftest: X25519 ECDH KAT failed");
         return false;
     }
 
