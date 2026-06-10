@@ -75,6 +75,11 @@ static const uint8_t FACTORY_D6[2] = {0x01, 0x20};
 static const uint8_t FACTORY_D7[2] = {0x00, 0x20};
 static const uint8_t FACTORY_D8[2] = {0x00, 0x20};
 
+/* General Feature Management 0x7F74 — OpenPGP 3.4 §4.4.3.
+ * Template: tag 0x81 (compact TLV), len 1, value 0x20 = button/keypad present.
+ * scdaemon queries this DO directly and sets extcap.has_button from it. */
+static const uint8_t FACTORY_7F74[3] = {0x81, 0x01, 0x20};
+
 /* ------------------------------------------------------------------ */
 /* State                                                               */
 /* ------------------------------------------------------------------ */
@@ -235,6 +240,11 @@ bool openpgp_card_ensure_defaults(void)
     ENSURE(0x5F2D, (const uint8_t *)"en", 2);
     ENSURE(0x5F35, (const uint8_t *)"9",  1);
     ENSURE(0x5F50, NULL,          0);  /* URL: empty                   */
+    ENSURE(0x005E, NULL,          0);  /* login data: empty — gnupg do_learn_status
+                                        * aborts the full LEARN chain on 6A88 here,
+                                        * silently skipping CHV-STATUS/KEY-FPR/etc. */
+    ENSURE(0x7F74, FACTORY_7F74,  3);  /* General Feature Management: scdaemon
+                                        * sets extcap.has_button from this DO    */
     ENSURE(0x0093, NULL,          3);  /* DS counter: zero             */
 
 #undef ENSURE
@@ -360,6 +370,12 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
             /* 5F52: Historical bytes (two-byte tag) */
             v = NULL; n = 0; openpgp_do_get(0x5F52u, &v, &n);
             APPEND_OR_FAIL(body, sizeof(body), off, 0x5F52u, v, n);
+
+            /* 7F74: General Feature Management (two-byte tag).
+             * OpenPGP 3.4 §4.4.3 places it here, between 5F52 and 73.
+             * scdaemon reads it directly to set extcap.has_button. */
+            v = NULL; n = 0; openpgp_do_get(0x7F74u, &v, &n);
+            APPEND_OR_FAIL(body, sizeof(body), off, 0x7F74u, v, n);
 
             /* 73: Discretionary DOs — build inner content first */
             {

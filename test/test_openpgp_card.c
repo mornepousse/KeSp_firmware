@@ -89,6 +89,16 @@ static bool has_bytes(const uint8_t *hay, uint16_t hlen,
     return false;
 }
 
+/* Return byte-offset of first occurrence of needle in hay, or -1 if absent. */
+static int find_index(const uint8_t *hay, uint16_t hlen,
+                      const uint8_t *needle, uint16_t nlen)
+{
+    if (nlen == 0 || nlen > hlen) return -1;
+    for (uint16_t i = 0; (uint16_t)(i + nlen) <= hlen; i++)
+        if (memcmp(hay + i, needle, nlen) == 0) return (int)i;
+    return -1;
+}
+
 /* ------------------------------------------------------------------ */
 /* Helper: drive SELECT, assert 9000                                   */
 /* ------------------------------------------------------------------ */
@@ -454,17 +464,105 @@ static void test_get_data_65_7a(void)
     TEST_ASSERT_EQ(rsp[4], 0x00, "7A DS counter byte 2 = 0");
 }
 
-/* After factory_reset (17 factory DOs), one more DO must succeed,
+/* ------------------------------------------------------------------ */
+/* Tests — HW-validated fix: 5E login data + 7F74 general feature mgmt */
+/* ------------------------------------------------------------------ */
+
+/* GET DATA 5E (Login data) must return 9000 with 0 bytes, not 6A88.
+ * gnupg do_learn_status aborts the whole chain on any 6A88 response,
+ * so 5E must be present as an empty DO. */
+static void test_login_data_empty(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[8], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+
+    clen = build_get_data(0x00, 0x5E, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DATA 5E returns 9000 (not 6A88)");
+    TEST_ASSERT_EQ(rlen - 2, 0, "5E data length is 0 bytes (empty)");
+}
+
+/* GET DATA 7F74 (General Feature Management) must return 9000 with
+ * exactly {81 01 20}: template tag 81, len 1, value 0x20 (button present).
+ * scdaemon derives extcap.has_button from this DO; without it "Button: no". */
+static void test_gf_management(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[8], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+
+    clen = build_get_data(0x7F, 0x74, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DATA 7F74 returns 9000");
+    TEST_ASSERT_EQ(rlen - 2, 3, "7F74 data length is 3 bytes");
+    TEST_ASSERT_EQ(rsp[0], 0x81, "7F74 byte[0] = 0x81 (template tag)");
+    TEST_ASSERT_EQ(rsp[1], 0x01, "7F74 byte[1] = 0x01 (len)");
+    TEST_ASSERT_EQ(rsp[2], 0x20, "7F74 byte[2] = 0x20 (button present)");
+}
+
+/* GET DATA 6E body must contain the 7F74 TLV placed AFTER 5F52 and BEFORE 73.
+ * Per OpenPGP 3.4 §4.4.3: 6E children = 4F, 5F52, 7F74, 73{...}. */
+static void test_6e_contains_7f74(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[8], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+
+    clen = build_get_data(0x00, 0x6E, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DATA 6E returns 9000");
+
+    uint16_t dlen = (uint16_t)(rlen - 2);
+
+    /* 6E body must contain the complete 7F74 TLV: 7F 74 03 81 01 20 */
+    uint8_t gfm[] = {0x7F, 0x74, 0x03, 0x81, 0x01, 0x20};
+    TEST_ASSERT(has_bytes(rsp, dlen, gfm, 6), "6E contains 7F 74 03 81 01 20");
+
+    /* Ordering: 7F74 TLV must appear AFTER 5F52 tag header and BEFORE 73.
+     * Note: 0x73 also appears inside HIST data, so search for {73 81} (the
+     * discretionary template tag followed by its long-form length marker)
+     * to distinguish the real 73 tag from data bytes. */
+    uint8_t hist_hdr[]  = {0x5F, 0x52};
+    uint8_t disc_hdr[]  = {0x73, 0x81};  /* 73 tag + 0x81 = long-form len */
+    int idx_5f52 = find_index(rsp, dlen, hist_hdr, 2);
+    int idx_7f74 = find_index(rsp, dlen, gfm,      6);
+    int idx_73   = find_index(rsp, dlen, disc_hdr,  2);
+
+    TEST_ASSERT(idx_5f52 >= 0, "5F52 TLV present in 6E");
+    TEST_ASSERT(idx_7f74 >= 0, "7F74 TLV present in 6E");
+    TEST_ASSERT(idx_73   >= 0, "73 discretionary tag present in 6E");
+    TEST_ASSERT(idx_7f74 > idx_5f52, "7F74 appears after 5F52");
+    TEST_ASSERT(idx_7f74 < idx_73,   "7F74 appears before 73");
+}
+
+/* ------------------------------------------------------------------ */
+/* Tests — DO store capacity                                           */
+/* ------------------------------------------------------------------ */
+
+/* After factory_reset (19 factory DOs), one more DO must succeed,
    proving MAX_ENTRIES was bumped beyond 16. */
 static void test_do_capacity(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
     setup_card(&h);
 
-    /* factory_reset stored 17 DOs; add a custom DO as the 18th */
+    /* factory_reset stored 19 DOs; add a custom DO as the 20th */
     uint8_t extra[4] = {0xDE, 0xAD, 0xBE, 0xEF};
     TEST_ASSERT(openpgp_do_put(0x0101, extra, 4),
-                "18th DO put succeeds (MAX_ENTRIES >= 18)");
+                "20th DO put succeeds (MAX_ENTRIES >= 20)");
 
     const uint8_t *v;
     uint16_t n;
@@ -515,4 +613,8 @@ void test_openpgp_card(void)
     TEST_RUN(test_get_data_65_7a);
     TEST_RUN(test_do_capacity);
     TEST_RUN(test_set_serial);
+    /* HW-validated fix: 5E login data + 7F74 general feature management */
+    TEST_RUN(test_login_data_empty);
+    TEST_RUN(test_gf_management);
+    TEST_RUN(test_6e_contains_7f74);
 }
