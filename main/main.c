@@ -14,6 +14,9 @@
 #include "keymap.h"
 #include "nvs_flash.h"
 #include "usb_hid.h"
+#if CONFIG_KASE_SEC_OPENPGP
+#include "esp_mac.h"
+#endif
 #include <stdint.h>
 
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
@@ -183,6 +186,23 @@ void app_main(void) {
 #if CONFIG_KASE_SEC_OTP_HID
     extern void otp_hid_init(void);
     otp_hid_init();                     /* Wire OTP HID hooks (after sec_store) */
+#endif
+#if CONFIG_KASE_SEC_OPENPGP
+    /* OpenPGP card state. openpgp_card_init() already ran inside
+     * kase_tinyusb_init() (CCID driver init: hooks + session + factory PIN
+     * baseline) and no longer touches the DO store, so loading/seeding DOs
+     * here — after NVS-backed sec_store — is safe. */
+    if (!safe_mode) {
+      extern void openpgp_do_init(void);
+      extern bool openpgp_card_ensure_defaults(void);
+      extern void openpgp_card_set_serial(const uint8_t serial[4]);
+      openpgp_do_init();                /* NVS load of persisted DOs */
+      if (!openpgp_card_ensure_defaults())
+        ESP_LOGE(TAG, "openpgp: factory DO seed incomplete");
+      uint8_t mac[6] = {0};
+      esp_read_mac(mac, ESP_MAC_WIFI_STA);
+      openpgp_card_set_serial(&mac[2]); /* 4 low MAC bytes = card serial */
+    }
 #endif
 #endif
   }
