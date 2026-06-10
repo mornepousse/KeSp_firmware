@@ -87,7 +87,7 @@ endif()
 # Dongle CDC stubs (no-op symbols for tama/bt/display referenced by cdc_binary_cmds.c)
 # and dongle-specific binary commands (RF status, pair list/reset, battery).
 # cr_hmac is kept unconditional: cdc_sec_cmds.c KAT self-test references it directly.
-# cr_crc16 is kept unconditional: tiny file, dead-stripped under NONE/OPENPGP.
+# cr_crc16 is kept unconditional: tiny file, linker-stripped under NONE/OPENPGP.
 if(CONFIG_KASE_DEVICE_ROLE_DONGLE)
     list(APPEND srcs
         "comm/cdc/cdc_dongle_stubs.c"

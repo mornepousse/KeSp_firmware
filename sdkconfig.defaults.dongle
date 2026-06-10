@@ -40,4 +40,8 @@ CONFIG_TINYUSB_DESC_SERIAL_STRING="dongle-v1"
 CONFIG_TINYUSB_DESC_CDC_STRING="KaSe Dongle CDC"
 # Dongle needs 2 HID instances: instance 0 = kbd/mouse, instance 1 = OTP
 CONFIG_TINYUSB_HID_COUNT=2
-# HID_COUNT=2 covers the OTP personality (instance 1). Under OPENPGP/NONE instance 1 is simply unused (a few bytes of RAM).
+# HID_COUNT=2 covers the OTP personality (instance 1). Under OPENPGP/NONE
+# instance 1 is simply unused (a few bytes of RAM).
+
+# --- Dongle security personality (OPENPGP = CCID smartcard; see main/Kconfig.projbuild) ---
+CONFIG_KASE_SEC_OPENPGP=y

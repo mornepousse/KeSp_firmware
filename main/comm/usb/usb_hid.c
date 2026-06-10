@@ -75,7 +75,7 @@ const uint8_t hid_report_descriptor[] = {
 };
 
 /* Configuration descriptor: CDC (2 interfaces) + HID keyboard.
- * Not used on dongle (which has the OTP-extended descriptor below). */
+ * Not used on dongle (which uses the personality-selected descriptor below). */
 #if !CONFIG_KASE_DEVICE_ROLE_DONGLE
 static const uint8_t hid_cdc_configuration_descriptor[] = {
     /* Config 1: 3 interfaces total, 100 mA */
@@ -199,7 +199,7 @@ static const uint8_t dongle_configuration_descriptor[] = {
     TUD_HID_DESCRIPTOR(2, 5, HID_ITF_PROTOCOL_KEYBOARD,
                        sizeof(hid_report_descriptor), EPNUM_HID, 16, 1),
 };
-#endif
+#endif /* KASE_SEC personality configuration descriptor */
 
 /* String table for dongle — security interface entry present only when a
  * personality is selected (index 6 = security interface name). */
