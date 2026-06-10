@@ -1,4 +1,18 @@
-# KaSe Dongle — Hardware Security Key (HMAC-SHA1 Challenge-Response)
+# KaSe Dongle — Hardware Security Key
+
+The dongle supports two security interfaces, selected at build time. They are **mutually
+exclusive**: the ESP32-S3 Full-Speed USB controller has a 4-IN-endpoint budget; CCID
+bulk-IN and OTP-HID-IN together overflow it.
+
+| Build flag | Interface | Status |
+|---|---|---|
+| `CONFIG_KASE_SEC_OPENPGP` *(default)* | OpenPGP smartcard — CCID (§2 below) | ✅ validated |
+| `CONFIG_KASE_SEC_OTP_HID` | CR-HMAC / YubiKey-compat OTP HID (§1 below) | built, pending HW validation |
+| `CONFIG_KASE_SEC_NONE` | No security interface | — |
+
+---
+
+## 1. CR-HMAC / OTP-HID — KeePassXC challenge-response
 
 The dongle can act as a **YubiKey-compatible HMAC-SHA1 challenge-response token**,
 gated by a **physical keypress** on a keyboard half. This unlocks, for example, a
@@ -151,3 +165,129 @@ The firmware **builds** but real USB behaviour can only be confirmed on the devi
 4. Provision a slot with `kase-sec`, then unlock a CR-protected KeePassXC DB (patched) and
    verify the **press-to-confirm** flow and the unlock.
 5. Optionally `ykchalresp` cross-check against a software HMAC-SHA1 of the same challenge.
+
+---
+
+## 2. OpenPGP Smartcard — SSH + git signing
+
+### What it is
+
+The dongle enumerates as a **GnuPG-compatible OpenPGP smartcard** (CCID class 0x0B, USB
+`303a:4001`). gpg can sign git commits and files using a NIST P-256 private key that lives
+on the dongle and never leaves it. Every sign operation is gated by a **physical touch**
+(`K_SEC_CONFIRM` keypress on a paired half).
+
+**Credential separation rationale:** the dongle is the *"dev identity" basket* (OpenPGP:
+git commit signing; SSH auth in Phase 2). The YubiKey 5 NFC remains the *"web/accounts"
+basket* (FIDO2 web 2FA). Losing or compromising one does not affect the other.
+
+**Threat model:** host malware only, NOT physical access. The private key is non-extractable
+over USB and every sign requires a physical keypress that malware cannot inject. Keys are
+stored plaintext in NVS at rest — the dongle is fully reprogrammable (no Secure Boot, no
+secure element). A future eFuse-HMAC KEK ("Couche 1") can add at-rest encryption without
+losing reprogrammability, but this is deferred.
+
+**Status:** ✅ validated on hardware (gpg 2.4.9 / scdaemon, ESP32-S3 `303a:4001`). See
+`docs/superpowers/specs/2026-06-09-dongle-openpgp-card-design.md §7b` for the full
+hardware-validated result including the five gotchas discovered during bring-up.
+
+---
+
+### Host requirements
+
+- **gpg 2.3+** (ships scdaemon's internal CCID driver). No pcscd, no libccid, no VID
+  whitelist patch needed — scdaemon opens CCID devices by USB class 0x0B.
+- The existing `99-local.rules` udev rule already grants access to `303a:4001`. No new
+  rule needed.
+- If gpg is absent on NixOS: `nix-shell -p gnupg`.
+- The Dell's built-in Broadcom reader (`0A5C:5843`) coexists — scdaemon enumerates all
+  CCID readers; the KaSe dongle appears as an additional reader.
+
+---
+
+### Provisioning (exact, validated commands)
+
+```bash
+# 1. Generate a P-256 signing key (skip if you already have one)
+gpg --expert --full-generate-key
+#   → ECC and ECC
+#   → Existing DSA or ECDH curve → enter:  nistp256
+#   → Sign only (no encryption subkey needed for this slot)
+#   → Set expiry, name, email as desired
+
+# 2. Import the signing key onto the card
+gpg --edit-key <KEYID>
+  gpg> keytocard
+  #   → (1) Signature key
+  #   → Enter Admin PIN: 12345678
+  gpg> save
+
+# 3. Verify
+gpg --card-status
+#   Signature key:   <fingerprint>   ← confirms key is on card
+gpg -K
+#   sec>  nistp256/...   ← ">" means card-backed; "Card serial no." shown
+```
+
+> `keytocard` requires the card to respond to `READ PUBLIC KEY` (INS 0x47 P1=0x81) — the
+> firmware implements this by deriving Q=d·G via mbedTLS. Without it, gpg silently falls
+> back to the local key (no touch, no card use) and gives no error.
+
+---
+
+### Default PINs
+
+| PIN | Default | Used for |
+|-----|---------|----------|
+| User PW1 | `123456` | Signing (PSO:CDS) |
+| Admin PW3 | `12345678` | Key import (keytocard / PUT DATA) |
+
+PINs persist across reboots and app-reflashes (NVS). Retry limit: 3 for PW1, 3 for PW3.
+**Change them before use:**
+
+```bash
+gpg --card-edit
+  gpg/card> admin
+  gpg/card> passwd
+  #   → change PIN (PW1) and Admin PIN (PW3)
+  gpg/card> quit
+```
+
+---
+
+### Signing and the touch gate
+
+**File / arbitrary data:**
+```bash
+echo x | gpg -u <KEYID> --clearsign
+```
+gpg prompts for PW1 (User PIN), then the card arms the touch gate and waits up to 15s.
+**Press `K_SEC_CONFIRM`** on a paired half within 15s → signature returned. No touch within
+15s → `gpg: signing failed: Conditions of use not satisfied` (SW 6985). No intermediate
+USB timeout — WTX (time-extension) frames hold scdaemon for the full 15s.
+
+**git commit signing:**
+```bash
+git config user.signingkey <KEYID>
+git config commit.gpgsign true
+git commit -S -m "message"   # or just `git commit` with gpgsign=true
+```
+gpg is invoked by git; the same PW1 prompt + touch flow applies. `git log --show-signature`
+confirms "Good signature".
+
+---
+
+### SSH (Phase 2 — not yet)
+
+The Authentication slot (`INTERNAL AUTHENTICATE` → SSH via `gpg-agent --enable-ssh-support`)
+is roadmap. It shares the same CCID transport and UIF gate; only the applet command and key
+slot are new. Tracked in the spec §8.
+
+---
+
+### What's proven / what needs your finger
+
+Everything listed above is validated on hardware. The one thing that cannot be automated
+and requires a human: the **physical `K_SEC_CONFIRM` keypress**. `sec_confirm` is armed
+only during a live PSO:CDS call and is authorized only by a real NRF keypress from a
+paired half — there is no software path to bypass it. This is the design.

@@ -170,6 +170,60 @@ print the card. This is Phase-1 applet work (§7), with its own host tests.
 **End state**: `gpg --card-status` shows the card; `gpg --sign` (and git commit signing) work,
 prompting a touch; the private key never leaves the dongle.
 
+## 7b. Phase 1 — RESULT (2026-06-10): ✅ signing card works
+
+Validated on hardware (dongle flashed via CH340, `gpg`/`scdaemon` 2.4.9 via `nix-shell -p gnupg`,
+ESP32-S3 `303a:4001`). Full end-to-end signing pipeline working.
+
+**What passed:**
+- `gpg --card-status` shows the full card: Application ID `D276000124010304FF00<serial>`,
+  type OpenPGP, version 3.4, Key attributes nistp256×3, PIN retry 3/0/3, Max PIN lengths 16/0/16,
+  UIF Sign=on, Signature counter.
+- `gpg ... keytocard` imports a NIST P-256 signing key (PUT DATA 0xDB extended header list);
+  the card stores the private scalar + fingerprint. `gpg -K` shows `sec>` with "Card serial no."
+- `gpg --clearsign` (PSO:CDS): reaches the card, prompts PW1, arms the UIF touch gate. WTX frames
+  keep scdaemon waiting up to 15s. **Without touch:** returns `6985` at exactly T+15s (no
+  intermediate USB timeout — WTX held the host). **With touch (`K_SEC_CONFIRM` keypress on a
+  paired half):** returns a valid ECDSA-P256 signature.
+- `gpg --verify` confirms Good signature. On-device KAT passes on boot (RFC 6979 §A.2.5 P-256
+  vector incl. public key Ux/Uy).
+- PINs (PW1/PW3) survive reboot and app-reflash (NVS); retry counters persist on every decrement
+  (anti pull-the-plug brute-force). `CHANGE REFERENCE DATA` (INS 0x24) supported.
+
+**Hardware-discovered gotchas and fixes (5):**
+
+1. **6E/constructed-DO multi-packet bulk-IN response of exactly N×64 bytes needs a USB ZLP.**
+   Without a zero-length packet to terminate the transfer, libusb/scdaemon hangs 5s waiting. Fixed
+   in `ccid.c`: send a ZLP after the last full 64-byte packet.
+2. **`READ PUBLIC KEY` (INS 0x47, P1=0x81) is required by `gpg keytocard` for imported keys.**
+   gpg needs to read the card's public key to build the local `sec>` card-backed stub. Without this
+   command, gpg silently signs with the local key — the import appears to succeed but the card is
+   never used (no touch, no UIF). Fix: implement 0x47/P1=0x81 by deriving Q=d·G via mbedTLS and
+   returning the uncompressed point in TLV.
+3. **Any `GET DATA` returning `6A88` aborts scdaemon's LEARN chain.** If the applet returns
+   "not found" for any DO queried during card-status enumeration, the LEARN aborts and CHV status
+   never reaches gpg ("PIN lengths 0 0 0"). Fix: serve empty-but-valid TLV for all DOs that gpg
+   queries — specifically login DO 0x5E and button DO 0x7F74.
+4. **ATR requires the TCK byte.** T=1/T=15 ATR without the checksum caused
+   `update_param_by_atr failed: -1` in scdaemon. Fix: TCK = XOR(T0..last) = 0xCD (also captured
+   in §6b; this is a T=1 spec requirement, not a scdaemon quirk).
+5. **CCID custom class driver must be force-linked.** `usbd_app_driver_get_cb` in `ccid.c` is a
+   weak-symbol override; without a reference, the linker keeps the empty default from
+   `libtinyusb.a` → CCID interface never claimed → `process_set_config` assert. Fix:
+   `ccid_init()` called from force-linked `kase_tinyusb_init()` (also captured in §6b — the
+   same fix, re-confirmed on Phase 1 firmware).
+
+**Deferred to Phase 2:**
+- Decrypt slot (cv25519/X25519, `PSO:DECIPHER`).
+- Auth slot (`INTERNAL AUTHENTICATE` → SSH via `gpg-agent --enable-ssh-support`).
+- On-card key generation (`GENERATE ASYMMETRIC KEY PAIR`, INS 0x47 P1=0x80).
+- RSA support.
+
+**One permanent manual gate (by design):** the physical touch cannot be automated or bypassed in
+software. `sec_confirm` is armed only during a live PSO:CDS and authorized only by a real
+`K_SEC_CONFIRM` keypress over NRF from a paired half. A software-only path to signing does not
+exist — this is the point.
+
 ## 8. Phase 2 — complete the card (roadmap, ≈3–4 weeks)
 
 Decryption slot (cv25519 / X25519 ECDH `PSO:DECIPHER`), Authentication slot (`INTERNAL
