@@ -26,5 +26,5 @@ bool openpgp_do_put(uint16_t tag, const uint8_t *v, uint16_t n);
  */
 bool openpgp_do_get(uint16_t tag, const uint8_t **v, uint16_t *n);
 
-/* Wipe all stored DOs (called from openpgp_card_init and on test reset). */
+/* Wipe all stored DOs (called from openpgp_card_factory_reset and on test reset). */
 void openpgp_do_reset(void);

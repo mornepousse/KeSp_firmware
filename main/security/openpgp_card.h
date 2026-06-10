@@ -29,9 +29,13 @@ typedef struct {
 } openpgp_card_hooks_t;
 
 /*
- * Initialise the applet: store hook pointers and reset session state
- * (selected flag, PW1/PW3 verified flags).  Does NOT wipe the DO store
- * or restore factory PINs — call openpgp_card_factory_reset() for that.
+ * Initialise the applet: store hook pointers, reset session state
+ * (selected flag, PW1/PW3 verified flags), and establish factory PIN
+ * baseline in RAM so a fresh boot yields a usable card rather than a
+ * blocked one (zero retry counters).  On target, Task 6 NVS load
+ * overrides the PIN state after this call.
+ * Does NOT wipe or populate the DO store — call
+ * openpgp_card_factory_reset() or openpgp_card_ensure_defaults() for that.
  * Must be called once before openpgp_card_apdu().
  */
 void openpgp_card_init(const openpgp_card_hooks_t *hooks);
@@ -47,13 +51,15 @@ void openpgp_card_factory_reset(void);
  * Populate any *missing* factory-default DOs without touching existing
  * ones.  Called automatically by openpgp_card_factory_reset(); may also
  * be called at target boot after openpgp_do_init() loads NVS state.
+ * Returns true if all puts succeeded, false if the DO table is full or
+ * an entry exceeded OPENPGP_DO_MAX_LEN (should never happen at factory).
  */
-void openpgp_card_ensure_defaults(void);
+bool openpgp_card_ensure_defaults(void);
 
 /*
  * Patch the 4-byte serial field inside the AID DO (bytes [10..13]).
  * On target this is called with the efuse-derived MAC serial (Task 4).
- * Has no effect if the AID DO has not been initialised yet.
+ * If the AID DO is absent it falls back to FACTORY_AID and creates the DO.
  */
 void openpgp_card_set_serial(const uint8_t serial[4]);
 

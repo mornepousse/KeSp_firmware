@@ -81,7 +81,7 @@ static uint16_t sw_of(const uint8_t *rsp, uint16_t len)
 
 /* Search for needle[0..nlen-1] anywhere in hay[0..hlen-1] */
 static bool has_bytes(const uint8_t *hay, uint16_t hlen,
-                      const uint8_t *needle, uint8_t nlen)
+                      const uint8_t *needle, uint16_t nlen)
 {
     if (nlen == 0 || nlen > hlen) return false;
     for (uint16_t i = 0; (uint16_t)(i + nlen) <= hlen; i++)
@@ -113,7 +113,7 @@ static void setup_card(openpgp_card_hooks_t *h)
 static void test_select_ok(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
-    openpgp_card_init(&h);
+    setup_card(&h);
     g_confirm_retval = 1;
 
     uint8_t cmd[64], rsp[256];

@@ -19,6 +19,8 @@ static const uint8_t PW3_DEFAULT[8]  = {'1','2','3','4','5','6','7','8'};
 #define PW1_RETRY_MAX    3
 #define PW3_RETRY_MAX    3
 #define PW_MAX_LEN      16
+#define FP_SLICE_LEN    20u  /* fingerprint slice length (C7/C8/C9 PUT DATA) */
+#define TS_SLICE_LEN     4u  /* timestamp slice length (CE/CF/D0 PUT DATA)    */
 
 /* Status words */
 #define SW_OK              0x9000u
@@ -150,6 +152,31 @@ static uint16_t tlv_append(uint8_t *buf, uint16_t max, uint16_t off,
     return (uint16_t)(off + n);
 }
 
+/* Restore factory PINs and retry counters to RAM state.
+ * Called from openpgp_card_init() (boot baseline) and
+ * openpgp_card_factory_reset() (full wipe). */
+static void pins_factory(void)
+{
+    memcpy(s_pw1, PW1_DEFAULT, PW1_DEFAULT_LEN);
+    s_pw1_len   = PW1_DEFAULT_LEN;
+    memcpy(s_pw3, PW3_DEFAULT, PW3_DEFAULT_LEN);
+    s_pw3_len   = PW3_DEFAULT_LEN;
+    s_pw1_retry = PW1_RETRY_MAX;
+    s_pw3_retry = PW3_RETRY_MAX;
+}
+
+/* Fill a 7-byte PW status buffer (DO 0xC4) from live retry counters. */
+static void fill_pw_status(uint8_t c4[7])
+{
+    c4[0] = 0x00;          /* PW1 validity (0 = valid for one PSO:CDS) */
+    c4[1] = PW_MAX_LEN;    /* max PW1 length */
+    c4[2] = 0x00;          /* RFU / no resetting code */
+    c4[3] = PW_MAX_LEN;    /* max PW3 length */
+    c4[4] = s_pw1_retry;
+    c4[5] = 0x00;          /* RC retries (not implemented) */
+    c4[6] = s_pw3_retry;
+}
+
 /* Check UIF DO 0xD6: returns true if touch confirmation is required. */
 static bool uif_signing_required(void)
 {
@@ -168,24 +195,29 @@ void openpgp_card_init(const openpgp_card_hooks_t *hooks)
 {
     s_hooks = hooks;
 
-    /* Reset session state only — DO store, PINs and retry counters are
-     * NOT touched here.  Call openpgp_card_factory_reset() for a full
-     * clean slate (tests, admin command). */
+    /* Reset session state */
     s_selected          = false;
     s_pw1_sign_verified = false;
     s_pw1_user_verified = false;
     s_pw3_verified      = false;
+
+    /* Factory PIN baseline. On target, NVS-backed PIN state (Task 6,
+     * openpgp_card_load) overrides these after init; until then a fresh
+     * boot must yield a usable card, not a blocked one (retry == 0). */
+    pins_factory();
 }
 
-void openpgp_card_ensure_defaults(void)
+bool openpgp_card_ensure_defaults(void)
 {
     const uint8_t *v;
     uint16_t n;
+    unsigned failures = 0;
 
-    /* Populate any absent factory DOs without touching existing ones. */
+    /* Populate any absent factory DOs without touching existing ones.
+     * Returns false if any openpgp_do_put fails (table full / oversized). */
 #define ENSURE(tag_, data_, len_) \
     do { if (!openpgp_do_get((tag_), &v, &n)) \
-             openpgp_do_put((tag_), (data_), (len_)); } while (0)
+             if (!openpgp_do_put((tag_), (data_), (len_))) failures++; } while (0)
 
     ENSURE(0x004F, FACTORY_AID,  16);
     ENSURE(0x5F52, FACTORY_HIST, 10);
@@ -193,7 +225,7 @@ void openpgp_card_ensure_defaults(void)
     ENSURE(0x00C1, FACTORY_C1,    9);
     ENSURE(0x00C2, FACTORY_C2,    9);
     ENSURE(0x00C3, FACTORY_C3,    9);
-    ENSURE(0x00C5, NULL,         60);  /* fingerprints: zero-filled   */
+    ENSURE(0x00C5, NULL,         60);  /* fingerprints: zero-filled    */
     ENSURE(0x00C6, NULL,         60);  /* CA fingerprints: zero-filled */
     ENSURE(0x00CD, NULL,         12);  /* generation timestamps: zero  */
     ENSURE(0x00D6, FACTORY_D6,    2);
@@ -206,6 +238,8 @@ void openpgp_card_ensure_defaults(void)
     ENSURE(0x0093, NULL,          3);  /* DS counter: zero             */
 
 #undef ENSURE
+
+    return (failures == 0);
 }
 
 void openpgp_card_factory_reset(void)
@@ -220,12 +254,7 @@ void openpgp_card_factory_reset(void)
     openpgp_do_reset();
 
     /* 3. Restore factory PINs and retry counters */
-    memcpy(s_pw1, PW1_DEFAULT, PW1_DEFAULT_LEN);
-    s_pw1_len   = PW1_DEFAULT_LEN;
-    memcpy(s_pw3, PW3_DEFAULT, PW3_DEFAULT_LEN);
-    s_pw3_len   = PW3_DEFAULT_LEN;
-    s_pw1_retry = PW1_RETRY_MAX;
-    s_pw3_retry = PW3_RETRY_MAX;
+    pins_factory();
 
     /* 4. Populate all factory-default DOs */
     openpgp_card_ensure_defaults();
@@ -313,6 +342,12 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         const uint8_t *v;
         uint16_t        n;
 
+/* Abort the response build on TLV overflow: corrupt-but-9000 is the worst
+ * failure mode.  References out/out_max from openpgp_card_apdu's scope. */
+#define APPEND_OR_FAIL(buf_, max_, off_, tag_, v_, n_) \
+    do { (off_) = tlv_append((buf_), (max_), (off_), (tag_), (v_), (n_)); \
+         if ((off_) == 0) return sw_only(out, out_max, 0x6F00); } while (0)
+
         /* ---- 6E: Application Related Data (constructed) ---- */
         if (tag == 0x006Eu) {
             uint8_t  body[256];
@@ -320,11 +355,11 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
 
             /* 4F: AID */
             v = NULL; n = 0; openpgp_do_get(0x004F, &v, &n);
-            off = tlv_append(body, sizeof(body), off, 0x004Fu, v, n);
+            APPEND_OR_FAIL(body, sizeof(body), off, 0x004Fu, v, n);
 
             /* 5F52: Historical bytes (two-byte tag) */
             v = NULL; n = 0; openpgp_do_get(0x5F52u, &v, &n);
-            off = tlv_append(body, sizeof(body), off, 0x5F52u, v, n);
+            APPEND_OR_FAIL(body, sizeof(body), off, 0x5F52u, v, n);
 
             /* 73: Discretionary DOs — build inner content first */
             {
@@ -332,43 +367,41 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
                 uint16_t ioff = 0;
 
                 v = NULL; n = 0; openpgp_do_get(0x00C0u, &v, &n);
-                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC0u, v, n);
+                APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xC0u, v, n);
 
                 v = NULL; n = 0; openpgp_do_get(0x00C1u, &v, &n);
-                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC1u, v, n);
+                APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xC1u, v, n);
 
                 v = NULL; n = 0; openpgp_do_get(0x00C2u, &v, &n);
-                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC2u, v, n);
+                APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xC2u, v, n);
 
                 v = NULL; n = 0; openpgp_do_get(0x00C3u, &v, &n);
-                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC3u, v, n);
+                APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xC3u, v, n);
 
                 /* C4: synthesised from live retry counters — never stored */
-                uint8_t c4[7] = {
-                    0x00, 0x10, 0x00, 0x10,
-                    s_pw1_retry, 0x00, s_pw3_retry
-                };
-                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC4u, c4, 7);
+                uint8_t c4[7];
+                fill_pw_status(c4);
+                APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xC4u, c4, 7);
 
                 v = NULL; n = 0; openpgp_do_get(0x00C5u, &v, &n);
-                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC5u, v, n);
+                APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xC5u, v, n);
 
                 v = NULL; n = 0; openpgp_do_get(0x00C6u, &v, &n);
-                ioff = tlv_append(inner, sizeof(inner), ioff, 0xC6u, v, n);
+                APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xC6u, v, n);
 
                 v = NULL; n = 0; openpgp_do_get(0x00CDu, &v, &n);
-                ioff = tlv_append(inner, sizeof(inner), ioff, 0xCDu, v, n);
+                APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xCDu, v, n);
 
                 v = NULL; n = 0; openpgp_do_get(0x00D6u, &v, &n);
-                ioff = tlv_append(inner, sizeof(inner), ioff, 0xD6u, v, n);
+                APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xD6u, v, n);
 
                 v = NULL; n = 0; openpgp_do_get(0x00D7u, &v, &n);
-                ioff = tlv_append(inner, sizeof(inner), ioff, 0xD7u, v, n);
+                APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xD7u, v, n);
 
                 v = NULL; n = 0; openpgp_do_get(0x00D8u, &v, &n);
-                ioff = tlv_append(inner, sizeof(inner), ioff, 0xD8u, v, n);
+                APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xD8u, v, n);
 
-                off = tlv_append(body, sizeof(body), off, 0x73u, inner, ioff);
+                APPEND_OR_FAIL(body, sizeof(body), off, 0x73u, inner, ioff);
             }
 
             return respond(out, out_max, body, off, SW_OK);
@@ -380,13 +413,13 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
             uint16_t off = 0;
 
             v = NULL; n = 0; openpgp_do_get(0x005Bu, &v, &n);
-            off = tlv_append(body, sizeof(body), off, 0x5Bu, v, n);
+            APPEND_OR_FAIL(body, sizeof(body), off, 0x5Bu, v, n);
 
             v = NULL; n = 0; openpgp_do_get(0x5F2Du, &v, &n);
-            off = tlv_append(body, sizeof(body), off, 0x5F2Du, v, n);
+            APPEND_OR_FAIL(body, sizeof(body), off, 0x5F2Du, v, n);
 
             v = NULL; n = 0; openpgp_do_get(0x5F35u, &v, &n);
-            off = tlv_append(body, sizeof(body), off, 0x5F35u, v, n);
+            APPEND_OR_FAIL(body, sizeof(body), off, 0x5F35u, v, n);
 
             return respond(out, out_max, body, off, SW_OK);
         }
@@ -397,17 +430,17 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
             uint16_t off = 0;
 
             v = NULL; n = 0; openpgp_do_get(0x0093u, &v, &n);
-            off = tlv_append(body, sizeof(body), off, 0x93u, v, n);
+            APPEND_OR_FAIL(body, sizeof(body), off, 0x93u, v, n);
 
             return respond(out, out_max, body, off, SW_OK);
         }
 
+#undef APPEND_OR_FAIL
+
         /* ---- C4: PW status bytes (synthesised — never stored) ---- */
         if (tag == 0x00C4u) {
-            uint8_t c4[7] = {
-                0x00, 0x10, 0x00, 0x10,
-                s_pw1_retry, 0x00, s_pw3_retry
-            };
+            uint8_t c4[7];
+            fill_pw_status(c4);
             return respond(out, out_max, c4, 7, SW_OK);
         }
 
@@ -424,38 +457,38 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
 
         uint16_t tag = ((uint16_t)a.p1 << 8) | a.p2;
 
-        /* Fingerprint slices: C7/C8/C9 → write 20-byte slice into C5 */
+        /* Fingerprint slices: C7/C8/C9 → write FP_SLICE_LEN-byte slice into C5 */
         if (tag == 0x00C7u || tag == 0x00C8u || tag == 0x00C9u) {
-            if (a.lc != 20)
+            if (a.lc != FP_SLICE_LEN)
                 return sw_only(out, out_max, SW_WRONG_DATA);
-            uint8_t        c5[60];
+            uint8_t        c5[3 * FP_SLICE_LEN];
             const uint8_t *cur; uint16_t cur_n;
-            if (openpgp_do_get(0x00C5u, &cur, &cur_n) && cur_n == 60)
-                memcpy(c5, cur, 60);
+            if (openpgp_do_get(0x00C5u, &cur, &cur_n) && cur_n == 3 * FP_SLICE_LEN)
+                memcpy(c5, cur, 3 * FP_SLICE_LEN);
             else
-                memset(c5, 0, 60);
+                memset(c5, 0, 3 * FP_SLICE_LEN);
             uint16_t slice_off = (tag == 0x00C7u) ? 0u :
-                                 (tag == 0x00C8u) ? 20u : 40u;
-            memcpy(c5 + slice_off, a.data, 20);
-            if (!openpgp_do_put(0x00C5u, c5, 60))
+                                 (tag == 0x00C8u) ? FP_SLICE_LEN : (2u * FP_SLICE_LEN);
+            memcpy(c5 + slice_off, a.data, FP_SLICE_LEN);
+            if (!openpgp_do_put(0x00C5u, c5, 3 * FP_SLICE_LEN))
                 return sw_only(out, out_max, SW_WRONG_DATA);
             return sw_only(out, out_max, SW_OK);
         }
 
-        /* Generation timestamp slices: CE/CF/D0 → write 4-byte slice into CD */
+        /* Generation timestamp slices: CE/CF/D0 → write TS_SLICE_LEN-byte slice into CD */
         if (tag == 0x00CEu || tag == 0x00CFu || tag == 0x00D0u) {
-            if (a.lc != 4)
+            if (a.lc != TS_SLICE_LEN)
                 return sw_only(out, out_max, SW_WRONG_DATA);
-            uint8_t        cd[12];
+            uint8_t        cd[3 * TS_SLICE_LEN];
             const uint8_t *cur; uint16_t cur_n;
-            if (openpgp_do_get(0x00CDu, &cur, &cur_n) && cur_n == 12)
-                memcpy(cd, cur, 12);
+            if (openpgp_do_get(0x00CDu, &cur, &cur_n) && cur_n == 3 * TS_SLICE_LEN)
+                memcpy(cd, cur, 3 * TS_SLICE_LEN);
             else
-                memset(cd, 0, 12);
+                memset(cd, 0, 3 * TS_SLICE_LEN);
             uint16_t slice_off = (tag == 0x00CEu) ? 0u :
-                                 (tag == 0x00CFu) ? 4u : 8u;
-            memcpy(cd + slice_off, a.data, 4);
-            if (!openpgp_do_put(0x00CDu, cd, 12))
+                                 (tag == 0x00CFu) ? TS_SLICE_LEN : (2u * TS_SLICE_LEN);
+            memcpy(cd + slice_off, a.data, TS_SLICE_LEN);
+            if (!openpgp_do_put(0x00CDu, cd, 3 * TS_SLICE_LEN))
                 return sw_only(out, out_max, SW_WRONG_DATA);
             return sw_only(out, out_max, SW_OK);
         }
