@@ -820,6 +820,42 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         return respond(out, out_max, sig, sig_len, SW_OK);
     }
 
+    /* ---- GENERATE ASYMMETRIC KEY PAIR (INS=0x47) ---- */
+    if (a.ins == 0x47) {
+        if (a.p1 == 0x81) {  /* READ existing public key — do NOT generate */
+            /* Data is a CRT tag; only B6 (sig slot) supported in Phase 1.
+             * Peek at the leading tag byte; anything else → 6A88. */
+            if (a.lc == 0 || !a.data)
+                return sw_only(out, out_max, SW_REF_NOT_FOUND);
+            if (a.data[0] != 0xB6u)
+                return sw_only(out, out_max, SW_REF_NOT_FOUND);
+
+            if (!s_key.set)
+                return sw_only(out, out_max, SW_REF_NOT_FOUND);
+
+            if (!s_hooks->pubkey)
+                return sw_only(out, out_max, SW_REF_NOT_FOUND);
+
+            uint8_t pub[65];
+            if (!s_hooks->pubkey(s_key.d, pub))
+                return sw_only(out, out_max, SW_REF_NOT_FOUND);
+
+            /* Build 7F49 { 86 41 <pub[65]> }
+             * inner: tag=0x86, len=0x41(65), value=pub  → 67 bytes
+             * outer: tag=0x7F49, len=0x43(67), value=inner → 70 bytes */
+            uint8_t inner[70];
+            uint16_t ioff = tlv_append(inner, sizeof(inner), 0, 0x86u, pub, 65);
+            if (ioff == 0) return sw_only(out, out_max, 0x6F00u);
+
+            uint8_t body[80];
+            uint16_t off = tlv_append(body, sizeof(body), 0, 0x7F49u, inner, ioff);
+            if (off == 0) return sw_only(out, out_max, 0x6F00u);
+
+            return respond(out, out_max, body, off, SW_OK);
+        }
+        /* P1=0x80 = on-device GENERATE — not in Phase 1; fall through to 6D00 */
+    }
+
     return sw_only(out, out_max, SW_INS_NOT_SUP);
 }
 

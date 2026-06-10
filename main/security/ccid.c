@@ -441,8 +441,26 @@ static bool ccid_drv_xfer(uint8_t rhport, uint8_t ep_addr,
     }
     if (ep_addr == s_ep_in) {
         if (s_final_queued) {
-            /* Final APDU response delivered.  Clear busy state and re-prime
-             * OUT so the next command can be received. */
+            /* USB bulk spec §5.8.3: a transfer whose byte count is an exact
+             * multiple of MPS does not carry an implicit "end-of-transfer"
+             * marker.  The host's libusb bulk read (length = dwMaxCCIDMessageLength
+             * = 271) only terminates on a short packet OR a ZLP.  If we just
+             * delivered N×64 bytes with no short last packet, send a ZLP now
+             * before clearing state and re-priming OUT.  xferred_bytes == 0
+             * means the ZLP itself just completed — fall through to re-prime. */
+            if (xferred_bytes > 0u && (xferred_bytes % 64u) == 0u) {
+                if (!usbd_edpt_xfer(rhport, s_ep_in, NULL, 0)) {
+                    ESP_LOGE(TAG, "ZLP send failed — aborting, re-priming OUT");
+                    /* ZLP failed: clear state and recover so OUT is not wedged. */
+                    s_final_queued = false;
+                    s_busy = false;
+                    usbd_edpt_xfer(rhport, s_ep_out, s_out_buf, sizeof(s_out_buf));
+                }
+                /* Wait for ZLP IN completion (next xfer_cb with xferred_bytes==0). */
+                return true;
+            }
+            /* Final APDU response delivered (short last packet, or ZLP just done).
+             * Clear busy state and re-prime OUT so the next command can arrive. */
             s_final_queued = false;
             s_busy = false;
             if (!usbd_edpt_xfer(rhport, s_ep_out, s_out_buf, sizeof(s_out_buf)))

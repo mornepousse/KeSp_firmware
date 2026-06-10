@@ -51,6 +51,40 @@ bool openpgp_crypto_p256_sign(const uint8_t d[32],
     return ok;
 }
 
+bool openpgp_crypto_p256_pubkey(const uint8_t d[32], uint8_t out_pub[65])
+{
+    if (!d || !out_pub) return false;
+
+    mbedtls_ecp_group grp;
+    mbedtls_ecp_point Q;
+    mbedtls_mpi dd;
+    mbedtls_ecp_group_init(&grp);
+    mbedtls_ecp_point_init(&Q);
+    mbedtls_mpi_init(&dd);
+
+    bool ok = false;
+    do {
+        if (mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1)) break;
+        if (mbedtls_mpi_read_binary(&dd, d, 32)) break;
+        /* reject d == 0 or d >= n (invalid scalar) */
+        if (mbedtls_mpi_cmp_int(&dd, 0) <= 0 ||
+            mbedtls_mpi_cmp_mpi(&dd, &grp.N) >= 0) break;
+        if (mbedtls_ecp_mul(&grp, &Q, &dd, &grp.G, rng_cb, NULL)) break;
+        size_t olen = 0;
+        if (mbedtls_ecp_point_write_binary(&grp, &Q,
+                                           MBEDTLS_ECP_PF_UNCOMPRESSED,
+                                           &olen, out_pub, 65)) break;
+        if (olen != 65) break;
+        ok = true;
+    } while (0);
+
+    mbedtls_mpi_lset(&dd, 0);  /* scrub the scalar copy before free */
+    mbedtls_mpi_free(&dd);
+    mbedtls_ecp_point_free(&Q);
+    mbedtls_ecp_group_free(&grp);
+    return ok;
+}
+
 bool openpgp_crypto_selftest(void)
 {
     /* RFC 6979 A.2.5 P-256 test key; hash = SHA-256("sample") */

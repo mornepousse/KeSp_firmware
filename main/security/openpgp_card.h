@@ -28,6 +28,11 @@ typedef struct {
                      const uint8_t *hash, uint16_t n,
                      uint8_t *out, uint16_t *out_n);
     int      (*confirm)(void);
+    /* Derive the public point Q = d·G for P-256.
+     * out_pub must hold 65 bytes; writes 0x04 || X(32) || Y(32).
+     * Returns false on error.  NULL-tolerant: if left NULL,
+     * READ PUBLIC KEY (INS 0x47 P1=0x81) returns 6A88. */
+    bool     (*pubkey)(const uint8_t d[32], uint8_t out_pub[65]);
 } openpgp_card_hooks_t;
 
 /*

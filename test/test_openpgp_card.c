@@ -24,6 +24,15 @@ static bool fake_sign(const uint8_t d[32],
 
 static int fake_confirm(void) { return g_confirm_retval; }
 
+/* Deterministic fake pubkey: 0x04 || d[32] || d[32] (easy to verify in tests). */
+static bool fake_pubkey(const uint8_t d[32], uint8_t out_pub[65])
+{
+    out_pub[0] = 0x04;
+    memcpy(out_pub + 1,  d, 32);
+    memcpy(out_pub + 33, d, 32);
+    return true;
+}
+
 /* ------------------------------------------------------------------ */
 /* APDU builders                                                       */
 /* ------------------------------------------------------------------ */
@@ -196,7 +205,7 @@ static void do_disable_uif(uint8_t *cmd, uint8_t *rsp)
 
 static void test_select_ok(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
     g_confirm_retval = 1;
 
@@ -214,7 +223,7 @@ static void test_select_ok(void)
 
 static void test_sign_requires_pin(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
     g_confirm_retval = 1;
 
@@ -246,7 +255,7 @@ static void test_sign_requires_pin(void)
 
 static void test_sign_uif_gate(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -297,7 +306,7 @@ static void test_sign_uif_gate(void)
 
 static void test_pin_retry_counter(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
     g_confirm_retval = 1;
 
@@ -331,7 +340,7 @@ static void test_pin_retry_counter(void)
    P2=0x82 alone must NOT open the signing gate. */
 static void test_verify_81_gates_sign(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
     g_confirm_retval = 1;
 
@@ -370,7 +379,7 @@ static void test_verify_81_gates_sign(void)
 /* Wrong PIN on P2=0x81 and P2=0x82 decrement the SAME PW1 retry counter. */
 static void test_verify_81_82_share_retries(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
     g_confirm_retval = 1;
 
@@ -405,7 +414,7 @@ static void test_verify_81_82_share_retries(void)
 
 static void test_factory_defaults_aid(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[16], rsp[256];
@@ -425,7 +434,7 @@ static void test_factory_defaults_aid(void)
 
 static void test_get_data_6e_constructed(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -467,7 +476,7 @@ static void test_get_data_6e_constructed(void)
 
 static void test_fingerprint_slices(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -499,7 +508,7 @@ static void test_fingerprint_slices(void)
 
 static void test_get_data_65_7a(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[16], rsp[256];
@@ -528,7 +537,7 @@ static void test_get_data_65_7a(void)
 
 static void test_login_data_empty(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[8], rsp[256];
@@ -544,7 +553,7 @@ static void test_login_data_empty(void)
 
 static void test_gf_management(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[8], rsp[256];
@@ -563,7 +572,7 @@ static void test_gf_management(void)
 
 static void test_6e_contains_7f74(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[8], rsp[256];
@@ -599,7 +608,7 @@ static void test_6e_contains_7f74(void)
 
 static void test_do_capacity(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t extra[4] = {0xDE, 0xAD, 0xBE, 0xEF};
@@ -614,7 +623,7 @@ static void test_do_capacity(void)
 
 static void test_set_serial(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[16], rsp[256];
@@ -644,7 +653,7 @@ static void test_set_serial(void)
 /* Key import without PW3 → 6982; key not set afterwards. */
 static void test_key_import_requires_pw3(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -663,7 +672,7 @@ static void test_key_import_requires_pw3(void)
    fake_sign received the correct private scalar. */
 static void test_key_import_ok_and_sign_uses_it(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
     g_confirm_retval = 1;
 
@@ -696,7 +705,7 @@ static void test_key_import_ok_and_sign_uses_it(void)
 /* B6 with a 3-byte reference value (84 01 01) must also be accepted. */
 static void test_key_import_b6_variant(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -729,7 +738,7 @@ static void test_key_import_b6_variant(void)
 /* B8 (decrypt slot) instead of B6 (sig slot) → 6A80; key not set. */
 static void test_key_import_wrong_slot_b8(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -750,7 +759,7 @@ static void test_key_import_wrong_slot_b8(void)
 /* 92 with length 16 (not 32) → 6A80 */
 static void test_key_import_bad_92_len(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -781,7 +790,7 @@ static void test_key_import_bad_92_len(void)
 /* Fresh card (no key), PW1 verified, UIF off → PSO:CDS returns 6A88. */
 static void test_sign_without_key_6a88(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
     g_confirm_retval = 1;
 
@@ -806,7 +815,7 @@ static void test_sign_without_key_6a88(void)
 /* After one successful PSO:CDS, a second without re-VERIFY → 6982 (PW1 consumed). */
 static void test_sign_consumes_pw1(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
     g_confirm_retval = 1;
 
@@ -834,7 +843,7 @@ static void test_sign_consumes_pw1(void)
 /* Two successful signs (each with its own VERIFY 81) → DS counter = 2. */
 static void test_ds_counter_increments(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
     g_confirm_retval = 1;
 
@@ -879,7 +888,7 @@ static void test_ds_counter_increments(void)
 /* 7F48 template absent → 6A80; key not set. */
 static void test_key_import_7f48_absent(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -907,7 +916,7 @@ static void test_key_import_7f48_absent(void)
 /* 5F48 key material absent → 6A80; key not set. */
 static void test_key_import_5f48_absent(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -935,7 +944,7 @@ static void test_key_import_5f48_absent(void)
 /* 7F48 declares 92 as 32 bytes but 5F48 only carries 16 bytes → 6A80. */
 static void test_key_import_5f48_too_short(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -968,7 +977,7 @@ static void test_key_import_5f48_too_short(void)
 /* Happy-path PW1 change: old "123456" → new "654321"; old PIN fails after. */
 static void test_change_pw1(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -997,7 +1006,7 @@ static void test_change_pw1(void)
 /* Happy-path PW3 change: 8-byte default → 8-byte new value. */
 static void test_change_pw3(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -1027,7 +1036,7 @@ static void test_change_pw3(void)
  * P2=0x82 → 6A86; blocked counter → 6983. */
 static void test_change_pw_rules(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
 
     uint8_t cmd[64], rsp[256];
@@ -1078,7 +1087,7 @@ static void test_change_pw_rules(void)
 /* Successful CHANGE 81 must clear s_pw1_sign_verified → PSO:CDS fails with 6982. */
 static void test_change_pw_clears_verified(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
     g_confirm_retval = 1;
 
@@ -1113,7 +1122,7 @@ static void test_change_pw_clears_verified(void)
 /* Verify that pin_persist() is called exactly when specified. */
 static void test_pin_persist_triggers(void)
 {
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
     /* Reset counter AFTER setup_card (factory_reset already ticked it) */
     g_pin_persist_calls = 0;
@@ -1149,6 +1158,122 @@ static void test_pin_persist_triggers(void)
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "change pw1 -> 9000");
     TEST_ASSERT_EQ(g_pin_persist_calls, 3, "persist==3 after CHANGE PW1");
+}
+
+/* ------------------------------------------------------------------ */
+/* APDU builder — INS 0x47 (GENERATE ASYMMETRIC KEY PAIR)             */
+/* ------------------------------------------------------------------ */
+
+/* Build: 00 47 <p1> 00 02 <crt_tag> 00  (CRT with empty value) */
+static uint16_t build_read_pubkey(uint8_t p1, uint8_t crt_tag, uint8_t *buf)
+{
+    buf[0] = 0x00; buf[1] = 0x47; buf[2] = p1; buf[3] = 0x00;
+    buf[4] = 0x02;    /* Lc */
+    buf[5] = crt_tag;
+    buf[6] = 0x00;    /* empty value */
+    return 7;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tests — INS 0x47 P1=0x81 READ PUBLIC KEY                           */
+/* ------------------------------------------------------------------ */
+
+/* No key imported → 6A88 */
+static void test_read_pubkey_no_key(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
+    setup_card(&h);
+
+    uint8_t cmd[16], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+
+    clen = build_read_pubkey(0x81, 0xB6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A88,
+                   "READ PUBKEY (B6) without imported key → 6A88");
+}
+
+/* Key imported → 9000, response = 7F49 43 86 41 04 ... (70 bytes data),
+   pubkey bytes match fake_pubkey output for the imported scalar. */
+static void test_read_pubkey_ok(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    uint8_t d[32];
+    for (int i = 0; i < 32; i++) d[i] = (uint8_t)(0xA0 + i);
+    do_import_key(d, cmd, rsp);
+
+    clen = build_read_pubkey(0x81, 0xB6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000,
+                   "READ PUBKEY (B6) with imported key → 9000");
+
+    uint16_t dlen = (uint16_t)(rlen - 2);
+    TEST_ASSERT_EQ(dlen, 70, "READ PUBKEY response data is 70 bytes");
+
+    /* Verify 7F 49 43 86 41 04 framing */
+    TEST_ASSERT_EQ(rsp[0], 0x7F, "response[0] = 7F (outer tag hi)");
+    TEST_ASSERT_EQ(rsp[1], 0x49, "response[1] = 49 (outer tag lo)");
+    TEST_ASSERT_EQ(rsp[2], 0x43, "response[2] = 43 (inner len = 67)");
+    TEST_ASSERT_EQ(rsp[3], 0x86, "response[3] = 86 (public key tag)");
+    TEST_ASSERT_EQ(rsp[4], 0x41, "response[4] = 41 (public point len = 65)");
+    TEST_ASSERT_EQ(rsp[5], 0x04, "response[5] = 04 (uncompressed point)");
+
+    /* fake_pubkey output: 0x04 || d || d */
+    uint8_t expected[65];
+    expected[0] = 0x04;
+    memcpy(expected + 1,  d, 32);
+    memcpy(expected + 33, d, 32);
+    TEST_ASSERT(memcmp(rsp + 5, expected, 65) == 0,
+                "READ PUBKEY pubkey bytes match fake_pubkey(d) output");
+}
+
+/* P1=0x80 (on-device GENERATE) → 6D00 — not implemented in Phase 1. */
+static void test_read_pubkey_generate_unsupported(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
+    setup_card(&h);
+
+    uint8_t cmd[16], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+
+    clen = build_read_pubkey(0x80, 0xB6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6D00,
+                   "GENERATE PUBKEY (P1=0x80) → 6D00 (unsupported)");
+}
+
+/* Auth slot (A4) — only sig slot (B6) supported in Phase 1 → 6A88. */
+static void test_read_pubkey_wrong_slot(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    static const uint8_t d[32] = {0xDD};
+    do_import_key(d, cmd, rsp);
+
+    /* A4 = auth slot → 6A88 even though a sig key is present */
+    clen = build_read_pubkey(0x81, 0xA4, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A88,
+                   "READ PUBKEY for auth slot (A4) → 6A88");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1194,4 +1319,9 @@ void test_openpgp_card(void)
     TEST_RUN(test_change_pw_rules);
     TEST_RUN(test_change_pw_clears_verified);
     TEST_RUN(test_pin_persist_triggers);
+    /* Task 8b: INS 0x47 P1=0x81 READ PUBLIC KEY */
+    TEST_RUN(test_read_pubkey_no_key);
+    TEST_RUN(test_read_pubkey_ok);
+    TEST_RUN(test_read_pubkey_generate_unsupported);
+    TEST_RUN(test_read_pubkey_wrong_slot);
 }
