@@ -64,8 +64,10 @@ static const uint8_t FACTORY_C0[10] = {
 static const uint8_t FACTORY_C1[9] = {
     0x13, /* PGP_ALGO_ECDSA_P256 */ 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
 };
-static const uint8_t FACTORY_C2[9] = {
-    0x12, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
+/* Algorithm attributes 0xC2 — ECDH with cv25519 (OID 1.3.6.1.4.1.3029.1.5.1),
+ * gpg's default ENC subkey algorithm since 2.3. */
+static const uint8_t FACTORY_C2[11] = {
+    0x12, 0x2B, 0x06, 0x01, 0x04, 0x01, 0x97, 0x55, 0x01, 0x05, 0x01
 };
 static const uint8_t FACTORY_C3[9] = {
     0x13, /* PGP_ALGO_ECDSA_P256 */ 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
@@ -214,14 +216,23 @@ static void fill_pw_status(uint8_t c4[7])
     c4[6] = s_pw3_retry;
 }
 
-/* Check UIF DO 0xD6: returns true if touch confirmation is required. */
-static bool uif_signing_required(void)
+/* UIF DO for a slot (0x00D6 sig / 0x00D7 dec / 0x00D8 aut): byte0 != 0 → touch. */
+static bool uif_required(uint16_t uif_tag)
 {
-    const uint8_t *v;
-    uint16_t n;
-    if (openpgp_do_get(0x00D6, &v, &n) && n >= 1 && v[0] != 0x00)
-        return true;
-    return false;
+    const uint8_t *v; uint16_t n;
+    return openpgp_do_get(uif_tag, &v, &n) && n >= 1 && v[0] != 0x00;
+}
+
+/* Only the algorithms this card implements may be written to C1/C2/C3 —
+ * accepting anything else would let gpg build keys the card cannot use. */
+static bool algo_attrs_acceptable(uint16_t tag, const uint8_t *v, uint16_t n)
+{
+    static const uint8_t P256_ECDSA[9] = {0x13,0x2A,0x86,0x48,0xCE,0x3D,0x03,0x01,0x07};
+    if (tag == 0x00C1u || tag == 0x00C3u)
+        return n == sizeof(P256_ECDSA) && memcmp(v, P256_ECDSA, n) == 0;
+    if (tag == 0x00C2u)
+        return n == sizeof(FACTORY_C2) && memcmp(v, FACTORY_C2, n) == 0;
+    return true;
 }
 
 /* BER-TLV sibling scanner.
@@ -414,7 +425,7 @@ bool openpgp_card_ensure_defaults(void)
     ENSURE(0x5F52, FACTORY_HIST, 10);
     ENSURE(0x00C0, FACTORY_C0,   10);
     ENSURE(0x00C1, FACTORY_C1,    9);
-    ENSURE(0x00C2, FACTORY_C2,    9);
+    ENSURE(0x00C2, FACTORY_C2,   11);
     ENSURE(0x00C3, FACTORY_C3,    9);
     ENSURE(0x00C5, NULL,         60);  /* fingerprints: zero-filled    */
     ENSURE(0x00C6, NULL,         60);  /* CA fingerprints: zero-filled */
@@ -434,6 +445,13 @@ bool openpgp_card_ensure_defaults(void)
     ENSURE(0x0093, NULL,          3);  /* DS counter: zero             */
 
 #undef ENSURE
+
+    /* Phase-1 cards shipped C2 = ECDH P-256; Phase 2 decrypts with X25519
+     * only.  Upgrade the stale factory value in place — safe: PSO:DECIPHER
+     * did not exist in Phase 1, so no key material depends on the old attrs. */
+    static const uint8_t LEGACY_C2_P256[9] = {0x12,0x2A,0x86,0x48,0xCE,0x3D,0x03,0x01,0x07};
+    if (openpgp_do_get(0x00C2u, &v, &n) && n == 9 && memcmp(v, LEGACY_C2_P256, 9) == 0)
+        if (!openpgp_do_put(0x00C2u, FACTORY_C2, sizeof(FACTORY_C2))) failures++;
 
     return (failures == 0);
 }
@@ -786,6 +804,11 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
             return sw_only(out, out_max, SW_OK);
         }
 
+        /* Algorithm attributes C1/C2/C3: reject anything the card can't use. */
+        if ((tag == 0x00C1u || tag == 0x00C2u || tag == 0x00C3u) &&
+            !algo_attrs_acceptable(tag, a.data, a.lc))
+            return sw_only(out, out_max, SW_WRONG_DATA);
+
         /* Generic PUT DATA */
         if (!openpgp_do_put(tag, a.data, a.lc))
             return sw_only(out, out_max, SW_WRONG_DATA);
@@ -898,8 +921,46 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         return sw_only(out, out_max, SW_OK);
     }
 
-    /* ---- PSO: Compute Digital Signature (INS=0x2A, P1=0x9E, P2=0x9A) ---- */
+    /* ---- PSO (INS=0x2A): COMPUTE DIGITAL SIGNATURE / DECIPHER ---- */
     if (a.ins == 0x2A) {
+        /* ---- PSO: DECIPHER (P1=0x80, P2=0x86) — X25519 ECDH ---- */
+        if (a.p1 == 0x80 && a.p2 == 0x86) {
+            if (!s_crypto_ok) return sw_only(out, out_max, 0x6581u);
+
+            const pgp_key_t *k = &s_keys[OPENPGP_SLOT_DEC];
+            if (!k->set) return sw_only(out, out_max, SW_REF_NOT_FOUND);
+            if (k->algo != PGP_ALGO_ECDH)
+                return sw_only(out, out_max, SW_COND_NOT_SAT);
+            if (!s_pw1_user_verified)
+                return sw_only(out, out_max, SW_SEC_NOT_SAT);
+
+            /* data = A6{ 7F49{ 86 <ephemeral public point> } } */
+            uint16_t a6_n; const uint8_t *a6 = tlv_find(a.data, a.lc, 0x00A6u, &a6_n);
+            if (!a6) return sw_only(out, out_max, SW_WRONG_DATA);
+            uint16_t t_n; const uint8_t *t = tlv_find(a6, a6_n, 0x7F49u, &t_n);
+            if (!t) return sw_only(out, out_max, SW_WRONG_DATA);
+            uint16_t p_n; const uint8_t *p = tlv_find(t, t_n, 0x0086u, &p_n);
+            if (!p) return sw_only(out, out_max, SW_WRONG_DATA);
+            /* X25519 u-coordinate: 32 B; tolerate the 0x40 native-format prefix. */
+            if (p_n == 33 && p[0] == 0x40) { p++; p_n = 32; }
+            if (p_n != 32) return sw_only(out, out_max, SW_WRONG_DATA);
+
+            /* UIF D7 gate (after input validation: don't burn a touch on garbage). */
+            if (uif_required(0x00D7u)) {
+                int cs = s_hooks->confirm();
+                if (cs != 1) return sw_only(out, out_max, SW_COND_NOT_SAT);
+            }
+            /* NOTE: mode-82 verification is NOT consumed — the C4 validity
+             * byte applies to PSO:CDS only (OpenPGP 3.4 §7.2.2). */
+
+            uint8_t shared[64]; uint16_t shared_n = 0;
+            if (!s_hooks->ecdh ||
+                !s_hooks->ecdh(k->d, p, p_n, shared, &shared_n))
+                return sw_only(out, out_max, SW_COND_NOT_SAT);
+            return respond(out, out_max, shared, shared_n, SW_OK);
+        }
+
+        /* ---- PSO: Compute Digital Signature (P1=0x9E, P2=0x9A) ---- */
         if (a.p1 != 0x9E || a.p2 != 0x9A)
             return sw_only(out, out_max, SW_WRONG_P1P2);
 
@@ -915,7 +976,7 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
             return sw_only(out, out_max, SW_SEC_NOT_SAT);
 
         /* UIF gate: if DO 0xD6 byte[0] != 0, call confirm hook */
-        if (uif_signing_required()) {
+        if (uif_required(0x00D6u)) {
             int cs = s_hooks->confirm();
             if (cs != 1)
                 return sw_only(out, out_max, SW_COND_NOT_SAT);

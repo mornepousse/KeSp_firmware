@@ -1575,6 +1575,184 @@ static void test_import_unknown_crt_rejected(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Tests — Task 2: PSO:DECIPHER + UIF D7 + algo-attrs validation       */
+/* ------------------------------------------------------------------ */
+
+/* Build PSO:DECIPHER 00 2A 80 86 Lc [ A6{ 7F49{ 86 <peer> } } ] */
+static uint16_t build_pso_decipher(const uint8_t *peer, uint8_t peer_n, uint8_t *buf)
+{
+    uint16_t i = 0;
+    buf[i++] = 0x00; buf[i++] = 0x2A; buf[i++] = 0x80; buf[i++] = 0x86;
+    buf[i++] = (uint8_t)(peer_n + 7);                  /* Lc */
+    buf[i++] = 0xA6; buf[i++] = (uint8_t)(peer_n + 5);
+    buf[i++] = 0x7F; buf[i++] = 0x49; buf[i++] = (uint8_t)(peer_n + 2);
+    buf[i++] = 0x86; buf[i++] = peer_n;
+    memcpy(buf + i, peer, peer_n); i += peer_n;
+    return i;
+}
+
+static void do_verify_pw1_user(uint8_t *cmd, uint8_t *rsp)   /* mode 0x82 */
+{
+    static const uint8_t pw1[] = {'1','2','3','4','5','6'};
+    uint16_t clen = build_verify(0x82, pw1, sizeof(pw1), cmd);
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, 256);
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY PW1 (82) returns 9000");
+}
+
+/* Full happy path + gate checks for PSO:DECIPHER. */
+static void test_decipher_gates_and_result(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp);
+
+    uint8_t peer[32]; memset(peer, 0x99, 32);
+
+    /* no key → 6A88 */
+    n = build_pso_decipher(peer, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A88, "DECIPHER no key");
+
+    do_verify_pw3(cmd, rsp);
+    uint8_t d_dec[32]; memset(d_dec, 0x22, 32);
+    n = build_key_import_crt(0xB8, d_dec, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "import DEC key");
+
+    /* PW1 mode 81 alone is NOT the decipher gate */
+    do_verify_pw1_sign(cmd, rsp);
+    n = build_pso_decipher(peer, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6982, "DECIPHER needs mode 82");
+
+    /* mode 82 + factory UIF D7 = off → succeeds, returns the canned shared */
+    do_verify_pw1_user(cmd, rsp);
+    n = build_pso_decipher(peer, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "DECIPHER ok");
+    TEST_ASSERT_EQ(rlen, 32 + 2, "32-byte shared secret");
+    TEST_ASSERT(rsp[0] == 0x55 && rsp[31] == 0x55, "canned ecdh output");
+    TEST_ASSERT(g_fake_ecdh_last_d[0] == 0x22, "used the DEC slot scalar");
+    TEST_ASSERT(g_fake_ecdh_last_peer[0] == 0x99, "peer point forwarded");
+
+    /* mode 82 is NOT consumed: second DECIPHER also works */
+    n = build_pso_decipher(peer, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "82 not consumed");
+}
+
+/* UIF D7 on → confirm() is consulted; denial → 6985, grant → 9000. */
+static void test_decipher_uif_gate(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);
+    uint8_t d_dec[32]; memset(d_dec, 0x22, 32);
+    n = build_key_import_crt(0xB8, d_dec, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "import DEC key");
+
+    static const uint8_t uif_on[] = {0x01, 0x20};
+    n = build_put_data(0x00, 0xD7, uif_on, 2, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "enable UIF D7");
+
+    do_verify_pw1_user(cmd, rsp);
+    uint8_t peer[32]; memset(peer, 0x99, 32);
+
+    g_confirm_retval = 2;                      /* denied */
+    n = build_pso_decipher(peer, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6985, "UIF denial → 6985");
+
+    g_confirm_retval = 1;                      /* touch */
+    n = build_pso_decipher(peer, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "UIF grant → ok");
+}
+
+/* 0x40-prefixed 33-byte peer accepted; malformed frames rejected. */
+static void test_decipher_input_formats(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);
+    uint8_t d_dec[32]; memset(d_dec, 0x22, 32);
+    n = build_key_import_crt(0xB8, d_dec, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "import DEC key");
+    do_verify_pw1_user(cmd, rsp);
+
+    uint8_t peer40[33]; peer40[0] = 0x40; memset(peer40 + 1, 0x99, 32);
+    n = build_pso_decipher(peer40, 33, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "0x40-prefixed peer accepted");
+    TEST_ASSERT(g_fake_ecdh_last_peer[0] == 0x99, "prefix stripped");
+
+    uint8_t bad[16]; memset(bad, 0x99, 16);    /* wrong point length */
+    n = build_pso_decipher(bad, 16, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80, "bad point length → 6A80");
+
+    /* garbage instead of A6 */
+    uint8_t raw[40]; memset(raw, 0xEE, sizeof(raw));
+    uint16_t i = 0;
+    cmd[i++] = 0x00; cmd[i++] = 0x2A; cmd[i++] = 0x80; cmd[i++] = 0x86;
+    cmd[i++] = 40; memcpy(cmd + i, raw, 40); i += 40;
+    rlen = openpgp_card_apdu(cmd, i, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80, "no A6 container → 6A80");
+}
+
+/* C1/C3 only accept ECDSA-P256; C2 only accepts ECDH-cv25519. */
+static void test_algo_attrs_validation(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);
+
+    static const uint8_t p256_ecdsa[9]  = {0x13,0x2A,0x86,0x48,0xCE,0x3D,0x03,0x01,0x07};
+    static const uint8_t cv25519[11]    = {0x12,0x2B,0x06,0x01,0x04,0x01,0x97,0x55,0x01,0x05,0x01};
+    static const uint8_t ed25519_bad[10]= {0x16,0x2B,0x06,0x01,0x04,0x01,0xDA,0x47,0x0F,0x01};
+
+    n = build_put_data(0x00, 0xC1, p256_ecdsa, 9, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "C1 = ECDSA P-256 accepted");
+
+    n = build_put_data(0x00, 0xC2, cv25519, 11, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "C2 = cv25519 accepted");
+
+    n = build_put_data(0x00, 0xC1, ed25519_bad, 10, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80, "C1 = EdDSA rejected");
+
+    n = build_put_data(0x00, 0xC2, p256_ecdsa, 9, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80, "C2 = ECDH P-256 rejected (X25519 only)");
+}
+
+/* Factory C2 is cv25519 and a stale Phase-1 P-256-ECDH C2 gets migrated. */
+static void test_factory_c2_is_cv25519(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[64], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp);
+    n = build_get_data(0x00, 0xC2, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET C2 ok");
+    TEST_ASSERT_EQ(rlen, 11 + 2, "C2 is 11 bytes");
+    TEST_ASSERT(rsp[0] == 0x12 && rsp[1] == 0x2B && rsp[10] == 0x01, "cv25519 OID");
+
+    /* simulate a Phase-1 card: plant the legacy value, re-run defaults */
+    static const uint8_t legacy[9] = {0x12,0x2A,0x86,0x48,0xCE,0x3D,0x03,0x01,0x07};
+    openpgp_do_put(0x00C2u, legacy, 9);
+    openpgp_card_ensure_defaults();
+    n = build_get_data(0x00, 0xC2, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(rlen, 11 + 2, "legacy C2 migrated to cv25519");
+}
+
+/* ------------------------------------------------------------------ */
 /* Test suite entry point                                              */
 /* ------------------------------------------------------------------ */
 
@@ -1633,4 +1811,10 @@ void test_openpgp_card(void)
     TEST_RUN(test_crypto_broken_blocks_readpub);
     TEST_RUN(test_sign_consumes_pw1_on_failure);
     TEST_RUN(test_import_rejects_zero_scalar);
+    /* Task 2: PSO:DECIPHER + UIF D7 + algo-attrs validation */
+    TEST_RUN(test_decipher_gates_and_result);
+    TEST_RUN(test_decipher_uif_gate);
+    TEST_RUN(test_decipher_input_formats);
+    TEST_RUN(test_algo_attrs_validation);
+    TEST_RUN(test_factory_c2_is_cv25519);
 }
