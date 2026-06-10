@@ -111,7 +111,7 @@ if(CONFIG_KASE_DEVICE_ROLE_DONGLE)
             "security/openpgp_card.c"
             "security/apdu.c"
             "security/openpgp_do.c"
-            # "security/openpgp_crypto.c"   # Task 7 — file doesn't exist yet
+            "security/openpgp_crypto.c"
         )
     endif()
 endif()
