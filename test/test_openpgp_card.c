@@ -3,6 +3,9 @@
 #include "openpgp_do.h"
 #include <string.h>
 
+/* host-visible persist-call counter defined in openpgp_card.c under TEST_HOST */
+extern int g_pin_persist_calls;
+
 /* ------------------------------------------------------------------ */
 /* Fake hooks                                                          */
 /* ------------------------------------------------------------------ */
@@ -73,6 +76,20 @@ static uint16_t build_get_data(uint8_t p1, uint8_t p2, uint8_t *buf)
 {
     buf[0] = 0x00; buf[1] = 0xCA; buf[2] = p1; buf[3] = p2; buf[4] = 0x00;
     return 5;
+}
+
+/* CHANGE REFERENCE DATA — 00 24 00 P2 lc old_pin||new_pin */
+static uint16_t build_change_ref(uint8_t p2,
+                                  const uint8_t *old_pin, uint8_t old_len,
+                                  const uint8_t *new_pin, uint8_t new_len,
+                                  uint8_t *buf)
+{
+    uint8_t lc = (uint8_t)(old_len + new_len);
+    buf[0] = 0x00; buf[1] = 0x24; buf[2] = 0x00; buf[3] = p2;
+    buf[4] = lc;
+    memcpy(buf + 5,            old_pin, old_len);
+    memcpy(buf + 5 + old_len,  new_pin, new_len);
+    return (uint16_t)(5 + lc);
 }
 
 /*
@@ -948,6 +965,196 @@ static void test_key_import_5f48_too_short(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Tests — Task 6: CHANGE REFERENCE DATA + PIN persistence            */
+/* ------------------------------------------------------------------ */
+
+/* Happy-path PW1 change: old "123456" → new "654321"; old PIN fails after. */
+static void test_change_pw1(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+
+    static const uint8_t old_pw1[] = {'1','2','3','4','5','6'};
+    static const uint8_t new_pw1[] = {'6','5','4','3','2','1'};
+
+    clen = build_change_ref(0x81, old_pw1, 6, new_pw1, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "CHANGE PW1 returns 9000");
+
+    /* Old PIN must now fail */
+    clen = build_verify(0x81, old_pw1, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x63C2, "old PW1 rejected after change (63C2)");
+
+    /* New PIN must succeed */
+    clen = build_verify(0x81, new_pw1, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "new PW1 accepted after change (9000)");
+}
+
+/* Happy-path PW3 change: 8-byte default → 8-byte new value. */
+static void test_change_pw3(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+
+    static const uint8_t old_pw3[] = {'1','2','3','4','5','6','7','8'};
+    static const uint8_t new_pw3[] = {'8','7','6','5','4','3','2','1'};
+
+    clen = build_change_ref(0x83, old_pw3, 8, new_pw3, 8, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "CHANGE PW3 returns 9000");
+
+    /* Old PIN must now fail */
+    clen = build_verify(0x83, old_pw3, 8, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x63C2, "old PW3 rejected after change (63C2)");
+
+    /* New PIN must succeed */
+    clen = build_verify(0x83, new_pw3, 8, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "new PW3 accepted after change (9000)");
+}
+
+/* Error-path rules: wrong old → 63Cx; new too short → 6A80 (no decrement);
+ * P2=0x82 → 6A86; blocked counter → 6983. */
+static void test_change_pw_rules(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+
+    static const uint8_t old_pw1[]   = {'1','2','3','4','5','6'};
+    static const uint8_t new_pw1[]   = {'6','5','4','3','2','1'};
+    static const uint8_t wrong_old[] = {'X','X','X','X','X','X'};
+
+    /* 1. Wrong old PIN → retry decrement → 63C2 */
+    clen = build_change_ref(0x81, wrong_old, 6, new_pw1, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x63C2, "CHANGE wrong old -> 63C2");
+
+    /* 2. New PIN too short (4 < min 6) → 6A80, counter must NOT decrement */
+    static const uint8_t short_new[] = {'1','2','3','4'};
+    clen = build_change_ref(0x81, old_pw1, 6, short_new, 4, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80, "CHANGE new too short -> 6A80");
+    /* Verify counter is still 2 (no decrement from the 6A80 path) */
+    {
+        uint8_t chk[5] = {0x00, 0x20, 0x00, 0x81, 0x00};
+        rlen = openpgp_card_apdu(chk, 5, rsp, sizeof(rsp));
+        TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x63C2,
+                       "counter still 2 after 6A80 (no decrement)");
+    }
+
+    /* 3. P2=0x82 → 6A86 (not a valid CHANGE REF DATA P2) */
+    clen = build_change_ref(0x82, old_pw1, 6, new_pw1, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A86, "CHANGE P2=82 -> 6A86");
+
+    /* 4. Block the counter then attempt → 6983 */
+    /* Counter is at 2; exhaust remaining 2 retries */
+    clen = build_change_ref(0x81, wrong_old, 6, new_pw1, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x63C1, "CHANGE 2nd wrong -> 63C1");
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x63C0, "CHANGE 3rd wrong -> 63C0 (blocked)");
+    /* Correct old now blocked */
+    clen = build_change_ref(0x81, old_pw1, 6, new_pw1, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6983, "CHANGE on blocked PW1 -> 6983");
+}
+
+/* Successful CHANGE 81 must clear s_pw1_sign_verified → PSO:CDS fails with 6982. */
+static void test_change_pw_clears_verified(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+    g_confirm_retval = 1;
+
+    uint8_t cmd[64], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    static const uint8_t d[32] = {0xCC};
+    do_import_key(d, cmd, rsp);
+    do_disable_uif(cmd, rsp);
+
+    /* Establish signing authorisation */
+    do_verify_pw1_sign(cmd, rsp);
+
+    /* Change PW1 — must clear the verified flag */
+    static const uint8_t old_pw1[] = {'1','2','3','4','5','6'};
+    static const uint8_t new_pw1[] = {'6','5','4','3','2','1'};
+    clen = build_change_ref(0x81, old_pw1, 6, new_pw1, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "CHANGE PW1 returns 9000");
+
+    /* PSO:CDS must now fail — flag cleared by CHANGE */
+    uint8_t hash[32]; memset(hash, 0xEE, 32);
+    clen = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6982,
+                   "PSO:CDS after CHANGE PW1 returns 6982 (flag cleared)");
+}
+
+/* Verify that pin_persist() is called exactly when specified. */
+static void test_pin_persist_triggers(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+    /* Reset counter AFTER setup_card (factory_reset already ticked it) */
+    g_pin_persist_calls = 0;
+
+    uint8_t cmd[64], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+
+    /* Wrong VERIFY → retry decrement → persist */
+    static const uint8_t wrong[] = {'X','X','X','X','X','X'};
+    static const uint8_t pw1[]   = {'1','2','3','4','5','6'};
+    clen = build_verify(0x81, wrong, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x63C2, "wrong verify -> 63C2");
+    TEST_ASSERT_EQ(g_pin_persist_calls, 1, "persist==1 after wrong verify");
+
+    /* Correct VERIFY (counter was 2, below max 3) → persist */
+    clen = build_verify(0x81, pw1, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "correct verify -> 9000");
+    TEST_ASSERT_EQ(g_pin_persist_calls, 2, "persist==2 after correct verify (counter restored)");
+
+    /* Correct VERIFY again (counter already at max 3) → NO persist */
+    clen = build_verify(0x81, pw1, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "second correct verify -> 9000");
+    TEST_ASSERT_EQ(g_pin_persist_calls, 2, "persist still==2 (counter was already max)");
+
+    /* CHANGE PW1 with correct old → persist */
+    static const uint8_t new_pw1[] = {'6','5','4','3','2','1'};
+    clen = build_change_ref(0x81, pw1, 6, new_pw1, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "change pw1 -> 9000");
+    TEST_ASSERT_EQ(g_pin_persist_calls, 3, "persist==3 after CHANGE PW1");
+}
+
+/* ------------------------------------------------------------------ */
 /* Test suite entry point                                              */
 /* ------------------------------------------------------------------ */
 
@@ -984,4 +1191,10 @@ void test_openpgp_card(void)
     TEST_RUN(test_key_import_7f48_absent);
     TEST_RUN(test_key_import_5f48_absent);
     TEST_RUN(test_key_import_5f48_too_short);
+    /* Task 6: CHANGE REFERENCE DATA + PIN persistence */
+    TEST_RUN(test_change_pw1);
+    TEST_RUN(test_change_pw3);
+    TEST_RUN(test_change_pw_rules);
+    TEST_RUN(test_change_pw_clears_verified);
+    TEST_RUN(test_pin_persist_triggers);
 }

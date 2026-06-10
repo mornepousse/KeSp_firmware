@@ -74,6 +74,16 @@ void openpgp_card_set_serial(const uint8_t serial[4]);
 bool openpgp_card_key_is_set(void);
 
 /*
+ * Load persisted PIN/retry state and imported key from NVS into the applet
+ * statics.  Must be called after openpgp_do_init() and before the card is
+ * accessible to hosts (i.e. before any CCID traffic).  On a fresh device
+ * (blobs absent) the call is a no-op and the factory baseline set by
+ * openpgp_card_init() remains in effect.
+ * On the test host this function is a no-op (compiled out).
+ */
+void openpgp_card_load(void);
+
+/*
  * Process one command APDU (`in[0..in_len-1]`).
  * Writes the response (data + SW1 SW2) into `out[0..out_max-1]`.
  * Returns the number of bytes written (always >= 2 for the SW).

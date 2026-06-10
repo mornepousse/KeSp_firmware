@@ -194,9 +194,11 @@ void app_main(void) {
      * here — after NVS-backed sec_store — is safe. */
     if (!safe_mode) {
       extern void openpgp_do_init(void);
+      extern void openpgp_card_load(void);
       extern bool openpgp_card_ensure_defaults(void);
       extern void openpgp_card_set_serial(const uint8_t serial[4]);
       openpgp_do_init();                /* NVS load of persisted DOs */
+      openpgp_card_load();              /* NVS load of PIN/retry/key state */
       if (!openpgp_card_ensure_defaults())
         ESP_LOGE(TAG, "openpgp: factory DO seed incomplete");
       uint8_t mac[6] = {0};

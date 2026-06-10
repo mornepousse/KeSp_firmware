@@ -106,7 +106,14 @@ static uint8_t s_pw3_len;
 typedef struct { uint8_t set; uint8_t algo; uint8_t d[32]; } pgp_key_t;
 static pgp_key_t s_key;
 
+/* NVS blob layout for PIN/retry persistence ("pgp_pins"). */
+typedef struct {
+    uint8_t pw1[PW_MAX_LEN]; uint8_t pw1_len; uint8_t pw1_retry;
+    uint8_t pw3[PW_MAX_LEN]; uint8_t pw3_len; uint8_t pw3_retry;
+} pgp_pins_blob_t;
+
 static bool key_persist(void); /* NVS on target, no-op on host; defined below */
+static bool pin_persist(void); /* NVS on target, counter on host; defined below */
 
 /* ------------------------------------------------------------------ */
 /* Internal helpers                                                    */
@@ -381,8 +388,9 @@ bool openpgp_card_factory_reset(void)
     /* 3. Wipe DO store */
     openpgp_do_reset();
 
-    /* 4. Restore factory PINs and retry counters */
+    /* 4. Restore factory PINs and retry counters, then persist them */
     pins_factory();
+    if (!pin_persist()) ok = false;
 
     /* 5. Populate all factory-default DOs */
     if (!openpgp_card_ensure_defaults()) ok = false;
@@ -460,14 +468,69 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         /* PIN comparison */
         if (a.lc != pinlen || memcmp(a.data, pin, pinlen) != 0) {
             (*retry)--;
+            pin_persist();
             return sw_only(out, out_max, (uint16_t)(0x63C0u | *retry));
         }
 
-        /* Correct PIN — reset counter, set mode-specific verified flag */
+        /* Correct PIN — reset counter, set mode-specific verified flag.
+         * Only persist when the counter actually changed (was below max), to
+         * avoid an NVS write on every routine VERIFY of an unblocked card. */
+        uint8_t old_retry = *retry;
         *retry = (is_pw1 ? PW1_RETRY_MAX : PW3_RETRY_MAX);
         if      (a.p2 == 0x81) s_pw1_sign_verified = true;
         else if (a.p2 == 0x82) s_pw1_user_verified = true;
         else                   s_pw3_verified       = true;
+        if (old_retry != *retry) pin_persist();
+        return sw_only(out, out_max, SW_OK);
+    }
+
+    /* ---- CHANGE REFERENCE DATA (INS=0x24) ---- */
+    if (a.ins == 0x24) {
+        /* P1 must be 0x00; P2 must be 0x81 (PW1) or 0x83 (PW3) */
+        if (a.p1 != 0x00)
+            return sw_only(out, out_max, SW_WRONG_P1P2);
+        bool is_pw1c = (a.p2 == 0x81);
+        bool is_pw3c = (a.p2 == 0x83);
+        if (!is_pw1c && !is_pw3c)
+            return sw_only(out, out_max, SW_WRONG_P1P2);
+
+        uint8_t *retry     = is_pw1c ? &s_pw1_retry  : &s_pw3_retry;
+        uint8_t *pin       = is_pw1c ? s_pw1          : s_pw3;
+        uint8_t *pin_len   = is_pw1c ? &s_pw1_len     : &s_pw3_len;
+        uint8_t  retry_max = is_pw1c ? PW1_RETRY_MAX  : PW3_RETRY_MAX;
+        uint8_t  min_len   = is_pw1c ? (uint8_t)PW1_DEFAULT_LEN
+                                     : (uint8_t)PW3_DEFAULT_LEN;
+
+        if (*retry == 0)
+            return sw_only(out, out_max, SW_AUTH_BLOCKED);
+
+        /* Frame validation: data = old_pin ‖ new_pin split at current length.
+         * Malformed frames return 6A80 with NO retry decrement. */
+        uint8_t old_len = *pin_len;
+        if (a.lc <= old_len)
+            return sw_only(out, out_max, SW_WRONG_DATA);
+        uint8_t new_len = (uint8_t)(a.lc - old_len);
+        if (new_len < min_len || new_len > PW_MAX_LEN)
+            return sw_only(out, out_max, SW_WRONG_DATA);
+
+        /* Verify old PIN — mismatch decrements counter and persists */
+        if (memcmp(a.data, pin, old_len) != 0) {
+            (*retry)--;
+            pin_persist();
+            return sw_only(out, out_max, (uint16_t)(0x63C0u | *retry));
+        }
+
+        /* Correct old PIN — store new PIN, reset retry, clear verified flags */
+        memcpy(pin, a.data + old_len, new_len);
+        *pin_len = new_len;
+        *retry   = retry_max;
+        if (is_pw1c) {
+            s_pw1_sign_verified = false;
+            s_pw1_user_verified = false;
+        } else {
+            s_pw3_verified = false;
+        }
+        pin_persist();
         return sw_only(out, out_max, SW_OK);
     }
 
@@ -756,13 +819,14 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
 }
 
 /* ------------------------------------------------------------------ */
-/* key_persist — NVS on target, no-op on host                         */
+/* NVS persistence helpers — target only; host stubs + test counters  */
 /* ------------------------------------------------------------------ */
 #ifndef TEST_HOST
 #include "esp_log.h"
 #include "nvs_utils.h"
 #include "keyboard_config.h"
 static const char *TAG = "openpgp_card";
+
 static bool key_persist(void)
 {
     esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "pgp_key",
@@ -774,6 +838,56 @@ static bool key_persist(void)
     }
     return true;
 }
-#else
+
+static bool pin_persist(void)
+{
+    pgp_pins_blob_t blob;
+    memcpy(blob.pw1, s_pw1, PW_MAX_LEN);
+    blob.pw1_len   = s_pw1_len;
+    blob.pw1_retry = s_pw1_retry;
+    memcpy(blob.pw3, s_pw3, PW_MAX_LEN);
+    blob.pw3_len   = s_pw3_len;
+    blob.pw3_retry = s_pw3_retry;
+    esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "pgp_pins",
+                                             &blob, sizeof(blob),
+                                             "pgp_pins_ver", 1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "pin persist failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
+
+void openpgp_card_load(void)
+{
+    /* Load PIN/retry state — on fresh device the blob is absent; keep factory RAM state */
+    uint32_t ver = 0;
+    pgp_pins_blob_t blob;
+    if (nvs_load_blob_with_total(STORAGE_NAMESPACE, "pgp_pins",
+                                 &blob, sizeof(blob), "pgp_pins_ver", &ver) == ESP_OK) {
+        memcpy(s_pw1, blob.pw1, PW_MAX_LEN);
+        s_pw1_len   = blob.pw1_len;
+        s_pw1_retry = blob.pw1_retry;
+        memcpy(s_pw3, blob.pw3, PW_MAX_LEN);
+        s_pw3_len   = blob.pw3_len;
+        s_pw3_retry = blob.pw3_retry;
+    }
+    /* Load imported key — use local buffer; copy only on success so a fresh
+     * device leaves s_key.set == 0 (no key imported yet). */
+    pgp_key_t loaded_key;
+    memset(&loaded_key, 0, sizeof(loaded_key));
+    ver = 0;
+    if (nvs_load_blob_with_total(STORAGE_NAMESPACE, "pgp_key",
+                                 &loaded_key, sizeof(loaded_key),
+                                 "pgp_key_ver", &ver) == ESP_OK)
+        s_key = loaded_key;
+}
+
+#else /* TEST_HOST */
+
 static bool key_persist(void) { return true; }
+int  g_pin_persist_calls = 0;
+static bool pin_persist(void) { g_pin_persist_calls++; return true; }
+void openpgp_card_load(void) { /* host: no NVS */ }
+
 #endif
