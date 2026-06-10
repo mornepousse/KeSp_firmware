@@ -21,7 +21,7 @@ static const uint8_t PW3_DEFAULT[8]  = {'1','2','3','4','5','6','7','8'};
 #define PW_MAX_LEN      16
 #define FP_SLICE_LEN    20u  /* fingerprint slice length (C7/C8/C9 PUT DATA) */
 #define TS_SLICE_LEN     4u  /* timestamp slice length (CE/CF/D0 PUT DATA)    */
-#define PGP_ALGO_ECDSA_P256   0x13u  /* algorithm attribute: ECDSA with NIST P-256 */
+/* PGP_ALGO_ECDSA_P256 / PGP_ALGO_ECDH are declared in openpgp_card.h */
 #define PGP_P256_SCALAR_BYTES 32u    /* private scalar size in bytes (P-256) */
 
 /* Status words */
@@ -108,10 +108,15 @@ static uint8_t s_pw1_len;
 static uint8_t s_pw3[PW_MAX_LEN];
 static uint8_t s_pw3_len;
 
-/* Imported private key — Signature slot only (Phase 1).
- * algo 0x13 = ECDSA P-256.  Cleared and re-persisted by factory_reset(). */
-typedef struct { uint8_t set; uint8_t algo; uint8_t d[32]; } pgp_key_t;
-static pgp_key_t s_key;
+/* Private keys, one per OpenPGP slot.  d is big-endian as received from gpg.
+ * origin per DO 0xDE encoding: 1 = generated on-device, 2 = imported. */
+typedef struct {
+    uint8_t set;
+    uint8_t algo;     /* PGP_ALGO_ECDSA_P256 / PGP_ALGO_ECDH */
+    uint8_t origin;
+    uint8_t d[32];
+} pgp_key_t;
+static pgp_key_t s_keys[OPENPGP_SLOT_COUNT];
 
 /* NVS blob layout for PIN/retry persistence ("pgp_pins"). */
 typedef struct {
@@ -322,6 +327,57 @@ static bool tlv_iter_next(const uint8_t *buf, uint16_t len, uint16_t *pos,
     return true;
 }
 
+/* CRT tag → slot index, or -1. */
+static int slot_from_crt(uint8_t crt)
+{
+    switch (crt) {
+    case 0xB6: return OPENPGP_SLOT_SIG;
+    case 0xB8: return OPENPGP_SLOT_DEC;
+    case 0xA4: return OPENPGP_SLOT_AUT;
+    default:   return -1;
+    }
+}
+
+/* Slot's algorithm from the live algo-attrs DO (C1/C2/C3 leading byte). */
+static uint8_t slot_algo(int slot)
+{
+    static const uint16_t attr_tag[OPENPGP_SLOT_COUNT] = {0x00C1u, 0x00C2u, 0x00C3u};
+    const uint8_t *v; uint16_t n;
+    if (openpgp_do_get(attr_tag[slot], &v, &n) && n >= 1) return v[0];
+    return PGP_ALGO_ECDSA_P256;
+}
+
+/* Build the 7F49 public-key response for a populated slot.
+ * P-256: 86 holds 65 B (04||X||Y).  X25519: 86 holds 0x40 || pub(32) —
+ * the OpenPGP "native curve" point format gpg expects for cv25519.
+ * Shared by READ PUBLIC KEY and (Task 5) GENERATE. */
+static uint16_t build_pubkey_response(int slot, uint8_t *out, uint16_t out_max)
+{
+    const pgp_key_t *k = &s_keys[slot];
+    if (!s_hooks->pubkey) return sw_only(out, out_max, SW_REF_NOT_FOUND);
+
+    uint8_t raw[65]; uint16_t raw_n = 0;
+    if (!s_hooks->pubkey(k->algo, k->d, raw, &raw_n))
+        return sw_only(out, out_max, SW_REF_NOT_FOUND);
+
+    uint8_t point[66]; uint16_t point_n;
+    if (k->algo == PGP_ALGO_ECDH) {            /* X25519 → 0x40-prefixed */
+        if (raw_n != 32) return sw_only(out, out_max, 0x6F00u);
+        point[0] = 0x40; memcpy(point + 1, raw, 32); point_n = 33;
+    } else {
+        if (raw_n != 65) return sw_only(out, out_max, 0x6F00u);
+        memcpy(point, raw, 65); point_n = 65;
+    }
+
+    uint8_t inner[70];
+    uint16_t ioff = tlv_append(inner, sizeof(inner), 0, 0x86u, point, point_n);
+    if (ioff == 0) return sw_only(out, out_max, 0x6F00u);
+    uint8_t body[80];
+    uint16_t off = tlv_append(body, sizeof(body), 0, 0x7F49u, inner, ioff);
+    if (off == 0) return sw_only(out, out_max, 0x6F00u);
+    return respond(out, out_max, body, off, SW_OK);
+}
+
 /* ------------------------------------------------------------------ */
 /* Public API — lifecycle                                              */
 /* ------------------------------------------------------------------ */
@@ -392,8 +448,8 @@ bool openpgp_card_factory_reset(void)
     s_pw1_user_verified = false;
     s_pw3_verified      = false;
 
-    /* 2. Clear imported key and persist the cleared state */
-    memset(&s_key, 0, sizeof(s_key));
+    /* 2. Clear imported keys (all slots) and persist the cleared state */
+    memset(s_keys, 0, sizeof(s_keys));
     if (!key_persist()) ok = false;
 
     /* 3. Wipe DO store */
@@ -411,7 +467,7 @@ bool openpgp_card_factory_reset(void)
 
 bool openpgp_card_key_is_set(void)
 {
-    return s_key.set != 0;
+    return s_keys[OPENPGP_SLOT_SIG].set != 0;
 }
 
 void openpgp_card_set_serial(const uint8_t serial[4])
@@ -750,11 +806,23 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         if (!inner)
             return sw_only(out, out_max, SW_WRONG_DATA);
 
-        /* B6 (sig-slot CRT) must be present — Phase 1 only supports Sig slot.
-         * Absence of B6 (incl. the case where only B8/A4 is present) → 6A80. */
-        uint16_t b6_vlen = 0;
-        if (!tlv_find(inner, inner_len, 0x00B6u, &b6_vlen))
+        /* Locate the key-slot CRT.  gpg sends exactly one of B6 (SIG) / B8
+         * (DEC) / A4 (AUT); scan in that order, first match wins.  No
+         * recognised CRT → 6A80. */
+        int      slot = -1;
+        uint16_t crt_vlen = 0;
+        static const uint16_t crt_tags[OPENPGP_SLOT_COUNT] =
+            {0x00B6u, 0x00B8u, 0x00A4u};
+        for (unsigned ci = 0; ci < OPENPGP_SLOT_COUNT; ci++) {
+            if (tlv_find(inner, inner_len, crt_tags[ci], &crt_vlen)) {
+                slot = slot_from_crt((uint8_t)crt_tags[ci]);
+                break;
+            }
+        }
+        if (slot < 0)
             return sw_only(out, out_max, SW_WRONG_DATA);
+
+        uint8_t algo = slot_algo(slot);
 
         /* 7F48: Cardholder private key template — (tag, length) pairs only,
          * no values; each pair describes one element's byte-size in 5F48. */
@@ -768,12 +836,21 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
          * *pos by vlen between iterations. */
         uint32_t d_offset = 0;  /* semantic uint32_t: offset into 5F48 key material */
         bool     found_92 = false;
+        uint16_t scalar_len = 0;  /* declared byte size of element 92 */
         uint16_t ti = 0, etag, elen;
         while (tlv_iter_next(tmpl, tmpl_len, &ti, &etag, &elen)) {
             if (etag == 0x92u) {
-                if (elen != PGP_P256_SCALAR_BYTES)
-                    return sw_only(out, out_max, SW_WRONG_DATA);
-                found_92 = true;
+                /* ECDSA P-256: scalar is exactly 32 B.  X25519 (ECDH): the
+                 * cv25519 secret may arrive 1..32 B and is left-padded below. */
+                if (algo == PGP_ALGO_ECDH) {
+                    if (elen < 1u || elen > PGP_P256_SCALAR_BYTES)
+                        return sw_only(out, out_max, SW_WRONG_DATA);
+                } else {
+                    if (elen != PGP_P256_SCALAR_BYTES)
+                        return sw_only(out, out_max, SW_WRONG_DATA);
+                }
+                scalar_len = elen;
+                found_92   = true;
                 break;
             }
             d_offset += elen; /* accumulate 5F48 offset for elements before 92 */
@@ -782,32 +859,39 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         if (!found_92) return sw_only(out, out_max, SW_WRONG_DATA);
 
         /* 5F48: concatenated key material; private scalar at
-         * [d_offset .. d_offset + PGP_P256_SCALAR_BYTES - 1] */
+         * [d_offset .. d_offset + scalar_len - 1] */
         uint16_t       km_len = 0;
         const uint8_t *km     = tlv_find(inner, inner_len, 0x5F48u, &km_len);
         if (!km) return sw_only(out, out_max, SW_WRONG_DATA);
-        if (d_offset + PGP_P256_SCALAR_BYTES > (uint32_t)km_len)
+        if (d_offset + scalar_len > (uint32_t)km_len)
             return sw_only(out, out_max, SW_WRONG_DATA);
+
+        /* Build the 32-byte big-endian scalar.  P-256 always fills all 32 B;
+         * a short X25519 secret is left-padded with leading zeros. */
+        uint8_t d[PGP_P256_SCALAR_BYTES];
+        memset(d, 0, sizeof(d));
+        memcpy(d + (PGP_P256_SCALAR_BYTES - scalar_len), km + d_offset, scalar_len);
 
         /* Reject an all-zero private scalar — provably invalid and exploitable.
          * (d >= N is rejected at sign time by mbedtls; the zero case is caught
-         * here before we persist the material.) */
+         * here before we persist the material.)  Checked on the padded buffer. */
         {
             bool all_zero = true;
             for (uint16_t zi = 0; zi < PGP_P256_SCALAR_BYTES; zi++) {
-                if ((km + d_offset)[zi] != 0u) { all_zero = false; break; }
+                if (d[zi] != 0u) { all_zero = false; break; }
             }
             if (all_zero) return sw_only(out, out_max, SW_WRONG_DATA);
         }
 
         /* Durable key import: write to RAM then persist to NVS.
-         * On NVS failure scrub RAM so host-visible state stays coherent;
+         * On NVS failure scrub the slot so host-visible state stays coherent;
          * return 6F00 so the host can detect the failure and retry. */
-        s_key.set  = 1u;
-        s_key.algo = PGP_ALGO_ECDSA_P256;
-        memcpy(s_key.d, km + d_offset, PGP_P256_SCALAR_BYTES);
+        s_keys[slot].set    = 1u;
+        s_keys[slot].algo   = algo;
+        s_keys[slot].origin = 2u;   /* imported */
+        memcpy(s_keys[slot].d, d, PGP_P256_SCALAR_BYTES);
         if (!key_persist()) {
-            memset(&s_key, 0, sizeof(s_key));
+            memset(&s_keys[slot], 0, sizeof(s_keys[slot]));
             return sw_only(out, out_max, 0x6F00u);
         }
         return sw_only(out, out_max, SW_OK);
@@ -822,8 +906,8 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
          * A failed KAT at boot means all crypto output is untrustworthy. */
         if (!s_crypto_ok) return sw_only(out, out_max, 0x6581u);
 
-        /* Referenced data check: key must be imported first */
-        if (!s_key.set)
+        /* Referenced data check: SIG-slot key must be imported first */
+        if (!s_keys[OPENPGP_SLOT_SIG].set)
             return sw_only(out, out_max, SW_REF_NOT_FOUND);
 
         if (!s_pw1_sign_verified)
@@ -845,7 +929,7 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         /* Invoke sign hook with private scalar */
         uint8_t  sig[256];
         uint16_t sig_len = 0;
-        if (!s_hooks->sign(s_key.d, a.data, a.lc, sig, &sig_len))
+        if (!s_hooks->sign(s_keys[OPENPGP_SLOT_SIG].d, a.data, a.lc, sig, &sig_len))
             return sw_only(out, out_max, SW_COND_NOT_SAT);
 
         /* Increment DS counter DO 0x93 (3-byte big-endian, persisted by DO store) */
@@ -869,38 +953,24 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
     /* ---- GENERATE ASYMMETRIC KEY PAIR (INS=0x47) ---- */
     if (a.ins == 0x47) {
         if (a.p1 == 0x81) {  /* READ existing public key — do NOT generate */
-            /* Data is a CRT tag; only B6 (sig slot) supported in Phase 1.
-             * Peek at the leading tag byte; anything else → 6A88. */
+            /* Data is a CRT tag (B6/B8/A4); map to a slot.  An unknown leading
+             * byte means "referenced data not found" → 6A88. */
             if (a.lc == 0 || !a.data)
                 return sw_only(out, out_max, SW_REF_NOT_FOUND);
-            if (a.data[0] != 0xB6u)
+            int slot = slot_from_crt(a.data[0]);
+            if (slot < 0)
                 return sw_only(out, out_max, SW_REF_NOT_FOUND);
 
             /* Crypto health gate — before any key check. */
             if (!s_crypto_ok) return sw_only(out, out_max, 0x6581u);
 
-            if (!s_key.set)
+            if (!s_keys[slot].set)
                 return sw_only(out, out_max, SW_REF_NOT_FOUND);
 
             if (!s_hooks->pubkey)
                 return sw_only(out, out_max, SW_REF_NOT_FOUND);
 
-            uint8_t pub[65];
-            if (!s_hooks->pubkey(s_key.d, pub))
-                return sw_only(out, out_max, SW_REF_NOT_FOUND);
-
-            /* Build 7F49 { 86 41 <pub[65]> }
-             * inner: tag=0x86, len=0x41(65), value=pub  → 67 bytes
-             * outer: tag=0x7F49, len=0x43(67), value=inner → 70 bytes */
-            uint8_t inner[70];
-            uint16_t ioff = tlv_append(inner, sizeof(inner), 0, 0x86u, pub, 65);
-            if (ioff == 0) return sw_only(out, out_max, 0x6F00u);
-
-            uint8_t body[80];
-            uint16_t off = tlv_append(body, sizeof(body), 0, 0x7F49u, inner, ioff);
-            if (off == 0) return sw_only(out, out_max, 0x6F00u);
-
-            return respond(out, out_max, body, off, SW_OK);
+            return build_pubkey_response(slot, out, out_max);
         }
         /* P1=0x80 = on-device GENERATE — not in Phase 1; fall through to 6D00 */
     }
@@ -917,11 +987,13 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
 #include "keyboard_config.h"
 static const char *TAG = "openpgp_card";
 
+/* NVS blob v2 — new key "pgp_keys" (the v1 "pgp_key" single-slot blob is
+ * migrated on first load and left in place, harmless). */
 static bool key_persist(void)
 {
-    esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "pgp_key",
-                                             &s_key, sizeof(s_key),
-                                             "pgp_key_ver", 1);
+    esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "pgp_keys",
+                                             s_keys, sizeof(s_keys),
+                                             "pgp_keys_ver", 2);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "key persist failed: %s", esp_err_to_name(err));
         return false;
@@ -968,15 +1040,31 @@ void openpgp_card_load(void)
             s_pw3_retry = (blob.pw3_retry <= PW3_RETRY_MAX) ? blob.pw3_retry : PW3_RETRY_MAX;
         }
     }
-    /* Load imported key — use local buffer; copy only on success so a fresh
-     * device leaves s_key.set == 0 (no key imported yet). */
-    pgp_key_t loaded_key;
-    memset(&loaded_key, 0, sizeof(loaded_key));
+    /* Load imported keys.  Try the v2 multi-slot blob first; on a
+     * fresh-from-Phase-1 device fall back to the legacy v1 single-slot blob,
+     * migrate it into the SIG slot, and persist v2. */
+    pgp_key_t loaded[OPENPGP_SLOT_COUNT];
+    memset(loaded, 0, sizeof(loaded));
     ver = 0;
-    if (nvs_load_blob_with_total(STORAGE_NAMESPACE, "pgp_key",
-                                 &loaded_key, sizeof(loaded_key),
-                                 "pgp_key_ver", &ver) == ESP_OK)
-        s_key = loaded_key;
+    if (nvs_load_blob_with_total(STORAGE_NAMESPACE, "pgp_keys",
+                                 loaded, sizeof(loaded),
+                                 "pgp_keys_ver", &ver) == ESP_OK) {
+        memcpy(s_keys, loaded, sizeof(s_keys));
+    } else {
+        typedef struct { uint8_t set; uint8_t algo; uint8_t d[32]; } pgp_key_v1_t;
+        pgp_key_v1_t v1; memset(&v1, 0, sizeof(v1));
+        ver = 0;
+        if (nvs_load_blob_with_total(STORAGE_NAMESPACE, "pgp_key",
+                                     &v1, sizeof(v1), "pgp_key_ver", &ver) == ESP_OK
+            && v1.set) {
+            s_keys[OPENPGP_SLOT_SIG].set    = 1;
+            s_keys[OPENPGP_SLOT_SIG].algo   = v1.algo;
+            s_keys[OPENPGP_SLOT_SIG].origin = 2;      /* Phase 1 = import only */
+            memcpy(s_keys[OPENPGP_SLOT_SIG].d, v1.d, 32);
+            key_persist();                             /* write v2 */
+            ESP_LOGI(TAG, "migrated Phase-1 SIG key to multi-slot blob");
+        }
+    }
 }
 
 #else /* TEST_HOST */

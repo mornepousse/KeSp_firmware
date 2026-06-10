@@ -33,12 +33,34 @@ static bool fake_sign_fail(const uint8_t d[32],
 
 static int fake_confirm(void) { return g_confirm_retval; }
 
-/* Deterministic fake pubkey: 0x04 || d[32] || d[32] (easy to verify in tests). */
-static bool fake_pubkey(const uint8_t d[32], uint8_t out_pub[65])
+/* Algo-aware fake pubkey.
+ * P-256: 0x04 || 0x77×64 (65 B).  X25519: 0x66×32 (32 B). */
+static bool fake_pubkey(uint8_t algo, const uint8_t d[32],
+                        uint8_t *out, uint16_t *out_n)
 {
-    out_pub[0] = 0x04;
-    memcpy(out_pub + 1,  d, 32);
-    memcpy(out_pub + 33, d, 32);
+    (void)d;
+    if (algo == PGP_ALGO_ECDH) { memset(out, 0x66, 32); *out_n = 32; }
+    else { out[0] = 0x04; memset(out + 1, 0x77, 64); *out_n = 65; }
+    return true;
+}
+
+static uint8_t g_fake_ecdh_last_d[32];
+static uint8_t g_fake_ecdh_last_peer[32];
+static bool fake_ecdh(const uint8_t d[32], const uint8_t *peer, uint16_t peer_n,
+                      uint8_t *out, uint16_t *out_n)
+{
+    if (peer_n != 32) return false;
+    memcpy(g_fake_ecdh_last_d, d, 32);
+    memcpy(g_fake_ecdh_last_peer, peer, 32);
+    memset(out, 0x55, 32); *out_n = 32;   /* canned shared secret */
+    return true;
+}
+
+static uint8_t g_fake_genkey_last_algo;
+static bool fake_genkey(uint8_t algo, uint8_t d_out[32])
+{
+    g_fake_genkey_last_algo = algo;
+    memset(d_out, 0xA0 + algo, 32);       /* distinguishable per algo */
     return true;
 }
 
@@ -115,18 +137,25 @@ static uint16_t build_change_ref(uint8_t p2,
  *   7F 48 02 92 20   — template: priv-key (92) is 32 bytes
  *   5F 48 20 d[32]   — 32-byte key material
  */
-static uint16_t build_key_import(const uint8_t d[32], uint8_t *buf)
+/* Extended-header-list import for any slot CRT (0xB6 / 0xB8 / 0xA4). */
+static uint16_t build_key_import_crt(uint8_t crt, const uint8_t d[32], uint8_t *buf)
 {
-    buf[0]  = 0x00; buf[1]  = 0xDB; buf[2]  = 0x3F; buf[3]  = 0xFF;
-    buf[4]  = 0x2Cu; /* Lc = 44 bytes of data */
-    buf[5]  = 0x4Du; buf[6]  = 0x2Au; /* outer tag 4D, inner len = 42 */
-    buf[7]  = 0xB6u; buf[8]  = 0x00u; /* B6 00: sig-slot CRT */
-    buf[9]  = 0x7Fu; buf[10] = 0x48u; buf[11] = 0x02u; /* 7F48 tag + len */
-    buf[12] = 0x92u; buf[13] = 0x20u; /* element: priv-key, 32 B */
-    buf[14] = 0x5Fu; buf[15] = 0x48u; buf[16] = 0x20u; /* 5F48 tag + len */
-    memcpy(buf + 17, d, 32);
-    return 49; /* 5 header + 44 data */
+    uint16_t i = 0;
+    buf[i++] = 0x00; buf[i++] = 0xDB; buf[i++] = 0x3F; buf[i++] = 0xFF;
+    buf[i++] = 0x00;                 /* Lc placeholder */
+    uint16_t lc_at = 4, body = i;
+    buf[i++] = 0x4D; buf[i++] = 0x00; uint16_t l4d = i - 1;
+    buf[i++] = crt;  buf[i++] = 0x00;             /* B6/B8/A4, empty */
+    buf[i++] = 0x7F; buf[i++] = 0x48; buf[i++] = 0x02;
+    buf[i++] = 0x92; buf[i++] = 0x20;             /* template: d is 32 B */
+    buf[i++] = 0x5F; buf[i++] = 0x48; buf[i++] = 0x20;
+    memcpy(buf + i, d, 32); i += 32;
+    buf[l4d]   = (uint8_t)(i - l4d - 1);
+    buf[lc_at] = (uint8_t)(i - body);
+    return i;
 }
+static uint16_t build_key_import(const uint8_t d[32], uint8_t *buf)
+{ return build_key_import_crt(0xB6, d, buf); }
 
 /* Extract status word from the last 2 bytes of a response */
 static uint16_t sw_of(const uint8_t *rsp, uint16_t len)
@@ -746,8 +775,9 @@ static void test_key_import_b6_variant(void)
     TEST_ASSERT(openpgp_card_key_is_set(), "key_is_set after B6-variant import");
 }
 
-/* B8 (decrypt slot) instead of B6 (sig slot) → 6A80; key not set. */
-static void test_key_import_wrong_slot_b8(void)
+/* B8 (decrypt slot) now routes to the DEC slot — import succeeds (9000),
+ * but the SIG slot stays empty so key_is_set() (SIG) remains false. */
+static void test_key_import_b8_routes_to_dec(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
     setup_card(&h);
@@ -762,9 +792,10 @@ static void test_key_import_wrong_slot_b8(void)
     cmd[7] = 0xB8u; /* overwrite B6 tag with B8 */
 
     uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
-    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80,
-                   "key import with B8 (decrypt slot) returns 6A80");
-    TEST_ASSERT(!openpgp_card_key_is_set(), "key not set after B8 rejection");
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000,
+                   "key import with B8 routes to DEC slot → 9000");
+    TEST_ASSERT(!openpgp_card_key_is_set(),
+                "SIG slot still empty after B8 (DEC) import");
 }
 
 /* 92 with length 16 (not 32) → 6A80 */
@@ -1239,13 +1270,12 @@ static void test_read_pubkey_ok(void)
     TEST_ASSERT_EQ(rsp[4], 0x41, "response[4] = 41 (public point len = 65)");
     TEST_ASSERT_EQ(rsp[5], 0x04, "response[5] = 04 (uncompressed point)");
 
-    /* fake_pubkey output: 0x04 || d || d */
+    /* fake_pubkey output (P-256): 0x04 || 0x77×64 */
     uint8_t expected[65];
     expected[0] = 0x04;
-    memcpy(expected + 1,  d, 32);
-    memcpy(expected + 33, d, 32);
+    memset(expected + 1, 0x77, 64);
     TEST_ASSERT(memcmp(rsp + 5, expected, 65) == 0,
-                "READ PUBKEY pubkey bytes match fake_pubkey(d) output");
+                "READ PUBKEY pubkey bytes match fake_pubkey(P-256) output");
 }
 
 /* P1=0x80 (on-device GENERATE) → 6D00 — not implemented in Phase 1. */
@@ -1265,7 +1295,8 @@ static void test_read_pubkey_generate_unsupported(void)
                    "GENERATE PUBKEY (P1=0x80) → 6D00 (unsupported)");
 }
 
-/* Auth slot (A4) — only sig slot (B6) supported in Phase 1 → 6A88. */
+/* Reading the AUT slot (A4) when only the SIG slot is populated → 6A88
+ * (the AUT slot has no key yet). */
 static void test_read_pubkey_wrong_slot(void)
 {
     openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
@@ -1452,6 +1483,98 @@ static void test_import_rejects_zero_scalar(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Tests — Task 1: multi-slot key store + algo-aware hooks            */
+/* ------------------------------------------------------------------ */
+
+/* Default full hook set for the Task-1 tests. */
+#define TASK1_HOOKS { .sign = fake_sign, .confirm = fake_confirm, \
+                      .pubkey = fake_pubkey, .ecdh = fake_ecdh, .genkey = fake_genkey }
+
+/* Import routes B6→SIG, B8→DEC, A4→AUT; each slot independent. */
+static void test_import_routes_to_slots(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);
+
+    uint8_t d_sig[32], d_dec[32], d_aut[32];
+    memset(d_sig, 0x11, 32); memset(d_dec, 0x22, 32); memset(d_aut, 0x33, 32);
+
+    n = build_key_import_crt(0xB6, d_sig, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "import B6 ok");
+    n = build_key_import_crt(0xB8, d_dec, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "import B8 ok");
+    n = build_key_import_crt(0xA4, d_aut, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "import A4 ok");
+
+    /* PSO:CDS must use the SIG scalar (0x11...), not DEC/AUT. */
+    do_verify_pw1_sign(cmd, rsp); do_disable_uif(cmd, rsp);
+    uint8_t hash[32]; memset(hash, 0x5A, 32);
+    n = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "CDS ok");
+    TEST_ASSERT(g_fake_sign_last_d[0] == 0x11, "CDS signed with SIG slot key");
+}
+
+/* READ PUBLIC KEY per CRT: B8 (X25519 slot) returns 7F49{86: 0x40||pub32}. */
+static void test_read_pubkey_per_slot(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);
+
+    /* No DEC key yet → 6A88 */
+    n = build_read_pubkey(0x81, 0xB8, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A88, "no DEC key yet");
+
+    uint8_t d_dec[32]; memset(d_dec, 0x22, 32);
+    n = build_key_import_crt(0xB8, d_dec, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "import B8 ok");
+
+    n = build_read_pubkey(0x81, 0xB8, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "read DEC pubkey ok");
+    /* 7F49 L { 86 0x21 0x40 <32×0x66> } — X25519 native format is 0x40-prefixed */
+    TEST_ASSERT(rsp[0] == 0x7F && rsp[1] == 0x49, "outer 7F49");
+    int i86 = find_index(rsp, rlen, (const uint8_t[]){0x86, 0x21, 0x40, 0x66}, 4);
+    TEST_ASSERT(i86 >= 0, "86 holds 0x40-prefixed 33-byte point");
+}
+
+/* SIG-slot ops must not see DEC/AUT keys: import only B8 → CDS 6A88. */
+static void test_sign_needs_sig_slot(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);
+    uint8_t d_dec[32]; memset(d_dec, 0x22, 32);
+    n = build_key_import_crt(0xB8, d_dec, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "import B8 ok");
+    do_verify_pw1_sign(cmd, rsp); do_disable_uif(cmd, rsp);
+    uint8_t hash[32]; memset(hash, 0x5A, 32);
+    n = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A88, "CDS without SIG key → 6A88");
+}
+
+/* Import with no recognizable CRT (e.g. only a bogus 0xB7) → 6A80. */
+static void test_import_unknown_crt_rejected(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);
+    uint8_t d[32]; memset(d, 0x44, 32);
+    n = build_key_import_crt(0xB7, d, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80, "unknown CRT rejected");
+}
+
+/* ------------------------------------------------------------------ */
 /* Test suite entry point                                              */
 /* ------------------------------------------------------------------ */
 
@@ -1479,7 +1602,12 @@ void test_openpgp_card(void)
     TEST_RUN(test_key_import_requires_pw3);
     TEST_RUN(test_key_import_ok_and_sign_uses_it);
     TEST_RUN(test_key_import_b6_variant);
-    TEST_RUN(test_key_import_wrong_slot_b8);
+    TEST_RUN(test_key_import_b8_routes_to_dec);
+    /* Task 1: multi-slot key store + algo-aware hooks */
+    TEST_RUN(test_import_routes_to_slots);
+    TEST_RUN(test_read_pubkey_per_slot);
+    TEST_RUN(test_sign_needs_sig_slot);
+    TEST_RUN(test_import_unknown_crt_rejected);
     TEST_RUN(test_key_import_bad_92_len);
     TEST_RUN(test_sign_without_key_6a88);
     TEST_RUN(test_sign_consumes_pw1);

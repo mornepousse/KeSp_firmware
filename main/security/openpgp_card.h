@@ -4,35 +4,47 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+/* Key slots (OpenPGP: Signature / Decryption / Authentication) */
+enum {
+    OPENPGP_SLOT_SIG = 0,
+    OPENPGP_SLOT_DEC = 1,
+    OPENPGP_SLOT_AUT = 2,
+    OPENPGP_SLOT_COUNT = 3,
+};
+
+/* Slot algorithm ids — match the leading byte of algo attrs C1/C2/C3.
+ * 0x12 (ECDH) always means X25519 in this implementation: C2 only accepts
+ * the cv25519 OID (Task 2), ECDH-P256 is not supported. */
+#define PGP_ALGO_ECDSA_P256  0x13u
+#define PGP_ALGO_ECDH        0x12u
+
 /*
  * Injected dependencies — keeps the applet pure and host-testable,
- * mirroring the otp_proto_hooks_t pattern.
- *
- *  sign(d, hash, n, out, out_n)
- *      Compute a signature using private scalar `d[0..31]` (P-256,
- *      big-endian) over `hash[0..n-1]`, write it to `out`,
- *      set *out_n to the number of bytes written.
- *      Returns true on success, false on error.
- *      On target: delegates to openpgp_crypto (mbedtls).
- *      In tests: records d, returns a canned buffer.
- *
- *  confirm()
- *      0 = not yet (treat as conditions not satisfied in host tests)
- *      1 = user authorized (touch/button)
- *      2 = denied / timed-out
- *      On target: drives sec_confirm.
- *      In tests: returns a preset value.
+ * mirroring the otp_proto_hooks_t pattern.  On target the hooks delegate to
+ * openpgp_crypto (mbedtls); in host tests they record arguments and return
+ * canned buffers.
  */
 typedef struct {
-    bool     (*sign)(const uint8_t d[32],
-                     const uint8_t *hash, uint16_t n,
-                     uint8_t *out, uint16_t *out_n);
-    int      (*confirm)(void);
-    /* Derive the public point Q = d·G for P-256.
-     * out_pub must hold 65 bytes; writes 0x04 || X(32) || Y(32).
-     * Returns false on error.  NULL-tolerant: if left NULL,
-     * READ PUBLIC KEY (INS 0x47 P1=0x81) returns 6A88. */
-    bool     (*pubkey)(const uint8_t d[32], uint8_t out_pub[65]);
+    /* ECDSA P-256 over `hash` with scalar d (BE). Used by SIG and AUT slots. */
+    bool (*sign)(const uint8_t d[32],
+                 const uint8_t *hash, uint16_t n,
+                 uint8_t *out, uint16_t *out_n);
+    /* UIF gate: 0 = not yet, 1 = authorized, 2 = denied/timeout. */
+    int  (*confirm)(void);
+    /* Derive the public key for `algo`.
+     * PGP_ALGO_ECDSA_P256: writes 65 B (0x04||X||Y), *out_n = 65.
+     * PGP_ALGO_ECDH (X25519): writes 32 B (RFC 7748 LE u), *out_n = 32.
+     * NULL-tolerant: if NULL, READ PUBLIC KEY / GENERATE return 6A88. */
+    bool (*pubkey)(uint8_t algo, const uint8_t d[32],
+                   uint8_t *out, uint16_t *out_n);
+    /* X25519 ECDH: shared secret = d · peer (peer = 32 B LE u-coordinate).
+     * Writes 32 B, *out_n = 32. NULL-tolerant (PSO:DECIPHER → 6985). */
+    bool (*ecdh)(const uint8_t d[32],
+                 const uint8_t *peer, uint16_t peer_n,
+                 uint8_t *out, uint16_t *out_n);
+    /* Generate a private scalar for `algo` (Task 5). BE output.
+     * NULL-tolerant (GENERATE 0x47/80 → 6985). */
+    bool (*genkey)(uint8_t algo, uint8_t d_out[32]);
 } openpgp_card_hooks_t;
 
 /*
@@ -73,8 +85,10 @@ bool openpgp_card_ensure_defaults(void);
 void openpgp_card_set_serial(const uint8_t serial[4]);
 
 /*
- * Returns true if a private key has been successfully imported into the
- * Signature slot via PUT DATA 0xDB 3FFF.  False on a fresh / factory-reset card.
+ * Returns true if a key is present in the Signature slot (imported via PUT
+ * DATA 0xDB 3FFF or generated on-device).  Always reports the SIG slot — its
+ * only current caller relies on that semantics.  False on a fresh /
+ * factory-reset card.
  */
 bool openpgp_card_key_is_set(void);
 
