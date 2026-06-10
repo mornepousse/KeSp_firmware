@@ -138,6 +138,11 @@ static uint16_t ccid_build_slotstatus(uint8_t slot, uint8_t seq)
 /* ------------------------------------------------------------------ */
 static void ccid_dispatch(uint8_t rhport, uint32_t xferred)
 {
+    /* NOTE (Task 8): openpgp_card_apdu() mutates applet statics (retries, verified
+     * flags, s_key).  Currently safe: TinyUSB serialises callbacks and load() runs
+     * before USB starts.  When CCID moves to a worker task, all callers of
+     * openpgp_card_apdu() and openpgp_card_factory_reset() must share a mutex. */
+
     /* Re-prime OUT and bail on a runt frame (no full header). */
     if (xferred < CCID_HDR_LEN) {
         if (!usbd_edpt_xfer(rhport, s_ep_out, s_out_buf, sizeof(s_out_buf)))

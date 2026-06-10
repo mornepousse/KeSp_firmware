@@ -79,9 +79,16 @@ bool openpgp_card_key_is_set(void);
  * accessible to hosts (i.e. before any CCID traffic).  On a fresh device
  * (blobs absent) the call is a no-op and the factory baseline set by
  * openpgp_card_init() remains in effect.
- * On the test host this function is a no-op (compiled out).
+ * On the test host this function is compiled as a no-op stub.
  */
 void openpgp_card_load(void);
+
+#ifdef TEST_HOST
+/* Host-visible counter incremented by the pin_persist() stub.
+ * Tests include this header to get the declaration; the definition lives in
+ * openpgp_card.c under TEST_HOST. */
+extern int g_pin_persist_calls;
+#endif
 
 /*
  * Process one command APDU (`in[0..in_len-1]`).

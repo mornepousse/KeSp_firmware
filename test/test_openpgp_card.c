@@ -3,9 +3,6 @@
 #include "openpgp_do.h"
 #include <string.h>
 
-/* host-visible persist-call counter defined in openpgp_card.c under TEST_HOST */
-extern int g_pin_persist_calls;
-
 /* ------------------------------------------------------------------ */
 /* Fake hooks                                                          */
 /* ------------------------------------------------------------------ */

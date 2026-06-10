@@ -108,8 +108,12 @@ static pgp_key_t s_key;
 
 /* NVS blob layout for PIN/retry persistence ("pgp_pins"). */
 typedef struct {
-    uint8_t pw1[PW_MAX_LEN]; uint8_t pw1_len; uint8_t pw1_retry;
-    uint8_t pw3[PW_MAX_LEN]; uint8_t pw3_len; uint8_t pw3_retry;
+    uint8_t pw1[PW_MAX_LEN];
+    uint8_t pw1_len;
+    uint8_t pw1_retry;
+    uint8_t pw3[PW_MAX_LEN];
+    uint8_t pw3_len;
+    uint8_t pw3_retry;
 } pgp_pins_blob_t;
 
 static bool key_persist(void); /* NVS on target, no-op on host; defined below */
@@ -467,6 +471,7 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
 
         /* PIN comparison */
         if (a.lc != pinlen || memcmp(a.data, pin, pinlen) != 0) {
+            /* duplicated in VERIFY/CHANGE; extract pin_wrong() if a third user appears (e.g. INS 2C) */
             (*retry)--;
             pin_persist();
             return sw_only(out, out_max, (uint16_t)(0x63C0u | *retry));
@@ -865,12 +870,18 @@ void openpgp_card_load(void)
     pgp_pins_blob_t blob;
     if (nvs_load_blob_with_total(STORAGE_NAMESPACE, "pgp_pins",
                                  &blob, sizeof(blob), "pgp_pins_ver", &ver) == ESP_OK) {
-        memcpy(s_pw1, blob.pw1, PW_MAX_LEN);
-        s_pw1_len   = blob.pw1_len;
-        s_pw1_retry = blob.pw1_retry;
-        memcpy(s_pw3, blob.pw3, PW_MAX_LEN);
-        s_pw3_len   = blob.pw3_len;
-        s_pw3_retry = blob.pw3_retry;
+        /* Clamp loaded values; implausible lengths -> keep factory baseline. */
+        if (blob.pw1_len < PW1_DEFAULT_LEN || blob.pw1_len > PW_MAX_LEN ||
+            blob.pw3_len < PW3_DEFAULT_LEN || blob.pw3_len > PW_MAX_LEN) {
+            ESP_LOGW(TAG, "pgp_pins blob invalid lengths — keeping factory state");
+        } else {
+            memcpy(s_pw1, blob.pw1, PW_MAX_LEN);
+            s_pw1_len   = blob.pw1_len;
+            s_pw1_retry = (blob.pw1_retry <= PW1_RETRY_MAX) ? blob.pw1_retry : PW1_RETRY_MAX;
+            memcpy(s_pw3, blob.pw3, PW_MAX_LEN);
+            s_pw3_len   = blob.pw3_len;
+            s_pw3_retry = (blob.pw3_retry <= PW3_RETRY_MAX) ? blob.pw3_retry : PW3_RETRY_MAX;
+        }
     }
     /* Load imported key — use local buffer; copy only on success so a fresh
      * device leaves s_key.set == 0 (no key imported yet). */
