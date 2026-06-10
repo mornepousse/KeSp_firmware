@@ -436,8 +436,11 @@ void openpgp_card_set_crypto_health(bool ok)
 
 /* Constant-time PIN comparison.  Returns true iff a[0..alen-1] == b[0..blen-1]
  * with no early exit on mismatch, so the timing is independent of where the
- * first differing byte is.  Length mismatch short-circuits immediately (the
- * lengths are public information in the APDU framing). */
+ * first differing byte is.  A length difference makes the final `alen == blen`
+ * false, but the byte loop still runs for min(alen,blen) iterations — do NOT
+ * "optimise" it into an early return; lengths are public in the APDU framing,
+ * no CT property is required there, and the loop bound keeps both reads in
+ * bounds. */
 static bool ct_pin_equal(const uint8_t *a, uint16_t alen,
                          const uint8_t *b, uint16_t blen)
 {
