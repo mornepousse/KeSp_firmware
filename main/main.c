@@ -178,10 +178,12 @@ void app_main(void) {
     cdc_dongle_cmds_init();
     extern void sec_store_init(void);
     extern void cdc_sec_cmds_init(void);
-    extern void otp_hid_init(void);
     if (!safe_mode) sec_store_init();   /* NVS read — skip under safe boot */
     cdc_sec_cmds_init();
+#if CONFIG_KASE_SEC_OTP_HID
+    extern void otp_hid_init(void);
     otp_hid_init();                     /* Wire OTP HID hooks (after sec_store) */
+#endif
 #endif
   }
 

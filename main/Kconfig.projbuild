@@ -77,6 +77,29 @@ config KASE_NRF_LINE_TEST
         a console to read (pair with CONFIG_ESP_CONSOLE_UART_DEFAULT, since the
         dongle is CONSOLE_NONE in production). Leave off in production.
 
+choice KASE_DONGLE_SEC_PERSONALITY
+    prompt "Dongle security personality"
+    depends on KASE_DEVICE_ROLE_DONGLE
+    default KASE_SEC_OPENPGP
+    help
+        The ESP32-S3 FS USB core has 4 data IN endpoints (ep_in_count=5
+        incl. EP0). CDC (2 IN) + HID kbd (1 IN) leave exactly ONE slot,
+        so the security interfaces are mutually exclusive:
+        NONE    = plain keyboard dongle (CDC + HID only).
+        OTP_HID = YubiKey-compatible OTP HID (CR-HMAC, KeePassXC).
+        OPENPGP = CCID smartcard (gpg sign / SSH, touch-gated).
+
+config KASE_SEC_NONE
+    bool "None (plain keyboard dongle)"
+
+config KASE_SEC_OTP_HID
+    bool "YubiKey-compatible OTP HID (CR-HMAC)"
+
+config KASE_SEC_OPENPGP
+    bool "OpenPGP smartcard over CCID"
+
+endchoice
+
 config KASE_HAS_ESPNOW
     bool
     default y if KASE_DEVICE_ROLE_DONGLE

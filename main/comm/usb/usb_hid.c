@@ -6,8 +6,10 @@
 #include "i2c_oled_display.h"
 #include "cdc_acm_com.h"
 #include "keyboard_config.h"
-#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+#if CONFIG_KASE_SEC_OTP_HID
 #include "otp_proto.h"
+#endif
+#if CONFIG_KASE_SEC_OPENPGP
 #include "ccid.h"
 #endif
 
@@ -22,10 +24,13 @@ volatile uint8_t hid_led_state = 0;
 #define EPNUM_CDC_OUT     0x02  /* EP2 OUT (bulk) */
 #define EPNUM_CDC_IN      0x82  /* EP2 IN  (bulk) */
 #define EPNUM_HID         0x83  /* EP3 IN  (interrupt) */
-#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+/* Dongle security personality endpoints.
+ * The S3 FS USB core has 4 data IN endpoints (ep_in_count=5 incl. EP0).
+ * CDC (2 IN) + HID kbd (1 IN) = 3 used; exactly ONE slot left for security. */
+#if CONFIG_KASE_SEC_OTP_HID
 #define EPNUM_OTP_HID     0x84  /* EP4 IN  (interrupt) — OTP HID instance 1 */
-/* DE-RISK EXPERIMENT (uncommitted): S3 FS DFIFO can't fit a 5th IN endpoint
- * (CCID 64B bulk) alongside CDC+HID+OTP. Drop OTP-HID, put CCID on EP4. */
+#endif
+#if CONFIG_KASE_SEC_OPENPGP
 #define EPNUM_CCID_OUT    0x04  /* EP4 OUT (bulk) — CCID smartcard */
 #define EPNUM_CCID_IN     0x84  /* EP4 IN  (bulk) — CCID smartcard */
 #endif
@@ -88,6 +93,8 @@ static const uint8_t hid_cdc_configuration_descriptor[] = {
 #endif /* !CONFIG_KASE_DEVICE_ROLE_DONGLE */
 
 #if CONFIG_KASE_DEVICE_ROLE_DONGLE
+
+#if CONFIG_KASE_SEC_OTP_HID
 /* YubiKey OTP HID report descriptor (instance 1):
  * Keyboard-usage collection (page 0x01, usage 0x06) containing an 8-byte
  * feature report.  Feature reports are exchanged over EP0 via SET_REPORT /
@@ -107,7 +114,9 @@ static const uint8_t otp_hid_report_descriptor[] = {
         HID_FEATURE      ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ), /* 0xB1, 0x02 */
     HID_COLLECTION_END                                      /* 0xC0 */
 };
+#endif /* CONFIG_KASE_SEC_OTP_HID */
 
+#if CONFIG_KASE_SEC_OPENPGP
 /* CCID functional descriptor (USB CCID Rev 1.1 §5.1) — single slot, T=1, short+extended APDU.
  * Cross-check every field against the spec and a real reader (e.g. a YubiKey) before trusting. */
 #define KASE_CCID_DESC \
@@ -139,10 +148,9 @@ static const uint8_t otp_hid_report_descriptor[] = {
     0x00,                       /* bPINSupport = 0 (no pinpad; PIN over APDU) */ \
     0x01                        /* bMaxCCIDBusySlots = 1 */
 
-/* Interface 4: CCID smartcard reader (class 0x0B). No TinyUSB macro exists. */
+/* Interface: CCID smartcard reader (class 0x0B). No TinyUSB macro exists. */
 #define TUD_CCID_DESC_LEN (9 + 54 + 7 + 7)   /* itf + CCID class desc + 2 EP */
 #define KASE_CCID_ITF_DESC(_itfnum, _stridx, _epout, _epin) \
-    /* Interface descriptor */ \
     /* Interface: bNumEndpoints=2, class 0x0B (CCID), subclass 0x00, \
      * bInterfaceProtocol=0x00 (bulk; 0x01/0x02 would be ICCD) */ \
     9, TUSB_DESC_INTERFACE, _itfnum, 0, 2, TUSB_CLASS_SMART_CARD, 0x00, 0x00, _stridx, \
@@ -152,41 +160,63 @@ static const uint8_t otp_hid_report_descriptor[] = {
     7, TUSB_DESC_ENDPOINT, _epout, TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0, \
     /* Bulk IN endpoint */ \
     7, TUSB_DESC_ENDPOINT, _epin, TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0
+#endif /* CONFIG_KASE_SEC_OPENPGP */
 
-/* Total config-descriptor length for dongle.
- * DE-RISK EXPERIMENT (uncommitted): OTP-HID dropped to free DFIFO for CCID
- * (S3 FS can't fit a 5th IN endpoint). So: CDC + HID kbd/mouse + CCID. */
-#define TUSB_DESC_TOTAL_LEN_OTP \
-    (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN \
-     + TUD_CCID_DESC_LEN)
-
-/* Configuration descriptor for dongle (4 interfaces — DE-RISK, OTP-HID removed):
- *   0 = CDC Communication, 1 = CDC Data, 2 = HID kbd/mouse, 3 = CCID */
-static const uint8_t hid_cdc_otp_configuration_descriptor[] = {
-    /* Config 1: 4 interfaces total, 100 mA */
-    TUD_CONFIG_DESCRIPTOR(1, 4, 0, TUSB_DESC_TOTAL_LEN_OTP,
+/* Personality-selected configuration descriptor. Three variants:
+ *   OPENPGP : 4 interfaces — 0/1=CDC, 2=HID kbd/mouse, 3=CCID (bulk EP4)
+ *   OTP_HID : 4 interfaces — 0/1=CDC, 2=HID kbd/mouse, 3=HID OTP (int EP4)
+ *   NONE    : 3 interfaces — 0/1=CDC, 2=HID kbd/mouse */
+#if CONFIG_KASE_SEC_OPENPGP
+#define TUSB_DESC_TOTAL_LEN_DONGLE \
+    (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN + TUD_CCID_DESC_LEN)
+static const uint8_t dongle_configuration_descriptor[] = {
+    TUD_CONFIG_DESCRIPTOR(1, 4, 0, TUSB_DESC_TOTAL_LEN_DONGLE,
                           TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-    /* CDC (Communication + Data): interfaces 0 and 1 */
-    TUD_CDC_DESCRIPTOR(0, 4, EPNUM_CDC_NOTIF, 8,
-                       EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
-    /* HID keyboard boot: interface 2 (existing kbd/mouse instance 0) */
+    TUD_CDC_DESCRIPTOR(0, 4, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
     TUD_HID_DESCRIPTOR(2, 5, HID_ITF_PROTOCOL_KEYBOARD,
                        sizeof(hid_report_descriptor), EPNUM_HID, 16, 1),
-    /* CCID smartcard reader: interface 3 (was 4; OTP-HID dropped for the de-risk) */
-    KASE_CCID_ITF_DESC(3, 7, EPNUM_CCID_OUT, EPNUM_CCID_IN),
+    KASE_CCID_ITF_DESC(3, 6, EPNUM_CCID_OUT, EPNUM_CCID_IN),
 };
+#elif CONFIG_KASE_SEC_OTP_HID
+#define TUSB_DESC_TOTAL_LEN_DONGLE \
+    (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN + TUD_HID_DESC_LEN)
+static const uint8_t dongle_configuration_descriptor[] = {
+    TUD_CONFIG_DESCRIPTOR(1, 4, 0, TUSB_DESC_TOTAL_LEN_DONGLE,
+                          TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+    TUD_CDC_DESCRIPTOR(0, 4, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
+    TUD_HID_DESCRIPTOR(2, 5, HID_ITF_PROTOCOL_KEYBOARD,
+                       sizeof(hid_report_descriptor), EPNUM_HID, 16, 1),
+    TUD_HID_DESCRIPTOR(3, 6, HID_ITF_PROTOCOL_NONE,
+                       sizeof(otp_hid_report_descriptor), EPNUM_OTP_HID, 8, 5),
+};
+#else /* KASE_SEC_NONE */
+#define TUSB_DESC_TOTAL_LEN_DONGLE \
+    (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN)
+static const uint8_t dongle_configuration_descriptor[] = {
+    TUD_CONFIG_DESCRIPTOR(1, 3, 0, TUSB_DESC_TOTAL_LEN_DONGLE,
+                          TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+    TUD_CDC_DESCRIPTOR(0, 4, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
+    TUD_HID_DESCRIPTOR(2, 5, HID_ITF_PROTOCOL_KEYBOARD,
+                       sizeof(hid_report_descriptor), EPNUM_HID, 16, 1),
+};
+#endif
 
-/* Extended string table for dongle (index 6 = OTP interface name) */
-static const char *hid_string_descriptor_otp[] = {
+/* String table for dongle — security interface entry present only when a
+ * personality is selected (index 6 = security interface name). */
+static const char *dongle_string_descriptor[] = {
     (const char[]){ 0x09, 0x04 }, /* 0: Language = English (US) 0x0409 */
     MANUFACTURER_NAME,            /* 1: Manufacturer */
     PRODUCT_NAME,                 /* 2: Product */
     SERIAL_NUMBER,                /* 3: Serial */
     PRODUCT_NAME " CDC",          /* 4: CDC serial port interface */
     PRODUCT_NAME " Keyboard",     /* 5: HID keyboard interface */
+#if CONFIG_KASE_SEC_OPENPGP
+    PRODUCT_NAME " CCID",         /* 6: CCID smartcard interface */
+#elif CONFIG_KASE_SEC_OTP_HID
     PRODUCT_NAME " OTP",          /* 6: HID OTP interface */
-    PRODUCT_NAME " CCID",         /* 7: CCID smartcard interface */
+#endif
 };
+
 #endif /* CONFIG_KASE_DEVICE_ROLE_DONGLE */
 
 /* String descriptor table (language + manufacturer + product + serial + interfaces) */
@@ -205,7 +235,7 @@ const char *hid_string_descriptor[] = {
 // Application return pointer to descriptor, whose contents must exist long
 // enough for transfer to complete
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
-#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+#if CONFIG_KASE_SEC_OTP_HID
     if (instance == 1) {
         return otp_hid_report_descriptor;
     }
@@ -220,7 +250,7 @@ uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
                                hid_report_type_t report_type, uint8_t *buffer,
                                uint16_t reqlen) {
-#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+#if CONFIG_KASE_SEC_OTP_HID
     if (instance == 1 && report_type == HID_REPORT_TYPE_FEATURE) {
         (void)report_id;
         (void)reqlen;
@@ -242,7 +272,7 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
                            hid_report_type_t report_type, uint8_t const *buffer,
                            uint16_t bufsize)
 {
-#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+#if CONFIG_KASE_SEC_OTP_HID
     if (instance == 1 && report_type == HID_REPORT_TYPE_FEATURE) {
         (void)report_id;
         if (bufsize >= OTP_FEATURE_RPT_SIZE) {
@@ -318,11 +348,11 @@ void tinyusb_hid_init(void)
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
     tusb_cfg.descriptor.device = &device_descriptor;
 #if CONFIG_KASE_DEVICE_ROLE_DONGLE
-    /* Dongle: use extended descriptor with OTP HID interface (instance 1) */
-    tusb_cfg.descriptor.string = hid_string_descriptor_otp;
+    /* Dongle: use personality-selected descriptor */
+    tusb_cfg.descriptor.string = dongle_string_descriptor;
     tusb_cfg.descriptor.string_count =
-        sizeof(hid_string_descriptor_otp) / sizeof(hid_string_descriptor_otp[0]);
-    tusb_cfg.descriptor.full_speed_config = hid_cdc_otp_configuration_descriptor;
+        sizeof(dongle_string_descriptor) / sizeof(dongle_string_descriptor[0]);
+    tusb_cfg.descriptor.full_speed_config = dongle_configuration_descriptor;
 #else
     tusb_cfg.descriptor.string = hid_string_descriptor;
     tusb_cfg.descriptor.string_count =
@@ -336,9 +366,11 @@ void tinyusb_hid_init(void)
 
 void kase_tinyusb_init(void)
 {
-#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+#if CONFIG_KASE_SEC_OPENPGP
     /* Force-link the CCID class driver so its strong usbd_app_driver_get_cb
-     * overrides the weak default before tinyusb_driver_install() reads it. */
+     * overrides the weak default before tinyusb_driver_install() reads it.
+     * Without this call the linker dead-strips ccid.o and the driver is never
+     * registered — a real Phase-0 bug that was fixed by keeping this call. */
     ccid_init();
 #endif
     tinyusb_hid_init();

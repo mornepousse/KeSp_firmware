@@ -86,7 +86,8 @@ endif()
 
 # Dongle CDC stubs (no-op symbols for tama/bt/display referenced by cdc_binary_cmds.c)
 # and dongle-specific binary commands (RF status, pair list/reset, battery).
-# Also: OTP security key stack (cr_crc16, otp_proto, cr_hmac, otp_hid) — dongle only.
+# cr_hmac is kept unconditional: cdc_sec_cmds.c KAT self-test references it directly.
+# cr_crc16 is kept unconditional: tiny file, dead-stripped under NONE/OPENPGP.
 if(CONFIG_KASE_DEVICE_ROLE_DONGLE)
     list(APPEND srcs
         "comm/cdc/cdc_dongle_stubs.c"
@@ -94,16 +95,25 @@ if(CONFIG_KASE_DEVICE_ROLE_DONGLE)
         "security/sec_store.c"
         "comm/cdc/cdc_sec_cmds.c"
         "security/cr_crc16.c"
-        "security/otp_proto.c"
         "security/cr_hmac.c"
-        "security/otp_hid.c"
-        # OpenPGP smartcard (Phase 0): CCID class driver + applet. apdu.c,
-        # openpgp_card.c and openpgp_do.c were host-test-only until now.
-        "security/ccid.c"
-        "security/openpgp_card.c"
-        "security/apdu.c"
-        "security/openpgp_do.c"
     )
+    # OTP transport (YubiKey CR-HMAC personality only)
+    if(CONFIG_KASE_SEC_OTP_HID)
+        list(APPEND srcs
+            "security/otp_proto.c"
+            "security/otp_hid.c"
+        )
+    endif()
+    # OpenPGP smartcard personality: CCID class driver + applet + crypto
+    if(CONFIG_KASE_SEC_OPENPGP)
+        list(APPEND srcs
+            "security/ccid.c"
+            "security/openpgp_card.c"
+            "security/apdu.c"
+            "security/openpgp_do.c"
+            # "security/openpgp_crypto.c"   # Task 7 — file doesn't exist yet
+        )
+    endif()
 endif()
 
 # CDC stubs for half role (no-op symbols for tama/bt/display/layout)
