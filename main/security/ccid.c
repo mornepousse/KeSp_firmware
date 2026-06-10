@@ -1,26 +1,40 @@
-/* main/security/ccid.c — minimal TinyUSB CCID class driver (dongle, Phase 0)
+/* main/security/ccid.c — TinyUSB CCID class driver (dongle, Phase 1)
  *
- * Implements just enough of USB CCID Rev 1.1 §6 to let scdaemon/gpg talk to
- * the OpenPGP applet (openpgp_card.c):
+ * Phase 1 behaviour:
+ *   - PC_to_RDR_IccPowerOn / IccPowerOff / GetSlotStatus are handled inline
+ *     (instant; run in tud_task context).
+ *   - PC_to_RDR_XfrBlock is offloaded to a dedicated FreeRTOS worker task so
+ *     that PSO:CDS + UIF can block up to SEC_CONFIRM_TIMEOUT_MS waiting for a
+ *     physical keypress without stalling the USB task (and thereby CDC + HID).
+ *     While the worker waits for the touch, the host is kept alive with CCID
+ *     time-extension frames (RDR_to_PC_DataBlock bStatus=0x80, bError=0x02).
+ *
+ * Implements USB CCID Rev 1.1 §6:
  *   - claims the CCID interface (class 0x0B, interface 4 of the dongle
- *     composite descriptor built in usb_hid.c),
- *   - opens the bulk IN/OUT endpoint pair,
- *   - reassembles a CCID message (10-byte header + abData) on bulk OUT,
- *   - dispatches by bMessageType and queues an RDR_to_PC response on bulk IN.
+ *     composite descriptor built in usb_hid.c)
+ *   - opens the bulk IN/OUT endpoint pair
+ *   - reassembles a CCID message (10-byte header + abData) on bulk OUT
+ *   - dispatches by bMessageType and queues an RDR_to_PC response on bulk IN
  *
- * Message handling (Phase 0 minimum):
- *   PC_to_RDR_IccPowerOn   (0x62) -> RDR_to_PC_DataBlock  (0x80) carrying ATR
- *   PC_to_RDR_IccPowerOff  (0x63) -> RDR_to_PC_SlotStatus (0x81)
- *   PC_to_RDR_GetSlotStatus(0x65) -> RDR_to_PC_SlotStatus (0x81), present+active
- *   PC_to_RDR_XfrBlock     (0x6F) -> openpgp_card_apdu(), wrapped in DataBlock
+ * One message in flight at a time (bMaxCCIDBusySlots = 1).
+ * All buffers static (no malloc). bSlot and bSeq are always echoed.
  *
- * One message in flight at a time (bMaxCCIDBusySlots = 1). All buffers static
- * (no malloc). bSlot and bSeq are always echoed from request to response.
+ * NOTE: openpgp_card_apdu() mutates applet statics (retries, verified flags,
+ * s_key).  It is called exclusively from the ccid_worker task — safe for the
+ * current single-consumer design.  If openpgp_card_factory_reset() is ever
+ * called concurrently (e.g. from an admin CDC command), a mutex shared by
+ * both callers will be required.
  *
  * Compiled for the dongle role only (gated in main/CMakeLists.txt).
  */
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "esp_timer.h"
 #include "device/usbd_pvt.h"   /* usbd_class_driver_t, usbd_*, tu_desc_* */
 #include "openpgp_card.h"
+#include "openpgp_crypto.h"
+#include "sec_confirm.h"
 #include "esp_log.h"
 #include <string.h>
 
@@ -43,17 +57,24 @@ static const char *TAG = "CCID";
 #define CCID_STATUS_OK           0x00
 #define CCID_ERROR_NONE          0x00
 
+/* sec_confirm slot ID reserved for OpenPGP UIF.
+ * sec_store uses slots 0-3; 0xF0 is a dedicated sentinel for the PGP touch gate. */
+#define CCID_CONFIRM_SLOT        0xF0u
+
+/* How often to fire a WTX frame while the worker waits for a UIF touch. */
+#define CCID_WTX_PERIOD_MS       1500u
+
 /* Message buffer: 10-byte header + abData. Sized to comfortably hold a
  * short-APDU exchange (dwMaxCCIDMessageLength = 271 in the descriptor) plus
  * margin. No malloc; static buffers only. */
 #define CCID_BUF_SZ              512
 
 /* ------------------------------------------------------------------ */
-/* ATR for IccPowerOn (OpenPGP-style T=1).                                      */
-/* The ATR advertises T=1 + T=15 global bytes, so a TCK check byte is           */
-/* MANDATORY (ISO 7816-3): TCK = XOR of all bytes from T0 to the last           */
-/* historical byte. Here XOR(DA..00) = 0xCD. Without it scdaemon rejects the    */
-/* card with "update_param_by_atr failed: -1" (validated on hardware).          */
+/* ATR for IccPowerOn (OpenPGP-style T=1).                             */
+/* The ATR advertises T=1 + T=15 global bytes, so a TCK check byte is  */
+/* MANDATORY (ISO 7816-3): TCK = XOR of all bytes from T0 to the last  */
+/* historical byte. Here XOR(DA..00) = 0xCD. Without it scdaemon       */
+/* rejects the card with "update_param_by_atr failed: -1".             */
 /* ------------------------------------------------------------------ */
 static const uint8_t s_atr[] = {
     0x3B,0xDA,0x18,0xFF,0x81,0xB1,0xFE,0x75,0x1F,0x03,
@@ -62,39 +83,40 @@ static const uint8_t s_atr[] = {
 };
 
 /* ------------------------------------------------------------------ */
-/* State                                                               */
+/* Endpoint addresses                                                   */
 /* ------------------------------------------------------------------ */
 static uint8_t s_ep_out;   /* bulk OUT endpoint addr (host -> device) */
 static uint8_t s_ep_in;    /* bulk IN  endpoint addr (device -> host) */
 
-static uint8_t s_out_buf[CCID_BUF_SZ];   /* incoming CCID message      */
-static uint8_t s_in_buf[CCID_BUF_SZ];    /* outgoing CCID response     */
+/* ------------------------------------------------------------------ */
+/* APDU buffers (static, no malloc)                                    */
+/* ------------------------------------------------------------------ */
+static uint8_t s_out_buf[CCID_BUF_SZ];   /* incoming CCID message (OUT)  */
+static uint8_t s_in_buf[CCID_BUF_SZ];    /* outgoing CCID response (IN)  */
+
+/* Separate buffer for WTX frames so they never clobber s_in_buf while
+ * the worker is building the final APDU response. */
+static uint8_t s_wtx_buf[CCID_HDR_LEN];
 
 /* ------------------------------------------------------------------ */
-/* Phase-0 stub applet hooks.                                          */
-/*                                                                     */
-/* TEMPORARY: SELECT (the de-risk target) needs neither sign nor       */
-/* confirm, so these are placeholders. Real crypto (openpgp_crypto /   */
-/* mbedtls) and the sec_confirm touch gate are wired in Phase 1.       */
+/* Worker-task state                                                    */
 /* ------------------------------------------------------------------ */
-static bool phase0_sign(const uint8_t d[32],
-                        const uint8_t *hash, uint16_t n,
-                        uint8_t *out, uint16_t *out_n)
-{
-    (void)d; (void)hash; (void)n; (void)out;
-    if (out_n) *out_n = 0;
-    return false;            /* no crypto yet — real impl in Task 7/8 */
-}
+static TaskHandle_t      s_worker;
+static SemaphoreHandle_t s_msg_ready;     /* binary: one XfrBlock pending    */
+static volatile bool     s_busy;          /* true while XfrBlock is in flight */
 
-static int phase0_confirm(void)
-{
-    return 1;                /* authorized (placeholder) */
-}
+/* XfrBlock context saved by ccid_dispatch for the worker to echo back. */
+static uint8_t           s_cur_slot;
+static uint8_t           s_cur_seq;
+static uint8_t           s_rhport;
+static volatile uint16_t s_resp_len;      /* final response length in s_in_buf */
 
-static const openpgp_card_hooks_t s_phase0_hooks = {
-    .sign    = phase0_sign,
-    .confirm = phase0_confirm,
-};
+/* Set to true immediately before queueing a final IN response (from either
+ * the inline path or ccid_send_final_cb).  Read and cleared in xfer_cb(IN).
+ * Both the set and the clear happen in tud_task context — no additional
+ * locking needed.  When false, an IN completion is a WTX acknowledgement
+ * and OUT must NOT be re-primed yet. */
+static volatile bool     s_final_queued;
 
 /* ------------------------------------------------------------------ */
 /* Response builders (write into s_in_buf, return total byte count)    */
@@ -134,19 +156,146 @@ static uint16_t ccid_build_slotstatus(uint8_t slot, uint8_t seq)
 }
 
 /* ------------------------------------------------------------------ */
-/* Message dispatch                                                    */
+/* USB-task-side callbacks (scheduled via usbd_defer_func)             */
+/* These run on the tud_task; only they may call usbd_edpt_xfer.       */
+/* ------------------------------------------------------------------ */
+
+/* Send a WTX (time extension) frame to keep scdaemon waiting.
+ * Silently skipped if the IN endpoint is already busy (e.g. a previous
+ * WTX or the final response is still in flight). */
+static void ccid_send_wtx_cb(void *param)
+{
+    (void)param;
+    if (usbd_edpt_busy(s_rhport, s_ep_in)) return;
+    s_wtx_buf[0] = RDR_TO_PC_DATA_BLOCK;
+    s_wtx_buf[1] = 0x00;   /* dwLength = 0, LE */
+    s_wtx_buf[2] = 0x00;
+    s_wtx_buf[3] = 0x00;
+    s_wtx_buf[4] = 0x00;
+    s_wtx_buf[5] = s_cur_slot;
+    s_wtx_buf[6] = s_cur_seq;
+    s_wtx_buf[7] = 0x80;   /* bmCommandStatus=10b → time extension; bmICCStatus=00b */
+    s_wtx_buf[8] = 0x02;   /* bError: BWT multiplier 2 */
+    s_wtx_buf[9] = 0x00;
+    if (!usbd_edpt_xfer(s_rhport, s_ep_in, s_wtx_buf, CCID_HDR_LEN))
+        ESP_LOGW(TAG, "WTX send failed");
+}
+
+/* Send the final APDU response built by the worker (s_in_buf[0..s_resp_len)).
+ * Retries on the next tud_task tick if a WTX frame is still in flight — this
+ * handles the rare race where a WTX was queued just before dongle_confirm()
+ * returned and both arrive in the defer queue before the WTX transfer drains. */
+static void ccid_send_final_cb(void *param)
+{
+    (void)param;
+    if (usbd_edpt_busy(s_rhport, s_ep_in)) {
+        usbd_defer_func(ccid_send_final_cb, NULL, false);
+        return;
+    }
+    s_final_queued = true;
+    if (!usbd_edpt_xfer(s_rhport, s_ep_in, s_in_buf, s_resp_len))
+        ESP_LOGE(TAG, "final IN queue failed");
+}
+
+/* ------------------------------------------------------------------ */
+/* CCID worker task                                                    */
+/* ------------------------------------------------------------------ */
+
+/* Runs indefinitely; woken by a binary semaphore each time a
+ * PC_to_RDR_XfrBlock arrives.  Owns s_in_buf while s_busy is true. */
+static void ccid_worker(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        xSemaphoreTake(s_msg_ready, portMAX_DELAY);
+
+        /* dwLength was clamped by ccid_dispatch and written back into
+         * s_out_buf[1..4] (bytes 3+4 zeroed) before the semaphore was given. */
+        uint32_t dwLength = (uint32_t)s_out_buf[1]
+                          | ((uint32_t)s_out_buf[2] << 8);
+
+        uint16_t apdu_n = openpgp_card_apdu(
+                              &s_out_buf[CCID_HDR_LEN], (uint16_t)dwLength,
+                              &s_in_buf[CCID_HDR_LEN], CCID_BUF_SZ - CCID_HDR_LEN);
+
+        ESP_LOGD(TAG, "APDU in=%u out=%u SW=%02x%02x",
+                 (unsigned)dwLength, (unsigned)apdu_n,
+                 s_in_buf[CCID_HDR_LEN + apdu_n - 2],
+                 s_in_buf[CCID_HDR_LEN + apdu_n - 1]);
+
+        s_resp_len = ccid_fill_header(RDR_TO_PC_DATA_BLOCK,
+                                      s_cur_slot, s_cur_seq, apdu_n);
+
+        /* Wait briefly for any in-flight WTX to drain before scheduling the
+         * final response (up to 500 ms; a USB FS transfer drains in < 1 ms). */
+        for (int i = 0; i < 100 && usbd_edpt_busy(s_rhport, s_ep_in); i++)
+            vTaskDelay(pdMS_TO_TICKS(5));
+
+        /* Hand off to the tud_task for the actual usbd_edpt_xfer call.
+         * s_busy is cleared in ccid_drv_xfer when that transfer completes. */
+        usbd_defer_func(ccid_send_final_cb, NULL, false);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Real applet hooks (Phase 1)                                          */
+/* ------------------------------------------------------------------ */
+
+static bool dongle_sign(const uint8_t d[32],
+                        const uint8_t *hash, uint16_t n,
+                        uint8_t *out, uint16_t *out_n)
+{
+    if (!openpgp_crypto_p256_sign(d, hash, n, out)) return false;
+    *out_n = 64;
+    return true;
+}
+
+/* UIF gate — runs on the ccid_worker task (NOT tud_task).
+ * Arms sec_confirm, then polls every 20 ms.  While waiting, fires a CCID
+ * time-extension (WTX) frame every CCID_WTX_PERIOD_MS so scdaemon does not
+ * time out.  Returns 1 if authorised by touch, 2 if denied / timed out. */
+static int dongle_confirm(void)
+{
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    sec_confirm_arm(CCID_CONFIRM_SLOT, now);
+    uint32_t last_wtx = now;
+    uint8_t  slot     = 0;
+
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        now = (uint32_t)(esp_timer_get_time() / 1000);
+
+        sec_confirm_state_t st = sec_confirm_poll(now, &slot);
+        if (st == SEC_CONFIRM_AUTHORIZED)
+            return (slot == CCID_CONFIRM_SLOT) ? 1 : 2;
+        if (st == SEC_CONFIRM_TIMEDOUT)
+            return 2;
+
+        if (now - last_wtx >= CCID_WTX_PERIOD_MS) {
+            usbd_defer_func(ccid_send_wtx_cb, NULL, false);
+            last_wtx = now;
+        }
+    }
+}
+
+static const openpgp_card_hooks_t s_dongle_hooks = {
+    .sign    = dongle_sign,
+    .confirm = dongle_confirm,
+};
+
+/* ------------------------------------------------------------------ */
+/* Message dispatch (runs in tud_task context via ccid_drv_xfer)       */
 /* ------------------------------------------------------------------ */
 static void ccid_dispatch(uint8_t rhport, uint32_t xferred)
 {
-    /* NOTE (Task 8): openpgp_card_apdu() mutates applet statics (retries, verified
-     * flags, s_key).  Currently safe: TinyUSB serialises callbacks and load() runs
-     * before USB starts.  When CCID moves to a worker task, all callers of
-     * openpgp_card_apdu() and openpgp_card_factory_reset() must share a mutex. */
-
-    /* Re-prime OUT and bail on a runt frame (no full header). */
+    /* Re-prime OUT and bail on a runt frame (no full header).
+     * Guard s_busy: if a worker is live, OUT should not be primed
+     * (the runt should never happen in that state, but be safe). */
     if (xferred < CCID_HDR_LEN) {
-        if (!usbd_edpt_xfer(rhport, s_ep_out, s_out_buf, sizeof(s_out_buf)))
-            ESP_LOGE(TAG, "OUT re-prime failed — CCID pipe wedged");
+        if (!s_busy) {
+            if (!usbd_edpt_xfer(rhport, s_ep_out, s_out_buf, sizeof(s_out_buf)))
+                ESP_LOGE(TAG, "OUT re-prime failed — CCID pipe wedged");
+        }
         return;
     }
 
@@ -176,30 +325,30 @@ static void ccid_dispatch(uint8_t rhport, uint32_t xferred)
         resp_len = ccid_build_slotstatus(bSlot, bSeq);
         break;
 
-    case PC_TO_RDR_XFR_BLOCK: {
-        /* abData IN is the C-APDU. Feed it to the applet, writing the
-         * R-APDU straight into the response abData region; then frame it. */
-        uint16_t apdu_n = openpgp_card_apdu(&s_out_buf[CCID_HDR_LEN],
-                                            (uint16_t)dwLength,
-                                            &s_in_buf[CCID_HDR_LEN],
-                                            CCID_BUF_SZ - CCID_HDR_LEN);
-        /* apdu_n is always >= 2 (R-APDU always carries a 2-byte SW). */
-        ESP_LOGD(TAG, "APDU in=%u out=%u SW=%02x%02x",
-                 (unsigned)dwLength, (unsigned)apdu_n,
-                 s_in_buf[10 + apdu_n - 2], s_in_buf[10 + apdu_n - 1]);
-        resp_len = ccid_fill_header(RDR_TO_PC_DATA_BLOCK, bSlot, bSeq, apdu_n);
-        break;
-    }
+    case PC_TO_RDR_XFR_BLOCK:
+        /* Write the clamped dwLength back into s_out_buf so the worker reads
+         * the safe value (bytes 3+4 zeroed; max apdu < 64 KB). */
+        s_out_buf[1] = (uint8_t)(dwLength & 0xFF);
+        s_out_buf[2] = (uint8_t)((dwLength >> 8) & 0xFF);
+        s_out_buf[3] = 0x00;
+        s_out_buf[4] = 0x00;
+        s_cur_slot = bSlot;
+        s_cur_seq  = bSeq;
+        s_rhport   = rhport;
+        s_busy     = true;
+        xSemaphoreGive(s_msg_ready);
+        return;   /* worker owns s_in_buf, IN endpoint, and OUT re-prime */
 
     default:
-        /* Unhandled message: answer with a slot status so the host is not
-         * left waiting. */
+        /* Unhandled message: answer with a slot status so the host is
+         * not left waiting. */
         resp_len = ccid_build_slotstatus(bSlot, bSeq);
         break;
     }
 
-    /* Queue the response. The next OUT read is re-primed once the IN
-     * transfer completes (xfer_cb on s_ep_in) — one message in flight. */
+    /* Queue the inline response.  Set s_final_queued so xfer_cb knows this
+     * IN completion is a final (not WTX) transfer and must re-prime OUT. */
+    s_final_queued = true;
     if (!usbd_edpt_xfer(rhport, s_ep_in, s_in_buf, resp_len))
         ESP_LOGE(TAG, "IN queue failed");
 }
@@ -211,8 +360,8 @@ static void ccid_drv_init(void)
 {
     s_ep_out = 0;
     s_ep_in  = 0;
-    /* Wire the OpenPGP applet once, at stack init. Phase-0 stub hooks. */
-    openpgp_card_init(&s_phase0_hooks);
+    /* Wire the real Phase-1 hooks (P-256 sign + sec_confirm UIF gate). */
+    openpgp_card_init(&s_dongle_hooks);
 }
 
 static bool ccid_drv_deinit(void)
@@ -257,7 +406,7 @@ static uint16_t ccid_drv_open(uint8_t rhport,
     return (uint16_t)((uintptr_t)p_desc - (uintptr_t)desc_intf);
 }
 
-/* No class-specific control requests are needed for Phase 0; STALL them. */
+/* No class-specific control requests are needed; STALL them. */
 static bool ccid_drv_control_xfer(uint8_t rhport, uint8_t stage,
                                   tusb_control_request_t const *request)
 {
@@ -273,14 +422,21 @@ static bool ccid_drv_xfer(uint8_t rhport, uint8_t ep_addr,
                  ep_addr, result, (unsigned)xferred_bytes);
 
     if (ep_addr == s_ep_out) {
-        /* A full CCID message arrived: dispatch and queue the response. */
+        /* A full CCID message arrived: dispatch it. */
         ccid_dispatch(rhport, xferred_bytes);
         return true;
     }
     if (ep_addr == s_ep_in) {
-        /* Response delivered: re-prime the next OUT read. */
-        if (!usbd_edpt_xfer(rhport, s_ep_out, s_out_buf, sizeof(s_out_buf)))
-            ESP_LOGE(TAG, "OUT re-prime failed — CCID pipe wedged");
+        if (s_final_queued) {
+            /* Final APDU response delivered.  Clear busy state and re-prime
+             * OUT so the next command can be received. */
+            s_final_queued = false;
+            s_busy = false;
+            if (!usbd_edpt_xfer(rhport, s_ep_out, s_out_buf, sizeof(s_out_buf)))
+                ESP_LOGE(TAG, "OUT re-prime failed — CCID pipe wedged");
+        }
+        /* else: a WTX frame was acknowledged by the host — nothing to do;
+         * wait for the next WTX or the final response callback. */
         return true;
     }
     return false;
@@ -313,8 +469,24 @@ usbd_class_driver_t const *usbd_app_driver_get_cb(uint8_t *driver_count)
  * call the linker never pulls ccid.c.obj from libmain.a — the weak (empty)
  * default wins, no CCID app driver is registered, and SET_CONFIGURATION asserts
  * (process_set_config: no driver claims the CCID interface). This reference
- * forces the object in so our strong symbol takes effect. Do not remove. */
+ * forces the object in so our strong symbol takes effect. Do not remove.
+ *
+ * Phase 1 additions: creates the binary semaphore and worker task (once), and
+ * runs the crypto self-test (log-only — CCID is not disabled on failure). */
 void ccid_init(void)
 {
-    ESP_LOGI(TAG, "CCID class driver registered (app driver hook linked)");
+    static bool s_init_done = false;
+    if (s_init_done) return;
+    s_init_done = true;
+
+    bool ok = openpgp_crypto_selftest();
+    ESP_LOGI(TAG, "crypto selftest: %s", ok ? "PASS" : "FAIL");
+
+    s_msg_ready = xSemaphoreCreateBinary();
+    configASSERT(s_msg_ready);
+
+    BaseType_t rc = xTaskCreate(ccid_worker, "ccid", 4096, NULL, 5, &s_worker);
+    configASSERT(rc == pdPASS);
+
+    ESP_LOGI(TAG, "CCID class driver registered (worker task running)");
 }
