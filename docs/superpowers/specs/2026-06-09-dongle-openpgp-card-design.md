@@ -17,6 +17,32 @@ using keys that live on the dongle and never leave it, with a **physical touch-t
 Reuses the Plan-1/2 foundation: `sec_store` (NVS key material), `sec_confirm` (keypress gate),
 the TinyUSB composite device, and the dongle's USB identity (`303a:4001`).
 
+## 1b. Why this device, not just the YubiKey (rationale, 2026-06-09)
+
+The owner already has a **YubiKey 5 NFC**, which on its own covers FIDO2, OpenPGP, PIV and
+CR-HMAC. So on raw capability the dongle is redundant. The deliberate reason to build OpenPGP
+here anyway is **credential separation — "not all eggs in one basket":**
+
+- **YubiKey 5 NFC = the "web / accounts" basket** (FIDO2 web 2FA, NFC for phone). Portable; you
+  carry it. This stays its job — **FIDO2 is NOT built on the dongle** (redundant + the dongle's
+  internal form factor can't be a portable authenticator).
+- **Dongle = the "dev identity" basket** (OpenPGP: SSH auth + git commit signing). Always present
+  (M.2 in the laptop), confirmed by a keystroke on the split (`K_SEC_CONFIRM`). A sedentary key
+  you don't want to carry — the form factor fits.
+
+This makes the two tokens **independent**: a lost/broken/compromised YubiKey does not also take
+down SSH/git, and vice versa; no single point of failure; no single-vendor dependency (the
+dongle firmware is yours/auditable). **CR-HMAC** (the old KeePassXC use case) is dropped — the
+owner moved to ProtonPass, which doesn't use HMAC challenge-response; it stays in-tree behind a
+future build flag, not deleted.
+
+**Honest caveat (accepted):** the dongle is *less hardened* than the YubiKey — no secure element,
+NVS keys plaintext at rest, fully reprogrammable (no Secure Boot). It defends the dev identity
+well against **host malware** (non-extractable over USB + physical-touch gate), but **not**
+against an attacker with physical access who desolders the flash. This matches the inherited
+threat model (host-malware-only). A future eFuse-HMAC KEK ("Couche 1") can encrypt the NVS at
+rest without losing reprogrammability.
+
 ## 2. Threat model (inherited from Plan 1/2)
 
 Host-malware-only, NOT physical access. Stays 100% reprogrammable (no Secure Boot). Private
