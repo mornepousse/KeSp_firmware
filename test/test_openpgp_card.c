@@ -136,8 +136,11 @@ static void do_select(uint8_t *cmd, uint8_t *rsp)
 
 static void setup_card(openpgp_card_hooks_t *h)
 {
+    /* Reset globals so every test starts from a known state (order-independent). */
+    g_confirm_retval = 1;
+    memset(g_fake_sign_last_d, 0, sizeof(g_fake_sign_last_d));
     openpgp_card_init(h);
-    openpgp_card_factory_reset();
+    TEST_ASSERT(openpgp_card_factory_reset(), "factory_reset succeeds");
 }
 
 static void do_verify_pw3(uint8_t *cmd, uint8_t *rsp)
@@ -856,6 +859,95 @@ static void test_ds_counter_increments(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Tests — W4: negative key-import paths                               */
+/* ------------------------------------------------------------------ */
+
+/* 7F48 template absent → 6A80; key not set. */
+static void test_key_import_7f48_absent(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    /* Build: B6 00 (sig CRT) + 5F48 payload — no 7F48 template. */
+    static const uint8_t d[32] = {0x77};
+    uint8_t inner[64]; uint16_t ii = 0;
+    inner[ii++]=0xB6; inner[ii++]=0x00;
+    inner[ii++]=0x5F; inner[ii++]=0x48; inner[ii++]=0x20;
+    memcpy(inner + ii, d, 32); ii += 32;
+
+    cmd[0]=0x00; cmd[1]=0xDB; cmd[2]=0x3F; cmd[3]=0xFF;
+    cmd[4]=(uint8_t)(2u + ii); cmd[5]=0x4D; cmd[6]=(uint8_t)ii;
+    memcpy(cmd + 7, inner, ii);
+    uint16_t clen = (uint16_t)(7u + ii);
+
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80,
+                   "key import with 7F48 absent returns 6A80");
+    TEST_ASSERT(!openpgp_card_key_is_set(), "key not set after 7F48-absent rejection");
+}
+
+/* 5F48 key material absent → 6A80; key not set. */
+static void test_key_import_5f48_absent(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    /* Build: B6 00 + 7F48 template — no 5F48. */
+    uint8_t inner[64]; uint16_t ii = 0;
+    inner[ii++]=0xB6; inner[ii++]=0x00;
+    inner[ii++]=0x7F; inner[ii++]=0x48; inner[ii++]=0x02;
+    inner[ii++]=0x92; inner[ii++]=0x20; /* declares 32 B for element 92 */
+    /* no 5F48 */
+
+    cmd[0]=0x00; cmd[1]=0xDB; cmd[2]=0x3F; cmd[3]=0xFF;
+    cmd[4]=(uint8_t)(2u + ii); cmd[5]=0x4D; cmd[6]=(uint8_t)ii;
+    memcpy(cmd + 7, inner, ii);
+    uint16_t clen = (uint16_t)(7u + ii);
+
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80,
+                   "key import with 5F48 absent returns 6A80");
+    TEST_ASSERT(!openpgp_card_key_is_set(), "key not set after 5F48-absent rejection");
+}
+
+/* 7F48 declares 92 as 32 bytes but 5F48 only carries 16 bytes → 6A80. */
+static void test_key_import_5f48_too_short(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    static const uint8_t d16[16] = {0x88};
+    uint8_t inner[64]; uint16_t ii = 0;
+    inner[ii++]=0xB6; inner[ii++]=0x00;
+    inner[ii++]=0x7F; inner[ii++]=0x48; inner[ii++]=0x02;
+    inner[ii++]=0x92; inner[ii++]=0x20; /* template declares 32 B */
+    inner[ii++]=0x5F; inner[ii++]=0x48; inner[ii++]=0x10; /* 5F48 only 16 B */
+    memcpy(inner + ii, d16, 16); ii += 16;
+
+    cmd[0]=0x00; cmd[1]=0xDB; cmd[2]=0x3F; cmd[3]=0xFF;
+    cmd[4]=(uint8_t)(2u + ii); cmd[5]=0x4D; cmd[6]=(uint8_t)ii;
+    memcpy(cmd + 7, inner, ii);
+    uint16_t clen = (uint16_t)(7u + ii);
+
+    uint16_t rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80,
+                   "key import with 5F48 too short (16 < 32) returns 6A80");
+    TEST_ASSERT(!openpgp_card_key_is_set(), "key not set after 5F48-too-short rejection");
+}
+
+/* ------------------------------------------------------------------ */
 /* Test suite entry point                                              */
 /* ------------------------------------------------------------------ */
 
@@ -888,4 +980,8 @@ void test_openpgp_card(void)
     TEST_RUN(test_sign_without_key_6a88);
     TEST_RUN(test_sign_consumes_pw1);
     TEST_RUN(test_ds_counter_increments);
+    /* W4: negative import paths — 7F48/5F48 absent, 5F48 too short */
+    TEST_RUN(test_key_import_7f48_absent);
+    TEST_RUN(test_key_import_5f48_absent);
+    TEST_RUN(test_key_import_5f48_too_short);
 }

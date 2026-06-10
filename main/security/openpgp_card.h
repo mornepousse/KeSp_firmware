@@ -45,9 +45,11 @@ void openpgp_card_init(const openpgp_card_hooks_t *hooks);
 /*
  * Wipe all DOs, restore factory PINs / retry counters, reset session
  * state, and repopulate all factory-default DOs.
+ * Returns true if all persist operations succeeded (key_persist + DO defaults).
+ * Returns false if any NVS write failed; the in-RAM state is still coherent.
  * Safe to call at any time; used by tests and future admin commands.
  */
-void openpgp_card_factory_reset(void);
+bool openpgp_card_factory_reset(void);
 
 /*
  * Populate any *missing* factory-default DOs without touching existing

@@ -21,6 +21,8 @@ static const uint8_t PW3_DEFAULT[8]  = {'1','2','3','4','5','6','7','8'};
 #define PW_MAX_LEN      16
 #define FP_SLICE_LEN    20u  /* fingerprint slice length (C7/C8/C9 PUT DATA) */
 #define TS_SLICE_LEN     4u  /* timestamp slice length (CE/CF/D0 PUT DATA)    */
+#define PGP_ALGO_ECDSA_P256   0x13u  /* algorithm attribute: ECDSA with NIST P-256 */
+#define PGP_P256_SCALAR_BYTES 32u    /* private scalar size in bytes (P-256) */
 
 /* Status words */
 #define SW_OK              0x9000u
@@ -58,15 +60,15 @@ static const uint8_t FACTORY_C0[10] = {
     0x34, 0x00,  0x00, 0x00,  0x00, 0x00,  0x01, 0x00,  0x00, 0x00
 };
 
-/* Algorithm attributes: 0x13=ECDSA, 0x12=ECDH; OID = NIST P-256 */
+/* Algorithm attributes: 0x13=ECDSA (PGP_ALGO_ECDSA_P256), 0x12=ECDH; OID = NIST P-256 */
 static const uint8_t FACTORY_C1[9] = {
-    0x13, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
+    0x13, /* PGP_ALGO_ECDSA_P256 */ 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
 };
 static const uint8_t FACTORY_C2[9] = {
     0x12, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
 };
 static const uint8_t FACTORY_C3[9] = {
-    0x13, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
+    0x13, /* PGP_ALGO_ECDSA_P256 */ 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
 };
 
 /* UIF DOs: byte0 0x01=required, byte1 0x20=button-present.
@@ -254,6 +256,54 @@ static const uint8_t *tlv_find(const uint8_t *buf, uint16_t buf_len,
     return NULL; /* tag not found */
 }
 
+/* Sibling-level TLV iterator.
+ * On entry *pos is the index of the next sibling's first byte.
+ * Reads tag (1-2 bytes) and length (short/0x81/0x82) and updates:
+ *   *tag  — decoded tag value
+ *   *vlen — declared value length
+ *   *pos  — updated to point at the first value byte (value start)
+ * Returns false at end of buffer (normal termination) or on truncation.
+ * For standard TLV: caller advances *pos by *vlen to reach the next sibling.
+ * For 7F48 template pairs (no value bytes): omit the advance; *pos already
+ * points at the next (tag, length) pair. */
+static bool tlv_iter_next(const uint8_t *buf, uint16_t len, uint16_t *pos,
+                           uint16_t *tag, uint16_t *vlen)
+{
+    if (*pos >= len) return false;
+    uint16_t p = *pos;
+
+    /* tag: 1 or 2 bytes */
+    uint16_t cur_tag;
+    if ((buf[p] & 0x1Fu) == 0x1Fu) {
+        if (p + 1u >= len) return false;
+        cur_tag = ((uint16_t)buf[p] << 8) | buf[p + 1u];
+        p += 2u;
+    } else {
+        cur_tag = buf[p];
+        p += 1u;
+    }
+    if (p >= len) return false;
+
+    /* length: short-form / 0x81 one-byte / 0x82 two-byte */
+    uint16_t el;
+    if (buf[p] < 0x80u) {
+        el = buf[p]; p += 1u;
+    } else if (buf[p] == 0x81u) {
+        if (p + 1u >= len) return false;
+        el = buf[p + 1u]; p += 2u;
+    } else if (buf[p] == 0x82u) {
+        if (p + 2u >= len) return false;
+        el = ((uint16_t)buf[p + 1u] << 8) | buf[p + 2u]; p += 3u;
+    } else {
+        return false; /* indefinite / reserved length form */
+    }
+
+    *tag  = cur_tag;
+    *vlen = el;
+    *pos  = p; /* value start */
+    return true;
+}
+
 /* ------------------------------------------------------------------ */
 /* Public API — lifecycle                                              */
 /* ------------------------------------------------------------------ */
@@ -314,17 +364,19 @@ bool openpgp_card_ensure_defaults(void)
     return (failures == 0);
 }
 
-void openpgp_card_factory_reset(void)
+bool openpgp_card_factory_reset(void)
 {
+    bool ok = true;
+
     /* 1. Reset session state */
     s_selected          = false;
     s_pw1_sign_verified = false;
     s_pw1_user_verified = false;
     s_pw3_verified      = false;
 
-    /* 2. Clear imported key */
+    /* 2. Clear imported key and persist the cleared state */
     memset(&s_key, 0, sizeof(s_key));
-    key_persist();
+    if (!key_persist()) ok = false;
 
     /* 3. Wipe DO store */
     openpgp_do_reset();
@@ -333,7 +385,9 @@ void openpgp_card_factory_reset(void)
     pins_factory();
 
     /* 5. Populate all factory-default DOs */
-    openpgp_card_ensure_defaults();
+    if (!openpgp_card_ensure_defaults()) ok = false;
+
+    return ok;
 }
 
 bool openpgp_card_key_is_set(void)
@@ -594,30 +648,11 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         if (!s_pw3_verified)
             return sw_only(out, out_max, SW_SEC_NOT_SAT);
 
-        /* Outer tag must be 0x4D */
-        if (a.lc < 2u || !a.data || a.data[0] != 0x4Du)
+        /* Outer container: 4D (Extended Header List) */
+        uint16_t       inner_len = 0;
+        const uint8_t *inner     = tlv_find(a.data, a.lc, 0x4Du, &inner_len);
+        if (!inner)
             return sw_only(out, out_max, SW_WRONG_DATA);
-
-        /* Parse 4D length to locate the inner buffer */
-        uint16_t hdr = 1u; /* skip 4D tag byte */
-        uint32_t outer_vlen;
-        if (a.data[hdr] < 0x80u) {
-            outer_vlen = a.data[hdr]; hdr += 1u;
-        } else if (a.data[hdr] == 0x81u) {
-            if (hdr + 1u >= a.lc) return sw_only(out, out_max, SW_WRONG_DATA);
-            outer_vlen = a.data[hdr + 1u]; hdr += 2u;
-        } else if (a.data[hdr] == 0x82u) {
-            if (hdr + 2u >= a.lc) return sw_only(out, out_max, SW_WRONG_DATA);
-            outer_vlen = ((uint32_t)a.data[hdr + 1u] << 8) | a.data[hdr + 2u];
-            hdr += 3u;
-        } else {
-            return sw_only(out, out_max, SW_WRONG_DATA);
-        }
-        if ((uint32_t)hdr + outer_vlen > (uint32_t)a.lc)
-            return sw_only(out, out_max, SW_WRONG_DATA);
-
-        const uint8_t *inner     = a.data + hdr;
-        uint16_t       inner_len = (uint16_t)outer_vlen;
 
         /* B6 (sig-slot CRT) must be present — Phase 1 only supports Sig slot.
          * Absence of B6 (incl. the case where only B8/A4 is present) → 6A80. */
@@ -631,56 +666,43 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         const uint8_t *tmpl     = tlv_find(inner, inner_len, 0x7F48u, &tmpl_len);
         if (!tmpl) return sw_only(out, out_max, SW_WRONG_DATA);
 
-        /* Walk template to find 92 (private scalar) and compute its offset
-         * in 5F48.  Elements before 92 contribute their declared size. */
-        uint16_t d_offset = 0;
+        /* Walk template with tlv_iter_next to find tag 92 (private scalar)
+         * and accumulate its byte-offset in 5F48.  The 7F48 template contains
+         * only (tag, length) pairs with no value bytes, so we do NOT advance
+         * *pos by vlen between iterations. */
+        uint32_t d_offset = 0;  /* semantic uint32_t: offset into 5F48 key material */
         bool     found_92 = false;
-        uint16_t ti = 0;
-        while (ti < tmpl_len) {
-            /* Tag: 1 or 2 bytes */
-            uint16_t etag;
-            if ((tmpl[ti] & 0x1Fu) == 0x1Fu) {
-                if (ti + 1u >= tmpl_len) return sw_only(out, out_max, SW_WRONG_DATA);
-                etag = ((uint16_t)tmpl[ti] << 8) | tmpl[ti + 1u];
-                ti  += 2u;
-            } else {
-                etag = tmpl[ti]; ti += 1u;
-            }
-            if (ti >= tmpl_len) return sw_only(out, out_max, SW_WRONG_DATA);
-            /* Length field in template = declared size in 5F48 (no value here) */
-            uint16_t elen;
-            if (tmpl[ti] < 0x80u) {
-                elen = tmpl[ti]; ti += 1u;
-            } else if (tmpl[ti] == 0x81u) {
-                if (ti + 1u >= tmpl_len) return sw_only(out, out_max, SW_WRONG_DATA);
-                elen = tmpl[ti + 1u]; ti += 2u;
-            } else if (tmpl[ti] == 0x82u) {
-                if (ti + 2u >= tmpl_len) return sw_only(out, out_max, SW_WRONG_DATA);
-                elen = ((uint16_t)tmpl[ti + 1u] << 8) | tmpl[ti + 2u]; ti += 3u;
-            } else {
-                return sw_only(out, out_max, SW_WRONG_DATA);
-            }
+        uint16_t ti = 0, etag, elen;
+        while (tlv_iter_next(tmpl, tmpl_len, &ti, &etag, &elen)) {
             if (etag == 0x92u) {
-                if (elen != 32u) return sw_only(out, out_max, SW_WRONG_DATA);
+                if (elen != PGP_P256_SCALAR_BYTES)
+                    return sw_only(out, out_max, SW_WRONG_DATA);
                 found_92 = true;
                 break;
             }
-            d_offset += elen; /* accumulate offset of elements before 92 */
+            d_offset += elen; /* accumulate 5F48 offset for elements before 92 */
+            /* 7F48 template has no value bytes; next (tag,len) pair follows. */
         }
         if (!found_92) return sw_only(out, out_max, SW_WRONG_DATA);
 
-        /* 5F48: concatenated key material; private scalar at [d_offset..d_offset+31] */
+        /* 5F48: concatenated key material; private scalar at
+         * [d_offset .. d_offset + PGP_P256_SCALAR_BYTES - 1] */
         uint16_t       km_len = 0;
         const uint8_t *km     = tlv_find(inner, inner_len, 0x5F48u, &km_len);
         if (!km) return sw_only(out, out_max, SW_WRONG_DATA);
-        if ((uint32_t)d_offset + 32u > (uint32_t)km_len)
+        if (d_offset + PGP_P256_SCALAR_BYTES > (uint32_t)km_len)
             return sw_only(out, out_max, SW_WRONG_DATA);
 
-        /* Import key */
+        /* Durable key import: write to RAM then persist to NVS.
+         * On NVS failure scrub RAM so host-visible state stays coherent;
+         * return 6F00 so the host can detect the failure and retry. */
         s_key.set  = 1u;
-        s_key.algo = 0x13u; /* ECDSA P-256 */
-        memcpy(s_key.d, km + d_offset, 32u);
-        key_persist();
+        s_key.algo = PGP_ALGO_ECDSA_P256;
+        memcpy(s_key.d, km + d_offset, PGP_P256_SCALAR_BYTES);
+        if (!key_persist()) {
+            memset(&s_key, 0, sizeof(s_key));
+            return sw_only(out, out_max, 0x6F00u);
+        }
         return sw_only(out, out_max, SW_OK);
     }
 
