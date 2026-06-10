@@ -96,6 +96,19 @@ extern int g_pin_persist_calls;
 #endif
 
 /*
+ * Set the crypto health flag.  Must be called by ccid_init() immediately after
+ * openpgp_crypto_selftest().  When `ok` is false, PSO:CDS (INS 0x2A) and READ
+ * PUBLIC KEY (INS 0x47 P1=0x81) return SW 0x6581 (memory failure) — the card
+ * refuses all cryptographic operations on a broken device.  GET DATA, SELECT,
+ * and VERIFY remain functional so that the host can still read card status to
+ * diagnose the fault.
+ * Default is true so host tests (which never call ccid_init) and the window
+ * between openpgp_card_init() and ccid_init() both work correctly.
+ * openpgp_card_init() and openpgp_card_factory_reset() do NOT reset this flag.
+ */
+void openpgp_card_set_crypto_health(bool ok);
+
+/*
  * Process one command APDU (`in[0..in_len-1]`).
  * Writes the response (data + SW1 SW2) into `out[0..out_max-1]`.
  * Returns the number of bytes written (always >= 2 for the SW).

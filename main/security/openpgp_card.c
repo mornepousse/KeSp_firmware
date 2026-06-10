@@ -95,6 +95,13 @@ static bool    s_pw3_verified;
 static uint8_t s_pw1_retry;          /* shared counter for both PW1 modes */
 static uint8_t s_pw3_retry;
 
+/* Crypto KAT health flag.  Set externally by ccid_init() after
+ * openpgp_crypto_selftest().  Default true: host tests never call the setter,
+ * and the boot window between openpgp_card_init() and ccid_init() must not
+ * leave the card hard-blocked.  openpgp_card_init/factory_reset do NOT touch
+ * this flag — it is owned by the ccid layer. */
+static bool s_crypto_ok = true;
+
 /* Mutable PINs (changeable via CHANGE REFERENCE DATA — Phase 2) */
 static uint8_t s_pw1[PW_MAX_LEN];
 static uint8_t s_pw1_len;
@@ -422,6 +429,24 @@ void openpgp_card_set_serial(const uint8_t serial[4])
     openpgp_do_put(0x004F, aid, 16);
 }
 
+void openpgp_card_set_crypto_health(bool ok)
+{
+    s_crypto_ok = ok;
+}
+
+/* Constant-time PIN comparison.  Returns true iff a[0..alen-1] == b[0..blen-1]
+ * with no early exit on mismatch, so the timing is independent of where the
+ * first differing byte is.  Length mismatch short-circuits immediately (the
+ * lengths are public information in the APDU framing). */
+static bool ct_pin_equal(const uint8_t *a, uint16_t alen,
+                         const uint8_t *b, uint16_t blen)
+{
+    uint8_t  diff = (uint8_t)(alen ^ blen);
+    uint16_t n    = alen < blen ? alen : blen;
+    for (uint16_t i = 0; i < n; i++) diff |= (uint8_t)(a[i] ^ b[i]);
+    return diff == 0 && alen == blen;
+}
+
 /* ------------------------------------------------------------------ */
 /* APDU dispatch                                                       */
 /* ------------------------------------------------------------------ */
@@ -469,8 +494,8 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         if (a.lc == 0)
             return sw_only(out, out_max, (uint16_t)(0x63C0u | *retry));
 
-        /* PIN comparison */
-        if (a.lc != pinlen || memcmp(a.data, pin, pinlen) != 0) {
+        /* PIN comparison — constant-time to avoid length/position oracle */
+        if (!ct_pin_equal(a.data, a.lc, pin, pinlen)) {
             /* duplicated in VERIFY/CHANGE; extract pin_wrong() if a third user appears (e.g. INS 2C) */
             (*retry)--;
             pin_persist();
@@ -518,8 +543,8 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         if (new_len < min_len || new_len > PW_MAX_LEN)
             return sw_only(out, out_max, SW_WRONG_DATA);
 
-        /* Verify old PIN — mismatch decrements counter and persists */
-        if (memcmp(a.data, pin, old_len) != 0) {
+        /* Verify old PIN — constant-time compare; mismatch decrements counter */
+        if (!ct_pin_equal(a.data, old_len, pin, old_len)) {
             (*retry)--;
             pin_persist();
             return sw_only(out, out_max, (uint16_t)(0x63C0u | *retry));
@@ -761,6 +786,17 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         if (d_offset + PGP_P256_SCALAR_BYTES > (uint32_t)km_len)
             return sw_only(out, out_max, SW_WRONG_DATA);
 
+        /* Reject an all-zero private scalar — provably invalid and exploitable.
+         * (d >= N is rejected at sign time by mbedtls; the zero case is caught
+         * here before we persist the material.) */
+        {
+            bool all_zero = true;
+            for (uint16_t zi = 0; zi < PGP_P256_SCALAR_BYTES; zi++) {
+                if ((km + d_offset)[zi] != 0u) { all_zero = false; break; }
+            }
+            if (all_zero) return sw_only(out, out_max, SW_WRONG_DATA);
+        }
+
         /* Durable key import: write to RAM then persist to NVS.
          * On NVS failure scrub RAM so host-visible state stays coherent;
          * return 6F00 so the host can detect the failure and retry. */
@@ -779,6 +815,10 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         if (a.p1 != 0x9E || a.p2 != 0x9A)
             return sw_only(out, out_max, SW_WRONG_P1P2);
 
+        /* Crypto health gate — before any key/PIN check.
+         * A failed KAT at boot means all crypto output is untrustworthy. */
+        if (!s_crypto_ok) return sw_only(out, out_max, 0x6581u);
+
         /* Referenced data check: key must be imported first */
         if (!s_key.set)
             return sw_only(out, out_max, SW_REF_NOT_FOUND);
@@ -793,14 +833,17 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
                 return sw_only(out, out_max, SW_COND_NOT_SAT);
         }
 
+        /* Consume PW1 sign authorisation before attempting the operation —
+         * exactly one attempt per VERIFY 81, regardless of sign() success or failure.
+         * Consumed here (not at the UIF gate) so a UIF denial preserves the token
+         * but a crypto failure always burns it. */
+        s_pw1_sign_verified = false;
+
         /* Invoke sign hook with private scalar */
         uint8_t  sig[256];
         uint16_t sig_len = 0;
         if (!s_hooks->sign(s_key.d, a.data, a.lc, sig, &sig_len))
             return sw_only(out, out_max, SW_COND_NOT_SAT);
-
-        /* Consume PW1 sign authorisation — exactly one signing per VERIFY 81 */
-        s_pw1_sign_verified = false;
 
         /* Increment DS counter DO 0x93 (3-byte big-endian, persisted by DO store) */
         {
@@ -829,6 +872,9 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
                 return sw_only(out, out_max, SW_REF_NOT_FOUND);
             if (a.data[0] != 0xB6u)
                 return sw_only(out, out_max, SW_REF_NOT_FOUND);
+
+            /* Crypto health gate — before any key check. */
+            if (!s_crypto_ok) return sw_only(out, out_max, 0x6581u);
 
             if (!s_key.set)
                 return sw_only(out, out_max, SW_REF_NOT_FOUND);

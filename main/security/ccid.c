@@ -519,7 +519,12 @@ void ccid_init(void)
     s_init_done = true;
 
     bool ok = openpgp_crypto_selftest();
-    ESP_LOGI(TAG, "crypto selftest: %s", ok ? "PASS" : "FAIL");
+    openpgp_card_set_crypto_health(ok);
+    if (ok) {
+        ESP_LOGI(TAG, "crypto selftest: PASS");
+    } else {
+        ESP_LOGE(TAG, "crypto selftest: FAIL — cryptographic operations disabled (SW 6581)");
+    }
 
     s_msg_ready = xSemaphoreCreateBinary();
     configASSERT(s_msg_ready);

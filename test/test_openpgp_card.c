@@ -22,6 +22,15 @@ static bool fake_sign(const uint8_t d[32],
     return true;
 }
 
+/* Sign hook that always fails — used by test_sign_consumes_pw1_on_failure. */
+static bool fake_sign_fail(const uint8_t d[32],
+                           const uint8_t *hash, uint16_t n,
+                           uint8_t *out, uint16_t *out_n)
+{
+    (void)d; (void)hash; (void)n; (void)out; (void)out_n;
+    return false;
+}
+
 static int fake_confirm(void) { return g_confirm_retval; }
 
 /* Deterministic fake pubkey: 0x04 || d[32] || d[32] (easy to verify in tests). */
@@ -162,6 +171,8 @@ static void setup_card(openpgp_card_hooks_t *h)
     /* Reset globals so every test starts from a known state (order-independent). */
     g_confirm_retval = 1;
     memset(g_fake_sign_last_d, 0, sizeof(g_fake_sign_last_d));
+    /* Ensure the crypto health flag is true regardless of test ordering. */
+    openpgp_card_set_crypto_health(true);
     openpgp_card_init(h);
     TEST_ASSERT(openpgp_card_factory_reset(), "factory_reset succeeds");
 }
@@ -1303,6 +1314,144 @@ static void test_read_pubkey_null_hook(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Tests — security hardening fixes                                    */
+/* ------------------------------------------------------------------ */
+
+/* Fix 1: crypto health gate.
+ * When s_crypto_ok is false, PSO:CDS must return SW 0x6581 (memory failure)
+ * before any key or PIN check.  GET DATA 6E must remain reachable (9000) so
+ * the host can still read diagnostic card status. */
+static void test_crypto_broken_blocks_sign(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm,
+                                .pubkey = fake_pubkey };
+    setup_card(&h);  /* sets health true */
+    g_confirm_retval = 1;
+
+    uint8_t cmd[64], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    static const uint8_t d[32] = {0x11};
+    do_import_key(d, cmd, rsp);
+    do_disable_uif(cmd, rsp);
+
+    /* Establish a valid PW1 signing authorisation before tripping health */
+    do_verify_pw1_sign(cmd, rsp);
+
+    /* Trip the health flag — simulates a failed KAT at boot */
+    openpgp_card_set_crypto_health(false);
+
+    uint8_t hash[32]; memset(hash, 0xCD, 32);
+    clen = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6581,
+                   "PSO:CDS with broken crypto health returns 6581");
+
+    /* GET DATA 6E (diagnostic) must still work — crypto gate must not
+     * affect GET DATA, SELECT, or VERIFY. */
+    clen = build_get_data(0x00, 0x6E, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000,
+                   "GET DATA 6E still returns 9000 when crypto health is false");
+
+    /* Restore for subsequent tests */
+    openpgp_card_set_crypto_health(true);
+}
+
+/* Fix 1: crypto health gate for READ PUBLIC KEY (INS 0x47 P1=0x81). */
+static void test_crypto_broken_blocks_readpub(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm,
+                                .pubkey = fake_pubkey };
+    setup_card(&h);  /* sets health true */
+
+    uint8_t cmd[64], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    static const uint8_t d[32] = {0x22};
+    do_import_key(d, cmd, rsp);
+
+    openpgp_card_set_crypto_health(false);
+
+    clen = build_read_pubkey(0x81, 0xB6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6581,
+                   "READ PUBLIC KEY with broken crypto health returns 6581");
+
+    /* Restore */
+    openpgp_card_set_crypto_health(true);
+}
+
+/* Fix 2: PW1 is consumed BEFORE sign() is called, so a failing sign still
+ * burns the single-use token.  A second PSO:CDS without a new VERIFY 81
+ * must return 6982 (security status not satisfied). */
+static void test_sign_consumes_pw1_on_failure(void)
+{
+    /* Use the always-failing sign hook */
+    openpgp_card_hooks_t h = { .sign = fake_sign_fail, .confirm = fake_confirm,
+                                .pubkey = fake_pubkey };
+    setup_card(&h);
+    g_confirm_retval = 1;
+
+    uint8_t cmd[64], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    static const uint8_t d[32] = {0x55};
+    do_import_key(d, cmd, rsp);
+    do_disable_uif(cmd, rsp);  /* keep UIF out of the equation */
+
+    do_verify_pw1_sign(cmd, rsp);
+
+    uint8_t hash[32]; memset(hash, 0xAA, 32);
+
+    /* First attempt: sign hook fails → SW_COND_NOT_SAT (6985).
+     * PW1 must have been consumed already. */
+    clen = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6985,
+                   "PSO:CDS with failing sign hook returns 6985");
+
+    /* Second attempt without re-VERIFY: PW1 was consumed → 6982. */
+    clen = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6982,
+                   "second PSO:CDS without re-VERIFY after sign failure returns 6982");
+}
+
+/* Fix 2: importing a private scalar of all-zero bytes must be rejected
+ * with SW 6A80 and the key must not be set in the applet state. */
+static void test_import_rejects_zero_scalar(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm,
+                                .pubkey = fake_pubkey };
+    setup_card(&h);
+
+    uint8_t cmd[64], rsp[256];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+
+    /* All-zero scalar — invalid/exploitable private key material */
+    static const uint8_t zero_d[32] = {0};
+    clen = build_key_import(zero_d, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80,
+                   "key import with all-zero scalar returns 6A80");
+    TEST_ASSERT(!openpgp_card_key_is_set(),
+                "key not set after zero-scalar rejection");
+}
+
+/* ------------------------------------------------------------------ */
 /* Test suite entry point                                              */
 /* ------------------------------------------------------------------ */
 
@@ -1351,4 +1500,9 @@ void test_openpgp_card(void)
     TEST_RUN(test_read_pubkey_generate_unsupported);
     TEST_RUN(test_read_pubkey_wrong_slot);
     TEST_RUN(test_read_pubkey_null_hook);
+    /* Security hardening: crypto health gate, consume PW1 before sign, zero scalar, const-time PIN */
+    TEST_RUN(test_crypto_broken_blocks_sign);
+    TEST_RUN(test_crypto_broken_blocks_readpub);
+    TEST_RUN(test_sign_consumes_pw1_on_failure);
+    TEST_RUN(test_import_rejects_zero_scalar);
 }
