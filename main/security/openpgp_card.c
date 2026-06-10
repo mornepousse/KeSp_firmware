@@ -37,9 +37,10 @@ static const uint8_t PW3_DEFAULT[8]  = {'1','2','3','4','5','6','7','8'};
 static const openpgp_card_hooks_t *s_hooks;
 
 static bool    s_selected;
-static bool    s_pw1_verified;
+static bool    s_pw1_sign_verified;  /* mode 0x81 — required for PSO:CDS */
+static bool    s_pw1_user_verified;  /* mode 0x82 — required for decrypt etc. */
 static bool    s_pw3_verified;
-static uint8_t s_pw1_retry;
+static uint8_t s_pw1_retry;          /* shared counter for both PW1 modes */
 static uint8_t s_pw3_retry;
 
 /* Mutable PINs (changeable via CHANGE REFERENCE DATA — Phase 2) */
@@ -94,11 +95,12 @@ void openpgp_card_init(const openpgp_card_hooks_t *hooks)
     openpgp_do_reset();
 
     /* Reset applet state */
-    s_selected     = false;
-    s_pw1_verified = false;
-    s_pw3_verified = false;
-    s_pw1_retry    = PW1_RETRY_MAX;
-    s_pw3_retry    = PW3_RETRY_MAX;
+    s_selected          = false;
+    s_pw1_sign_verified = false;
+    s_pw1_user_verified = false;
+    s_pw3_verified      = false;
+    s_pw1_retry         = PW1_RETRY_MAX;
+    s_pw3_retry         = PW3_RETRY_MAX;
 
     /* Restore factory-default PINs */
     memcpy(s_pw1, PW1_DEFAULT, PW1_DEFAULT_LEN);
@@ -121,9 +123,10 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         if (a.lc < 6 || !a.data ||
             memcmp(a.data, OPGP_AID_PREFIX, 6) != 0)
             return sw_only(out, out_max, SW_REF_NOT_FOUND);
-        s_selected     = true;
-        s_pw1_verified = false;
-        s_pw3_verified = false;
+        s_selected          = true;
+        s_pw1_sign_verified = false;
+        s_pw1_user_verified = false;
+        s_pw3_verified      = false;
         return sw_only(out, out_max, SW_OK);
     }
 
@@ -133,13 +136,12 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
 
     /* ---- VERIFY (INS=0x20) ---- */
     if (a.ins == 0x20) {
-        bool is_pw1 = (a.p2 == 0x82);
+        bool is_pw1 = (a.p2 == 0x81 || a.p2 == 0x82);
         bool is_pw3 = (a.p2 == 0x83);
         if (!is_pw1 && !is_pw3)
             return sw_only(out, out_max, SW_WRONG_P1P2);
 
         uint8_t *retry  = is_pw1 ? &s_pw1_retry  : &s_pw3_retry;
-        bool    *verif  = is_pw1 ? &s_pw1_verified : &s_pw3_verified;
         uint8_t *pin    = is_pw1 ? s_pw1 : s_pw3;
         uint8_t  pinlen = is_pw1 ? s_pw1_len : s_pw3_len;
 
@@ -157,9 +159,11 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
             return sw_only(out, out_max, (uint16_t)(0x63C0u | *retry));
         }
 
-        /* Correct PIN */
+        /* Correct PIN — reset counter and set the mode-specific flag */
         *retry = (is_pw1 ? PW1_RETRY_MAX : PW3_RETRY_MAX);
-        *verif = true;
+        if      (a.p2 == 0x81) s_pw1_sign_verified = true;
+        else if (a.p2 == 0x82) s_pw1_user_verified = true;
+        else                   s_pw3_verified       = true;
         return sw_only(out, out_max, SW_OK);
     }
 
@@ -187,7 +191,7 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
     if (a.ins == 0x2A) {
         if (a.p1 != 0x9E || a.p2 != 0x9A)
             return sw_only(out, out_max, SW_WRONG_P1P2);
-        if (!s_pw1_verified)
+        if (!s_pw1_sign_verified)
             return sw_only(out, out_max, SW_SEC_NOT_SAT);
 
         /* UIF gate: if DO 0xD6 byte[0] != 0, call confirm hook */

@@ -122,11 +122,11 @@ static void test_sign_requires_pin(void)
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6982,
                    "PSO:CDS without VERIFY returns 6982");
 
-    /* After VERIFY PW1 succeeds, signing works (no UIF) */
+    /* After VERIFY PW1 (mode 0x81 = signing mode) succeeds, signing works (no UIF) */
     uint8_t pw1[] = {'1','2','3','4','5','6'};
-    clen = build_verify(0x82, pw1, sizeof(pw1), cmd);
+    clen = build_verify(0x81, pw1, sizeof(pw1), cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
-    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY PW1 returns 9000");
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY PW1 (81) returns 9000");
 
     clen = build_pso_cds(hash, 20, cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
@@ -156,11 +156,11 @@ static void test_sign_uif_gate(void)
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "PUT DATA UIF returns 9000");
 
-    /* VERIFY PW1 */
+    /* VERIFY PW1 (mode 0x81 = signing mode) */
     uint8_t pw1[] = {'1','2','3','4','5','6'};
-    clen = build_verify(0x82, pw1, sizeof(pw1), cmd);
+    clen = build_verify(0x81, pw1, sizeof(pw1), cmd);
     rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
-    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY PW1 returns 9000");
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY PW1 (81) returns 9000");
 
     /* PSO:CDS with UIF enabled, confirm returns 1 (authorized) → 9000 */
     uint8_t hash[20];
@@ -215,6 +215,63 @@ static void test_pin_retry_counter(void)
                    "blocked PIN returns 6983");
 }
 
+/* VERIFY P2=0x81 (PW1 for signing) is accepted and gates PSO:CDS;
+   P2=0x82 alone must NOT open the signing gate. */
+static void test_verify_81_gates_sign(void)
+{
+    openpgp_card_hooks_t h = { fake_sign, fake_confirm };
+    openpgp_card_init(&h);
+    g_confirm_retval = 1;
+
+    uint8_t cmd[64], rsp[300];
+    uint16_t clen, rlen;
+    uint8_t hash[20];
+    memset(hash, 0xCC, 20);
+
+    do_select(cmd, rsp);
+
+    /* VERIFY 0x82 alone must NOT satisfy the signing gate */
+    clen = build_verify(0x82, (const uint8_t *)"123456", 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY 82 ok");
+
+    clen = build_pso_cds(hash, sizeof(hash), cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6982, "PSO:CDS still gated after 82 only");
+
+    /* VERIFY 0x81 satisfies the signing gate */
+    clen = build_verify(0x81, (const uint8_t *)"123456", 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "VERIFY 81 ok");
+
+    clen = build_pso_cds(hash, sizeof(hash), cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "PSO:CDS passes after 81");
+}
+
+/* Wrong PIN on P2=0x81 and P2=0x82 decrement the SAME PW1 retry counter. */
+static void test_verify_81_82_share_retries(void)
+{
+    openpgp_card_hooks_t h = { fake_sign, fake_confirm };
+    openpgp_card_init(&h);
+    g_confirm_retval = 1;
+
+    uint8_t cmd[64], rsp[300];
+    uint16_t clen, rlen;
+
+    do_select(cmd, rsp);
+
+    /* Wrong PIN on 0x81: counter 3→2 */
+    clen = build_verify(0x81, (const uint8_t *)"000000", 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x63C2, "81 wrong -> 2 left");
+
+    /* Wrong PIN on 0x82: counter 2→1 (shared) */
+    clen = build_verify(0x82, (const uint8_t *)"000000", 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x63C1, "82 wrong -> 1 left (shared)");
+}
+
 void test_openpgp_card(void)
 {
     TEST_SUITE("openpgp applet");
@@ -222,4 +279,6 @@ void test_openpgp_card(void)
     TEST_RUN(test_sign_requires_pin);
     TEST_RUN(test_sign_uif_gate);
     TEST_RUN(test_pin_retry_counter);
+    TEST_RUN(test_verify_81_gates_sign);
+    TEST_RUN(test_verify_81_82_share_retries);
 }
