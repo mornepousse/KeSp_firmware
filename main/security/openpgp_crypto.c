@@ -94,7 +94,10 @@ static void be32_to_le(const uint8_t in[32], uint8_t out[32])
 
 /* Load the X25519 scalar: BE→LE, RFC 7748 clamp (gpg sends pre-clamped
  * scalars; re-clamping is idempotent and protects against bad imports),
- * then read little-endian into the MPI. Scrubs the stack copy. */
+ * then read little-endian into the MPI. Scrubs the stack copy.
+ * NOTE: unlike the P-256 paths there is deliberately NO d==0 / d>=n
+ * rejection — RFC 7748 clamping makes every 32-byte input a structurally
+ * valid Montgomery scalar and the spec mandates no rejection. Do not "fix". */
 static int x25519_load_scalar(mbedtls_mpi *dd, const uint8_t d_be[32])
 {
     uint8_t d_le[32];
