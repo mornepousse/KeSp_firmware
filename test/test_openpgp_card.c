@@ -2034,6 +2034,31 @@ static void test_terminate_activate(void)
     do_verify_pw3(cmd, rsp);   /* factory PW3 works again */
 }
 
+/* TERMINATE escape hatch: both PINs blocked → TERMINATE allowed without PW3. */
+static void test_terminate_blocked_pins(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[64], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp);
+
+    /* exhaust PW1 (mode 81) and PW3 retry counters with wrong PINs */
+    for (int i = 0; i < 3; i++) {
+        n = build_verify(0x81, (const uint8_t *)"000000", 6, cmd);
+        openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+        n = build_verify(0x83, (const uint8_t *)"00000000", 8, cmd);
+        openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    }
+    /* both blocked now → TERMINATE without PW3 is the documented escape hatch */
+    cmd[0]=0x00; cmd[1]=0xE6; cmd[2]=0x00; cmd[3]=0x00;
+    rlen = openpgp_card_apdu(cmd, 4, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "TERMINATE allowed when both PINs blocked");
+
+    cmd[0]=0x00; cmd[1]=0x44; cmd[2]=0x00; cmd[3]=0x00;
+    rlen = openpgp_card_apdu(cmd, 4, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "ACTIVATE revives");
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);  /* factory PINs restored */
+}
+
 /* ------------------------------------------------------------------ */
 /* Test suite entry point                                              */
 /* ------------------------------------------------------------------ */
@@ -2111,4 +2136,5 @@ void test_openpgp_card(void)
     TEST_RUN(test_pw1_validity_put);
     TEST_RUN(test_key_information_do);
     TEST_RUN(test_terminate_activate);
+    TEST_RUN(test_terminate_blocked_pins);
 }

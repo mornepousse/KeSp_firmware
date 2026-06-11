@@ -592,6 +592,10 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         if (!(s_pw3_verified || (s_pw1_retry == 0 && s_pw3_retry == 0)))
             return sw_only(out, out_max, SW_SEC_NOT_SAT);
         openpgp_card_factory_reset();
+        /* s_terminated is RAM-only by design: the destructive wipe is already
+         * persisted by factory_reset(), so a power-cycle just brings up an
+         * already-reset, usable card.  The flag only gates the in-session
+         * ACTIVATE handshake (gpg sends ACTIVATE within milliseconds). */
         s_terminated = true;
         return sw_only(out, out_max, SW_OK);
     }
@@ -704,6 +708,11 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
          if ((off_) == 0) return sw_only(out, out_max, 0x6F00); } while (0)
 
         /* ---- 6E: Application Related Data (constructed) ---- */
+        /* CEILING: this response is ~254 B (data) + 2 SW = 256 = the short-APDU
+         * Le=256 maximum.  There is NO GET RESPONSE chaining / extended-length
+         * here, so 256 is a hard limit.  Adding any DO (or a longer value) to
+         * the 73 template below will overflow a short-Le host read — if more is
+         * ever needed, add 61xx/00C0 response chaining FIRST. */
         if (tag == 0x006Eu) {
             uint8_t  body[256];
             uint16_t off = 0;
