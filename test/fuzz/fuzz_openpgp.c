@@ -57,12 +57,33 @@ static int fake_confirm(void)
     return g_confirm_val ? 1 : 2;
 }
 
-static bool fake_pubkey(const uint8_t d[32], uint8_t out_pub[65])
+/* v2 pubkey hook: algo-aware.  ECDH → 32 B X25519 u-coord, ECDSA → 65 B
+ * uncompressed point.  Canned bytes only — must NEVER echo d. */
+static bool fake_pubkey(uint8_t algo, const uint8_t d[32], uint8_t *out, uint16_t *out_n)
 {
-    /* Return a dummy uncompressed point. Must NOT echo d. */
-    out_pub[0] = 0x04;
-    memset(out_pub + 1, 0x55, 64);
     (void)d;
+    if (algo == PGP_ALGO_ECDH) { memset(out, 0x55, 32); *out_n = 32; }   /* must NOT echo d */
+    else { out[0] = 0x04; memset(out + 1, 0x55, 64); *out_n = 65; }
+    return true;
+}
+
+/* v2 ECDH hook (X25519 PSO:DECIPHER).  Canned shared secret — must NOT echo d. */
+static bool fake_ecdh(const uint8_t d[32], const uint8_t *peer, uint16_t peer_n,
+                      uint8_t *out, uint16_t *out_n)
+{
+    (void)d; (void)peer;
+    if (peer_n != 32) return false;
+    memset(out, 0x33, 32); *out_n = 32;   /* canned; must NOT echo d */
+    return true;
+}
+
+/* v2 genkey hook (on-device GENERATE).  Deterministic non-secret pattern,
+ * distinct from TEST_KEY_D (keeps the G1 scan meaningful) and never all-zero
+ * (import/keygen reject that).  Pattern byte = 0xA0 + (algo & 0x0F):
+ *   ECDSA P-256 (0x13) -> 0xA3,  ECDH/X25519 (0x12) -> 0xA2. */
+static bool fake_genkey(uint8_t algo, uint8_t d_out[32])
+{
+    memset(d_out, 0xA0 + (algo & 0x0F), 32);
     return true;
 }
 
@@ -70,6 +91,8 @@ static const openpgp_card_hooks_t hooks = {
     .sign    = fake_sign,
     .confirm = fake_confirm,
     .pubkey  = fake_pubkey,
+    .ecdh    = fake_ecdh,
+    .genkey  = fake_genkey,
 };
 
 /* ------------------------------------------------------------------ */
@@ -128,6 +151,23 @@ static const uint8_t TEST_KEY_D[32] = {
     0x19,0x1A,0x1B,0x1C,0x1D,0x1E,0x1F,0x20,
 };
 
+/* Generated-scalar sentinels (G1 for on-device GENERATE).  fake_genkey emits
+ * 32 bytes of 0xA0+(algo&0x0F): ECDSA P-256 -> 0xA3, ECDH/X25519 -> 0xA2.
+ * After GENERATE the active scalar is one of these; it must never appear in
+ * any response either. */
+static const uint8_t GEN_PAT_ECDSA[32] = {
+    0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,
+    0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,0xA3,
+};
+static const uint8_t GEN_PAT_ECDH[32] = {
+    0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,
+    0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,0xA2,
+};
+
+/* SW of the last feed_apdu() response — lets callers branch on status while
+ * the invariant scan still runs centrally. */
+static uint16_t g_last_sw = 0;
+
 /* Returns false and prints a finding if invariants are violated. */
 static bool feed_apdu(const uint8_t *in, uint16_t in_len,
                       const char *label)
@@ -141,20 +181,23 @@ static bool feed_apdu(const uint8_t *in, uint16_t in_len,
         fprintf(stderr, "[FAIL] %s: rlen=%u < 2 (SW missing)\n", label, rlen);
         return false;
     }
+    g_last_sw = sw_of(rsp, rlen);
 
     /*
-     * G1: the response must NEVER contain TEST_KEY_D.
-     * Even a partial 4-byte match of a recognizable key fragment is
-     * suspicious enough to flag (the full 32-byte check is the strict one).
+     * G1: the response must NEVER contain a private scalar — neither the
+     * imported TEST_KEY_D nor an on-device generated scalar pattern.
      */
     if (rlen > 34) {
-        /* Full key check (32 consecutive bytes) */
         for (int i = 0; i + 32 <= (int)rlen; i++) {
-            if (memcmp(rsp + i, TEST_KEY_D, 32) == 0) {
+            const char *sentinel = NULL;
+            if      (memcmp(rsp + i, TEST_KEY_D,    32) == 0) sentinel = "imported(TEST_KEY_D)";
+            else if (memcmp(rsp + i, GEN_PAT_ECDSA, 32) == 0) sentinel = "generated(ECDSA 0xA3)";
+            else if (memcmp(rsp + i, GEN_PAT_ECDH,  32) == 0) sentinel = "generated(ECDH 0xA2)";
+            if (sentinel) {
                 fprintf(stderr,
-                    "[FAIL-G1] %s: private scalar present in response "
+                    "[FAIL-G1] %s: private scalar [%s] present in response "
                     "at offset %d (SW=%04x)\n",
-                    label, i, sw_of(rsp, rlen));
+                    label, sentinel, i, g_last_sw);
                 return false;
             }
         }
@@ -584,6 +627,234 @@ static void fuzz_pin_brute(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* PHASE 7: Phase-2 INS surface — structured fuzzing of the new        */
+/* command handlers (DECIPHER / INTERNAL AUTH / GENERATE / PUT C4 /    */
+/* algo-attrs / TERMINATE-ACTIVATE / X25519 import).                   */
+/* ------------------------------------------------------------------ */
+
+/* Small TLV emitter: tag (1- or 2-byte) + short-form length + value.
+ * All values used here are < 128 bytes, so single-byte length is valid. */
+static uint16_t tlv_wrap(uint8_t *dst, uint16_t tag, const uint8_t *val, uint16_t n)
+{
+    uint16_t o = 0;
+    if (tag > 0xFF) dst[o++] = (uint8_t)(tag >> 8);
+    dst[o++] = (uint8_t)(tag & 0xFF);
+    dst[o++] = (uint8_t)n;
+    if (n) memcpy(dst + o, val, n);
+    return (uint16_t)(o + n);
+}
+
+/* SELECT the OpenPGP applet. */
+static void do_select(void)
+{
+    uint8_t buf[11] = {0x00,0xA4,0x04,0x00,0x06,
+                       0xD2,0x76,0x00,0x01,0x24,0x01};
+    uint8_t rsp[64];
+    openpgp_card_apdu(buf, 11, rsp, sizeof(rsp));
+}
+
+/* VERIFY a PIN (p2 = 0x81 sign / 0x82 user / 0x83 admin), correct or wrong. */
+static void verify_pin(uint8_t p2, bool correct)
+{
+    uint8_t buf[16], rsp[64];
+    buf[0]=0x00; buf[1]=0x20; buf[2]=0x00; buf[3]=p2;
+    if (p2 == 0x83) {
+        buf[4]=0x08;
+        memcpy(buf+5, correct ? PW3_DEF : (const uint8_t *)"XXXXXXXX", 8);
+        openpgp_card_apdu(buf, 13, rsp, sizeof(rsp));
+    } else {
+        buf[4]=0x06;
+        memcpy(buf+5, correct ? PW1_DEF : (const uint8_t *)"XXXXXX", 6);
+        openpgp_card_apdu(buf, 11, rsp, sizeof(rsp));
+    }
+}
+
+/* Build a key-import APDU (INS 0xDB 3FFF) for slot CRT `crt` (B6/B8/A4) with a
+ * `scalar_len`-byte private scalar (non-secret, non-zero, != TEST_KEY_D).
+ * Returns the total APDU length.  Requires scalar_len <= ~100 (buffer bound). */
+static uint16_t build_import_crt(uint8_t *buf, uint8_t crt, uint8_t scalar_len)
+{
+    uint8_t inner[160]; uint16_t ii = 0;
+    inner[ii++] = crt; inner[ii++] = 0x00;          /* CRT, len 0 */
+    inner[ii++] = 0x7F; inner[ii++] = 0x48; inner[ii++] = 0x02;   /* 7F48 tmpl, len 2 */
+    inner[ii++] = 0x92; inner[ii++] = scalar_len;                 /* element 92 size */
+    inner[ii++] = 0x5F; inner[ii++] = 0x48; inner[ii++] = scalar_len; /* 5F48 material */
+    for (uint8_t k = 0; k < scalar_len; k++) inner[ii++] = (uint8_t)(0x40 + k); /* nonzero, != d */
+
+    buf[0]=0x00; buf[1]=0xDB; buf[2]=0x3F; buf[3]=0xFF;
+    buf[4]=(uint8_t)(2 + ii);          /* Lc = 4D tag + len byte + inner */
+    buf[5]=0x4D; buf[6]=(uint8_t)ii;   /* outer 4D container */
+    memcpy(buf+7, inner, ii);
+    return (uint16_t)(7 + ii);
+}
+
+static void fuzz_phase2_surface(int iterations)
+{
+    uint8_t cmd[320];      /* room for Lc up to 255 + 5-byte header */
+
+    for (int i = 0; i < iterations; i++) {
+        reset_card();
+        do_select();
+
+        uint64_t r = rng_next();
+        /* Random PIN gating: some ops authorised, some refused. */
+        if (r & 0x1)  verify_pin(0x83, (r >> 1) & 1);   /* PW3 admin */
+        if (r & 0x4)  verify_pin(0x82, (r >> 3) & 1);   /* PW1 user (mode 82) */
+        if (r & 0x10) verify_pin(0x81, (r >> 5) & 1);   /* PW1 sign (mode 81) */
+
+        /* Sometimes pre-import a key so gated ops reach the crypto hooks. */
+        if (r & 0x40) {
+            verify_pin(0x83, true);                     /* PW3 needed to import */
+            static const uint8_t crts[3] = {0xB6,0xB8,0xA4};
+            uint8_t crt  = crts[(r >> 7) % 3];
+            uint8_t slen = (crt == 0xB8) ? (uint8_t)(1 + ((r >> 9) % 32)) : 32;
+            uint16_t L = build_import_crt(cmd, crt, slen);
+            feed_apdu(cmd, L, "p2_preimport");
+        }
+
+        int choice = (int)((r >> 16) % 8);
+        switch (choice) {
+
+        case 0: {   /* PSO:DECIPHER */
+            uint8_t p1 = ((r >> 20) & 1) ? 0x80 : rng_byte();
+            uint8_t p2 = ((r >> 21) & 1) ? 0x86 : rng_byte();
+            uint16_t bn;
+            if ((r >> 22) & 1) {
+                /* Well-formed A6{ 7F49{ 86 <point> } } */
+                static const uint8_t Nopts[4] = {16, 32, 33, 40};
+                uint8_t N = Nopts[(r >> 24) % 4];
+                uint8_t pt[48];
+                if (N == 33) { pt[0] = 0x40; rng_fill(pt + 1, 32); }   /* native 0x40 prefix */
+                else         { rng_fill(pt, N); }
+                uint8_t v86[64];  uint16_t n86 = tlv_wrap(v86, 0x86,   pt,  N);
+                uint8_t v7f[80];  uint16_t n7f = tlv_wrap(v7f, 0x7F49, v86, n86);
+                uint8_t a6[96];   bn           = tlv_wrap(cmd + 5, 0xA6, v7f, n7f);
+                (void)a6;
+            } else {
+                bn = (uint16_t)(1 + (r % 60));
+                rng_fill(cmd + 5, bn);
+            }
+            cmd[0]=0x00; cmd[1]=0x2A; cmd[2]=p1; cmd[3]=p2; cmd[4]=(uint8_t)bn;
+            feed_apdu(cmd, (uint16_t)(5 + bn), "p2_decipher");
+            break;
+        }
+
+        case 1: {   /* INTERNAL AUTHENTICATE */
+            uint8_t p1 = ((r >> 20) & 1) ? 0x00 : rng_byte();
+            uint8_t p2 = ((r >> 21) & 1) ? 0x00 : rng_byte();
+            static const uint8_t lcs[6] = {0, 1, 32, 64, 65, 200};
+            uint8_t lc = ((r >> 22) & 1) ? lcs[(r >> 23) % 6] : rng_byte();
+            cmd[0]=0x00; cmd[1]=0x88; cmd[2]=p1; cmd[3]=p2; cmd[4]=lc;
+            rng_fill(cmd + 5, lc);
+            feed_apdu(cmd, (uint16_t)(5 + lc), "p2_intauth");
+            break;
+        }
+
+        case 2: {   /* GENERATE / READ PUBLIC KEY */
+            static const uint8_t p1o[2]  = {0x80, 0x81};
+            static const uint8_t crts[3] = {0xB6, 0xB8, 0xA4};
+            uint8_t p1  = ((r >> 20) & 1) ? p1o[(r >> 21) & 1] : rng_byte();
+            uint8_t crt = ((r >> 22) & 1) ? crts[(r >> 23) % 3] : rng_byte();
+            cmd[0]=0x00; cmd[1]=0x47; cmd[2]=p1; cmd[3]=0x00;
+            cmd[4]=0x02; cmd[5]=crt; cmd[6]=0x00;
+            feed_apdu(cmd, 7, "p2_generate");
+            /* After a (possibly successful) on-device GENERATE, scan all the
+             * places the fresh scalar could leak. */
+            if (p1 == 0x80) {
+                cmd[0]=0x00; cmd[1]=0x47; cmd[2]=0x81; cmd[3]=0x00;
+                cmd[4]=0x02; cmd[5]=crt; cmd[6]=0x00;
+                feed_apdu(cmd, 7, "p2_gen_readpub");
+                static const uint8_t gt[][2] = {
+                    {0x00,0x6E},{0x00,0xC5},{0x00,0x65},{0x00,0x7A},{0x00,0xDE}
+                };
+                for (size_t t = 0; t < sizeof(gt)/sizeof(gt[0]); t++) {
+                    cmd[0]=0x00; cmd[1]=0xCA; cmd[2]=gt[t][0]; cmd[3]=gt[t][1]; cmd[4]=0x00;
+                    feed_apdu(cmd, 5, "p2_gen_getdata");
+                }
+            }
+            break;
+        }
+
+        case 3: {   /* PUT DATA C4 (PW1 validity / forcesig) */
+            static const uint8_t lcs[3] = {0, 1, 4};
+            uint8_t lc = ((r >> 20) & 1) ? lcs[(r >> 21) % 3] : rng_byte();
+            cmd[0]=0x00; cmd[1]=0xDA; cmd[2]=0x00; cmd[3]=0xC4; cmd[4]=lc;
+            rng_fill(cmd + 5, lc);
+            feed_apdu(cmd, (uint16_t)(5 + lc), "p2_putdata_c4");
+            break;
+        }
+
+        case 4: {   /* PUT DATA C1/C2/C3 (algo-attrs validation) */
+            static const uint8_t tags[3] = {0xC1, 0xC2, 0xC3};
+            static const uint8_t P256[9] = {0x13,0x2A,0x86,0x48,0xCE,0x3D,0x03,0x01,0x07};
+            static const uint8_t CV25519[11] =
+                {0x12,0x2B,0x06,0x01,0x04,0x01,0x97,0x55,0x01,0x05,0x01};
+            uint8_t tag = tags[(r >> 20) % 3];
+            uint8_t lc;
+            if ((r >> 22) & 1) {
+                /* Occasionally feed the exact-valid attrs to hit acceptance. */
+                if (tag == 0xC2) { lc = 11; memcpy(cmd + 5, CV25519, 11); }
+                else             { lc = 9;  memcpy(cmd + 5, P256,    9);  }
+            } else {
+                lc = (uint8_t)((r >> 23) % 18);
+                rng_fill(cmd + 5, lc);
+            }
+            cmd[0]=0x00; cmd[1]=0xDA; cmd[2]=0x00; cmd[3]=tag; cmd[4]=lc;
+            feed_apdu(cmd, (uint16_t)(5 + lc), "p2_putdata_algo");
+            break;
+        }
+
+        case 5: {   /* TERMINATE DF, then ACTIVATE or probe the terminated guard */
+            cmd[0]=0x00; cmd[1]=0xE6; cmd[2]=0x00; cmd[3]=0x00;
+            feed_apdu(cmd, 4, "p2_terminate");
+            bool term = (g_last_sw == 0x9000);
+            if ((r >> 20) & 1) {
+                cmd[0]=0x00; cmd[1]=0x44; cmd[2]=0x00; cmd[3]=0x00;
+                feed_apdu(cmd, 4, "p2_activate");
+            } else {
+                /* Any non-0x44 command on a terminated card must return 6285. */
+                cmd[0]=0x00; cmd[1]=0xCA; cmd[2]=0x00; cmd[3]=0x6E; cmd[4]=0x00;
+                feed_apdu(cmd, 5, "p2_term_guard");
+                if (term && g_last_sw != 0x6285) {
+                    fprintf(stderr,
+                        "[FAIL] terminated guard: non-0x44 returned %04x, expected 6285\n",
+                        g_last_sw);
+                    exit(1);
+                }
+            }
+            break;
+        }
+
+        case 6: {   /* Import to B8 (X25519/DEC) or A4 (AUT) — random scalar len */
+            verify_pin(0x83, true);
+            uint8_t crt  = ((r >> 20) & 1) ? 0xB8 : 0xA4;
+            static const uint8_t sopt[6] = {1, 16, 31, 32, 33, 40};
+            uint8_t slen = ((r >> 21) & 1) ? sopt[(r >> 22) % 6]
+                                           : (uint8_t)(1 + ((r >> 22) % 90));
+            uint16_t L = build_import_crt(cmd, crt, slen);
+            feed_apdu(cmd, L, "p2_import_b8a4");
+            break;
+        }
+
+        case 7: {   /* Deep DECIPHER path: import DEC (ECDH) + PW1-82 + good point */
+            verify_pin(0x83, true);
+            uint8_t imp[160];
+            uint16_t L = build_import_crt(imp, 0xB8, 32);
+            feed_apdu(imp, L, "p2_dec_import");
+            verify_pin(0x82, true);
+            uint8_t pt[32]; rng_fill(pt, 32);
+            uint8_t v86[64];  uint16_t n86 = tlv_wrap(v86, 0x86,   pt,  32);
+            uint8_t v7f[80];  uint16_t n7f = tlv_wrap(v7f, 0x7F49, v86, n86);
+            uint16_t bn = tlv_wrap(cmd + 5, 0xA6, v7f, n7f);
+            cmd[0]=0x00; cmd[1]=0x2A; cmd[2]=0x80; cmd[3]=0x86; cmd[4]=(uint8_t)bn;
+            feed_apdu(cmd, (uint16_t)(5 + bn), "p2_decipher_full");
+            break;
+        }
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* main                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -591,6 +862,7 @@ int main(void)
 {
     const int RANDOM_ITERS  = 100000;
     const int IMPORT_ITERS  = 50000;
+    const int PHASE2_ITERS  = 50000;
 
     printf("fuzz_openpgp: starting\n");
     printf("  Phase 1: %d random APDUs (unselected + selected)...\n", RANDOM_ITERS);
@@ -617,7 +889,12 @@ int main(void)
     fuzz_pin_brute();
     printf("  Phase 6: done\n");
 
-    printf("Fuzz complete: %d + %d + misc iterations, 0 crashes.\n",
-           RANDOM_ITERS, IMPORT_ITERS);
+    printf("  Phase 7: %d Phase-2 INS surface iterations "
+           "(decipher/auth/generate/C4/algo/terminate/import)...\n", PHASE2_ITERS);
+    fuzz_phase2_surface(PHASE2_ITERS);
+    printf("  Phase 7: done\n");
+
+    printf("Fuzz complete: %d + %d + %d + misc iterations, 0 crashes.\n",
+           RANDOM_ITERS, IMPORT_ITERS, PHASE2_ITERS);
     return 0;
 }
