@@ -934,6 +934,33 @@ git add main/security/openpgp_crypto.c main/security/openpgp_crypto.h main/secur
 git commit -m "feat(pgp): X25519 ECDH + genkey (mbedtls CURVE25519, RFC7748 KATs in boot selftest), hooks v2 wired — gpg --decrypt validated on HW"
 ```
 
+#### Task 3 — HW RESULT (2026-06-11): ✅ PASS (committed 229776d9 + review 4cf4c4fd)
+
+Validated on the real dongle (flashed via CH340, gpg/scdaemon 2.4.9). All four firmware pieces
+proven correct:
+- C2→cv25519 migration ran on-device: `gpg --card-status` shows `Key attributes: nistp256 cv25519 nistp256`.
+- **X25519 pubkey derivation correct**: card READ-PUBLIC-KEY (0x47/81) for the DEC slot returns a
+  point byte-identical to the keyring's cv25519 subkey public key AND to `X25519(reverse(scalar))`
+  computed host-side (pyca). The `be32_to_le` reversal is **correct** — gpg sends the cv25519 scalar
+  **big-endian** in the 5F48 (despite the "djb-tweak" label); we reverse to LE. Do NOT "fix" it.
+- **X25519 ECDH correct**: raw-APDU PSO:DECIPHER (via `gpg-connect-agent 'scd apdu ...'`) returns the
+  exact expected shared secret vs `X25519(eph_priv, card_pub)` (pyca). 32-byte output, SW 9000.
+- **gpg --decrypt end-to-end works** in a pristine GNUPGHOME (factory UIF-D7 off → no touch).
+
+⚠️ **GOTCHA discovered (carry into Task 4/5/7 HW checkpoints): reused test GNUPGHOME → stale
+shadow-key stubs.** A first `gpg --decrypt` failed with `app_decipher failed: No secret key`. Root
+cause (found by systematic-debugging, NOT a firmware bug): the test home had an orphaned
+`shadowed-private-key` stub from earlier *failed* keytocard attempts (`command-fd` needs a pty; use
+`expect`). The orphaned stub's keygrip didn't match the subkey's, so gpg-agent couldn't route to the
+card. **Fix = pristine GNUPGHOME per checkpoint** (`rm -rf $H && mkdir -p $H && chmod 700 $H`). The
+firmware pubkey/keygrip are correct; the mismatch was 100% host-state. Known-good home left at
+`/tmp/kase-clean`. keytocard automation: `expect` script driving `gpg --edit-key FPR` → `key 1` →
+`keytocard` → `2` → `save`, with a fake `pinentry-program` returning the admin PIN from `$KASE_PIN`
+(NOT `--pinentry-mode loopback`, which bypasses the pinentry program).
+
+OPTIONAL not yet run (needs Mae's physical touch): UIF-on decrypt (`uif 2 on` → 6985 without touch,
+decrypt with `K_SEC_CONFIRM`). Folded into the Task 7 final E2E.
+
 ---
 
 ### Task 4: INTERNAL AUTHENTICATE (TDD) + HW checkpoint SSH
