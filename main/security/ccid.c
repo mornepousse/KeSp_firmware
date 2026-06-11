@@ -215,6 +215,46 @@ static void ccid_send_final_cb(void *param)
 /* CCID worker task                                                    */
 /* ------------------------------------------------------------------ */
 
+/* Process one pending PC_to_RDR_XfrBlock: read the clamped dwLength that
+ * ccid_dispatch wrote back into s_out_buf[1..4], run the applet, build the
+ * RDR_to_PC_DataBlock header, and queue the response.  Extracted from the
+ * worker loop (behaviour-preserving) so the security-relevant body can be
+ * driven synchronously by the host CCID fuzzer (test/fuzz/fuzz_ccid.c). */
+static void ccid_process_xfrblock(void)
+{
+    /* dwLength was clamped by ccid_dispatch and written back into
+     * s_out_buf[1..4] (bytes 3+4 zeroed) before the semaphore was given. */
+    uint32_t dwLength = (uint32_t)s_out_buf[1]
+                      | ((uint32_t)s_out_buf[2] << 8);
+
+    uint16_t apdu_n = openpgp_card_apdu(
+                          &s_out_buf[CCID_HDR_LEN], (uint16_t)dwLength,
+                          &s_in_buf[CCID_HDR_LEN], CCID_BUF_SZ - CCID_HDR_LEN);
+
+    if (apdu_n >= 2) {
+        ESP_LOGD(TAG, "APDU in=%u out=%u SW=%02x%02x",
+                 (unsigned)dwLength, (unsigned)apdu_n,
+                 s_in_buf[CCID_HDR_LEN + apdu_n - 2],
+                 s_in_buf[CCID_HDR_LEN + apdu_n - 1]);
+    }
+
+    /* One-shot stack high-watermark log (mbedTLS ECDSA P-256 ~2-3 KB). */
+    static bool s_hwm_logged;
+    if (!s_hwm_logged) {
+        s_hwm_logged = true;
+        ESP_LOGD(TAG, "worker stack HWM: %u",
+                 (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    }
+
+    s_resp_len = ccid_fill_header(RDR_TO_PC_DATA_BLOCK,
+                                  s_cur_slot, s_cur_seq, apdu_n);
+
+    /* s_in_buf and s_resp_len are written by the worker BEFORE usbd_defer_func().
+     * The FreeRTOS queue inside usbd_defer_func provides a full memory barrier
+     * (SMP spinlock), guaranteeing visibility from tud_task. Do not bypass it. */
+    usbd_defer_func(ccid_send_final_cb, NULL, false);
+}
+
 /* Runs indefinitely; woken by a binary semaphore each time a
  * PC_to_RDR_XfrBlock arrives.  Owns s_in_buf while s_busy is true. */
 static void ccid_worker(void *arg)
@@ -222,38 +262,7 @@ static void ccid_worker(void *arg)
     (void)arg;
     for (;;) {
         xSemaphoreTake(s_msg_ready, portMAX_DELAY);
-
-        /* dwLength was clamped by ccid_dispatch and written back into
-         * s_out_buf[1..4] (bytes 3+4 zeroed) before the semaphore was given. */
-        uint32_t dwLength = (uint32_t)s_out_buf[1]
-                          | ((uint32_t)s_out_buf[2] << 8);
-
-        uint16_t apdu_n = openpgp_card_apdu(
-                              &s_out_buf[CCID_HDR_LEN], (uint16_t)dwLength,
-                              &s_in_buf[CCID_HDR_LEN], CCID_BUF_SZ - CCID_HDR_LEN);
-
-        if (apdu_n >= 2) {
-            ESP_LOGD(TAG, "APDU in=%u out=%u SW=%02x%02x",
-                     (unsigned)dwLength, (unsigned)apdu_n,
-                     s_in_buf[CCID_HDR_LEN + apdu_n - 2],
-                     s_in_buf[CCID_HDR_LEN + apdu_n - 1]);
-        }
-
-        /* One-shot stack high-watermark log (mbedTLS ECDSA P-256 ~2-3 KB). */
-        static bool s_hwm_logged;
-        if (!s_hwm_logged) {
-            s_hwm_logged = true;
-            ESP_LOGD(TAG, "worker stack HWM: %u",
-                     (unsigned)uxTaskGetStackHighWaterMark(NULL));
-        }
-
-        s_resp_len = ccid_fill_header(RDR_TO_PC_DATA_BLOCK,
-                                      s_cur_slot, s_cur_seq, apdu_n);
-
-        /* s_in_buf and s_resp_len are written by the worker BEFORE usbd_defer_func().
-         * The FreeRTOS queue inside usbd_defer_func provides a full memory barrier
-         * (SMP spinlock), guaranteeing visibility from tud_task. Do not bypass it. */
-        usbd_defer_func(ccid_send_final_cb, NULL, false);
+        ccid_process_xfrblock();
     }
 }
 
@@ -575,3 +584,26 @@ void ccid_init(void)
 
     ESP_LOGI(TAG, "CCID class driver registered (worker task running)");
 }
+
+/* ------------------------------------------------------------------ */
+/* Host pentest accessors — ONLY compiled for test/fuzz/fuzz_ccid.c.   */
+/* Gated behind CCID_HOST_FUZZ; never built on target (the dongle      */
+/* CMakeLists defines no such symbol).  These expose the static driver */
+/* statics + entry points so the host harness can drive ccid_dispatch  */
+/* / ccid_drv_xfer synchronously and let ASan/UBSan instrument the     */
+/* static buffers s_out_buf / s_in_buf.                                */
+/* ------------------------------------------------------------------ */
+#ifdef CCID_HOST_FUZZ
+uint8_t  *ccid_host_out_buf(void)  { return s_out_buf; }
+uint8_t  *ccid_host_in_buf(void)   { return s_in_buf; }
+uint32_t  ccid_host_buf_sz(void)   { return (uint32_t)CCID_BUF_SZ; }
+void      ccid_host_set_eps(uint8_t out, uint8_t in) { s_ep_out = out; s_ep_in = in; }
+void      ccid_host_reset_state(void) { s_busy = false; s_final_queued = false; }
+void      ccid_host_dispatch(uint8_t rhport, uint32_t xferred)
+              { ccid_dispatch(rhport, xferred); }
+bool      ccid_host_drv_xfer(uint8_t rhport, uint8_t ep_addr,
+                             xfer_result_t result, uint32_t xferred_bytes)
+              { return ccid_drv_xfer(rhport, ep_addr, result, xferred_bytes); }
+/* Called by the host xSemaphoreGive() shim to run the extracted worker body. */
+void      ccid_host_run_worker(void) { ccid_process_xfrblock(); }
+#endif /* CCID_HOST_FUZZ */
