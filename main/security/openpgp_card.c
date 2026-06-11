@@ -382,9 +382,13 @@ static uint8_t slot_algo(int slot)
 }
 
 /* Build the 7F49 public-key response for a populated slot.
- * P-256: 86 holds 65 B (04||X||Y).  X25519: 86 holds 0x40 || pub(32) —
- * the OpenPGP "native curve" point format gpg expects for cv25519.
- * Shared by READ PUBLIC KEY and (Task 5) GENERATE. */
+ * P-256: 86 holds 65 B (04||X||Y).
+ * X25519: 86 holds the RAW 32-byte point — NO 0x40 prefix.  gpg's
+ * ecc_read_pubkey() (shared by READ PUBLIC KEY 0x47/81 AND GENERATE 0x47/80)
+ * prepends the 0x40 itself for djb-tweak curves; a card-side 0x40 would make a
+ * double prefix → invalid curve point → "pubkey_encrypt failed: Invalid object"
+ * on a generated key.  (HW-verified 2026-06-11 against gpg 2.4.9 source.)
+ * Shared by READ PUBLIC KEY and GENERATE. */
 static uint16_t build_pubkey_response(int slot, uint8_t *out, uint16_t out_max)
 {
     const pgp_key_t *k = &s_keys[slot];
@@ -395,9 +399,9 @@ static uint16_t build_pubkey_response(int slot, uint8_t *out, uint16_t out_max)
         return sw_only(out, out_max, SW_REF_NOT_FOUND);
 
     uint8_t point[66]; uint16_t point_n;
-    if (k->algo == PGP_ALGO_ECDH) {            /* X25519 → 0x40-prefixed */
+    if (k->algo == PGP_ALGO_ECDH) {            /* X25519 → raw 32 B, no prefix */
         if (raw_n != 32) return sw_only(out, out_max, 0x6F00u);
-        point[0] = 0x40; memcpy(point + 1, raw, 32); point_n = 33;
+        memcpy(point, raw, 32); point_n = 32;
     } else {
         if (raw_n != 65) return sw_only(out, out_max, 0x6F00u);
         memcpy(point, raw, 65); point_n = 65;

@@ -1524,10 +1524,11 @@ static void test_read_pubkey_per_slot(void)
     n = build_read_pubkey(0x81, 0xB8, cmd);
     rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "read DEC pubkey ok");
-    /* 7F49 L { 86 0x21 0x40 <32×0x66> } — X25519 native format is 0x40-prefixed */
+    /* 7F49 L { 86 0x20 <32×0x66> } — X25519 86 holds the RAW 32-byte point;
+     * gpg's ecc_read_pubkey() prepends the 0x40 itself (same for READ + GENERATE). */
     TEST_ASSERT(rsp[0] == 0x7F && rsp[1] == 0x49, "outer 7F49");
-    int i86 = find_index(rsp, rlen, (const uint8_t[]){0x86, 0x21, 0x40, 0x66}, 4);
-    TEST_ASSERT(i86 >= 0, "86 holds 0x40-prefixed 33-byte point");
+    int i86 = find_index(rsp, rlen, (const uint8_t[]){0x86, 0x20, 0x66, 0x66}, 4);
+    TEST_ASSERT(i86 >= 0, "86 holds raw 32-byte point (no 0x40 prefix)");
 }
 
 /* SIG-slot ops must not see DEC/AUT keys: import only B8 → CDS 6A88. */
@@ -1864,13 +1865,15 @@ static void test_generate_keypair(void)
     int i86 = find_index(rsp, rlen, (const uint8_t[]){0x86, 0x41, 0x04}, 3);
     TEST_ASSERT(i86 >= 0, "uncompressed P-256 point");
 
-    /* DEC slot: C2 = cv25519 → genkey(0x12), 0x40-prefixed 33-B point */
+    /* DEC slot: C2 = cv25519 → genkey(0x12).  GENERATE returns the RAW 32-byte
+     * point (NO 0x40 prefix) — gpg prepends the 0x40 itself for cv25519 (a
+     * double prefix would make an invalid curve point).  fake_pubkey fills 0x66. */
     n = build_read_pubkey(0x80, 0xB8, cmd);
     rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GENERATE B8 ok");
     TEST_ASSERT_EQ(g_fake_genkey_last_algo, PGP_ALGO_ECDH, "DEC algo from C2");
-    i86 = find_index(rsp, rlen, (const uint8_t[]){0x86, 0x21, 0x40}, 3);
-    TEST_ASSERT(i86 >= 0, "0x40-prefixed X25519 point");
+    i86 = find_index(rsp, rlen, (const uint8_t[]){0x86, 0x20, 0x66, 0x66}, 4);
+    TEST_ASSERT(i86 >= 0, "raw 32-byte X25519 point (no 0x40 prefix on GENERATE)");
 
     /* generated SIG key signs (genkey fake fills d with 0xA0+0x13 = 0xB3) */
     do_verify_pw1_sign(cmd, rsp); do_disable_uif(cmd, rsp);
