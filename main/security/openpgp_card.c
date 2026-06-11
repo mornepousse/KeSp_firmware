@@ -1090,8 +1090,10 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
 
             uint8_t algo = slot_algo(slot);
             uint8_t d[32];
-            if (!s_hooks->genkey(algo, d))
+            if (!s_hooks->genkey(algo, d)) {
+                memset(d, 0, sizeof(d));   /* scrub any partial scalar */
                 return sw_only(out, out_max, SW_COND_NOT_SAT);
+            }
 
             s_keys[slot].set    = 1;
             s_keys[slot].algo   = algo;

@@ -1880,7 +1880,7 @@ static void test_generate_keypair(void)
                 "generated scalar in use");
 }
 
-/* unknown CRT → 6A88; missing genkey hook tolerated (6985); no key yet stays unset */
+/* unknown CRT → 6A88; a NULL genkey hook is tolerated → 6985 */
 static void test_generate_bad_crt(void)
 {
     openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
@@ -1889,6 +1889,13 @@ static void test_generate_bad_crt(void)
     n = build_read_pubkey(0x80, 0xB7, cmd);   /* bogus CRT */
     rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A88, "unknown CRT → 6A88");
+
+    /* NULL genkey hook → 6985 (valid CRT, PW3 verified) */
+    h.genkey = NULL; openpgp_card_init(&h);
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);
+    n = build_read_pubkey(0x80, 0xB6, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6985, "NULL genkey hook → 6985");
 }
 
 /* DS counter resets when a new SIG key is generated or imported. */
