@@ -1517,6 +1517,39 @@ git commit -m "docs(pgp): Phase 2 result + OpenPGP card user guide; fuzz: cover 
 
 ---
 
+## Consolidated HW bring-up — Tasks 4/5/6 RESULT (2026-06-11): ✅ PASS
+
+One flash (Task 4+5+6 firmware), validated on the real dongle via raw-APDU passthrough
+(`gpg-connect-agent 'scd apdu ...'`) with cryptographic verification in pyca. **All passed; NO
+firmware change was needed** — Tasks 4/5/6 code is correct as committed.
+
+- 254-byte 6E response (now incl. DO 0xDE) — `gpg --card-status` enumerates fine; the 256-B
+  short-APDU ceiling holds on the real CCID transport (no trimming of DE needed).
+- **T5 on-device GENERATE** (INS 0x47/80): all three slots generate — SIG/AUT P-256 (on-curve,
+  GEN==READ), DEC X25519 (32-B u). Keys are born on the card, never touch the host.
+- **T5+CDS**: the generated SIG key signs (PSO:CDS) and the signature verifies (ECDSA P-256,
+  **Prehashed** — the card signs the input as a precomputed digest).
+- **T4 INTERNAL AUTHENTICATE** (INS 0x88): the generated AUT key produces a P-256 ECDSA signature
+  that verifies — the SSH auth crypto path works.
+- **DECIPHER with a generated DEC key**: the X25519 shared secret matches `X25519(eph, card_pub)`
+  computed host-side — on-device-generated cv25519 keys round-trip correctly.
+- **T6**: DO 0xDE = `010102010301` (all generated); signature counter increments; TERMINATE →
+  `6285` while terminated → ACTIVATE → card reset (`General key info: [none]`, keys wiped).
+
+**HARNESS GOTCHAS (for the Task 7 final E2E):** (1) `gpg-connect-agent /hex` D-lines include an
+ASCII gutter whose chars can look like hex and inflate a parse — use the default (non-/hex)
+percent-escaped D-lines and unescape `%XX`. (2) PIN-verify state must be established in the SAME
+`gpg-connect-agent` invocation as the dependent op (a fresh process / `scd serialno` can drop it).
+(3) The card signs the raw input digest — verify ECDSA with `Prehashed`, not by re-hashing.
+(4) A rapid APDU storm + factory-reset NVS writes can momentarily drop the CCID interface
+("Card removed"); `gpgconf --kill all` recovers it.
+
+DEFERRED to Task 7 final E2E (need real gpg client + Mae's GitLab account / physical touch):
+`ssh-add -L` + real `ssh -T git@gitlab.com`; forcesig / factory-reset via `gpg --card-edit`;
+UIF-on touch-gated sign/decrypt/auth. The underlying crypto for all of these is already proven above.
+
+---
+
 ## Risks / open points carried into execution
 
 1. **X25519 byte-order vs live gpg** — the BE-scalar convention (reverse + clamp) matches Gnuk's handling of gpg's MPI encoding, and the 0x40 point prefix matches SmartPGP; both are KAT-covered, but the Task 3 HW checkpoint is the real oracle. Symptom of a mismatch: decrypt produces garbage (host-side KDF fails) with SW 9000. The debug path is written into Task 3 Step 6.
