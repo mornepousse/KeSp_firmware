@@ -1803,11 +1803,24 @@ static void test_internal_auth(void)
     rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "82 not consumed by AUTH");
 
-    /* wrong P1P2 */
+    /* wrong P1 */
     n = build_internal_auth(hash, 32, cmd);
     cmd[2] = 0x01;
     rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A86, "P1 must be 00");
+
+    /* wrong P2 */
+    n = build_internal_auth(hash, 32, cmd);
+    cmd[3] = 0x01;
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A86, "P2 must be 00");
+
+    /* oversized data (lc > 64) → 6A80 (verified state still set) */
+    do_verify_pw1_user(cmd, rsp);
+    uint8_t big[65]; memset(big, 0x5A, sizeof(big));
+    n = build_internal_auth(big, sizeof(big), cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80, "AUTH data > 64 rejected");
 }
 
 /* UIF D8 on → confirm consulted. */
