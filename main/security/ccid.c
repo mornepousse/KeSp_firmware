@@ -58,7 +58,18 @@ static const char *TAG = "CCID";
 #define CCID_ERROR_NONE          0x00
 
 /* sec_confirm slot ID reserved for OpenPGP UIF.
- * sec_store uses slots 0-3; 0xF0 is a dedicated sentinel for the PGP touch gate. */
+ * sec_store uses slots 0-3; 0xF0 is a dedicated sentinel for the PGP touch gate.
+ *
+ * INVARIANT (Phase-2 audit): the THREE UIF-gated ops (PSO:CDS D6, PSO:DECIPHER
+ * D7, INTERNAL AUTHENTICATE D8) all share this ONE slot, and that is safe
+ * because openpgp_card_apdu() runs only on the single ccid_worker task and
+ * ccid_dispatch() serialises XfrBlocks via s_busy + the binary semaphore
+ * (bMaxCCIDBusySlots=1).  While dongle_confirm() blocks the worker polling for
+ * a touch, no second UIF op can arm sec_confirm, and sec_confirm_poll() consumes
+ * the AUTHORIZED state before returning — so a DECIPHER touch can never
+ * authorise a CDS.  If a SECOND consumer of openpgp_card_apdu() is ever added
+ * (e.g. a concurrent CCID worker or an admin CDC command), this single-slot
+ * design MUST be revisited with a per-op slot distinction. */
 #define CCID_CONFIRM_SLOT        0xF0u
 
 /* How often to fire a WTX frame while the worker waits for a UIF touch. */
@@ -274,7 +285,12 @@ static int dongle_confirm(void)
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(20));
         now = (uint32_t)(esp_timer_get_time() / 1000);
-        if ((int32_t)(now - deadline) >= 0) return 2;   /* unconditional termination */
+        if ((int32_t)(now - deadline) >= 0) {
+            /* Discard any button press that raced the outer deadline so a stale
+             * AUTHORIZED state cannot linger until the next arm (Phase-2 audit). */
+            sec_confirm_reset();
+            return 2;   /* unconditional termination */
+        }
 
         sec_confirm_state_t st = sec_confirm_poll(now, &slot);
         if (st == SEC_CONFIRM_AUTHORIZED)
