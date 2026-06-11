@@ -71,10 +71,17 @@ static bool hook_compute_hmac(uint8_t slot,
  * Arm the physical confirmation gate for the given slot.
  * Called by otp_proto when a valid challenge frame arrives.
  */
+/* Store-slot this OTP transaction armed sec_confirm for; -1 = none.
+ * hook_confirm_state() checks the granted slot against this so a touch armed
+ * for one slot can never authorise a different slot's HMAC (mirrors the CCID
+ * `slot == CCID_CONFIRM_SLOT` check in ccid.c). */
+static int s_armed_idx = -1;
+
 static void hook_confirm_arm(uint8_t slot)
 {
     int idx = otp_slot_to_store_idx(slot);
     if (idx < 0) return;
+    s_armed_idx = idx;
     sec_confirm_arm((uint8_t)idx, now_ms());
     ESP_LOGI(TAG, "confirm armed for store slot %d", idx);
 }
@@ -88,7 +95,10 @@ static int hook_confirm_state(void)
     uint8_t out_slot = 0;
     sec_confirm_state_t st = sec_confirm_poll(now_ms(), &out_slot);
     switch (st) {
-        case SEC_CONFIRM_AUTHORIZED: return 1;
+        case SEC_CONFIRM_AUTHORIZED:
+            /* Only accept a grant for the slot THIS transaction armed —
+             * reject a touch armed for another slot (defence-in-depth). */
+            return (s_armed_idx >= 0 && out_slot == (uint8_t)s_armed_idx) ? 1 : 2;
         case SEC_CONFIRM_TIMEDOUT:   return 2;
         default:                     return 0;
     }
