@@ -487,7 +487,9 @@ static void test_get_data_6e_constructed(void)
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DATA 6E returns 9000");
 
     uint16_t dlen = (uint16_t)(rlen - 2);
-    TEST_ASSERT(dlen >= 200 && dlen < 254, "6E data length in [200,254)");
+    /* Upper bound 254: data (254) + 2-byte SW = 256 = one short-APDU response.
+     * Grew to 254 after Task 6 added the 8-byte DE (key-info) DO to 73. */
+    TEST_ASSERT(dlen >= 200 && dlen <= 254, "6E data length in [200,254]");
 
     TEST_ASSERT_EQ(rsp[0], 0x4F, "6E body[0] = 4F");
     TEST_ASSERT_EQ(rsp[1], 0x10, "6E body[1] = 10 (AID len=16)");
@@ -1923,6 +1925,116 @@ static void test_ds_counter_resets_on_new_sig_key(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Tests — Task 6: PW1 validity C4 PUT, key-info DO 0xDE, TERMINATE    */
+/* ------------------------------------------------------------------ */
+
+/* PUT DATA C4: byte0=1 → PW1-81 valid for several signatures (forcesig off). */
+static void test_pw1_validity_put(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);
+    uint8_t d[32]; memset(d, 0x11, 32);
+    do_import_key(d, cmd, rsp);
+    do_disable_uif(cmd, rsp);
+    uint8_t hash[32]; memset(hash, 0x5A, 32);
+
+    /* default (0): second CDS without re-VERIFY fails */
+    do_verify_pw1_sign(cmd, rsp);
+    n = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "first CDS ok");
+    n = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6982, "second CDS consumed");
+
+    /* PUT C4 = 01 → not consumed anymore */
+    static const uint8_t multi[1] = {0x01};
+    n = build_put_data(0x00, 0xC4, multi, 1, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "PUT C4 ok");
+    do_verify_pw1_sign(cmd, rsp);
+    n = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "CDS 1");
+    n = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "CDS 2 — validity=1 keeps the token");
+
+    /* GET C4 reflects it (synthesized byte0) */
+    n = build_get_data(0x00, 0xC4, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET C4 ok");
+    TEST_ASSERT_EQ(rsp[0], 0x01, "validity byte served");
+
+    /* invalid value rejected */
+    static const uint8_t bad[1] = {0x07};
+    n = build_put_data(0x00, 0xC4, bad, 1, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80, "C4 byte must be 0/1");
+}
+
+/* DO 0xDE: per-slot presence/origin — 01 xx 02 xx 03 xx. */
+static void test_key_information_do(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp);
+    n = build_get_data(0x00, 0xDE, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DE ok");
+    TEST_ASSERT_EQ(rlen, 6 + 2, "3 pairs");
+    static const uint8_t empty[6] = {0x01,0x00, 0x02,0x00, 0x03,0x00};
+    TEST_ASSERT(memcmp(rsp, empty, 6) == 0, "all slots empty");
+
+    do_verify_pw3(cmd, rsp);
+    uint8_t d[32]; memset(d, 0x11, 32);
+    do_import_key(d, cmd, rsp);                       /* SIG ← imported (2) */
+    n = build_read_pubkey(0x80, 0xB8, cmd);           /* DEC ← generated (1) */
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GENERATE B8 ok");
+
+    n = build_get_data(0x00, 0xDE, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    static const uint8_t mixed[6] = {0x01,0x02, 0x02,0x01, 0x03,0x00};
+    TEST_ASSERT(memcmp(rsp, mixed, 6) == 0, "imported=2 / generated=1 / empty=0");
+}
+
+/* TERMINATE DF (0xE6) + ACTIVATE FILE (0x44): gpg factory-reset sequence. */
+static void test_terminate_activate(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp);
+
+    /* without PW3 and with live retry counters → 6982 */
+    cmd[0]=0x00; cmd[1]=0xE6; cmd[2]=0x00; cmd[3]=0x00;
+    rlen = openpgp_card_apdu(cmd, 4, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6982, "TERMINATE needs PW3 (or blocked PINs)");
+
+    do_verify_pw3(cmd, rsp);
+    uint8_t d[32]; memset(d, 0x11, 32);
+    do_import_key(d, cmd, rsp);
+
+    cmd[0]=0x00; cmd[1]=0xE6; cmd[2]=0x00; cmd[3]=0x00;
+    rlen = openpgp_card_apdu(cmd, 4, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "TERMINATE ok");
+
+    /* terminated: everything except ACTIVATE answers 6285 */
+    n = build_get_data(0x00, 0x4F, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6285, "terminated state");
+
+    /* ACTIVATE re-initializes: fresh card, key wiped, factory PINs */
+    cmd[0]=0x00; cmd[1]=0x44; cmd[2]=0x00; cmd[3]=0x00;
+    rlen = openpgp_card_apdu(cmd, 4, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "ACTIVATE ok");
+    do_select(cmd, rsp);
+    TEST_ASSERT(!openpgp_card_key_is_set(), "key wiped by factory reset");
+    do_verify_pw3(cmd, rsp);   /* factory PW3 works again */
+}
+
+/* ------------------------------------------------------------------ */
 /* Test suite entry point                                              */
 /* ------------------------------------------------------------------ */
 
@@ -1994,4 +2106,9 @@ void test_openpgp_card(void)
     TEST_RUN(test_generate_keypair);
     TEST_RUN(test_generate_bad_crt);
     TEST_RUN(test_ds_counter_resets_on_new_sig_key);
+
+    /* Task 6: PW1 validity C4 PUT, key-info DO 0xDE, TERMINATE/ACTIVATE */
+    TEST_RUN(test_pw1_validity_put);
+    TEST_RUN(test_key_information_do);
+    TEST_RUN(test_terminate_activate);
 }

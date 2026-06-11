@@ -91,6 +91,7 @@ static const uint8_t FACTORY_7F74[3] = {0x81, 0x01, 0x20};
 static const openpgp_card_hooks_t *s_hooks;
 
 static bool    s_selected;
+static bool    s_terminated;         /* after INS 0xE6 — only ACTIVATE revives */
 static bool    s_pw1_sign_verified;  /* mode 0x81 — required for PSO:CDS */
 static bool    s_pw1_user_verified;  /* mode 0x82 — gate for PSO:DECIPHER (Phase 2) */
 static bool    s_pw3_verified;
@@ -207,13 +208,27 @@ static void pins_factory(void)
 /* Fill a 7-byte PW status buffer (DO 0xC4) from live retry counters. */
 static void fill_pw_status(uint8_t c4[7])
 {
-    c4[0] = 0x00;          /* PW1 validity (0 = valid for one PSO:CDS) */
+    const uint8_t *c4v; uint16_t c4n;
+    /* PW1 validity: byte0 of the stored C4 DO (0 = valid for one PSO:CDS,
+     * 1 = valid for several / gpg "forcesig off"); default 0 if absent. */
+    c4[0] = (openpgp_do_get(0x00C4u, &c4v, &c4n) && c4n >= 1) ? c4v[0] : 0x00;
     c4[1] = PW_MAX_LEN;    /* max PW1 length */
     c4[2] = 0x00;          /* RFU / no resetting code */
     c4[3] = PW_MAX_LEN;    /* max PW3 length */
     c4[4] = s_pw1_retry;
     c4[5] = 0x00;          /* RC retries (not implemented) */
     c4[6] = s_pw3_retry;
+}
+
+/* Key Information DO 0xDE (OpenPGP 3.4 §4.4.3.9): per-slot {key-ref, status}.
+ * Status: 0 = not present, 1 = generated on card, 2 = imported. */
+static uint16_t fill_key_info(uint8_t de[6])
+{
+    for (int i = 0; i < OPENPGP_SLOT_COUNT; i++) {
+        de[2*i]     = (uint8_t)(i + 1);
+        de[2*i + 1] = s_keys[i].set ? s_keys[i].origin : 0x00;
+    }
+    return 6;
 }
 
 /* UIF DO for a slot (0x00D6 sig / 0x00D7 dec / 0x00D8 aut): byte0 != 0 → touch. */
@@ -407,6 +422,7 @@ void openpgp_card_init(const openpgp_card_hooks_t *hooks)
 
     /* Reset session state */
     s_selected          = false;
+    s_terminated        = false;
     s_pw1_sign_verified = false;
     s_pw1_user_verified = false;
     s_pw3_verified      = false;
@@ -543,6 +559,16 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
     if (!apdu_parse(in, in_len, &a))
         return sw_only(out, out_max, 0x6700); /* wrong length */
 
+    /* Terminated DF (after INS 0xE6): only ACTIVATE FILE revives the card. */
+    if (s_terminated) {
+        if (a.ins == 0x44) {            /* ACTIVATE FILE */
+            s_terminated = false;
+            openpgp_card_factory_reset();
+            return sw_only(out, out_max, SW_OK);
+        }
+        return sw_only(out, out_max, 0x6285u);  /* selected file in terminated state */
+    }
+
     /* ---- SELECT (always available, even before selection) ---- */
     if (a.ins == 0xA4) {
         if (a.p1 != 0x04)
@@ -556,6 +582,22 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         s_pw3_verified      = false;
         return sw_only(out, out_max, SW_OK);
     }
+
+    /* ---- TERMINATE DF (INS=0xE6) — gpg factory-reset, step 1 ----
+     * Placed before the s_selected guard so it works whenever gpg sends it
+     * (gpg always SELECTs first anyway). */
+    if (a.ins == 0xE6) {
+        /* Allowed if PW3 verified, OR both PINs are blocked (the escape hatch
+         * gpg uses to reset a locked card). */
+        if (!(s_pw3_verified || (s_pw1_retry == 0 && s_pw3_retry == 0)))
+            return sw_only(out, out_max, SW_SEC_NOT_SAT);
+        openpgp_card_factory_reset();
+        s_terminated = true;
+        return sw_only(out, out_max, SW_OK);
+    }
+    /* ---- ACTIVATE FILE (INS=0x44) — no-op when not terminated ---- */
+    if (a.ins == 0x44)
+        return sw_only(out, out_max, SW_OK);
 
     /* All other commands require the applet to be selected */
     if (!s_selected)
@@ -720,6 +762,11 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
                 v = NULL; n = 0; openpgp_do_get(0x00D8u, &v, &n);
                 APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xD8u, v, n);
 
+                /* DE: Key Information — synthesised from slot origins */
+                uint8_t de[6];
+                fill_key_info(de);
+                APPEND_OR_FAIL(inner, sizeof(inner), ioff, 0xDEu, de, 6);
+
                 APPEND_OR_FAIL(body, sizeof(body), off, 0x73u, inner, ioff);
             }
 
@@ -763,6 +810,13 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
             return respond(out, out_max, c4, 7, SW_OK);
         }
 
+        /* ---- DE: Key Information (synthesised from slot origins) ---- */
+        if (tag == 0x00DEu) {
+            uint8_t de[6];
+            fill_key_info(de);
+            return respond(out, out_max, de, 6, SW_OK);
+        }
+
         /* ---- All others: flat store lookup ---- */
         if (!openpgp_do_get(tag, &v, &n))
             return sw_only(out, out_max, SW_REF_NOT_FOUND);
@@ -775,6 +829,18 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
             return sw_only(out, out_max, SW_SEC_NOT_SAT);
 
         uint16_t tag = ((uint16_t)a.p1 << 8) | a.p2;
+
+        /* C4: PW1 status / forcesig.  Byte0 0=valid for one PSO:CDS (forced),
+         * 1=valid for several.  Stored as a 1-byte DO; GET DATA C4 + fill_pw_status
+         * reflect byte0.  Older gpg may send 4 bytes — use byte0. */
+        if (tag == 0x00C4u) {
+            if (a.lc < 1 || (a.data[0] != 0x00 && a.data[0] != 0x01))
+                return sw_only(out, out_max, SW_WRONG_DATA);
+            uint8_t v0 = a.data[0];
+            if (!openpgp_do_put(0x00C4u, &v0, 1))
+                return sw_only(out, out_max, SW_WRONG_DATA);
+            return sw_only(out, out_max, SW_OK);
+        }
 
         /* Fingerprint slices: C7/C8/C9 → write FP_SLICE_LEN-byte slice into C5 */
         if (tag == 0x00C7u || tag == 0x00C8u || tag == 0x00C9u) {
@@ -997,8 +1063,14 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         /* Consume PW1 sign authorisation before attempting the operation —
          * exactly one attempt per VERIFY 81, regardless of sign() success or failure.
          * Consumed here (not at the UIF gate) so a UIF denial preserves the token
-         * but a crypto failure always burns it. */
-        s_pw1_sign_verified = false;
+         * but a crypto failure always burns it.
+         * Only consume in "valid for one signature" mode (C4 byte0 == 0);
+         * byte0 == 1 keeps the token (gpg "forcesig off"). */
+        {
+            const uint8_t *c4v; uint16_t c4n;
+            bool multi = openpgp_do_get(0x00C4u, &c4v, &c4n) && c4n >= 1 && c4v[0] == 0x01;
+            if (!multi) s_pw1_sign_verified = false;
+        }
 
         /* Invoke sign hook with private scalar */
         uint8_t  sig[256];
