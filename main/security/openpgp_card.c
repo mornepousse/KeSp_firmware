@@ -349,6 +349,14 @@ static int slot_from_crt(uint8_t crt)
     }
 }
 
+/* Reset the signature counter (DO 0x93) — required when a new SIG key is
+ * generated or imported (OpenPGP 3.4 §7.2.14). */
+static void ds_counter_reset(void)
+{
+    static const uint8_t zero[3] = {0, 0, 0};
+    openpgp_do_put(0x0093u, zero, 3);
+}
+
 /* Slot's algorithm from the live algo-attrs DO (C1/C2/C3 leading byte). */
 static uint8_t slot_algo(int slot)
 {
@@ -918,6 +926,7 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
             memset(&s_keys[slot], 0, sizeof(s_keys[slot]));
             return sw_only(out, out_max, 0x6F00u);
         }
+        if (slot == OPENPGP_SLOT_SIG) ds_counter_reset();
         return sw_only(out, out_max, SW_OK);
     }
 
@@ -1068,7 +1077,35 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
 
             return build_pubkey_response(slot, out, out_max);
         }
-        /* P1=0x80 = on-device GENERATE — not in Phase 1; fall through to 6D00 */
+        if (a.p1 == 0x80) {   /* on-device GENERATE */
+            if (a.lc == 0 || !a.data)
+                return sw_only(out, out_max, SW_WRONG_DATA);
+            int slot = slot_from_crt(a.data[0]);
+            if (slot < 0) return sw_only(out, out_max, SW_REF_NOT_FOUND);
+            if (!s_crypto_ok) return sw_only(out, out_max, 0x6581u);
+            if (!s_pw3_verified)
+                return sw_only(out, out_max, SW_SEC_NOT_SAT);
+            if (!s_hooks->genkey)
+                return sw_only(out, out_max, SW_COND_NOT_SAT);
+
+            uint8_t algo = slot_algo(slot);
+            uint8_t d[32];
+            if (!s_hooks->genkey(algo, d))
+                return sw_only(out, out_max, SW_COND_NOT_SAT);
+
+            s_keys[slot].set    = 1;
+            s_keys[slot].algo   = algo;
+            s_keys[slot].origin = 1;            /* generated on-device */
+            memcpy(s_keys[slot].d, d, 32);
+            memset(d, 0, sizeof(d));            /* scrub the transient scalar */
+            if (!key_persist()) {
+                memset(&s_keys[slot], 0, sizeof(s_keys[slot]));
+                return sw_only(out, out_max, 0x6F00u);
+            }
+            if (slot == OPENPGP_SLOT_SIG) ds_counter_reset();
+            return build_pubkey_response(slot, out, out_max);
+        }
+        /* other P1 values fall through to 6D00 */
     }
 
     return sw_only(out, out_max, SW_INS_NOT_SUP);

@@ -1278,23 +1278,6 @@ static void test_read_pubkey_ok(void)
                 "READ PUBKEY pubkey bytes match fake_pubkey(P-256) output");
 }
 
-/* P1=0x80 (on-device GENERATE) → 6D00 — not implemented in Phase 1. */
-static void test_read_pubkey_generate_unsupported(void)
-{
-    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
-    setup_card(&h);
-
-    uint8_t cmd[16], rsp[256];
-    uint16_t clen, rlen;
-
-    do_select(cmd, rsp);
-
-    clen = build_read_pubkey(0x80, 0xB6, cmd);
-    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
-    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6D00,
-                   "GENERATE PUBKEY (P1=0x80) → 6D00 (unsupported)");
-}
-
 /* Reading the AUT slot (A4) when only the SIG slot is populated → 6A88
  * (the AUT slot has no key yet). */
 static void test_read_pubkey_wrong_slot(void)
@@ -1852,6 +1835,87 @@ static void test_internal_auth_uif(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Tests — Task 5: on-device GENERATE ASYMMETRIC KEY PAIR (0x47/80)     */
+/* ------------------------------------------------------------------ */
+
+/* 0x47 P1=0x80: PW3-gated, routes CRT→slot, uses the slot's algo attrs,
+ * persists, returns the 7F49 pubkey template. */
+static void test_generate_keypair(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[64], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp);
+
+    /* PW3 gate */
+    n = build_read_pubkey(0x80, 0xB6, cmd);   /* same APDU shape, P1=0x80 */
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6982, "GENERATE needs PW3");
+
+    do_verify_pw3(cmd, rsp);
+
+    /* SIG slot: C1 = ECDSA P-256 → genkey(0x13), response holds 65-B point */
+    n = build_read_pubkey(0x80, 0xB6, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GENERATE B6 ok");
+    TEST_ASSERT_EQ(g_fake_genkey_last_algo, PGP_ALGO_ECDSA_P256, "SIG algo from C1");
+    TEST_ASSERT(rsp[0] == 0x7F && rsp[1] == 0x49, "7F49 response");
+    int i86 = find_index(rsp, rlen, (const uint8_t[]){0x86, 0x41, 0x04}, 3);
+    TEST_ASSERT(i86 >= 0, "uncompressed P-256 point");
+
+    /* DEC slot: C2 = cv25519 → genkey(0x12), 0x40-prefixed 33-B point */
+    n = build_read_pubkey(0x80, 0xB8, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GENERATE B8 ok");
+    TEST_ASSERT_EQ(g_fake_genkey_last_algo, PGP_ALGO_ECDH, "DEC algo from C2");
+    i86 = find_index(rsp, rlen, (const uint8_t[]){0x86, 0x21, 0x40}, 3);
+    TEST_ASSERT(i86 >= 0, "0x40-prefixed X25519 point");
+
+    /* generated SIG key signs (genkey fake fills d with 0xA0+0x13 = 0xB3) */
+    do_verify_pw1_sign(cmd, rsp); do_disable_uif(cmd, rsp);
+    uint8_t hash[32]; memset(hash, 0x5A, 32);
+    n = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "sign with generated key");
+    TEST_ASSERT(g_fake_sign_last_d[0] == (uint8_t)(0xA0 + PGP_ALGO_ECDSA_P256),
+                "generated scalar in use");
+}
+
+/* unknown CRT → 6A88; missing genkey hook tolerated (6985); no key yet stays unset */
+static void test_generate_bad_crt(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[64], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);
+    n = build_read_pubkey(0x80, 0xB7, cmd);   /* bogus CRT */
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A88, "unknown CRT → 6A88");
+}
+
+/* DS counter resets when a new SIG key is generated or imported. */
+static void test_ds_counter_resets_on_new_sig_key(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);
+    uint8_t d[32]; memset(d, 0x11, 32);
+    do_import_key(d, cmd, rsp);
+    do_verify_pw1_sign(cmd, rsp); do_disable_uif(cmd, rsp);
+    uint8_t hash[32]; memset(hash, 0x5A, 32);
+    n = build_pso_cds(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "one signature made");
+
+    /* counter is now 1; generating a fresh SIG key must zero it */
+    n = build_read_pubkey(0x80, 0xB6, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GENERATE B6 ok");
+    n = build_get_data(0x00, 0x93, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET 93 ok");
+    TEST_ASSERT(rsp[0] == 0 && rsp[1] == 0 && rsp[2] == 0, "DS counter reset");
+}
+
+/* ------------------------------------------------------------------ */
 /* Test suite entry point                                              */
 /* ------------------------------------------------------------------ */
 
@@ -1902,7 +1966,6 @@ void test_openpgp_card(void)
     /* Task 8b: INS 0x47 P1=0x81 READ PUBLIC KEY */
     TEST_RUN(test_read_pubkey_no_key);
     TEST_RUN(test_read_pubkey_ok);
-    TEST_RUN(test_read_pubkey_generate_unsupported);
     TEST_RUN(test_read_pubkey_wrong_slot);
     TEST_RUN(test_read_pubkey_null_hook);
     /* Security hardening: crypto health gate, consume PW1 before sign, zero scalar, const-time PIN */
@@ -1919,4 +1982,9 @@ void test_openpgp_card(void)
     /* Task 4: INTERNAL AUTHENTICATE (INS 0x88) */
     TEST_RUN(test_internal_auth);
     TEST_RUN(test_internal_auth_uif);
+
+    /* Task 5: on-device GENERATE ASYMMETRIC KEY PAIR (INS 0x47 P1=0x80) */
+    TEST_RUN(test_generate_keypair);
+    TEST_RUN(test_generate_bad_crt);
+    TEST_RUN(test_ds_counter_resets_on_new_sig_key);
 }
