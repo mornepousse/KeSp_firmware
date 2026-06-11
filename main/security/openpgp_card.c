@@ -1015,6 +1015,37 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         return respond(out, out_max, sig, sig_len, SW_OK);
     }
 
+    /* ---- INTERNAL AUTHENTICATE (INS=0x88) — SSH via gpg-agent ---- */
+    if (a.ins == 0x88) {
+        if (a.p1 != 0x00 || a.p2 != 0x00)
+            return sw_only(out, out_max, SW_WRONG_P1P2);
+        if (!s_crypto_ok) return sw_only(out, out_max, 0x6581u);
+
+        const pgp_key_t *k = &s_keys[OPENPGP_SLOT_AUT];
+        if (!k->set) return sw_only(out, out_max, SW_REF_NOT_FOUND);
+        if (k->algo != PGP_ALGO_ECDSA_P256)
+            return sw_only(out, out_max, SW_COND_NOT_SAT);
+        if (!s_pw1_user_verified)
+            return sw_only(out, out_max, SW_SEC_NOT_SAT);
+        if (a.lc == 0 || a.lc > 64 || !a.data)
+            return sw_only(out, out_max, SW_WRONG_DATA);
+
+        if (uif_required(0x00D8u)) {
+            int cs = s_hooks->confirm();
+            if (cs != 1) return sw_only(out, out_max, SW_COND_NOT_SAT);
+        }
+        /* mode-82 is NOT consumed and the DS counter does NOT move —
+         * both are PSO:CDS-only semantics (OpenPGP 3.4 §7.2.10/§7.2.13). */
+
+        uint8_t sig[256]; uint16_t sig_len = 0;
+        if (!s_hooks->sign(k->d, a.data, a.lc, sig, &sig_len))
+            return sw_only(out, out_max, SW_COND_NOT_SAT);
+        /* Defence-in-depth: never copy past the buffer if a future hook
+         * mis-reports its length (P-256 r||s output is fixed at 64 B). */
+        if (sig_len > sizeof(sig)) sig_len = sizeof(sig);
+        return respond(out, out_max, sig, sig_len, SW_OK);
+    }
+
     /* ---- GENERATE ASYMMETRIC KEY PAIR (INS=0x47) ---- */
     if (a.ins == 0x47) {
         if (a.p1 == 0x81) {  /* READ existing public key — do NOT generate */

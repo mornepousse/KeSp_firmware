@@ -1753,6 +1753,92 @@ static void test_factory_c2_is_cv25519(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Tests — Task 4: INTERNAL AUTHENTICATE (INS 0x88)                    */
+/* ------------------------------------------------------------------ */
+
+static uint16_t build_internal_auth(const uint8_t *data, uint8_t n, uint8_t *buf)
+{
+    uint16_t i = 0;
+    buf[i++] = 0x00; buf[i++] = 0x88; buf[i++] = 0x00; buf[i++] = 0x00;
+    buf[i++] = n; memcpy(buf + i, data, n); i += n;
+    return i;
+}
+
+/* Gates + happy path: AUT slot key, PW1 mode 82, UIF D8. */
+static void test_internal_auth(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp);
+    uint8_t hash[32]; memset(hash, 0x5A, 32);
+
+    /* no key → 6A88 */
+    n = build_internal_auth(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A88, "no AUT key");
+
+    do_verify_pw3(cmd, rsp);
+    uint8_t d_aut[32]; memset(d_aut, 0x33, 32);
+    n = build_key_import_crt(0xA4, d_aut, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "import AUT key");
+
+    /* unverified PW1-82 → 6982 */
+    n = build_internal_auth(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6982, "AUTH needs mode 82");
+
+    /* mode 82 + factory UIF D8 = off → signs with the AUT scalar */
+    do_verify_pw1_user(cmd, rsp);
+    n = build_internal_auth(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "AUTH ok");
+    /* fake_sign emits a 32-byte canned signature (real P-256 emits 64-byte
+     * r||s); assert the test-double length, as the CDS tests do. */
+    TEST_ASSERT_EQ(rlen, 32 + 2, "signature returned");
+    TEST_ASSERT(g_fake_sign_last_d[0] == 0x33, "signed with AUT slot key");
+
+    /* NOT consumed (unlike CDS): a second AUTH still works */
+    n = build_internal_auth(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "82 not consumed by AUTH");
+
+    /* wrong P1P2 */
+    n = build_internal_auth(hash, 32, cmd);
+    cmd[2] = 0x01;
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A86, "P1 must be 00");
+}
+
+/* UIF D8 on → confirm consulted. */
+static void test_internal_auth_uif(void)
+{
+    openpgp_card_hooks_t h = TASK1_HOOKS; setup_card(&h);
+    uint8_t cmd[128], rsp[300]; uint16_t n, rlen;
+    do_select(cmd, rsp); do_verify_pw3(cmd, rsp);
+    uint8_t d_aut[32]; memset(d_aut, 0x33, 32);
+    n = build_key_import_crt(0xA4, d_aut, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "import AUT key");
+    static const uint8_t uif_on[] = {0x01, 0x20};
+    n = build_put_data(0x00, 0xD8, uif_on, 2, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "enable UIF D8");
+    do_verify_pw1_user(cmd, rsp);
+    uint8_t hash[32]; memset(hash, 0x5A, 32);
+
+    g_confirm_retval = 2;
+    n = build_internal_auth(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6985, "UIF denial → 6985");
+
+    g_confirm_retval = 1;
+    n = build_internal_auth(hash, 32, cmd);
+    rlen = openpgp_card_apdu(cmd, n, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "UIF grant → ok");
+}
+
+/* ------------------------------------------------------------------ */
 /* Test suite entry point                                              */
 /* ------------------------------------------------------------------ */
 
@@ -1817,4 +1903,7 @@ void test_openpgp_card(void)
     TEST_RUN(test_decipher_input_formats);
     TEST_RUN(test_algo_attrs_validation);
     TEST_RUN(test_factory_c2_is_cv25519);
+    /* Task 4: INTERNAL AUTHENTICATE (INS 0x88) */
+    TEST_RUN(test_internal_auth);
+    TEST_RUN(test_internal_auth_uif);
 }
