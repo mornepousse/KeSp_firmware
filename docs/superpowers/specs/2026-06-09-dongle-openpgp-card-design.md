@@ -51,6 +51,62 @@ keys stored in NVS (plaintext at rest acceptable in this phase; the future eFuse
 physical keypress (OpenPGP UIF → `sec_confirm`). The OpenPGP PINs (PW1/PW3) add the
 "something you know" the spec requires.
 
+## 2b. Release-eng decision (2026-06-10): secure boot V2 + flash encryption NOT enabled
+
+Ratified with Mae. **Neither ESP32-S3 Secure Boot V2 nor flash encryption is enabled**, by
+design. Rationale:
+
+- The threat model (§2) is **host-malware-only, not physical access.** Secure Boot and flash
+  encryption defend against an attacker who can read/replace the flash physically — a class
+  of attack explicitly out of scope here.
+- The dongle is a **personal, non-distributed device** that is **deliberately reprogrammable.**
+  Both features burn **irreversible eFuses** and would **permanently end free reflashing** —
+  directly contradicting the inherited "stays 100% reprogrammable" decision that makes this an
+  auditable, owner-controlled token in the first place.
+
+**Re-evaluation trigger: before distributing flashed hardware to any third party.** At that
+point the entire threat model changes — a recipient can no longer trust that the firmware is
+the audited one (a replaceable firmware voids every guarantee, including the touch gate), so
+Secure Boot V2 + flash-encryption **release mode** would become mandatory. For the procedure
+see the **ESP-IDF Security Guide** (Secure Boot V2 and flash encryption, release mode).
+
+Lighter future option already noted in §2: an **eFuse-HMAC KEK ("Couche 1")** can encrypt the
+NVS key material at rest **without** losing reprogrammability — at-rest confidentiality without
+fusing away the ability to reflash. That remains the preferred next hardening step if/when the
+threat model tightens short of full distribution.
+
+## 2c. Quantum posture (2026-06-10): classical algos by necessity, trivial rotation
+
+The card's keys are **classical** — P-256 ECDSA (SIG/AUT) and X25519 ECDH (DEC). This is not a
+shortcut: **no production OpenPGP smartcard or GnuPG card format is post-quantum in 2026.**
+Neither YubiKey, Nitrokey, nor Gnuk ships PQC on the card, and ML-DSA / ML-KEM are **not yet
+wired into the gpg card path**. P-256/X25519 are therefore the only viable choice and match
+every commercial token.
+
+**Exposure:**
+
+| Slot | Algo | Quantum exposure | Verdict |
+|------|------|------------------|---------|
+| Signature | P-256 ECDSA | needs a *live* quantum attacker at use time (does not exist; est. 2035+) | **low** |
+| Authentication (SSH) | P-256 ECDSA | needs a *live* quantum attacker at use time | **low** |
+| Decryption | X25519 ECDH | **harvest-now-decrypt-later** (captured ciphertext broken once a CRQC exists) | **accepted** |
+
+The signature/auth keys only matter to an attacker who can run a cryptographically-relevant
+quantum computer **at the moment of use** — forging a signature or an SSH handshake is not a
+store-and-wait attack. The **only** harvest-now-decrypt-later exposure is the X25519 decrypt
+slot, and it is **accepted**: the dongle's role is **dev identity** (git commit signing + SSH
+auth), not long-lived message confidentiality.
+
+**Mitigation = trivial rotation.** The day gpg ships PQC card algorithms, regenerate keys
+**on-device** (the GENERATE path) — **nothing is fused** (ties directly to §2b: the dongle
+stays reprogrammable precisely so this rotation is free).
+
+**Note — the SSH "quantum" warnings are a different layer.** A user may see server-side or
+client warnings about quantum-vulnerable SSH; those concern the **OpenSSH session key
+exchange (KEX)**, a transport-layer ephemeral negotiation entirely separate from this card's
+auth key. Fix it **host-side** with a PQ KEX (`sntrup761x25519-sha512`), not by changing the
+card key.
+
 ## 3. Why this is tractable (spike findings that de-risk it)
 
 - 🟢 **No VID whitelist problem** (unlike the YubiKey HID path). GnuPG's **scdaemon internal
@@ -229,6 +285,54 @@ exist — this is the point.
 Decryption slot (cv25519 / X25519 ECDH `PSO:DECIPHER`), Authentication slot (`INTERNAL
 AUTHENTICATE` → SSH via gpg-agent), on-device **`GENERATE ASYMMETRIC KEY PAIR`**, the full DO
 set, and RSA support (with the larger key blob). Each reuses the Phase-1 CCID + applet skeleton.
+
+## 8b. Phase 2 — RESULT (2026-06-11): ✅ complete ECC card, HW-validated
+
+Phase 2 is done and validated on the real dongle (flashed via CH340, gpg/scdaemon 2.4.9). The
+Phase-1 signing card is now a **complete ECC OpenPGP card**: 3 slots (SIG P-256 / DEC X25519 /
+AUT P-256), on-device key generation, decrypt, SSH auth, and factory reset.
+
+**What passed on hardware:**
+- **`gpg --card-status`** shows `Key attributes: nistp256 cv25519 nistp256` — the C2→cv25519
+  factory migration ran on-device.
+- **X25519 decrypt (`PSO:DECIPHER`, INS 0x2A/80/86):** card READ PUBLIC KEY for the DEC slot
+  returns a point byte-identical to the keyring's cv25519 subkey **and** to a host-side
+  reference; raw-APDU ECDH returns the exact expected shared secret; **`gpg --decrypt`
+  round-trips end-to-end** (factory UIF-D7 off → no touch).
+- **On-device GENERATE (INS 0x47/80) for all 3 slots:** SIG/AUT P-256 (on-curve, GEN==READ),
+  DEC X25519 (32-byte u). **Keys are born on the card and never touch the host.** A generated
+  SIG key signs (PSO:CDS) and verifies; a generated DEC key round-trips ECDH.
+- **INTERNAL AUTHENTICATE (INS 0x88):** the generated AUT key produces a P-256 ECDSA signature
+  that verifies — the SSH-auth crypto path works.
+- **Multi-slot** import/generate are independent; **DO 0xDE** (key-info) reports per-slot origin
+  (`010102010301` = all generated); the signature counter increments.
+- **TERMINATE/ACTIVATE** (the `gpg --card-edit → admin → factory-reset` flow): TERMINATE →
+  `6285` while terminated → ACTIVATE → card reset (`General key info: [none]`, all keys wiped,
+  default PINs restored).
+
+**Phase-2 gotchas discovered (and their resolution):**
+1. **gpg sends the cv25519 scalar BIG-endian in `5F48`** despite the "djb-tweak" label. The
+   `be32_to_le` reversal in `x25519_load_scalar` is **correct** — validated: the card's derived
+   public key equals the keyring's cv25519 public key. Do **not** "fix" the reversal.
+2. **The card signs the raw input digest** (it does not re-hash) → verify ECDSA with
+   **Prehashed**, not by hashing the input again.
+3. **Reused GNUPGHOME → stale shadow-key stubs** cause a spurious `No secret key` on decrypt.
+   Root cause is host state (an orphaned `shadowed-private-key` from a failed keytocard), **not**
+   firmware — use a **pristine GNUPGHOME** per checkpoint.
+4. **The 6E response is at the 256-byte short-APDU ceiling** (254 B with DO 0xDE included). It
+   fits, but there is **no headroom for more DOs** without adding response chaining.
+
+**Security:** the end-of-phase audit found **0 critical / 0 high / 0 medium, 3 low**
+(documented). The Phase-1 pentest's **multi-UIF carry-over is RESOLVED**: the three UIF-gated
+ops (sign/decrypt/auth) share the single `sec_confirm` slot, which is safe because CCID
+serializes APDUs (`bMaxCCIDBusySlots=1`, single worker, `s_busy` guard) — only one gated op is
+ever in flight.
+
+**Parked (not in Phase 2):**
+- **RSA** — Mae has zero RSA keys (both SSH keys are Ed25519, the GPG keyring is empty), so the
+  card ships ECC-only; RSA returns in a future phase only on real need.
+- **Extended-length APDU** — not needed: every ECC payload fits the short-APDU +
+  `dwMaxCCIDMessageLength=271` path. (Required only if RSA lands.)
 
 ## 9. Testing (TDD, host-side where pure)
 
