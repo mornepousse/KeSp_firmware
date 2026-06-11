@@ -321,6 +321,21 @@ AUT P-256), on-device key generation, decrypt, SSH auth, and factory reset.
    firmware — use a **pristine GNUPGHOME** per checkpoint.
 4. **The 6E response is at the 256-byte short-APDU ceiling** (254 B with DO 0xDE included). It
    fits, but there is **no headroom for more DOs** without adding response chaining.
+5. **cv25519 public-key DO `86` must be the RAW 32-byte point — NO `0x40` prefix** (found during
+   the real-key ceremony; fix commit `ab105aa6`). gpg's `ecc_read_pubkey()` (shared by READ
+   PUBLIC KEY 0x47/81 **and** GENERATE 0x47/80) prepends the `0x40` itself for djb-tweak curves.
+   A card-side `0x40` produced a **double prefix** → 34-byte / 271-bit MPI → invalid curve point
+   → `pubkey_encrypt failed: Invalid object` on an **on-device-generated** cv25519 key (keytocard
+   masked it because it builds the keyring from the host pubkey, not the card's `86`). Verified
+   against the gpg 2.4.9 source and on HW: generate→encrypt→decrypt **and** keytocard→decrypt both
+   round-trip. P-256 `86` stays `04||X||Y` (gpg does not prepend for standard curves).
+
+**Real-key ceremony (2026-06-11): ✅** `gpg --card-edit → generate` builds a full card-backed
+identity (`sec>` SIG + `ssb>` AUT + `ssb>` DEC, all `Card serial no.`); git-style **signature
+verifies** (Good signature), **encrypt→decrypt round-trips** with the generated cv25519 key, and
+`ssh-add -L` exposes the `ecdsa-sha2-nistp256 … cardno:` SSH key. Note: the cert self-sign during
+`generate` needs a physical touch (UIF Sign ON) — automated runs disable D6 first. User
+walkthrough: `docs/OPENPGP_CARD.md` §0.
 
 **Security:** the end-of-phase audit found **0 critical / 0 high / 0 medium, 3 low**
 (documented). The Phase-1 pentest's **multi-UIF carry-over is RESOLVED**: the three UIF-gated
