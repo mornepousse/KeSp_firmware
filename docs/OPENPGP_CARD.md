@@ -17,22 +17,35 @@ malware cannot inject.
 
 ## 0. Première configuration — tutoriel pas à pas (FR)
 
-> Validé en live le 2026-06-11 (gpg 2.4.9 via `nix-shell`). Refais exactement ces étapes pour
-> installer **ta vraie identité** sur le dongle. Compte ~15 min. Sections 3-10 = la référence détaillée.
+> Validé en live le 2026-06-11 (gpg 2.4.9). Refais exactement ces étapes pour installer **ta vraie
+> identité** sur le dongle. Compte ~15 min. Sections 3-10 = la référence détaillée.
 
-**Prérequis — un pinentry dans nix-shell.** `nix-shell -p gnupg` n'embarque PAS de pinentry, donc
-gpg ne peut pas demander tes PINs. On en ajoute un (une seule fois) :
+**Prérequis — gpg natif (NixOS, recommandé).** Pour un usage quotidien, gpg + l'agent (scdaemon
+carte, pinentry, agent SSH) doivent être **déclaratifs** dans ta config, pas via `nix-shell`. Sur
+NixOS :
 
-```bash
-mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
-nix-shell -p gnupg pinentry-curses --run \
-  'echo "pinentry-program $(command -v pinentry-curses)" > ~/.gnupg/gpg-agent.conf; gpgconf --kill gpg-agent'
+```nix
+# modules/apps/gnupg.nix  (importé par tes hosts)
+programs.gnupg.agent = {
+  enable = true;
+  enableSSHSupport = true;                 # expose la clé AUTH de la carte à ssh + pose SSH_AUTH_SOCK
+  pinentryPackage = pkgs.pinentry-gnome3;  # GUI Wayland/Hyprland ; ou pinentry-curses en terminal
+};
+environment.systemPackages = [ pkgs.gnupg ];
+# NE PAS activer services.pcscd : scdaemon utilise son driver CCID interne.
+# Une règle udev pour le VID 303a est nécessaire (accès non-root au nœud USB CCID).
 ```
-Désormais lance gpg ainsi : `nix-shell -p gnupg pinentry-curses --run 'gpg ...'`.
+`nh os switch`, puis **ouvre un shell de login frais** (`exec zsh -l` ou relogue la session) pour
+que `SSH_AUTH_SOCK` soit posé. Vérifie : `echo "$SSH_AUTH_SOCK"` non-vide.
+Après ça, toutes les commandes ci-dessous sont du `gpg` **direct** (plus de `nix-shell`).
+
+> Pas encore natif ? Fallback ponctuel : `nix-shell -p gnupg pinentry-curses --run 'gpg ...'` après
+> `echo "pinentry-program $(command -v pinentry-curses)" > ~/.gnupg/gpg-agent.conf`. Mais pour le
+> quotidien, fais le natif ci-dessus.
 
 **Étape 1 — vérifier la carte.**
 ```bash
-nix-shell -p gnupg --run 'gpgconf --kill scdaemon; gpg --card-status'
+gpgconf --kill scdaemon; gpg --card-status
 ```
 Tu dois voir `Application type: OpenPGP`, `Key attributes: nistp256 cv25519 nistp256`, PINs `3 0 3`.
 Si tu vois "No such device", relance (`gpgconf --kill all` puis re-`gpg --card-status`) — le CCID
@@ -40,7 +53,7 @@ se réveille parfois au 2e essai.
 
 **Étape 2 — changer les PINs (defaults `123456`/`12345678` publics).**
 ```bash
-nix-shell -p gnupg pinentry-curses --run 'gpg --card-edit'
+gpg --card-edit
 ```
 Puis : `admin` → `passwd` → `1` (PW1 user, actuel `123456`, ≥ 6 car.) → `3` (PW3 admin, actuel
 `12345678`, ≥ 8 car.) → `q`. Garde `gpg/card>` ouvert pour l'étape 3.
@@ -56,28 +69,32 @@ generate
   une identité dev git/SSH).
 - PIN Admin, validité (`0` = pas d'expiration), puis **Real name / Email / Comment**.
 - 👉 **TOUCHE REQUISE** : à la fin, gpg auto-signe ton certificat avec la clé de **signature**, et
-  l'UIF Sign est ON → **presse `K_SEC_CONFIRM` sur ta moitié dans les 15 s** quand l'écran/agent
+  l'UIF Sign est ON → **presse `K_SEC_CONFIRM` sur ta moitié dans les 15 s** quand le pinentry/agent
   attend. Sans la touche, la génération échoue (6985).
 - Résultat attendu : `public and secret key created and signed.` et `gpg -K` montre `sec>` + deux
   `ssb>` avec `Card serial no.` (les 3 clés sont sur la carte).
 
 **Étape 4 — signature git.**
 ```bash
-FPR=$(nix-shell -p gnupg --run 'gpg --list-keys --with-colons' | awk -F: '/^fpr/{print $10; exit}')
+FPR=$(gpg --list-keys --with-colons | awk -F: '/^fpr/{print $10; exit}')
 git config --global user.signingkey $FPR
 git config --global commit.gpgsign true
-git config --global gpg.program "$(command -v gpg || echo gpg)"
+git config --global gpg.program gpg
 ```
 Chaque `git commit` demandera PW1 + **une touche** (UIF Sign ON). Vérifie : `git log --show-signature`.
 
-**Étape 5 — SSH (GitLab/GitHub).**
+**Étape 5 — SSH (GitLab/GitHub).** Avec `enableSSHSupport = true`, `SSH_AUTH_SOCK` est déjà posé
+(shell de login frais) — pas d'export manuel.
 ```bash
-grep -q enable-ssh-support ~/.gnupg/gpg-agent.conf || echo enable-ssh-support >> ~/.gnupg/gpg-agent.conf
-gpgconf --kill gpg-agent
-export SSH_AUTH_SOCK=$(gpgconf --list-dirs agent-ssh-socket)   # mets-le dans ta conf home NixOS
-nix-shell -p gnupg openssh --run 'gpg --card-status >/dev/null; ssh-add -L'
+ssh-add -L
 ```
 Copie la ligne `ecdsa-sha2-nistp256 … cardno:…` dans GitLab → *SSH Keys*. Test : `ssh -T git@gitlab.com`.
+- `ssh-add -L` dit « has no identities » ? La carte n'a pas encore de clé AUTH (refais l'étape 3),
+  ou `SSH_AUTH_SOCK` n'est pas posé (shell de login frais).
+- « Could not open a connection to your authentication agent » = `SSH_AUTH_SOCK` absent →
+  `export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"; gpgconf --launch gpg-agent`, puis
+  fixe la persistance (shell de login / module gpg-agent). Si un autre agent (gnome-keyring) squatte
+  la variable, démarre gnome-keyring avec `--components=secrets,pkcs11` (sans `ssh`).
 
 **Voilà.** Tu as une identité dev complète (sign + decrypt + SSH) née sur le dongle. Pour repartir
 de zéro un jour : `gpg --card-edit` → `admin` → `factory-reset` (efface tout, PINs par défaut).
