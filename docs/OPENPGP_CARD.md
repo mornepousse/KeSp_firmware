@@ -19,6 +19,11 @@ malware cannot inject.
 
 > Validé en live le 2026-06-11 (gpg 2.4.9). Refais exactement ces étapes pour installer **ta vraie
 > identité** sur le dongle. Compte ~15 min. Sections 3-10 = la référence détaillée.
+>
+> 🚀 **Raccourci :** `scripts/kase-pgp-setup.sh setup` est un assistant guidé qui enchaîne tout
+> (détection + recovery CCID, PINs, generate avec rappel de la touche, git signing, clé SSH/GitLab,
+> et `… reset` pour repartir à zéro). Il NE voit jamais tes PINs (pinentry) et ne peut pas presser
+> la touche à ta place. Les étapes manuelles ci-dessous restent la référence / le fallback.
 
 **Prérequis — gpg natif (NixOS, recommandé).** Pour un usage quotidien, gpg + l'agent (scdaemon
 carte, pinentry, agent SSH) doivent être **déclaratifs** dans ta config, pas via `nix-shell`. Sur
