@@ -35,11 +35,22 @@ have(){ command -v "$1" >/dev/null 2>&1; }
 
 command -v gpg >/dev/null 2>&1 || die "gpg introuvable. Installe-le en natif (NixOS: programs.gnupg.agent + pkgs.gnupg). Voir docs/OPENPGP_CARD.md §0."
 
+# Interactive read that first restores the terminal to a sane (cooked) mode, so
+# a raw tty leaked by a prior expect/gpg session doesn't turn Enter into "^M".
+# Honors KASE_YES=1 to auto-answer "oui" (non-interactive / CI).
+ask(){  # ask "<prompt>" -> prints the reply on stdout
+  if [ "${KASE_YES:-}" = "1" ]; then printf 'oui'; return; fi
+  stty sane 2>/dev/null || true
+  local r; read -rp "$1 " r </dev/tty; printf '%s' "$r"
+}
+
 # Run an expect script file, transparently via nix-shell if expect is absent.
+# Always restore the tty afterwards (expect leaves it raw if interrupted).
 run_expect(){
   if have expect; then expect "$1"
   else warn "expect absent → via nix-shell"; nix-shell -p expect --run "expect '$1'"
   fi
+  local rc=$?; stty sane 2>/dev/null || true; return $rc
 }
 
 # Send raw APDUs to the card in ONE gpg-connect-agent session (PIN-state holds).
@@ -82,7 +93,7 @@ cmd_status(){
 cmd_reset(){
   require_card
   warn "FACTORY RESET — efface TOUTES les clés de la carte et remet les PINs par défaut."
-  read -rp "Taper 'oui' pour confirmer : " a; [ "$a" = "oui" ] || die "annulé."
+  [ "$(ask "Taper 'oui' pour confirmer :")" = "oui" ] || die "annulé."
   info "Blocage des PINs puis terminate/activate…"
   # block PW1 (3 wrong VERIFY 0x81) + PW3 (3 wrong VERIFY 0x83), then E6 + 44.
   scd_apdu \
@@ -105,7 +116,7 @@ cmd_pins(){
   info "${c_bold}Changement des PINs${c_0} (défauts publics PW1=$PW1_DEFAULT / PW3=$PW3_DEFAULT)."
   info "Dans le menu : ${c_bold}admin${c_0} → ${c_bold}passwd${c_0} → 1 (PW1 user) → 3 (PW3 admin) → q → quit."
   warn "3 essais faux sur les DEUX PINs = carte bloquée (récup: $0 reset, qui efface tout)."
-  read -rp "Entrée pour ouvrir gpg --card-edit… " _
+  ask "Entrée pour ouvrir gpg --card-edit…" >/dev/null
   gpg --card-edit
 }
 
@@ -118,8 +129,8 @@ cmd_generate(){
     [ "$a" = "oui" ] && cmd_reset || die "annulé."
   fi
   local name email
-  read -rp "Nom complet (Real name) : " name
-  read -rp "Email : " email
+  name=$(ask "Nom complet (Real name) :")
+  email=$(ask "Email :")
   [ -n "$name" ] && [ -n "$email" ] || die "nom et email requis."
 
   cat > /tmp/.kase_gen.exp <<EXP
@@ -148,7 +159,7 @@ EXP
   warn "gpg va (1) te demander le PIN Admin puis User (fenêtre pinentry),"
   warn "puis (2) auto-signer le certificat avec la clé de signature → ${c_bold}presse K_SEC_CONFIRM${c_0}"
   warn "sur ta moitié dans les 15 s quand ça bloque. Sans la touche → échec (6985)."
-  read -rp "Prête ? Entrée pour lancer la génération… " _
+  ask "Prête ? Entrée pour lancer la génération…" >/dev/null
 
   if run_expect /tmp/.kase_gen.exp | tee /tmp/.kase_gen.out | grep -q '__TIMEOUT__'; then
     rm -f /tmp/.kase_gen.exp
@@ -203,10 +214,9 @@ cmd_ssh(){
 cmd_setup(){
   info "${c_bold}=== Assistant configuration carte OpenPGP KaSe ===${c_0}"
   cmd_status; echo
-  read -rp "1/3 Changer les PINs maintenant ? (oui/non) " a
-  [ "$a" = "oui" ] && { cmd_pins; echo; }
-  read -rp "2/3 Générer ton identité SUR la carte ? (oui/non) " a
-  [ "$a" = "oui" ] && { cmd_generate; echo; } || { warn "generate sauté — git/ssh nécessitent une clé."; return; }
+  [ "$(ask "1/3 Changer les PINs maintenant ? (oui/non)")" = "oui" ] && { cmd_pins; echo; }
+  [ "$(ask "2/3 Générer ton identité SUR la carte ? (oui/non)")" = "oui" ] && { cmd_generate; echo; } \
+    || { warn "generate sauté — git/ssh nécessitent une clé."; return; }
   ok "3/3 Terminé. Identité dev complète sur le dongle."
 }
 
