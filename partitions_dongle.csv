@@ -1,0 +1,13 @@
+# KaSe dongle partition table — Secure Boot V2 reflow.
+# The signed SBv2 bootloader is ~0x8ab0 (>0x8000), so the partition table is
+# moved to 0x10000 (CONFIG_PARTITION_TABLE_OFFSET) and every partition shifts up.
+# App partitions stay 0x10000-aligned. Sizes match the legacy partitions.csv
+# (nvs 64KB, factory/ota_0 2MB each, storage littlefs). 16MB flash.
+# Validated on the spare ESP32-S3 (2026-06-25). Other boards keep partitions.csv.
+# Name,   Type, SubType,  Offset,   Size, Flags
+nvs,      data, nvs,      0x11000,  0x10000,
+otadata,  data, ota,      0x21000,  0x2000,
+phy_init, data, phy,      0x23000,  0x1000,
+factory,  app,  factory,  0x30000,  0x200000,
+ota_0,    app,  ota_0,    0x230000, 0x200000,
+storage,  data, littlefs, 0x430000, 0xF0000,

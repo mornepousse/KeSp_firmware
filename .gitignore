@@ -16,3 +16,6 @@ build_*/
 
 # Python bytecode caches
 __pycache__/
+
+# Secure Boot V2 signing key — NEVER commit (back up offline; losing it = no more dongle updates)
+secure_boot_signing_key.pem

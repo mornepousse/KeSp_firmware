@@ -53,3 +53,17 @@ CONFIG_KASE_SEC_OPENPGP=y
 CONFIG_NVS_ENCRYPTION=y
 CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC=y
 CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID=0
+
+# --- Secure Boot V2 (RSA-3072) — only signed firmware boots; closes the
+# "malicious firmware decrypts NVS" gap left by NVS-enc alone. Validated end-to-end
+# on a spare ESP32-S3 (2026-06-25). Requires the signing key (gitignored, NOT in
+# repo) — losing it = no more dongle updates. The signed bootloader (>0x8000)
+# forces the partition table to 0x10000 → partitions_dongle.csv reflow.
+# IRREVERSIBLE once flashed (SECURE_BOOT_EN + Secure Download Mode burn on 1st boot).
+CONFIG_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_V2_ENABLED=y
+CONFIG_SECURE_BOOT_V2_RSA_ENABLED=y
+CONFIG_SECURE_BOOT_SIGNING_KEY="secure_boot_signing_key.pem"
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_dongle.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x10000
