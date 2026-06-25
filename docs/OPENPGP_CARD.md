@@ -334,13 +334,54 @@ See the design spec **§2c** for the full posture.
 
 ## 10. Troubleshooting
 
-- **Reset scdaemon between attempts** (it caches card state):
+### 10.0 Usage quotidien (le seul truc à retenir)
 
-  ```bash
-  gpgconf --kill scdaemon
-  ```
+Une fois l'identité installée (§0), tu ne refais RIEN de tout ce qui suit. Au quotidien :
 
-- **Verbose scdaemon log** — in `~/.gnupg/scdaemon.conf`:
+- **Commit signé** : `git commit …` → tape ton PIN User (mis en cache un moment) **+ presse
+  `K_SEC_CONFIRM`** (la touche que tu as mappée, p.ex. l'ex-ESC du half_left) dans les 15 s.
+- **SSH / push** : transparent — la carte fait l'auth (PIN si demandé).
+
+Tout le reste de cette section, c'est **« au cas où »** — la plupart des pannes ci-dessous
+n'arrivent que pendant le **setup initial**.
+
+### 10.1 Pannes courantes — symptôme → cause → fix
+
+| Tu vois… | Cause | Fix |
+|---|---|---|
+| `gpg: No pinentry` | gpg-agent n'a pas de programme pinentry (config vide, ou chemin nix-shell garbage-collecté) | Installe-en un **persistant** : `nix profile install nixpkgs#pinentry-curses` puis `echo "pinentry-program $(command -v pinentry-curses)" >> ~/.gnupg/gpg-agent.conf && gpgconf --kill gpg-agent`. Permanent/propre = via le module NixOS (§0). |
+| `^M` quand tu valides (Entrée ne passe pas) | Terminal resté en **mode raw** (laissé par une session `expect`/`gpg --card-edit` interrompue) | `stty sane` (tape-le même si tu vois `^M`). Si ça résiste : `reset` ⏎ ou nouveau terminal. |
+| ssh : `Could not open a connection to your authentication agent` | `SSH_AUTH_SOCK` pas posé dans ce shell | Shell de login frais (`exec zsh -l`) si le module `enableSSHSupport` est actif ; sinon `export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)" && gpgconf --launch gpg-agent`. |
+| ssh-add : `The agent has no identities` | Pas (encore) de clé AUTH sur la carte, ou carte non lue | Génère l'identité (§0/§4), ou `gpg --card-status` une fois pour réveiller la carte. *(message normal sur carte vierge.)* |
+| `No such device` / `OpenPGP card not available` | Interface CCID figée (wedge), souvent après une rafale d'opérations | `gpgconf --kill all` puis réessaie 1-2× (le CCID se réveille). Wedge tenace → **rebranche le dongle**. |
+| `Conditions of use not satisfied` après un reset | scdaemon a une vue périmée de la carte | `gpgconf --kill all` puis `gpg --card-status`. |
+| `factory-reset` → `This command is not supported by this card` | Le firmware n'annonce pas le flag « life-cycle » à gpg (limitation connue) | Reset en **raw APDU** (bloque les 2 PINs → TERMINATE `00E60000` → ACTIVATE `00440000`) ou `scripts/kase-pgp-setup.sh reset`. |
+| **Timeout** sur une **passphrase** pendant `generate` | C'est le backup off-card (le pinentry expire) | Au `generate`, réponds **`n`** à *« Make off-card backup? »* (pas de backup = pas de passphrase = pas de timeout). |
+| **Timeout** sur la **touche** pendant `generate` | Les 15 s du gate UIF dépassées | Setup sans pression : `gpg --card-edit → admin → uif 1 off` AVANT `generate`, puis `uif 1 on` après. La touche reste obligatoire pour l'usage quotidien. |
+| `Key generation failed` / clés sur la carte mais `General key info: [none]` | Un `generate` a échoué (backup/touche) → clés orphelines sans trousseau | Reset (raw APDU ci-dessus) puis régénère proprement (`backup n`, `uif off`). |
+| `pubkey_encrypt failed: Invalid object` | Bug firmware corrigé (double préfixe `0x40` cv25519) | Mets à jour le firmware (≥ commit `ab105aa6`) et régénère. |
+
+### 10.2 Reset propre de la carte (la commande raw qui marche toujours)
+
+`factory-reset` de gpg ne marche pas sur cette carte → reset déterministe en raw APDU (indépendant
+des PINs : bloque les deux, puis TERMINATE + ACTIVATE) :
+
+```bash
+gpg-connect-agent /hex "scd serialno" \
+  "scd apdu 00A4040006 D27600012401" \
+  "scd apdu 0020008106 303030303030" "scd apdu 0020008106 303030303030" "scd apdu 0020008106 303030303030" \
+  "scd apdu 0020008308 3030303030303030" "scd apdu 0020008308 3030303030303030" "scd apdu 0020008308 3030303030303030" \
+  "scd apdu 00E60000" "scd apdu 00440000" /bye
+gpgconf --kill all      # puis: gpg --card-status  (doit montrer 0 clé, PINs 3 0 3)
+```
+(ou plus simple : `./scripts/kase-pgp-setup.sh reset`)
+
+### 10.3 Outils de diagnostic
+
+- **Reset scdaemon entre deux essais** (il cache l'état de la carte) : `gpgconf --kill scdaemon`
+  (ou `gpgconf --kill all` pour tout relancer).
+
+- **Log scdaemon verbeux** — dans `~/.gnupg/scdaemon.conf` :
 
   ```
   debug-level guru
