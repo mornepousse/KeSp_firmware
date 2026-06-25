@@ -93,7 +93,24 @@ cmd_status(){
 cmd_reset(){
   require_card
   warn "FACTORY RESET — efface TOUTES les clés de la carte et remet les PINs par défaut."
-  [ "$(ask "Taper 'oui' pour confirmer :")" = "oui" ] || die "annulé."
+  # Safety interlock: if the card holds a real identity, refuse the easy/
+  # automated path. KASE_YES / piped 'oui' must NEVER wipe a live identity —
+  # that is exactly how the 2026-06-25 on-card identity (no backup) was lost
+  # (`KASE_YES=1 reset` / `echo oui | reset` while testing the wizard).
+  if card_has_sig_key; then
+    local serial; serial="$(gpg --card-status 2>/dev/null \
+                            | sed -n 's/^Serial number *[. ]*: *//p' | head -1)"
+    warn "⚠ Cette carte CONTIENT une identité (clé de signature présente)."
+    warn "  Le wipe est IRRÉVERSIBLE — assure-toi d'avoir un backup avant."
+    if [ "${KASE_YES:-}" = "1" ]; then
+      die "refus: KASE_YES n'efface pas une carte qui contient des clés. Reset en interactif requis."
+    fi
+    stty sane 2>/dev/null || true
+    local r; read -rp "Pour confirmer, tape le n° de série de la carte (${serial:-?}) : " r </dev/tty
+    [ -n "$serial" ] && [ "$r" = "$serial" ] || die "série incorrecte — reset annulé (carte intacte)."
+  else
+    [ "$(ask "Carte vierge. Taper 'oui' pour confirmer le reset :")" = "oui" ] || die "annulé."
+  fi
   info "Blocage des PINs puis terminate/activate…"
   # block PW1 (3 wrong VERIFY 0x81) + PW3 (3 wrong VERIFY 0x83), then E6 + 44.
   scd_apdu \

@@ -301,6 +301,18 @@ default PINs** (`123456` / `12345678`).
 > key, and the touch gate makes exfiltration impossible regardless. A wiped card just means
 > regenerate on-device.
 
+> ⚠️ **Hard-won lesson (2026-06-25).** Keys generated **on-device with no backup** are a single
+> point of failure: **any** factory reset = total, unrecoverable loss. An on-card identity was
+> destroyed by running `kase-pgp-setup.sh reset` against the **live** card while testing the
+> wizard (`KASE_YES=1 reset` / `echo oui | reset`). Two rules:
+> 1. **Never run `reset` (or `gpg factory-reset`, or the raw `00E60000`/`00440000`) against a card
+>    that holds a real identity** unless you have a backup and mean it. The wizard now **refuses**
+>    to wipe a card that has a signature key unless you type its serial on the tty — `KASE_YES` /
+>    piped `oui` are ignored when keys are present (blank cards still reset freely for CI).
+> 2. For a recoverable identity, **generate off-card with an encrypted backup on offline media,
+>    then `keytocard`** — you keep daily on-card isolation *and* a recovery path. On-card-only is
+>    the most *isolated* but the most *brittle* (no recovery). Choose with eyes open.
+
 ---
 
 ## 9. Quantum posture
