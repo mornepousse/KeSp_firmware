@@ -78,11 +78,29 @@ test board reveals any problem, abort before touching the dongle. Brick risk ≈
 
 ## Deferred (future hardening spec)
 
-- **Secure Boot V2** — closes the malicious-firmware-decrypts-NVS gap. Note:
-  enabling it *after* a full Flash-Encryption-Release burn is hard (no plaintext
-  bootloader access); if pursued, prep the signed bootloader while plaintext
-  flash access remains. (HMAC-NVS alone does NOT lock flash, so this constraint
-  is not yet triggered.)
+- **Secure Boot V2** — closes the malicious-firmware-decrypts-NVS gap.
+  **VALIDATED end-to-end on the spare ESP32-S3 (2026-06-25)** — findings for the
+  hardening pass:
+  - Config: `CONFIG_SECURE_BOOT=y` + `SECURE_BOOT_V2_ENABLED` + `_V2_RSA_ENABLED`
+    + `SECURE_BOOT_SIGNING_KEY="<key.pem>"` + `SECURE_BOOT_BUILD_SIGNED_BINARIES=y`.
+    Key = RSA-3072 via `espsecure.py generate_signing_key --version 2`.
+  - **Partition reflow REQUIRED:** the signed bootloader is **0x8ab0 (~35 KB)**,
+    exceeding the default `0x8000` partition-table offset → build fails. Fix:
+    `CONFIG_PARTITION_TABLE_OFFSET=0x10000` + shift partitions.csv (apps stay
+    `0x10000`-aligned). A partition-table change ⇒ a full reflash, so it must be
+    flashed before any future flash-encryption lockdown.
+  - First boot burns `SECURE_BOOT_EN` + the pubkey digest and **enables Secure
+    Download Mode** (espefuse/esptool can no longer read eFuses or use the stub).
+  - **Coexists with NVS-HMAC** (HMAC key in eFuse KEY0, SB digest in another block).
+  - Enforcement proven: ROM logs `secure boot verification succeeded` for the
+    signed bootloader; a **corrupted app → bootloader rejects → reset loop, app
+    never runs** (signed app re-flash restores it).
+  - **Key management:** the signing key signs all future firmware — losing it =
+    no more updates; leaking it = anyone can sign. Generate + back up offline
+    before doing this on the real dongle. The 2026-06-25 test used a throwaway key.
+  - Caveat for enabling *after* a full Flash-Encryption-Release burn: hard (no
+    plaintext bootloader access). HMAC-NVS alone does NOT lock flash, so the
+    dongle can still take Secure Boot later via a plaintext bootloader reflash.
 - **OTA gating** (require a touch to accept an OTA image) — pure software, easy
   to add later via a normal OTA.
 - **Full Flash Encryption Release** — encrypt app+bootloader too; irreversible
