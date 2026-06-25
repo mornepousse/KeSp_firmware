@@ -61,6 +61,7 @@ bool sec_store_get_secret(uint8_t idx, uint8_t *out, uint8_t *out_len)
 
 #ifndef TEST_HOST
 #include "esp_log.h"
+#include "nvs.h"                /* ESP_ERR_NVS_NOT_FOUND */
 #include "nvs_utils.h"
 #include "keyboard_config.h"   /* STORAGE_NAMESPACE */
 static const char *TAG = "sec_store";
@@ -77,8 +78,11 @@ static bool sec_store_persist(void)
 void sec_store_init(void)
 {
     uint32_t ver = 0;
-    nvs_load_blob_with_total(STORAGE_NAMESPACE, "sec_slots", s_slots,
+    esp_err_t err = nvs_load_blob_with_total(STORAGE_NAMESPACE, "sec_slots", s_slots,
                              sizeof(s_slots), "sec_slots_ver", &ver);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND)
+        ESP_LOGW(TAG, "sec_slots load failed (%s) — slots vides, re-provision requis",
+                 esp_err_to_name(err));
 }
 #else
 static bool sec_store_persist(void) { return true; }

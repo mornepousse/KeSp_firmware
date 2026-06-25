@@ -127,6 +127,11 @@ bool openpgp_crypto_x25519_ecdh(const uint8_t d_be[32],
         if (mbedtls_ecp_point_read_binary(&grp, &Qp, peer_le, 32)) break;
         if (mbedtls_ecdh_compute_shared(&grp, &z, &Qp, &dd, rng_cb, NULL)) break;
         if (mbedtls_mpi_write_binary_le(&z, out_le, 32)) break;
+        /* RFC 7748 §6: a low-order / all-zero peer point yields an all-zero
+         * shared secret — MUST be rejected (else the card becomes a decrypt
+         * oracle on a key the attacker can pre-derive). (Pentest 2026-06-25.) */
+        { uint8_t acc = 0; for (int i = 0; i < 32; i++) acc |= out_le[i];
+          if (acc == 0) break; }
         ok = true;
     } while (0);
 
