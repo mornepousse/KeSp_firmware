@@ -97,6 +97,25 @@ static void test_hb_timeout_releases_all(void)
     TEST_ASSERT_EQ(g_release_count, 0, "no double release");
 }
 
+/* OOB guard: rf_decode_key emits 4-bit row/col (0..15) straight from the wire,
+ * but local_bitmap only sizes RF_HALF_ROWS×RF_HALF_COLS. Out-of-range frames
+ * must be dropped before any bitmap access (else OOB read/write past the 5-byte
+ * bitmap). Without the guard, row=15/col=15 would access bitmap[15] and return
+ * true; with it, false. (Pentest 2026-06-25, OTA OOB write.) */
+static void test_hb_apply_key_oob_rejected(void)
+{
+    hb_half_state_t st; memset(&st, 0, sizeof(st));
+    rf_key_event_t bad_row = { .row = RF_HALF_ROWS, .col = 0, .pressed = true, .seq = 1 };
+    TEST_ASSERT(!hb_apply_key(&st, &bad_row), "row >= RF_HALF_ROWS rejected");
+    rf_key_event_t bad_col = { .row = 0, .col = RF_HALF_COLS, .pressed = true, .seq = 2 };
+    TEST_ASSERT(!hb_apply_key(&st, &bad_col), "col >= RF_HALF_COLS rejected");
+    rf_key_event_t maxv = { .row = 15, .col = 15, .pressed = true, .seq = 3 };
+    TEST_ASSERT(!hb_apply_key(&st, &maxv), "row=15 col=15 rejected (idx 120 OOB)");
+    rf_key_event_t okv = { .row = RF_HALF_ROWS - 1, .col = RF_HALF_COLS - 1,
+                           .pressed = true, .seq = 4 };
+    TEST_ASSERT(hb_apply_key(&st, &okv), "max in-range key still accepted");
+}
+
 void test_heartbeat(void)
 {
     TEST_SUITE("Heartbeat reconciliation");
@@ -105,4 +124,5 @@ void test_heartbeat(void)
     test_hb_reconcile_missed_press();
     test_hb_reconcile_stuck_release();
     test_hb_timeout_releases_all();
+    test_hb_apply_key_oob_rejected();
 }

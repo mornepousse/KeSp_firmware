@@ -7,6 +7,13 @@
 
 bool hb_apply_key(hb_half_state_t *st, const rf_key_event_t *e)
 {
+    /* Bound row/col BEFORE any bitmap access: rf_decode_key extracts 4-bit
+     * fields (0..15) straight from the wire, but local_bitmap is sized for
+     * RF_HALF_ROWS×RF_HALF_COLS only. An out-of-range RF frame would otherwise
+     * read/write up to 10 bytes past local_bitmap into adjacent state/BSS.
+     * (Pentest 2026-06-25, OTA OOB write.) */
+    if (e->row >= RF_HALF_ROWS || e->col >= RF_HALF_COLS)
+        return false;
     if (st->seq_valid && e->seq == st->last_seq && !e->is_retry)
         return false;                     /* duplicate */
     st->last_seq = e->seq;
