@@ -26,7 +26,9 @@ void otp_proto_reset(void)
 {
     s_state    = ST_IDLE;
     s_resp_seq = 0;
-    memset(s_frame, 0, sizeof(s_frame));
+    memset(s_frame,     0, sizeof(s_frame));
+    memset(s_resp,      0, sizeof(s_resp));      /* don't retain last HMAC digest */
+    memset(s_challenge, 0, sizeof(s_challenge));
 }
 
 void otp_proto_on_write(const uint8_t report[OTP_FEATURE_RPT_SIZE])

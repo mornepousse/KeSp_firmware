@@ -1070,7 +1070,9 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
             /* Defence-in-depth: never copy past the buffer if a future hook
              * mis-reports its length (the contract fixes X25519 output at 32 B). */
             if (shared_n > sizeof(shared)) shared_n = sizeof(shared);
-            return respond(out, out_max, shared, shared_n, SW_OK);
+            uint16_t rn = respond(out, out_max, shared, shared_n, SW_OK);
+            memset(shared, 0, sizeof(shared));  /* scrub the ECDH KEK from stack */
+            return rn;
         }
 
         /* ---- PSO: Compute Digital Signature (P1=0x9E, P2=0x9A) ---- */
@@ -1316,7 +1318,9 @@ void openpgp_card_load(void)
                 ESP_LOGW(TAG, "Phase-1 key migration: v2 persist failed, "
                               "will retry next boot");
         }
+        memset(&v1, 0, sizeof(v1));     /* scrub migrated scalar from stack */
     }
+    memset(loaded, 0, sizeof(loaded));  /* scrub loaded private scalars from stack */
 }
 
 #else /* TEST_HOST */
