@@ -191,6 +191,10 @@ set(priv_requires
     esp_driver_gpio
     esp_timer
     nvs_flash
+    nvs_sec_provider  # NVS encryption HMAC scheme (CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC).
+                      # Unconditional like esp_wifi/bt above: a conditional require fails on
+                      # the first config pass (CONFIG unknown) and the NVS_SEC_* symbols stay
+                      # unknown. Compiles to ~nothing when NVS_ENCRYPTION=n.
     unity
     esp_driver_i2c
     app_update
