@@ -691,9 +691,14 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
         uint8_t old_len = *pin_len;
         if (a.lc <= old_len)
             return sw_only(out, out_max, SW_WRONG_DATA);
-        uint8_t new_len = (uint8_t)(a.lc - old_len);
-        if (new_len < min_len || new_len > PW_MAX_LEN)
+        /* Validate in 16-bit width BEFORE narrowing: an extended-Lc frame with
+         * (a.lc - old_len) a multiple of 256 plus a valid remainder would
+         * otherwise truncate to an in-range new_len and copy the wrong slice.
+         * (Phase-2 pentest: new_len truncation, openpgp_card.c low.) */
+        uint16_t new_len16 = (uint16_t)(a.lc - old_len);
+        if (new_len16 < min_len || new_len16 > PW_MAX_LEN)
             return sw_only(out, out_max, SW_WRONG_DATA);
+        uint8_t new_len = (uint8_t)new_len16;
 
         /* Verify old PIN — constant-time compare; mismatch decrements counter */
         if (!ct_pin_equal(a.data, old_len, pin, old_len)) {
@@ -1082,6 +1087,13 @@ uint16_t openpgp_card_apdu(const uint8_t *in, uint16_t in_len,
 
         if (!s_pw1_sign_verified)
             return sw_only(out, out_max, SW_SEC_NOT_SAT);
+
+        /* Validate the hash length BEFORE any side effect (UIF touch prompt,
+         * PW1 sign-token burn). Mirrors the crypto layer's 20..64 bound so a
+         * malformed input is rejected cleanly without consuming a touch.
+         * (Phase-2 pentest: PSO:CDS input gate, openpgp_card.c low.) */
+        if (a.lc < 20u || a.lc > 64u)
+            return sw_only(out, out_max, SW_WRONG_DATA);
 
         /* UIF gate: if DO 0xD6 byte[0] != 0, call confirm hook */
         if (uif_required(0x00D6u)) {

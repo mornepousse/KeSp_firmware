@@ -31,7 +31,8 @@ static bool fake_sign_fail(const uint8_t d[32],
     return false;
 }
 
-static int fake_confirm(void) { return g_confirm_retval; }
+static int g_confirm_calls = 0;   /* counts UIF confirm() invocations */
+static int fake_confirm(void) { g_confirm_calls++; return g_confirm_retval; }
 
 /* Algo-aware fake pubkey.
  * P-256: 0x04 || 0x77×64 (65 B).  X25519: 0x66×32 (32 B). */
@@ -199,6 +200,7 @@ static void setup_card(openpgp_card_hooks_t *h)
 {
     /* Reset globals so every test starts from a known state (order-independent). */
     g_confirm_retval = 1;
+    g_confirm_calls  = 0;
     memset(g_fake_sign_last_d, 0, sizeof(g_fake_sign_last_d));
     /* Ensure the crypto health flag is true regardless of test ordering. */
     openpgp_card_set_crypto_health(true);
@@ -721,6 +723,61 @@ static void test_serial_survives_factory_reset(void)
     TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DATA 4F after reset → 9000");
     TEST_ASSERT_EQ(rsp[10], 0x12, "serial[0] kept after factory reset");
     TEST_ASSERT_EQ(rsp[13], 0x78, "serial[3] kept after factory reset");
+}
+
+/* Pentest (Phase-2): PSO:CDS must validate the hash length BEFORE the UIF
+ * gate and PW1-token burn — a malformed (too short) hash must be rejected
+ * cleanly (6A80) without consuming a touch, leaving the sign token intact. */
+static void test_pso_cds_short_hash_rejected_no_touch(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
+    setup_card(&h);
+    uint8_t cmd[64], rsp[256]; uint16_t clen, rlen;
+    do_select(cmd, rsp);
+    do_verify_pw3(cmd, rsp);
+    static const uint8_t d[32] = {0x22};
+    do_import_key(d, cmd, rsp);          /* SIG slot; UIF on by default */
+    do_verify_pw1_sign(cmd, rsp);
+    g_confirm_calls = 0;
+
+    uint8_t shorth[10]; memset(shorth, 0xAB, sizeof(shorth));   /* 10 < 20 */
+    clen = build_pso_cds(shorth, sizeof(shorth), cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80, "PSO:CDS short hash → 6A80");
+    TEST_ASSERT_EQ(g_confirm_calls, 0, "no touch consumed on malformed hash");
+
+    /* Token preserved: a valid 32-byte hash still signs without re-VERIFY. */
+    uint8_t good[32]; memset(good, 0xCD, sizeof(good));
+    clen = build_pso_cds(good, sizeof(good), cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "valid PSO:CDS still works (token kept)");
+}
+
+/* Pentest (Phase-2): an extended-Lc CHANGE REFERENCE DATA whose (Lc - old_len)
+ * is a multiple of 256 plus an in-range remainder must NOT narrow to a valid
+ * uint8 new_len and copy the wrong slice — it must be rejected (6A80). */
+static void test_change_ref_extended_lc_no_truncation(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
+    setup_card(&h);
+    uint8_t cmd[320], rsp[256]; uint16_t clen, rlen;
+    do_select(cmd, rsp);
+
+    static const uint8_t old_pw1[6] = {'1','2','3','4','5','6'};
+    uint16_t lc = 270;                   /* (lc - 6) = 264 → (uint8_t)264 = 8 */
+    cmd[0]=0x00; cmd[1]=0x24; cmd[2]=0x00; cmd[3]=0x81;
+    cmd[4]=0x00; cmd[5]=(uint8_t)(lc>>8); cmd[6]=(uint8_t)(lc&0xFF);
+    memcpy(cmd+7, old_pw1, 6);
+    memset(cmd+7+6, 0xEE, (size_t)(lc-6));
+    clen = (uint16_t)(7 + lc);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x6A80,
+                   "extended-Lc CHANGE REF truncation rejected");
+
+    /* PW1 unchanged — original still verifies. */
+    clen = build_verify(0x81, old_pw1, 6, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "PW1 unchanged after rejected change");
 }
 
 /* ------------------------------------------------------------------ */
@@ -2119,6 +2176,8 @@ void test_openpgp_card(void)
     TEST_RUN(test_set_serial);
     TEST_RUN(test_historical_bytes_lcs_operational);
     TEST_RUN(test_serial_survives_factory_reset);
+TEST_RUN(test_pso_cds_short_hash_rejected_no_touch);
+TEST_RUN(test_change_ref_extended_lc_no_truncation);
     /* HW-validated fix: 5E login data + 7F74 general feature management */
     TEST_RUN(test_login_data_empty);
     TEST_RUN(test_gf_management);

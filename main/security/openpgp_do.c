@@ -77,8 +77,11 @@ static bool openpgp_do_persist(void)
 void openpgp_do_init(void)
 {
     uint32_t ver = 0;
-    nvs_load_blob_with_total(STORAGE_NAMESPACE, "pgp_dos",
+    esp_err_t err = nvs_load_blob_with_total(STORAGE_NAMESPACE, "pgp_dos",
                              s_dos, sizeof(s_dos), "pgp_dos_ver", &ver);
+    if (err != ESP_OK)
+        ESP_LOGW(TAG, "pgp_dos absent/invalid (%s) — DOs reset to factory",
+                 esp_err_to_name(err));
 }
 #else
 static bool openpgp_do_persist(void) { return true; }

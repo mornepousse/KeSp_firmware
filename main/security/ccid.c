@@ -179,6 +179,11 @@ static uint16_t ccid_build_slotstatus(uint8_t slot, uint8_t seq)
 static void ccid_send_wtx_cb(void *param)
 {
     (void)param;
+    /* USB reset (ccid_drv_reset) zeroes s_ep_in while the worker may still be
+     * blocked in dongle_confirm() mid-UIF-wait. Never issue a bulk xfer on
+     * EP0 (the control endpoint): WTX is moot until re-enumeration re-opens
+     * the interface. (Phase-2 pentest: USB-reset-during-UIF, ccid.c medium.) */
+    if (s_ep_in == 0) return;
     if (usbd_edpt_busy(s_rhport, s_ep_in)) return;
     s_wtx_buf[0] = RDR_TO_PC_DATA_BLOCK;
     s_wtx_buf[1] = 0x00;   /* dwLength = 0, LE */
@@ -201,6 +206,16 @@ static void ccid_send_wtx_cb(void *param)
 static void ccid_send_final_cb(void *param)
 {
     uintptr_t retries = (uintptr_t)param;
+    /* Interface was reset mid-operation (s_ep_in zeroed by ccid_drv_reset):
+     * drop the now-stale response instead of issuing a bulk xfer on EP0 or
+     * spinning 200 retries on a dead endpoint. State is already cleared by the
+     * reset; re-enumeration re-primes OUT for a fresh command flow.
+     * (Phase-2 pentest: USB-reset-during-UIF; also unwedges the abandon path.) */
+    if (s_ep_in == 0) {
+        s_final_queued = false;
+        s_busy         = false;
+        return;
+    }
     if (usbd_edpt_busy(s_rhport, s_ep_in)) {
         if (retries < 200)
             usbd_defer_func(ccid_send_final_cb, (void *)(retries + 1), false);
