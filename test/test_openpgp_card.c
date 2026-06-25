@@ -688,6 +688,41 @@ static void test_set_serial(void)
     TEST_ASSERT_EQ(rsp[13], 0xEF, "AID serial[3] = EF");
 }
 
+/* Historical bytes (DO 5F52) must report LCS = 0x05 (operational) so gpg allows
+ * `gpg --card-edit → admin → factory-reset` (it requires status indicator 3 or 5). */
+static void test_historical_bytes_lcs_operational(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
+    setup_card(&h);
+    uint8_t cmd[16], rsp[256]; uint16_t clen, rlen;
+    do_select(cmd, rsp);
+    clen = build_get_data(0x5F, 0x52, cmd);   /* historical bytes DO */
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DATA 5F52 → 9000");
+    TEST_ASSERT_EQ(rlen - 2, 10, "historical bytes are 10 long");
+    /* ISO 7816-4: category 0x00, last 3 bytes = LCS SW1 SW2 → index [7]=LCS. */
+    TEST_ASSERT_EQ(rsp[7], 0x05, "LCS = 0x05 (operational)");
+}
+
+/* The MAC-derived serial must survive a factory reset (ACTIVATE re-runs
+ * ensure_defaults which would otherwise restore the all-zero FACTORY_AID). */
+static void test_serial_survives_factory_reset(void)
+{
+    openpgp_card_hooks_t h = { .sign = fake_sign, .confirm = fake_confirm, .pubkey = fake_pubkey };
+    setup_card(&h);
+    uint8_t cmd[16], rsp[256]; uint16_t clen, rlen;
+    do_select(cmd, rsp);
+    uint8_t serial[4] = {0x12, 0x34, 0x56, 0x78};
+    openpgp_card_set_serial(serial);
+    TEST_ASSERT(openpgp_card_factory_reset(), "factory_reset ok");
+    do_select(cmd, rsp);
+    clen = build_get_data(0x00, 0x4F, cmd);
+    rlen = openpgp_card_apdu(cmd, clen, rsp, sizeof(rsp));
+    TEST_ASSERT_EQ(sw_of(rsp, rlen), 0x9000, "GET DATA 4F after reset → 9000");
+    TEST_ASSERT_EQ(rsp[10], 0x12, "serial[0] kept after factory reset");
+    TEST_ASSERT_EQ(rsp[13], 0x78, "serial[3] kept after factory reset");
+}
+
 /* ------------------------------------------------------------------ */
 /* Tests — Task 5: key import (PUT DATA 0xDB 3FFF) + DS counter       */
 /* ------------------------------------------------------------------ */
@@ -2082,6 +2117,8 @@ void test_openpgp_card(void)
     TEST_RUN(test_get_data_65_7a);
     TEST_RUN(test_do_capacity);
     TEST_RUN(test_set_serial);
+    TEST_RUN(test_historical_bytes_lcs_operational);
+    TEST_RUN(test_serial_survives_factory_reset);
     /* HW-validated fix: 5E login data + 7F74 general feature management */
     TEST_RUN(test_login_data_empty);
     TEST_RUN(test_gf_management);

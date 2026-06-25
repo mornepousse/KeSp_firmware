@@ -48,9 +48,13 @@ static const uint8_t FACTORY_AID[16] = {
     0x00, 0x00                             /* RFU                          */
 };
 
-/* Historical bytes 0x5F52 — mirrors the ATR historical bytes */
+/* Historical bytes 0x5F52 — mirrors the ATR historical bytes.
+ * ISO 7816-4: category 0x00 + compact-TLV + 3-byte status indicator (LCS,SW1,SW2).
+ * LCS = 0x05 (operational) is REQUIRED for gpg's `factory-reset` (it refuses unless
+ * the card reports status indicator 3 or 5). The ATR in ccid.c carries the same
+ * bytes (and must keep its TCK in sync). */
 static const uint8_t FACTORY_HIST[10] = {
-    0x00, 0x31, 0x84, 0x73, 0x80, 0x01, 0x80, 0x00, 0x90, 0x00
+    0x00, 0x31, 0x84, 0x73, 0x80, 0x01, 0x80, 0x05, 0x90, 0x00
 };
 
 /* Extended capabilities 0xC0 — 10 bytes:
@@ -120,6 +124,11 @@ typedef struct {
     uint8_t d[32];
 } pgp_key_t;
 static pgp_key_t s_keys[OPENPGP_SLOT_COUNT];
+
+/* Device serial (efuse MAC) cached at boot so factory_reset() can re-apply it —
+ * ensure_defaults() restores the all-zero FACTORY_AID otherwise. */
+static uint8_t s_serial[4];
+static bool    s_serial_set;
 
 /* NVS blob layout for PIN/retry persistence ("pgp_pins"). */
 typedef struct {
@@ -508,6 +517,11 @@ bool openpgp_card_factory_reset(void)
     /* 5. Populate all factory-default DOs */
     if (!openpgp_card_ensure_defaults()) ok = false;
 
+    /* 6. Re-apply the device serial — ensure_defaults() restored the all-zero
+     * FACTORY_AID, and set_serial() is otherwise only called once at boot, so an
+     * in-session factory reset (gpg admin/ACTIVATE) would leave serial 00000000. */
+    if (s_serial_set) openpgp_card_set_serial(s_serial);
+
     return ok;
 }
 
@@ -518,6 +532,9 @@ bool openpgp_card_key_is_set(void)
 
 void openpgp_card_set_serial(const uint8_t serial[4])
 {
+    memcpy(s_serial, serial, 4);
+    s_serial_set = true;
+
     uint8_t aid[16];
     const uint8_t *v;
     uint16_t n;
