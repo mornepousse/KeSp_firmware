@@ -425,6 +425,48 @@ gpgconf --kill all      # puis: gpg --card-status  (doit montrer 0 clé, PINs 3 
 
 ---
 
+## 11. Security posture — at-rest, integrity, RF link (2026-06-25)
+
+A security pass hardened the dongle on three axes. Status below; some items are
+configured + validated on a spare ESP32-S3 and await the (irreversible) dongle
+rollout.
+
+**At-rest — NVS encryption (HMAC scheme).** Without it, a flash dump
+(`esptool read_flash 0x9000 0x10000`) yields the private keys in cleartext
+(empirically confirmed). With it, the `nvs` partition is XTS-AES ciphertext, the
+key derived from an eFuse HMAC key auto-generated on-chip (read-protected, never
+leaves the part). Config in `sdkconfig.defaults.dongle`; validated on the spare
+board (entropy 7.89, 0 cleartext strings). Spec:
+`docs/superpowers/specs/2026-06-25-dongle-nvs-encryption-design.md`.
+
+**Integrity — Secure Boot V2 (RSA-3072).** Only firmware signed with the project
+key boots; a malicious/unsigned image is rejected (validated on the spare board:
+corrupted app → bootloader reset loop). Forces a partition-table reflow
+(bootloader >0x8000 → table at 0x10000, `partitions_dongle.csv`). ⚠️ The signing
+key (`secure_boot_signing_key.pem`, gitignored) signs all future firmware —
+**back it up offline; losing it = no more dongle updates.** Burning it
+(`SECURE_BOOT_EN` + Secure Download Mode) is **irreversible**.
+
+**Sequencing.** NVS-encryption + Secure Boot are flashed together (full flash,
+reflowed partitions). First boot burns the eFuses. Then re-push keyboard config
+and **re-mint the OpenPGP identity** so the keys are born inside an encrypted,
+signed device. Generate keys **off-card with an encrypted offline backup, then
+`keytocard`** — recoverable, unlike the no-backup on-card identity that was lost
+on 2026-06-25 (see §8).
+
+**RF link authentication.** The NRF24 link (halves → dongle) is being
+authenticated (per-set shared key + truncated HMAC-SHA1 + session-nonce
+anti-replay) to close over-the-air keystroke injection and remote `K_SEC_CONFIRM`
+forgery (which would bypass the touch gate). Spec:
+`docs/superpowers/specs/2026-06-25-rf-link-auth-design.md`.
+
+**Reset safety.** `scripts/kase-pgp-setup.sh reset` now refuses to wipe a card
+that holds a signature key unless you type its serial on the tty (`KASE_YES` /
+piped `oui` are ignored when keys are present) — the guard that would have
+prevented the 2026-06-25 identity loss.
+
+---
+
 ## What's proven / what needs your finger
 
 Everything above is validated on hardware. The one thing that cannot be automated and requires
