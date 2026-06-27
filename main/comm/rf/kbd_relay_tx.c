@@ -21,9 +21,16 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "driver/gpio.h"    /* CE-pin scan during pairing */
 
 static const char *TAG = "kbd_relay";
+
+/* Refresh the current keyboard report every 25 ms so a lost key-up self-heals
+ * (the NRF link is lossy + the HIDREPORT relay has no heartbeat reconciliation).
+ * HID keyboard reports are idempotent, so resending the live state is harmless;
+ * mouse is relative (non-idempotent) so it is NOT refreshed. */
+#define KBD_RELAY_REFRESH_MS  25
 
 /* ── Fallback NRF pin config ────────────────────────────────────────────────
  * Keyboard boards (V2, V2D) do not define BOARD_NRF_* — those are on the half
@@ -50,6 +57,31 @@ static const char *TAG = "kbd_relay";
 
 static rf_radio_t s_radio;
 static bool s_paired = false;
+
+/* TX serialization (engine send + refresh timer share the single radio) +
+ * last keyboard report for the periodic refresh. */
+static SemaphoreHandle_t s_tx_mutex;
+static uint8_t s_last_mod;
+static uint8_t s_last_kb[6];
+static bool    s_have_last;
+
+static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
+{
+    if (s_tx_mutex && xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+        rf_driver_send(&s_radio, buf, len);
+        xSemaphoreGive(s_tx_mutex);
+    }
+}
+
+/* esp_timer callback: resend the live keyboard report (idempotent). */
+static void kbd_relay_refresh_cb(void *arg)
+{
+    (void)arg;
+    if (!s_paired || !s_have_last) return;
+    uint8_t buf[9];
+    rf_encode_hidreport_kbd(buf, s_last_mod, s_last_kb);
+    kbd_tx_locked(buf, 9);
+}
 
 /* ── Radio config helper (mirrors board_nrf_cfg in half_scan_task.c) ─────── */
 
@@ -159,7 +191,17 @@ void kbd_relay_init(void)
 
     ESP_LOGI(TAG, "kbd_relay: paired set_id=0x%04X slot=0x%02X — relay active",
              set_id, slot);
+    s_tx_mutex = xSemaphoreCreateMutex();
     s_paired = true;
+
+    /* Periodic keyboard-state refresh: self-heals lost key-ups over the lossy
+     * link (no heartbeat reconciliation on the HIDREPORT path). */
+    const esp_timer_create_args_t ta = {
+        .callback = kbd_relay_refresh_cb, .name = "kbd_refresh",
+    };
+    esp_timer_handle_t th;
+    if (esp_timer_create(&ta, &th) == ESP_OK)
+        esp_timer_start_periodic(th, (uint64_t)KBD_RELAY_REFRESH_MS * 1000);
 }
 
 bool kbd_relay_active(void)
@@ -169,14 +211,17 @@ bool kbd_relay_active(void)
 
 void kbd_relay_send_kbd(uint8_t modifier, const uint8_t kb[6])
 {
+    s_last_mod = modifier;
+    memcpy(s_last_kb, kb, 6);
+    s_have_last = true;
     uint8_t buf[9];
     rf_encode_hidreport_kbd(buf, modifier, kb);
-    rf_driver_send(&s_radio, buf, 9);
+    kbd_tx_locked(buf, 9);
 }
 
 void kbd_relay_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
 {
     uint8_t buf[6];
     rf_encode_hidreport_mouse(buf, buttons, x, y, wheel);
-    rf_driver_send(&s_radio, buf, 6);
+    kbd_tx_locked(buf, 6);   /* relative — never refreshed */
 }
