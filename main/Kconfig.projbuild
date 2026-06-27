@@ -50,6 +50,15 @@ config KASE_HAS_TAMA
     help
         Compiles Tamagotchi virtual pet.
 
+config KASE_KBD_WIRELESS
+    bool "Keyboard talks to the M.2 dongle wirelessly (NRF HID + ESP-NOW config)"
+    default n
+    depends on KASE_DEVICE_ROLE_KEYBOARD
+    help
+      When set, a standalone keyboard relays its HID reports to the M.2 dongle
+      over NRF24 and exchanges config over ESP-NOW, instead of acting as its own
+      USB device. Wired keyboards (V1/V2) leave this off.
+
 config KASE_HAS_RF_RX
     bool
     default y if KASE_DEVICE_ROLE_DONGLE

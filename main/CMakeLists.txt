@@ -84,6 +84,15 @@ if(CONFIG_KASE_HAS_TAMA)
     )
 endif()
 
+# NRF24 + ESP-NOW radio stack — keyboard wireless relay mode only
+if(CONFIG_KASE_KBD_WIRELESS)
+    list(APPEND srcs
+        "comm/rf/rf_driver.c"
+        "comm/rf/rf_pairing.c"
+        "comm/espnow/espnow_link.c"
+        "comm/espnow/espnow_info.c")
+endif()
+
 # Dongle CDC stubs (no-op symbols for tama/bt/display referenced by cdc_binary_cmds.c)
 # and dongle-specific binary commands (RF status, pair list/reset, battery).
 # cr_hmac is kept unconditional: cdc_sec_cmds.c KAT self-test references it directly.
