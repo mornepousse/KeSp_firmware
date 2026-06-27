@@ -14,7 +14,7 @@
  * GPIO45 (IRQ) is a strapping pin — fine as a post-boot input. */
 #define BOARD_NRF_SPI_HOST      SPI2_HOST
 #define BOARD_NRF_SPI_MOSI      GPIO_NUM_5
-#define BOARD_NRF_SPI_MISO      GPIO_NUM_38
+#define BOARD_NRF_SPI_MISO      GPIO_NUM_37
 #define BOARD_NRF_SPI_SCK       GPIO_NUM_6
 #define BOARD_NRF_SPI_CLOCK_HZ  (8 * 1000 * 1000)
 #define BOARD_NRF_CSN_GPIO      GPIO_NUM_48
