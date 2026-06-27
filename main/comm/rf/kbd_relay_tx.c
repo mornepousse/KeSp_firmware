@@ -195,7 +195,8 @@ void kbd_relay_init(void)
     s_paired = true;
 
     /* Periodic keyboard-state refresh: self-heals lost key-ups over the lossy
-     * link (no heartbeat reconciliation on the HIDREPORT path). */
+     * link (no heartbeat reconciliation on the HIDREPORT path). Streams only
+     * after the first keystroke (s_have_last) so an idle keyboard stays quiet. */
     const esp_timer_create_args_t ta = {
         .callback = kbd_relay_refresh_cb, .name = "kbd_refresh",
     };

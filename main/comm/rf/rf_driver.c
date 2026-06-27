@@ -254,9 +254,18 @@ void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_EN_AA, 0x01);
     rf_driver_write_reg(r, REG_EN_RXADDR, 0x01);
     rf_driver_write_reg(r, REG_SETUP_AW, 0x03);
-    rf_driver_write_reg(r, REG_SETUP_RETR, 0x13);
+    rf_driver_write_reg(r, REG_SETUP_RETR, 0x1F);    /* ARD=500us, ARC=15 — MUST match
+                                                        rf_driver_init (was 0x13) */
     rf_driver_set_channel(r, cfg->channel);
-    rf_driver_write_reg(r, REG_RF_SETUP, 0x0E);
+    rf_driver_write_reg(r, REG_RF_SETUP, 0x06);      /* 1 Mbps, 0 dBm — MUST match
+                                                        rf_driver_init. Was 0x0E (2 Mbps):
+                                                        after the 250k→1M revert the init was
+                                                        fixed but this re-arm path was not, so
+                                                        the watchdog silently switched a live
+                                                        RX radio to 2 Mbps → deaf to 1 Mbps
+                                                        peers. Dormant for halves (heartbeats
+                                                        keep the watchdog from firing) but fatal
+                                                        for the heartbeat-less HID relay. */
     rf_driver_write_reg(r, REG_FEATURE, 0x04);
     rf_driver_write_reg(r, REG_DYNPD, 0x01);
     uint8_t addr[5];
