@@ -184,3 +184,19 @@ void ks_rx_reset(void);
 /* Process a fully assembled binary command from the FIFO.
  * Called from the CDC processing task. Returns true if a command was processed. */
 bool ks_process_one(void);
+
+/* Dispatch a fully-formed KS request frame directly (magic 'K''S' + cmd + len
+ * + payload + crc8). Verifies CRC, looks up the handler, and invokes it. Used by
+ * the ESP-NOW config bridge on the smart keyboard to run a frame that arrived
+ * over the air. On bad length/CRC or unknown command, emits a KR error (which on
+ * the keyboard is captured by the response-redirect — see below). */
+void ks_dispatch_frame(const uint8_t *frame, uint16_t len);
+
+/* ── Response redirect (ESP-NOW config bridge) ──────────────────────
+ * When the redirect is active, KS responses (ks_respond / ks_respond_begin /
+ * write / end) accumulate into an internal buffer instead of being written to
+ * USB CDC. Used on the smart keyboard so a KR generated for a bridged KS frame
+ * can be chunked back to the dongle over ESP-NOW. Default OFF → USB path is
+ * byte-identical. */
+void           ks_resp_redirect_begin(void);
+const uint8_t *ks_resp_redirect_end(uint16_t *len);  /* returns buf+len, clears flag */

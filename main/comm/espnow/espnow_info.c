@@ -12,6 +12,7 @@
 
 #include "espnow_info.h"
 #include "espnow_msg.h"
+#include "cfg_bridge.h"   /* config bridge KS/KR chunk handlers */
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -206,6 +207,19 @@ void espnow_info_dispatch(const uint8_t mac[6], const uint8_t *buf, uint8_t len)
         }
         break;
     }
+#endif
+#if CONFIG_KASE_KBD_WIRELESS
+    /* Smart keyboard: a config (KS) frame chunk arrived from the dongle.
+     * Payload after the type byte = [idx][total][slice...]. */
+    case EN_KS_CHUNK:
+        cfg_bridge_recv_ks_chunk(mac, buf + 1, (uint16_t)(len - 1));
+        break;
+#endif
+#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+    /* Dongle: a response (KR) frame chunk arrived from the smart keyboard. */
+    case EN_KR_CHUNK:
+        cfg_bridge_recv_kr_chunk(mac, buf + 1, (uint16_t)(len - 1));
+        break;
 #endif
     default:
         ESP_LOGW(TAG, "unknown ESP-NOW type 0x%02x (len=%u) — dropped", type, len);

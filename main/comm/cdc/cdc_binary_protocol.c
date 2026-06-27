@@ -1,6 +1,43 @@
 /* Binary CDC protocol core — frame parsing, CRC-8, dispatch, response framing */
 #include "cdc_binary_protocol.h"
 #include "cdc_internal.h"
+#include "cfg_bridge.h"   /* CFG_FRAME_MAX, cfg_is_dongle_local, bridge fns */
+#include <string.h>
+
+/* ── Response redirect (ESP-NOW config bridge) ──────────────────────
+ * When set (only on a smart keyboard handling an ESP-NOW-arrived KS frame), KS
+ * responses accumulate into s_resp_redirect_buf instead of USB CDC, and are sent
+ * back over ESP-NOW on flush. Default false → USB path is byte-identical. */
+static bool     s_resp_redirect;
+static uint8_t  s_resp_redirect_buf[CFG_FRAME_MAX];
+static uint16_t s_resp_redirect_len;
+
+/* Append bytes to the redirect buffer, bounds-checked vs CFG_FRAME_MAX.
+ * Silently drops the overflow tail (the bridge caps forwarded responses). */
+static void resp_redirect_append(const uint8_t *data, uint16_t len)
+{
+    if (!data || len == 0) return;
+    uint16_t room = (s_resp_redirect_len < CFG_FRAME_MAX)
+                  ? (uint16_t)(CFG_FRAME_MAX - s_resp_redirect_len) : 0;
+    uint16_t n = (len < room) ? len : room;
+    if (n) {
+        memcpy(s_resp_redirect_buf + s_resp_redirect_len, data, n);
+        s_resp_redirect_len = (uint16_t)(s_resp_redirect_len + n);
+    }
+}
+
+void ks_resp_redirect_begin(void)
+{
+    s_resp_redirect     = true;
+    s_resp_redirect_len = 0;
+}
+
+const uint8_t *ks_resp_redirect_end(uint16_t *len)
+{
+    s_resp_redirect = false;
+    if (len) *len = s_resp_redirect_len;
+    return s_resp_redirect_buf;
+}
 
 /* ── CRC-8: polynomial 0x31, init 0x00, MSB-first, no reflection ──
  * NOT the catalogued CRC-8/MAXIM (which is reflected). See
@@ -58,11 +95,18 @@ void ks_respond(uint8_t cmd_id, uint8_t status, const uint8_t *payload, uint16_t
     };
     uint8_t crc = ks_crc8(payload, len);
 
-    tinyusb_cdcacm_write_queue(CDC_ITF, hdr, 6);
-    if (len > 0 && payload)
-        tinyusb_cdcacm_write_queue(CDC_ITF, payload, len);
-    tinyusb_cdcacm_write_queue(CDC_ITF, &crc, 1);
-    tinyusb_cdcacm_write_flush(CDC_ITF, 0);
+    if (s_resp_redirect) {
+        resp_redirect_append(hdr, 6);
+        if (len > 0 && payload)
+            resp_redirect_append(payload, len);
+        resp_redirect_append(&crc, 1);
+    } else {
+        tinyusb_cdcacm_write_queue(CDC_ITF, hdr, 6);
+        if (len > 0 && payload)
+            tinyusb_cdcacm_write_queue(CDC_ITF, payload, len);
+        tinyusb_cdcacm_write_queue(CDC_ITF, &crc, 1);
+        tinyusb_cdcacm_write_flush(CDC_ITF, 0);
+    }
 }
 
 void ks_respond_ok(uint8_t cmd_id)
@@ -86,13 +130,21 @@ void ks_respond_begin(uint8_t cmd_id, uint8_t status, uint16_t total_len)
         cmd_id, status,
         (uint8_t)(total_len & 0xFF), (uint8_t)((total_len >> 8) & 0xFF)
     };
-    tinyusb_cdcacm_write_queue(CDC_ITF, hdr, 6);
+    if (s_resp_redirect) {
+        resp_redirect_append(hdr, 6);
+    } else {
+        tinyusb_cdcacm_write_queue(CDC_ITF, hdr, 6);
+    }
     stream_crc = 0x00;
 }
 
 void ks_respond_write(const uint8_t *data, uint16_t len)
 {
-    tinyusb_cdcacm_write_queue(CDC_ITF, data, len);
+    if (s_resp_redirect) {
+        resp_redirect_append(data, len);
+    } else {
+        tinyusb_cdcacm_write_queue(CDC_ITF, data, len);
+    }
     /* Update CRC incrementally */
     for (uint16_t i = 0; i < len; i++) {
         stream_crc ^= data[i];
@@ -103,8 +155,12 @@ void ks_respond_write(const uint8_t *data, uint16_t len)
 
 void ks_respond_end(void)
 {
-    tinyusb_cdcacm_write_queue(CDC_ITF, &stream_crc, 1);
-    tinyusb_cdcacm_write_flush(CDC_ITF, 0);
+    if (s_resp_redirect) {
+        resp_redirect_append(&stream_crc, 1);
+    } else {
+        tinyusb_cdcacm_write_queue(CDC_ITF, &stream_crc, 1);
+        tinyusb_cdcacm_write_flush(CDC_ITF, 0);
+    }
 }
 
 /* ── Receive-side state machine ─────────────────────────────────── */
@@ -216,6 +272,32 @@ uint16_t ks_rx_feed(const char *data, uint16_t len)
     return consumed;
 }
 
+void ks_dispatch_frame(const uint8_t *frame, uint16_t len)
+{
+    /* frame = [0x4B][0x53][cmd][len_lo][len_hi][payload...][crc8] */
+    if (!frame || len < 6) return;
+    if (frame[0] != KS_MAGIC_0 || frame[1] != KS_MAGIC_1) return;
+
+    uint8_t  cmd_id = frame[2];
+    uint16_t plen   = (uint16_t)frame[3] | ((uint16_t)frame[4] << 8);
+    /* Exact length: magic(2)+cmd(1)+len(2)+payload+crc(1) */
+    if ((uint32_t)plen + 6 != (uint32_t)len) return;
+
+    const uint8_t *payload = frame + 5;
+    uint8_t crc = frame[5 + plen];
+    if (ks_crc8(payload, plen) != crc) {
+        ks_respond_err(cmd_id, KS_STATUS_ERR_CRC);
+        return;
+    }
+
+    ks_bin_handler_t handler = find_handler(cmd_id);
+    if (handler) {
+        handler(cmd_id, payload, plen);
+    } else {
+        ks_respond_err(cmd_id, KS_STATUS_ERR_UNKNOWN);
+    }
+}
+
 bool ks_process_one(void)
 {
     if (!bin_rx.ready)
@@ -223,6 +305,31 @@ bool ks_process_one(void)
 
     bin_rx.ready = false;
     uint8_t cmd_id = bin_rx.cmd_id;
+
+#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+    /* Config bridge: config-class commands are owned by the paired smart
+     * keyboard. Reconstruct the raw KS frame and tunnel it over ESP-NOW; the
+     * KR returns asynchronously via EN_KR_CHUNK and is written out USB CDC. */
+    if (!cfg_is_dongle_local(cmd_id) && cfg_bridge_have_smart_kbd()) {
+        uint16_t full_len = (uint16_t)(6 + bin_rx.payload_len);
+        if (full_len <= CFG_FRAME_MAX) {
+            uint8_t frame[CFG_FRAME_MAX];
+            frame[0] = KS_MAGIC_0;
+            frame[1] = KS_MAGIC_1;
+            frame[2] = cmd_id;
+            frame[3] = (uint8_t)(bin_rx.payload_len & 0xFF);
+            frame[4] = (uint8_t)((bin_rx.payload_len >> 8) & 0xFF);
+            if (bin_rx.payload_len)
+                memcpy(frame + 5, bin_rx.payload, bin_rx.payload_len);
+            frame[5 + bin_rx.payload_len] = ks_crc8(bin_rx.payload, bin_rx.payload_len);
+            cfg_bridge_forward_frame(frame, full_len);
+        } else {
+            ks_respond_err(cmd_id, KS_STATUS_ERR_OVERFLOW);
+        }
+        return true;
+    }
+#endif
+
     ks_bin_handler_t handler = find_handler(cmd_id);
 
     if (handler) {

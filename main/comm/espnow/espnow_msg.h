@@ -29,6 +29,15 @@
 
 #define EN_INFO_STATUS    0x04   /* dongle → half: link + signal + USB status */
 
+/* ── Config bridge (0x40-0x41) ────────────────────────────────────
+ * KS/KR config-frame tunnel between the dongle and the paired SMART keyboard
+ * (V2D). The rebind software's KS frames are chunked and forwarded to the
+ * keyboard (which owns the keymap); the keyboard's KR response is chunked back.
+ * Each ESP-NOW payload = [type][idx][total][slice...], i.e. the type byte
+ * (prepended by espnow_send) followed by the cfg_chunk_make() output. */
+#define EN_KS_CHUNK       0x40   /* a config request (KS) frame chunk — both directions */
+#define EN_KR_CHUNK       0x41   /* a config response (KR) frame chunk — both directions */
+
 /* ── EN_INFO_STATUS (dongle → half) — 3 bytes ─────────────────── */
 typedef struct __attribute__((packed)) {
     uint8_t flags;      /* bit0=link_left_up, bit1=link_right_up,

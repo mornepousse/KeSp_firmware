@@ -15,6 +15,11 @@ set(srcs
     "comm/cdc/cdc_binary_cmds.c"
     "comm/cdc/ks_monitor.c"
 
+    # Config bridge: dongle↔smart-keyboard KS/KR tunnelling over ESP-NOW.
+    # Pure chunk/predicate logic compiles on all boards; the ESP-NOW networking
+    # functions are gated inside the file (dongle role / wireless keyboard).
+    "comm/rf/cfg_bridge.c"
+
     # Security confirmation gate — compiled for all roles (key_processor calls it)
     "security/sec_confirm.c"
 
