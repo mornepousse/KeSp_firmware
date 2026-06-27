@@ -232,6 +232,23 @@ static void test_rf_pair_req_too_short(void)
     TEST_ASSERT(!ok, "pair_req len<7: retourne false");
 }
 
+static void test_rf_pkt_hidreport_roundtrip(void)
+{
+    uint8_t kb[6] = {0x04,0x05,0,0,0,0};
+    uint8_t buf[32];
+    uint16_t n = rf_encode_hidreport_kbd(buf, 0x02, kb);
+    TEST_ASSERT_EQ(n, 9, "kbd hidreport = 1+1+1+6");
+    TEST_ASSERT_EQ(rf_packet_type(buf, n), PKT_TYPE_HIDREPORT, "type 0x5");
+    uint8_t mod, kbo[6]; uint8_t btn; int8_t x,y,w; uint8_t sub;
+    TEST_ASSERT(rf_decode_hidreport(buf, n, &sub, &mod, kbo, &btn, &x, &y, &w), "decode kbd");
+    TEST_ASSERT(sub==0 && mod==0x02 && kbo[0]==0x04 && kbo[1]==0x05, "kbd fields");
+    n = rf_encode_hidreport_mouse(buf, 0x01, 5, -3, 1);
+    TEST_ASSERT_EQ(n, 6, "mouse hidreport = 1+1+1+1+1+1");
+    TEST_ASSERT(rf_decode_hidreport(buf, n, &sub, &mod, kbo, &btn, &x, &y, &w), "decode mouse");
+    TEST_ASSERT(sub==1 && btn==0x01 && x==5 && y==-3 && w==1, "mouse fields");
+    TEST_ASSERT(!rf_decode_hidreport(buf, 2, &sub, &mod, kbo, &btn, &x, &y, &w), "runt rejected");
+}
+
 void test_rf_packet(void)
 {
     TEST_SUITE("RF packet codec");
@@ -248,4 +265,7 @@ void test_rf_packet(void)
     test_rf_pair_req_slot_right_roundtrip();
     test_rf_pair_req_legacy_7bytes();
     test_rf_pair_req_too_short();
+
+    /* TDD: PKT_TYPE_HIDREPORT encode/decode */
+    test_rf_pkt_hidreport_roundtrip();
 }

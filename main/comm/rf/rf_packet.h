@@ -9,8 +9,13 @@
 #define PKT_TYPE_KEY        0x1
 #define PKT_TYPE_HEARTBEAT  0x2
 #define PKT_TYPE_TRACKPAD   0x3
+#define PKT_TYPE_HIDREPORT  0x5   /* keyboard-agnostic relay: final HID report */
 #define PKT_TYPE_PAIR_ACK   0xE   /* dongle→half pairing ACK (RF-2) */
 #define PKT_TYPE_PAIR_REQ   0xF   /* half→dongle pairing request (RF-2) */
+
+/* Sub-types for PKT_TYPE_HIDREPORT (byte 1) */
+#define RF_HID_SUB_KBD   0
+#define RF_HID_SUB_MOUSE 1
 
 /* Flags (low nibble of byte 0) */
 #define PKT_FLAG_PRESSED    0x01   /* PKT_KEY: key is pressed (vs released) */
@@ -112,6 +117,33 @@ static inline uint8_t rf_packet_type(const uint8_t *buf, uint16_t len)
 {
     if (len < 1) return 0;
     return (buf[0] >> 4) & 0x0F;
+}
+
+/* PKT_HIDREPORT: relay final HID reports over NRF24.
+ *   kbd:   [type<<4][SUB_KBD][modifier][keycodes×6]   → 9 bytes
+ *   mouse: [type<<4][SUB_MOUSE][buttons][x][y][wheel] → 6 bytes
+ */
+static inline uint16_t rf_encode_hidreport_kbd(uint8_t *buf, uint8_t modifier, const uint8_t kb[6])
+{
+    buf[0] = (PKT_TYPE_HIDREPORT << 4); buf[1] = RF_HID_SUB_KBD; buf[2] = modifier;
+    memcpy(buf + 3, kb, 6); return 9;
+}
+
+static inline uint16_t rf_encode_hidreport_mouse(uint8_t *buf, uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
+{
+    buf[0] = (PKT_TYPE_HIDREPORT << 4); buf[1] = RF_HID_SUB_MOUSE;
+    buf[2] = buttons; buf[3] = (uint8_t)x; buf[4] = (uint8_t)y; buf[5] = (uint8_t)wheel; return 6;
+}
+
+static inline bool rf_decode_hidreport(const uint8_t *buf, uint16_t len, uint8_t *sub,
+        uint8_t *mod, uint8_t kb[6], uint8_t *btn, int8_t *x, int8_t *y, int8_t *wheel)
+{
+    if (len < 2 || rf_packet_type(buf, len) != PKT_TYPE_HIDREPORT) return false;
+    *sub = buf[1];
+    if (buf[1] == RF_HID_SUB_KBD)   { if (len < 9) return false; *mod = buf[2]; memcpy(kb, buf+3, 6); return true; }
+    if (buf[1] == RF_HID_SUB_MOUSE) { if (len < 6) return false; *btn = buf[2];
+        *x=(int8_t)buf[3]; *y=(int8_t)buf[4]; *wheel=(int8_t)buf[5]; return true; }
+    return false;
 }
 
 static inline bool rf_decode_key(const uint8_t *buf, uint16_t len, rf_key_event_t *e)
