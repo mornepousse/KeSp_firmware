@@ -21,7 +21,7 @@
 
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 #include "display_backend.h"
-#include "hid_bluetooth_manager.h"
+#include "hid_bluetooth_manager.h"   /* real API, or no-op stubs when HAS_BLE off */
 #include "keyboard_task.h"
 #include "led_strip_anim.h"
 #include "matrix_scan.h"
@@ -281,6 +281,7 @@ void app_main(void) {
                           &ucParameterToPass, 3, &xHandleMatrixKeyboard, 0);
 
   if (!safe_mode) {
+#if CONFIG_KASE_HAS_BLE
     ESP_LOGI(TAG, "bluetooth init check");
     if (load_bt_state()) {
       ESP_LOGI(TAG, "Starting bluetooth (saved state: ON)");
@@ -294,6 +295,7 @@ void app_main(void) {
     } else {
       ESP_LOGI(TAG, "Bluetooth disabled (saved state: OFF)");
     }
+#endif /* CONFIG_KASE_HAS_BLE */
 
 #if BOARD_HAS_LED_STRIP
     ESP_LOGI(TAG, "LED Strip init");

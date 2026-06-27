@@ -225,6 +225,9 @@ static void bin_cmd_set_layout_name(uint8_t cmd, const uint8_t *p, uint16_t l)
 }
 
 /* ── Bluetooth ──────────────────────────────────────────────────── */
+/* Compiled out in wireless-relay / dongle builds (CONFIG_KASE_HAS_BLE off):
+ * the BT command IDs drop from the dispatch table and return "unknown cmd". */
+#if CONFIG_KASE_HAS_BLE
 
 /* BT_QUERY: → [slot:u8][init:u8][conn:u8][pairing:u8][{slot_info}...] */
 static void bin_cmd_bt_query(uint8_t cmd, const uint8_t *p, uint16_t l)
@@ -302,6 +305,8 @@ static void bin_cmd_bt_prev(uint8_t cmd, const uint8_t *p, uint16_t l)
     bt_prev_device();
     ks_respond_ok(cmd);
 }
+
+#endif /* CONFIG_KASE_HAS_BLE */
 
 /* ── Tamagotchi ─────────────────────────────────────────────────── */
 
@@ -1130,13 +1135,15 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     { KS_CMD_LIST_LAYOUTS,      bin_cmd_list_layouts },
     { KS_CMD_SET_LAYOUT_NAME,   bin_cmd_set_layout_name },
     { KS_CMD_GET_LAYOUT_JSON,   bin_cmd_layout_json },
-    /* Bluetooth */
+    /* Bluetooth — only when the BLE stack is compiled in */
+#if CONFIG_KASE_HAS_BLE
     { KS_CMD_BT_QUERY,          bin_cmd_bt_query },
     { KS_CMD_BT_SWITCH,         bin_cmd_bt_switch },
     { KS_CMD_BT_PAIR,           bin_cmd_bt_pair },
     { KS_CMD_BT_DISCONNECT,     bin_cmd_bt_disconnect },
     { KS_CMD_BT_NEXT,           bin_cmd_bt_next },
     { KS_CMD_BT_PREV,           bin_cmd_bt_prev },
+#endif
     /* Tamagotchi */
     { KS_CMD_TAMA_QUERY,        bin_cmd_tama_query },
     { KS_CMD_TAMA_ENABLE,       bin_cmd_tama_enable },

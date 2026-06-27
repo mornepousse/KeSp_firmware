@@ -38,10 +38,13 @@ config KASE_HAS_DISPLAY
 
 config KASE_HAS_BLE
     bool
-    default y if KASE_DEVICE_ROLE_KEYBOARD
+    default y if KASE_DEVICE_ROLE_KEYBOARD && !KASE_KBD_WIRELESS
     default n
     help
-        Compiles BLE HID stack (ESP-IDF Bluedroid).
+        Compiles BLE HID stack (ESP-IDF Bluedroid). Disabled in wireless-relay
+        mode (KASE_KBD_WIRELESS): a smart keyboard reaches the host through the
+        M.2 dongle over USB, so its own BLE radio is redundant — and dropping it
+        frees ~80KB heap and removes its 2.4GHz activity near the NRF relay.
 
 config KASE_HAS_TAMA
     bool
