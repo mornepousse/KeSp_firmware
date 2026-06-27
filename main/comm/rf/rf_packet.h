@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include "rf_pairing.h"   /* RF_DEV_DUMB_HALF, RF_DEV_SMART_KBD */
 
 /* Packet type = high nibble of byte 0; flags = low nibble. */
 #define PKT_TYPE_KEY        0x1
@@ -184,6 +185,30 @@ static inline bool rf_decode_pair_req(const uint8_t *buf, uint16_t len,
     if (len < 7 || rf_packet_type(buf, len) != PKT_TYPE_PAIR_REQ) return false;
     memcpy(mac_out, buf + 1, 6);
     *slot_out = (len >= 8) ? buf[7] : 0;   /* legacy 7-byte req → slot unknown */
+    return true;
+}
+
+/* PKT_PAIR_REQ v2: 9 bytes — type 0xF, mac[6], slot, devtype.
+ * Use RF_DEV_DUMB_HALF or RF_DEV_SMART_KBD for devtype. */
+static inline uint16_t rf_encode_pair_req2(uint8_t *buf, const uint8_t mac[6],
+                                           uint8_t slot, uint8_t devtype)
+{
+    buf[0] = (PKT_TYPE_PAIR_REQ << 4);
+    memcpy(buf + 1, mac, 6);
+    buf[7] = slot;
+    buf[8] = devtype;
+    return 9;
+}
+
+/* Decodes both the 9-byte v2 (with devtype) and the legacy 8-byte (devtype=RF_DEV_DUMB_HALF). */
+static inline bool rf_decode_pair_req2(const uint8_t *buf, uint16_t len,
+                                       uint8_t mac_out[6], uint8_t *slot_out,
+                                       uint8_t *devtype_out)
+{
+    if (len < 8 || rf_packet_type(buf, len) != PKT_TYPE_PAIR_REQ) return false;
+    memcpy(mac_out, buf + 1, 6);
+    *slot_out    = buf[7];
+    *devtype_out = (len >= 9) ? buf[8] : RF_DEV_DUMB_HALF;
     return true;
 }
 

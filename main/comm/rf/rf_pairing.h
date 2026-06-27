@@ -46,6 +46,11 @@ uint8_t rf_derive_wifi_ch(uint16_t set_id);
 #define RF_PAIR_CHANNEL  0x28                          /* 40 dec, 2440 MHz */
 #define RF_PAIR_ADDR     { 'K', 'S', 'P', 'R', 0xFF }  /* 5 bytes */
 
+/* Device type advertised in the v2 pairing request (rf_encode_pair_req2).
+ * Legacy 8-byte halves (rf_encode_pair_req) are treated as DUMB_HALF. */
+#define RF_DEV_DUMB_HALF  0   /* sends raw matrix; HID engine runs on dongle */
+#define RF_DEV_SMART_KBD  1   /* sends final HID reports over NRF */
+
 /* Positional slot assignment (spec §3.4). paired_count 0→0x01, 1→0x02.
  * Returns false (window full) when paired_count >= 2. Pure. */
 bool rf_pairing_assign_slot(uint8_t paired_count, uint8_t *slot_out);

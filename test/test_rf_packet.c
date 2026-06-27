@@ -1,6 +1,7 @@
 /* Tests for the NRF24 RF packet codec (dongle plan 2) */
 #include "test_framework.h"
 #include "../main/comm/rf/rf_packet.h"
+#include "../main/comm/rf/rf_pairing.h"
 
 static void test_rf_key_roundtrip(void)
 {
@@ -249,6 +250,19 @@ static void test_rf_pkt_hidreport_roundtrip(void)
     TEST_ASSERT(!rf_decode_hidreport(buf, 2, &sub, &mod, kbo, &btn, &x, &y, &w), "runt rejected");
 }
 
+static void test_rf_pair_devtype(void) {
+    uint8_t buf[16]; uint8_t mac[6]={1,2,3,4,5,6};
+    uint16_t n = rf_encode_pair_req2(buf, mac, 0x01, RF_DEV_SMART_KBD);
+    uint8_t mo[6], slot, dev;
+    TEST_ASSERT(rf_decode_pair_req2(buf, n, mo, &slot, &dev), "decode v2 pair req");
+    TEST_ASSERT(dev == RF_DEV_SMART_KBD && slot == 0x01, "devtype + slot");
+    TEST_ASSERT(mo[0]==1 && mo[5]==6, "mac roundtrip");
+    /* legacy 8-byte pair-req decodes as DUMB_HALF via the v2 decoder */
+    uint8_t legacy[8]; rf_encode_pair_req(legacy, mac, 0x02);
+    TEST_ASSERT(rf_decode_pair_req2(legacy, 8, mo, &slot, &dev), "legacy decodes");
+    TEST_ASSERT(dev == RF_DEV_DUMB_HALF && slot == 0x02, "legacy = dumb half");
+}
+
 void test_rf_packet(void)
 {
     TEST_SUITE("RF packet codec");
@@ -268,4 +282,7 @@ void test_rf_packet(void)
 
     /* TDD: PKT_TYPE_HIDREPORT encode/decode */
     test_rf_pkt_hidreport_roundtrip();
+
+    /* TDD: v2 pairing request with device-type byte */
+    test_rf_pair_devtype();
 }
