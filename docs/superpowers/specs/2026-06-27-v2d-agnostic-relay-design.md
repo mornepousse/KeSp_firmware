@@ -66,11 +66,22 @@ V2D telemetry (layer/battery) → ESP-NOW → dongle (existing EN_INFO_* channel
   - `main/comm/rf/rf_rx_task.c` `drain_radio()` — handle `PKT_TYPE_HIDREPORT`:
     decode → `hid_transport` USB send (reuse the existing HID send path), skip the
     engine. Keep the raw-matrix branch unchanged.
-- **Config over ESP-NOW:**
-  - New ESP-NOW message(s) `EN_CFG_*` (keymap/settings chunks) — host→dongle(CDC)
-    →V2D. Reuse the existing `espnow_link`/`espnow_msg` framing; add config opcodes
-    alongside the `EN_INFO_*` telemetry ones. V2D stores config in its own NVS
-    (it owns the brain).
+- **Config over ESP-NOW = the CDC protocol tunneled (dongle is a bridge):**
+  ESP-NOW carries the **same KS/KR binary protocol** as USB CDC — not a new
+  format. The rebind software keeps talking KS/KR to the dongle over USB CDC; the
+  dongle **routes** each frame:
+  - **config/keymap-class** commands (SETKEY, MACRO, layers, stats, …) → forwarded
+    verbatim to the paired smart keyboard (V2D) over ESP-NOW; V2D processes them
+    (it owns the keymap/brain), and its KR response is relayed back out the USB CDC.
+  - **dongle-class** commands (RF status, pairing, dongle OTA) → handled locally
+    by the dongle as today.
+  - **DRY:** V2D reuses the **same KS/KR handlers** whether a frame arrives on its
+    own USB CDC (wired) or via ESP-NOW from the dongle (wireless). The rebind
+    software is unchanged — it still sees a device speaking KS/KR and configures
+    V2D *through* the dongle transparently.
+  - Implementation: an ESP-NOW transport that wraps a KS frame as its payload
+    (chunk if > the ESP-NOW 250 B limit), + a routing table in the dongle's CDC
+    dispatch (forward vs local). Telemetry keeps the existing `EN_INFO_*` channel.
 - **Pairing:** reuse the NRF pairing (`rf_pairing`), but the pair-req declares a
   **device type** (`dumb-half` vs `smart-keyboard`) so the dongle routes the
   paired device's packets to the right path. Extend `rf_encode_pair_req` with a
@@ -113,7 +124,9 @@ gets the same trailer as the other input packets.)
 
 - **Wired V2D coexistence:** confirm whether V2D keeps a wired direct-USB mode
   (then relay mode is a runtime/build option) or becomes wireless-only.
-- **Config-over-ESP-NOW scope:** which settings flow this way (full keymap? just
-  layers?) vs staying on V2D's own USB CDC when wired — to scope `EN_CFG_*`.
+- **Config-over-ESP-NOW = resolved:** tunnel the KS/KR protocol; dongle bridges
+  config-class → V2D, dongle-class → local (see Components §"Config over ESP-NOW").
+  Remaining detail for the plan: the exact forward-vs-local routing table (which
+  KS_CMD ids are dongle-local) + ESP-NOW chunking of large frames (keymap blobs).
 - **Power:** wireless V2D battery/light-sleep is out of scope here; flag if it
   becomes a blocker for daily use.
