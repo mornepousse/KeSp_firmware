@@ -228,6 +228,15 @@ static bool drain_radio(rf_radio_t *radio, hb_half_state_t *hb, uint8_t half)
                     hid_send_mouse(out.buttons, out.dx, out.dy, out.scroll_v);
                 }
             }
+        } else if (type == PKT_TYPE_HIDREPORT) {
+            /* Relay path: smart keyboard already ran its engine; forward final HID
+             * report straight to USB. No MATRIX_STATE, no run_engine_cycle(). */
+            uint8_t sub, mod, kb[6], btn; int8_t x, y, w;
+            if (rf_decode_hidreport(buf, n, &sub, &mod, kb, &btn, &x, &y, &w)) {
+                if (sub == RF_HID_SUB_KBD)        hid_send_keyboard(mod, kb);
+                else if (sub == RF_HID_SUB_MOUSE) hid_send_mouse(btn, x, y, w);
+            }
+            /* Do NOT set changed = true: no engine cycle for the relay path. */
         }
     }
     return changed;
@@ -388,8 +397,17 @@ static void rf_rx_task(void *arg)
         if (s_right.present) changed |= drain_radio(&s_right, &s_hb_right, HB_HALF_RIGHT);
 
         uint32_t now = esp_timer_get_time() / 1000;
+        bool was_up_left  = s_hb_left.link_up;
+        bool was_up_right = s_hb_right.link_up;
         hb_check_timeout(&s_hb_left,  HB_HALF_LEFT,  &s_cb, now, 250);
         hb_check_timeout(&s_hb_right, HB_HALF_RIGHT, &s_cb, now, 250);
+        /* Relay path: on link loss emit a zero keyboard report so no key sticks.
+         * Harmless on the raw-matrix path (engine will also release via MATRIX_STATE). */
+        if ((was_up_left  && !s_hb_left.link_up) ||
+            (was_up_right && !s_hb_right.link_up)) {
+            uint8_t z[6] = {0};
+            hid_send_keyboard(0, z);
+        }
         rf_rx_watchdog(now);   /* self-heal a wedged NRF radio (no reboot) */
 
         if (matrix_test_mode) {
