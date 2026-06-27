@@ -16,6 +16,11 @@
 #include "board.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_mac.h"        /* esp_read_mac */
+#include "esp_system.h"     /* esp_restart */
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "kbd_relay";
 
@@ -66,6 +71,52 @@ static rf_radio_cfg_t kbd_nrf_cfg(void)
     return c;
 }
 
+/* ── Active pairing task (mirrors half_pairing_task; no SPI-bus lock) ──────
+ * Sends PKT_PAIR_REQ on the rendezvous declaring this device as a smart
+ * keyboard, awaits PKT_PAIR_ACK, saves the assigned set_id/slot to NVS, then
+ * reboots so kbd_relay_init() comes up paired (relay active). Runs only while
+ * unpaired; the dongle's pairing window must be open (KS_CMD_RF_PAIR_START). */
+static void kbd_pairing_task(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "pairing: window open (30 s) — sending PKT_PAIR_REQ (smart kbd)");
+
+    uint8_t my_mac[6];
+    esp_read_mac(my_mac, ESP_MAC_WIFI_STA);
+    /* 8-byte REQ, byte-identical to a half's (the dongle pairing RX expects this
+     * width). Device-type defaults to dumb-half on the dongle; that's fine for
+     * the typing path (the dongle routes by PACKET TYPE, HIDREPORT vs KEY). */
+    uint8_t req[8];
+    rf_encode_pair_req(req, my_mac, BOARD_NRF_ADDR_SUFFIX);
+
+    static const uint8_t pair_addr[5] = RF_PAIR_ADDR;
+    uint32_t deadline = (uint32_t)(esp_timer_get_time() / 1000) + 30000;
+    bool acked = false;
+    rf_pair_ack_t ack;
+
+    while (!acked && (uint32_t)(esp_timer_get_time() / 1000) < deadline) {
+        rf_driver_set_tx_address(&s_radio, pair_addr);
+        rf_driver_set_channel(&s_radio, RF_PAIR_CHANNEL);
+        rf_driver_send(&s_radio, req, 8);
+
+        uint8_t rxb[32];
+        uint16_t n = rf_driver_pair_listen(&s_radio, RF_PAIR_CHANNEL, pair_addr,
+                                           rxb, sizeof(rxb), 150);
+        if (n && rf_decode_pair_ack(rxb, n, &ack)) { acked = true; break; }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    if (acked) {
+        ESP_LOGI(TAG, "pairing: ACK set_id=0x%04X slot=0x%02X — saving NVS + reboot",
+                 ack.set_id, ack.slot);
+        rf_pairing_save_half(ack.set_id, ack.slot, ack.dongle_wifi_mac);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+    }
+    ESP_LOGW(TAG, "pairing: timed out (no ACK) — relay stays inactive");
+    vTaskDelete(NULL);
+}
+
 /* ── Public API ─────────────────────────────────────────────────────────── */
 
 void kbd_relay_init(void)
@@ -88,11 +139,12 @@ void kbd_relay_init(void)
     }
 
     if (set_id == 0 || set_id == 0xFFFF) {
-        /* Radio is live but no dongle has been paired yet.  Pairing can be
-         * triggered later (e.g. via a CDC command or a dedicated key sequence).
-         * For now, relay stays inactive. */
-        ESP_LOGW(TAG, "kbd_relay: no pairing in NVS — relay inactive until paired");
-        return;
+        /* Unpaired: spawn the active pairing task. It REQs on the rendezvous and,
+         * on ACK, saves NVS + reboots (relay comes up active). Open the dongle's
+         * pairing window (KS_CMD_RF_PAIR_START) to complete it. */
+        ESP_LOGW(TAG, "kbd_relay: unpaired — starting pairing task (open the dongle window)");
+        xTaskCreate(kbd_pairing_task, "kbd_pair", 4096, NULL, 5, NULL);
+        return;   /* s_paired becomes true after the post-pairing reboot */
     }
 
     ESP_LOGI(TAG, "kbd_relay: paired set_id=0x%04X slot=0x%02X — relay active",
