@@ -30,7 +30,7 @@ static const char *TAG = "kbd_relay";
  * (the NRF link is lossy + the HIDREPORT relay has no heartbeat reconciliation).
  * HID keyboard reports are idempotent, so resending the live state is harmless;
  * mouse is relative (non-idempotent) so it is NOT refreshed. */
-#define KBD_RELAY_REFRESH_MS  25
+#define KBD_RELAY_REFRESH_MS  10
 
 /* ── Fallback NRF pin config ────────────────────────────────────────────────
  * Keyboard boards (V2, V2D) do not define BOARD_NRF_* — those are on the half
