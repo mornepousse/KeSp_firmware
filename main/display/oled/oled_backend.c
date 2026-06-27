@@ -5,6 +5,9 @@
 #include "i2c_oled_display.h"
 #include "hid_bluetooth_manager.h"
 #include "hid_report.h"
+#if CONFIG_KASE_KBD_WIRELESS
+#include "usb_presence.h"   /* kbd_active_route() — USB vs RF path icon */
+#endif
 #include "keyboard_config.h"
 #include "keymap.h"
 #include "tama_engine.h"
@@ -263,7 +266,12 @@ static void oled_update_connection_icons(bool force)
     else if (hid_bluetooth_is_connected())    bt_state = 1;
     else                                       bt_state = 2;
 
-    int path_state = (keyboard_get_usb_bl_state() == 0) ? 0 : 1;
+#if CONFIG_KASE_KBD_WIRELESS
+    /* Wireless relay: path icon reflects the live USB-first auto-switch. */
+    int path_state = (kbd_active_route() == KBD_OUT_RF) ? 1 : 0;   /* 0=USB, 1=RF */
+#else
+    int path_state = (keyboard_get_usb_bl_state() == 0) ? 0 : 1;   /* 0=USB, 1=BLE */
+#endif
     int pairing_state = hid_bluetooth_is_pairing() ? 1 : 0;
 
     bool blink_toggled = false;
@@ -284,9 +292,13 @@ static void oled_update_connection_icons(bool force)
     oled_init_icons();
     if (!icon_path) { lvgl_port_unlock(); return; }
 
-    /* Connection path icon */
+    /* Connection path icon: USB = flash; alternate path = RF (wireless) or BLE. */
     if (path_state == 0) lv_img_set_src(icon_path, &flash);
+#if CONFIG_KASE_KBD_WIRELESS
+    else                  lv_img_set_src(icon_path, &wifi);
+#else
     else                  lv_img_set_src(icon_path, &bluetooth_16px);
+#endif
 
     /* BT status icon */
     if (bt_state == 0) {

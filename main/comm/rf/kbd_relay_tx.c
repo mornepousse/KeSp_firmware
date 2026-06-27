@@ -13,6 +13,7 @@
 #include "rf_driver.h"
 #include "rf_packet.h"
 #include "rf_pairing.h"
+#include "usb_presence.h"   /* route poll + kbd_active_route (USB-first auto-switch) */
 #include "board.h"
 #include "esp_log.h"
 #include "esp_err.h"
@@ -73,11 +74,16 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
     }
 }
 
-/* esp_timer callback: resend the live keyboard report (idempotent). */
+/* esp_timer callback (10 ms): the single route poller, and the idempotent live
+ * keyboard-state refresh. Polling here keeps the debounce + cached route fresh
+ * even when idle. Only transmits over RF when RF is the active path — when USB is
+ * plugged we must NOT relay (the dongle would type a duplicate on its own host). */
 static void kbd_relay_refresh_cb(void *arg)
 {
     (void)arg;
-    if (!s_paired || !s_have_last) return;
+    usb_presence_poll(s_paired);
+    if (kbd_active_route() != KBD_OUT_RF) return;
+    if (!s_have_last) return;
     uint8_t buf[9];
     rf_encode_hidreport_kbd(buf, s_last_mod, s_last_kb);
     kbd_tx_locked(buf, 9);
@@ -164,6 +170,8 @@ static void kbd_pairing_task(void *arg)
 void kbd_relay_init(void)
 {
     s_paired = false;
+
+    usb_presence_init();   /* VBUS sense GPIO for the USB-first auto-switch */
 
     rf_radio_cfg_t nrf_cfg = kbd_nrf_cfg();
 

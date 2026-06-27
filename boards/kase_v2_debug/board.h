@@ -23,6 +23,14 @@
 #define BOARD_NRF_CHANNEL       76
 #define BOARD_NRF_ADDR_SUFFIX   0x03
 
+/* ── USB VBUS sense — wireless-relay auto-switch (USB-first) ───────────
+ * TinyUSB mount detection is unreliable on the S3 without VBUS sensing, so the
+ * USB-cable-present signal is read from this GPIO, fed by a 100k/100k divider off
+ * USB VBUS (5V -> ~2.5V = logic HIGH when plugged; pulled LOW when unplugged).
+ * Free / input-capable / non-strapping on the V2D — change to 34/35/36 if a
+ * different pad is more accessible on the bodge (nothing else depends on it). */
+#define BOARD_VBUS_SENSE_GPIO   GPIO_NUM_33
+
 /* Override product info */
 #undef GATTS_TAG
 #define GATTS_TAG   "KaSe_V2_DBG"

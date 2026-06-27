@@ -13,6 +13,7 @@
 
 #if CONFIG_KASE_KBD_WIRELESS
 #include "kbd_relay_tx.h"
+#include "usb_presence.h"   /* kbd_active_route() — USB-first auto-switch */
 #endif
 
 static const char *TAG = "HID_REPORT";
@@ -108,11 +109,11 @@ static void hid_sender_task(void *pvParameters)
         }
 
 #if CONFIG_KASE_KBD_WIRELESS
-        if (kbd_relay_active()) {
+        if (kbd_active_route() == KBD_OUT_RF) {
             kbd_relay_send_kbd(kb_mod, kb_buf);
             if (m_buttons || m_x || m_y || m_wheel)
                 kbd_relay_send_mouse(m_buttons, m_x, m_y, m_wheel);
-        } else
+        } else  /* KBD_OUT_USB (USB-first) / KBD_OUT_NONE → USB path (no-ops if down) */
 #endif
         hid_send_kb_mouse(kb_mod, kb_buf, m_buttons, m_x, m_y, m_wheel);
         xSemaphoreGive(hid_report_mutex);
@@ -174,7 +175,7 @@ void send_hid_key(void)
         xQueueSend(hid_queue, &msg, pdMS_TO_TICKS(5));
     } else {
 #if CONFIG_KASE_KBD_WIRELESS
-        if (kbd_relay_active()) { kbd_relay_send_kbd(modifier, keycodes); return; }
+        if (kbd_active_route() == KBD_OUT_RF) { kbd_relay_send_kbd(modifier, keycodes); return; }
 #endif
         hid_send_keyboard(modifier, keycodes);
     }
@@ -194,7 +195,7 @@ void send_mouse_report(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
         }
     } else {
 #if CONFIG_KASE_KBD_WIRELESS
-        if (kbd_relay_active()) { kbd_relay_send_mouse(buttons, x, y, wheel); return; }
+        if (kbd_active_route() == KBD_OUT_RF) { kbd_relay_send_mouse(buttons, x, y, wheel); return; }
 #endif
         hid_send_mouse(buttons, x, y, wheel);
     }
@@ -218,7 +219,7 @@ void send_hid_kb_mouse(uint8_t modifier, const uint8_t kc[6],
         }
     } else {
 #if CONFIG_KASE_KBD_WIRELESS
-        if (kbd_relay_active()) {
+        if (kbd_active_route() == KBD_OUT_RF) {
             kbd_relay_send_kbd(modifier, msg.payload.kb_mouse.keycodes);
             if (buttons || x || y || wheel)
                 kbd_relay_send_mouse(buttons, x, y, wheel);

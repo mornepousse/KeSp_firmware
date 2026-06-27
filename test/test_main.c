@@ -50,6 +50,7 @@ extern void test_apdu(void);
 extern void test_openpgp_do(void);
 extern void test_openpgp_card(void);
 extern void test_cfg_bridge(void);
+extern void test_kbd_route(void);
 
 int main(void) {
     printf("KeSp Firmware Unit Tests\n");
@@ -99,6 +100,7 @@ int main(void) {
     test_openpgp_do();
     test_openpgp_card();
     test_cfg_bridge();
+    test_kbd_route();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);
