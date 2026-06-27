@@ -347,10 +347,10 @@ void rf_driver_power_up(rf_radio_t *r)
 }
 
 /* ════════════════════════════════════════════════════════════════
- * PTX mode (half → dongle transmit)
- * Compiled only when KASE_HAS_RF_TX=y. Shares all helpers above.
+ * PTX mode (half → dongle transmit, or smart keyboard relay)
+ * Compiled when KASE_HAS_RF_TX=y (half) or KASE_KBD_WIRELESS=y (keyboard relay).
  * ════════════════════════════════════════════════════════════════ */
-#if CONFIG_KASE_HAS_RF_TX
+#if CONFIG_KASE_HAS_RF_TX || CONFIG_KASE_KBD_WIRELESS
 
 /* Additional registers and commands for PTX mode */
 #define REG_TX_ADDR         0x10
@@ -542,7 +542,7 @@ uint16_t rf_driver_pair_listen(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
     return got;
 }
 
-#endif /* CONFIG_KASE_HAS_RF_TX */
+#endif /* CONFIG_KASE_HAS_RF_TX || CONFIG_KASE_KBD_WIRELESS */
 
 bool rf_driver_rx_available(rf_radio_t *r)
 {

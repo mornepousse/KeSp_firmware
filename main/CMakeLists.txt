@@ -84,11 +84,12 @@ if(CONFIG_KASE_HAS_TAMA)
     )
 endif()
 
-# NRF24 + ESP-NOW radio stack — keyboard wireless relay mode only
+# NRF24 + ESP-NOW radio stack + HID relay TX — keyboard wireless relay mode only
 if(CONFIG_KASE_KBD_WIRELESS)
     list(APPEND srcs
         "comm/rf/rf_driver.c"
         "comm/rf/rf_pairing.c"
+        "comm/rf/kbd_relay_tx.c"
         "comm/espnow/espnow_link.c"
         "comm/espnow/espnow_info.c")
 endif()
@@ -230,6 +231,10 @@ if(CONFIG_KASE_HAS_RF_RX)
 endif()
 
 if(CONFIG_KASE_HAS_RF_TX AND NOT CONFIG_KASE_HAS_RF_RX)
+    list(APPEND priv_requires esp_driver_spi)
+endif()
+
+if(CONFIG_KASE_KBD_WIRELESS AND NOT CONFIG_KASE_HAS_RF_RX AND NOT CONFIG_KASE_HAS_RF_TX)
     list(APPEND priv_requires esp_driver_spi)
 endif()
 

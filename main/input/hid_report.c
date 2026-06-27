@@ -11,6 +11,10 @@
 #include "freertos/queue.h"
 #include <string.h>
 
+#if CONFIG_KASE_KBD_WIRELESS
+#include "kbd_relay_tx.h"
+#endif
+
 static const char *TAG = "HID_REPORT";
 
 /* ── Message types ───────────────────────────────────────────────── */
@@ -103,6 +107,13 @@ static void hid_sender_task(void *pvParameters)
             break;
         }
 
+#if CONFIG_KASE_KBD_WIRELESS
+        if (kbd_relay_active()) {
+            kbd_relay_send_kbd(kb_mod, kb_buf);
+            if (m_buttons || m_x || m_y || m_wheel)
+                kbd_relay_send_mouse(m_buttons, m_x, m_y, m_wheel);
+        } else
+#endif
         hid_send_kb_mouse(kb_mod, kb_buf, m_buttons, m_x, m_y, m_wheel);
         xSemaphoreGive(hid_report_mutex);
     }
@@ -162,6 +173,9 @@ void send_hid_key(void)
         }
         xQueueSend(hid_queue, &msg, pdMS_TO_TICKS(5));
     } else {
+#if CONFIG_KASE_KBD_WIRELESS
+        if (kbd_relay_active()) { kbd_relay_send_kbd(modifier, keycodes); return; }
+#endif
         hid_send_keyboard(modifier, keycodes);
     }
     memcpy(last_kc, keycodes, 6); last_mod = modifier; last_tick = xTaskGetTickCount();
@@ -179,6 +193,9 @@ void send_mouse_report(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
                 ESP_LOGW(TAG, "Mouse report dropped (queue full)");
         }
     } else {
+#if CONFIG_KASE_KBD_WIRELESS
+        if (kbd_relay_active()) { kbd_relay_send_mouse(buttons, x, y, wheel); return; }
+#endif
         hid_send_mouse(buttons, x, y, wheel);
     }
 }
@@ -200,6 +217,14 @@ void send_hid_kb_mouse(uint8_t modifier, const uint8_t kc[6],
                 ESP_LOGW(TAG, "KB+Mouse report dropped (queue full)");
         }
     } else {
+#if CONFIG_KASE_KBD_WIRELESS
+        if (kbd_relay_active()) {
+            kbd_relay_send_kbd(modifier, msg.payload.kb_mouse.keycodes);
+            if (buttons || x || y || wheel)
+                kbd_relay_send_mouse(buttons, x, y, wheel);
+            return;
+        }
+#endif
         hid_send_kb_mouse(modifier, msg.payload.kb_mouse.keycodes,
                           buttons, x, y, wheel);
     }

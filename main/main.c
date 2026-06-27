@@ -29,6 +29,10 @@
 #include "tama_engine.h"
 #endif
 
+#if CONFIG_KASE_KBD_WIRELESS
+#include "kbd_relay_tx.h"
+#endif
+
 #if CONFIG_KASE_DEVICE_ROLE_HALF
 #include "half_scan_task.h"
 #endif
@@ -265,6 +269,10 @@ void app_main(void) {
 
   ESP_LOGI(TAG, "Keyboard manager init");
   keyboard_manager_init();
+
+#if CONFIG_KASE_KBD_WIRELESS
+  kbd_relay_init();
+#endif
 
   ESP_LOGI(TAG, "Task Matrix init");
   TaskHandle_t xHandleMatrixKeyboard = NULL;

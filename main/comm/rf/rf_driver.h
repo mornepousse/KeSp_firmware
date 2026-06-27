@@ -83,8 +83,8 @@ bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
 void rf_driver_power_down(rf_radio_t *r);
 void rf_driver_power_up(rf_radio_t *r);
 
-/* ── PTX mode — compiled only when KASE_HAS_RF_TX=y ─────────────── */
-#if CONFIG_KASE_HAS_RF_TX
+/* ── PTX mode — compiled when KASE_HAS_RF_TX=y (half) or KASE_KBD_WIRELESS=y (keyboard relay) ── */
+#if CONFIG_KASE_HAS_RF_TX || CONFIG_KASE_KBD_WIRELESS
 
 /* Initialize the radio in PTX mode (transmitter).
  * Sets TX_ADDR + RX_ADDR_P0 to the same 5-byte address (required for ESB auto-ACK).
@@ -119,6 +119,6 @@ void rf_driver_set_tx_address(rf_radio_t *r, const uint8_t addr[5]);
 uint16_t rf_driver_pair_listen(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
                                uint8_t *buf, uint16_t maxlen, uint32_t timeout_ms);
 
-#endif /* CONFIG_KASE_HAS_RF_TX */
+#endif /* CONFIG_KASE_HAS_RF_TX || CONFIG_KASE_KBD_WIRELESS */
 
 #endif /* RF_DRIVER_H */
