@@ -214,9 +214,9 @@ esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_EN_AA, 0x01);           /* auto-ack pipe 0 */
     rf_driver_write_reg(r, REG_EN_RXADDR, 0x01);       /* enable pipe 0 */
     rf_driver_write_reg(r, REG_SETUP_AW, 0x03);        /* 5-byte address */
-    rf_driver_write_reg(r, REG_SETUP_RETR, 0x5F);      /* ARD=1500us (250kbps ACK is slower), ARC=15 */
+    rf_driver_write_reg(r, REG_SETUP_RETR, 0x1F);      /* ARD=500us, ARC=15 */
     rf_driver_set_channel(r, cfg->channel);
-    rf_driver_write_reg(r, REG_RF_SETUP, 0x26);        /* 250 kbps (RF_DR_LOW=1), 0 dBm — +12dB sensitivity */
+    rf_driver_write_reg(r, REG_RF_SETUP, 0x06);        /* 1 Mbps, 0 dBm (clones don't support 250kbps) */
     rf_driver_write_reg(r, REG_FEATURE, 0x04);         /* EN_DPL */
     rf_driver_write_reg(r, REG_DYNPD, 0x01);           /* dynamic payload pipe 0 */
 
@@ -417,9 +417,9 @@ esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_EN_AA,      0x01);   /* auto-ack pipe 0 (dongle ACKs our TX) */
     rf_driver_write_reg(r, REG_EN_RXADDR,  0x01);   /* pipe 0 for ACK reception */
     rf_driver_write_reg(r, REG_SETUP_AW,   0x03);   /* 5-byte address */
-    rf_driver_write_reg(r, REG_SETUP_RETR, 0x5F);   /* ARD=1500 µs (slower 250kbps ACK), ARC=15 — max retransmit */
+    rf_driver_write_reg(r, REG_SETUP_RETR, 0x1F);   /* ARD=500 µs, ARC=15 — max retransmit */
     rf_driver_set_channel(r, cfg->channel);
-    rf_driver_write_reg(r, REG_RF_SETUP,   0x26);   /* 250 kbps (RF_DR_LOW=1), 0 dBm — +12dB sensitivity for the bodged link */
+    rf_driver_write_reg(r, REG_RF_SETUP,   0x06);   /* 1 Mbps, 0 dBm — ~3dB better than 2Mbps; clones lack 250kbps */
     rf_driver_write_reg(r, REG_FEATURE,    0x04);   /* EN_DPL (bit2) */
     rf_driver_write_reg(r, REG_DYNPD,      0x01);   /* DPL on pipe 0 */
 
