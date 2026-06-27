@@ -67,6 +67,8 @@ add_executable(test_runner
     ../main/security/openpgp_do.c
     test_openpgp_card.c
     ../main/security/openpgp_card.c
+    test_cfg_bridge.c
+    ../main/comm/rf/cfg_bridge.c
     test_main.c
 )
 
