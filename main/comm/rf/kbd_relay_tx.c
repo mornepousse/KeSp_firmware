@@ -21,6 +21,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/gpio.h"    /* CE-pin scan during pairing */
 
 static const char *TAG = "kbd_relay";
 
@@ -79,41 +80,50 @@ static rf_radio_cfg_t kbd_nrf_cfg(void)
 static void kbd_pairing_task(void *arg)
 {
     (void)arg;
-    ESP_LOGI(TAG, "pairing: window open (30 s) — sending PKT_PAIR_REQ (smart kbd)");
-
     uint8_t my_mac[6];
     esp_read_mac(my_mac, ESP_MAC_WIFI_STA);
-    /* 8-byte REQ, byte-identical to a half's (the dongle pairing RX expects this
-     * width). Device-type defaults to dumb-half on the dongle; that's fine for
-     * the typing path (the dongle routes by PACKET TYPE, HIDREPORT vs KEY). */
     uint8_t req[8];
     rf_encode_pair_req(req, my_mac, BOARD_NRF_ADDR_SUFFIX);
-
     static const uint8_t pair_addr[5] = RF_PAIR_ADDR;
-    uint32_t deadline = (uint32_t)(esp_timer_get_time() / 1000) + 30000;
-    bool acked = false;
+
+    /* CE-pin scan: the register-read probe confirms SPI (CSN/SCK/MOSI/MISO) but
+     * NOT CE (the TX trigger). On the bodged V2D the CE wire is uncertain, so try
+     * each candidate GPIO as CE: the one that lets a REQ reach the dongle (ACK
+     * comes back) is the real CE. Logs the winner so it can be set in board.h.
+     * Only cfg.pin_ce changes (a GPIO toggled directly) — no SPI re-init. */
+    static const int ce_cand[] = { 47, 45, 38, 39, 40, 33, 34, 35, 36 };
     rf_pair_ack_t ack;
+    bool acked = false;
+    int win_ce = -1;
 
-    while (!acked && (uint32_t)(esp_timer_get_time() / 1000) < deadline) {
-        rf_driver_set_tx_address(&s_radio, pair_addr);
-        rf_driver_set_channel(&s_radio, RF_PAIR_CHANNEL);
-        rf_driver_send(&s_radio, req, 8);
-
-        uint8_t rxb[32];
-        uint16_t n = rf_driver_pair_listen(&s_radio, RF_PAIR_CHANNEL, pair_addr,
-                                           rxb, sizeof(rxb), 150);
-        if (n && rf_decode_pair_ack(rxb, n, &ack)) { acked = true; break; }
-        vTaskDelay(pdMS_TO_TICKS(50));
+    for (unsigned ci = 0; ci < sizeof(ce_cand) / sizeof(ce_cand[0]) && !acked; ci++) {
+        int ce = ce_cand[ci];
+        ESP_LOGW(TAG, "pairing: trying CE=GPIO%d ...", ce);
+        gpio_reset_pin(ce);
+        gpio_set_direction(ce, GPIO_MODE_OUTPUT);
+        gpio_set_level(ce, 0);
+        s_radio.cfg.pin_ce = ce;
+        for (int i = 0; i < 12 && !acked; i++) {        /* ~3 s per candidate */
+            rf_driver_set_tx_address(&s_radio, pair_addr);
+            rf_driver_set_channel(&s_radio, RF_PAIR_CHANNEL);
+            rf_driver_send(&s_radio, req, 8);
+            uint8_t rxb[32];
+            uint16_t n = rf_driver_pair_listen(&s_radio, RF_PAIR_CHANNEL, pair_addr,
+                                               rxb, sizeof(rxb), 150);
+            if (n && rf_decode_pair_ack(rxb, n, &ack)) { acked = true; win_ce = ce; break; }
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
     }
 
     if (acked) {
-        ESP_LOGI(TAG, "pairing: ACK set_id=0x%04X slot=0x%02X — saving NVS + reboot",
-                 ack.set_id, ack.slot);
+        ESP_LOGW(TAG, "pairing: ACK on CE=GPIO%d! set_id=0x%04X slot=0x%02X — saving + reboot",
+                 win_ce, ack.set_id, ack.slot);
         rf_pairing_save_half(ack.set_id, ack.slot, ack.dongle_wifi_mac);
         vTaskDelay(pdMS_TO_TICKS(500));
         esp_restart();
     }
-    ESP_LOGW(TAG, "pairing: timed out (no ACK) — relay stays inactive");
+    ESP_LOGE(TAG, "pairing: no CE candidate worked — REQ never reached the dongle "
+                  "(check CE wiring / dongle window)");
     vTaskDelete(NULL);
 }
 
