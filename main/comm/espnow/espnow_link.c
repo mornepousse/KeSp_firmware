@@ -98,7 +98,11 @@ static uint8_t espnow_derive_wifi_ch(void)
     uint16_t set_id = 0;
 #if CONFIG_KASE_DEVICE_ROLE_DONGLE
     set_id = rf_pairing_load_set_id_dongle();
-#elif CONFIG_KASE_DEVICE_ROLE_HALF
+#elif CONFIG_KASE_DEVICE_ROLE_HALF || CONFIG_KASE_KBD_WIRELESS
+    /* Half and wireless-relay keyboard both store the dongle's set_id via
+     * rf_pairing_save_half(); use it so the WiFi channel matches the dongle
+     * (otherwise the keyboard defaulted to ch 6 while the dongle was on
+     * {1,6,11}[set_id%3] → ESP-NOW never delivered). */
     uint8_t slot;
     set_id = rf_pairing_load_set_id_half(0x01, &slot);
 #endif

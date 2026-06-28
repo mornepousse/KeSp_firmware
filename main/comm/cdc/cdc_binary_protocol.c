@@ -313,7 +313,10 @@ bool ks_process_one(void)
     if (!cfg_is_dongle_local(cmd_id) && cfg_bridge_have_smart_kbd()) {
         uint16_t full_len = (uint16_t)(6 + bin_rx.payload_len);
         if (full_len <= CFG_FRAME_MAX) {
-            uint8_t frame[CFG_FRAME_MAX];
+            /* static, not on the stack: CFG_FRAME_MAX is 6KB and the CDC dispatch
+             * task stack would overflow (reboot). ks_process_one is the single,
+             * non-reentrant CDC dispatcher, so a shared static buffer is safe. */
+            static uint8_t frame[CFG_FRAME_MAX];
             frame[0] = KS_MAGIC_0;
             frame[1] = KS_MAGIC_1;
             frame[2] = cmd_id;
