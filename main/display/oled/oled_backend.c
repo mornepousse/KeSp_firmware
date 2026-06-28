@@ -446,12 +446,18 @@ static void oled_sleep(void)
         last_pairing_state = -1;
         tama_render_destroy();
         oled_initialized = false;
+        /* Power the panel OFF (SSD1306 display-off) while holding the LVGL lock
+         * (no concurrent I2C flush). The clear only blanks the LVGL buffer; in
+         * light-sleep the LVGL task is held and never flushes it, so without this
+         * the last frame would stay frozen on screen. */
+        i2c_oled_display_power(false);
         lvgl_port_unlock();
     }
 }
 
 static void oled_wake(void)
 {
+    i2c_oled_display_power(true);   /* panel back on (redraw follows) */
     request_wake_request = true;
 }
 

@@ -14,9 +14,19 @@
 #include "driver/i2c.h"
 #include "driver/gpio.h"
 
-static const char *TAG_DISP = "I2C_OLED"; 
+static const char *TAG_DISP = "I2C_OLED";
 /* Forward declaration */
 bool test_oled_presence(void);
+
+static esp_lcd_panel_handle_t s_panel = NULL;   /* for i2c_oled_display_power() */
+
+/* Turn the SSD1306 panel on/off (display on/off command). Independent of LVGL —
+ * used by the OLED sleep/wake path so the screen truly goes dark in light-sleep
+ * even while the LVGL task is held (no flush of a cleared frame would happen). */
+void i2c_oled_display_power(bool on)
+{
+    if (s_panel) esp_lcd_panel_disp_on_off(s_panel, on);
+}
 
 lv_disp_t *disp;
 /* display_available is defined in status_display.c */
@@ -130,6 +140,7 @@ void init_display(void)
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
+    s_panel = panel_handle;   /* kept for i2c_oled_display_power() (sleep/wake) */
 
     ESP_LOGI(TAG_DISP, "Initialize LVGL for I2C OLED");
     const lvgl_port_cfg_t lvgl_cfg = {
