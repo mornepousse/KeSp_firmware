@@ -93,6 +93,13 @@ extern void tap_dance_tick(void);
 
 static rf_radio_t s_left, s_right;
 
+/* Last time each radio drained ANY packet (ms). The watchdog uses this — not the
+ * heartbeat age — to decide a radio is wedged: the HID relay sends no heartbeats,
+ * so a heartbeat-age trigger would re-arm a perfectly-working relay radio every
+ * RF_REARM_SILENCE_MS (FLUSH_RX + a brief deaf window = needless dropped packets).
+ * Any received packet (heartbeat, key, or HID report) refreshes this. */
+static uint32_t s_left_last_rx_ms = 0, s_right_last_rx_ms = 0;
+
 /* Current per-radio config (set_id-derived) — kept so the radio watchdog can
  * re-arm a wedged radio with the live address/channel. Updated at init and on
  * every pairing hot-switch. */
@@ -188,6 +195,9 @@ static bool drain_radio(rf_radio_t *radio, hb_half_state_t *hb, uint8_t half)
     while (rf_driver_rx_available(radio)) {
         uint16_t n = rf_driver_read_rx(radio, buf, sizeof(buf));
         if (n == 0) break;
+        /* Any packet = the radio is alive (watchdog liveness, not just heartbeats). */
+        uint32_t rx_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        if (half == HB_HALF_LEFT) s_left_last_rx_ms = rx_ms; else s_right_last_rx_ms = rx_ms;
         uint8_t type = rf_packet_type(buf, n);
         if (type == PKT_TYPE_KEY) {
             rf_key_event_t e;
@@ -363,20 +373,20 @@ static void rf_rx_watchdog(uint32_t now)
 {
     static uint32_t s_left_rearm_ms = 0, s_right_rearm_ms = 0;
     if (s_left.present &&
-        (now - s_hb_left.last_hb_ms) > RF_REARM_SILENCE_MS &&
-        (now - s_left_rearm_ms)      > RF_REARM_SILENCE_MS) {
+        (now - s_left_last_rx_ms) > RF_REARM_SILENCE_MS &&
+        (now - s_left_rearm_ms)   > RF_REARM_SILENCE_MS) {
         rf_driver_rearm_rx(&s_left, &s_lcfg);
         s_left_rearm_ms = now;
-        ESP_LOGW(TAG, "watchdog: re-armed LEFT radio (silent %lu ms)",
-                 (unsigned long)(now - s_hb_left.last_hb_ms));
+        ESP_LOGW(TAG, "watchdog: re-armed LEFT radio (no rx %lu ms)",
+                 (unsigned long)(now - s_left_last_rx_ms));
     }
     if (s_right.present &&
-        (now - s_hb_right.last_hb_ms) > RF_REARM_SILENCE_MS &&
-        (now - s_right_rearm_ms)      > RF_REARM_SILENCE_MS) {
+        (now - s_right_last_rx_ms) > RF_REARM_SILENCE_MS &&
+        (now - s_right_rearm_ms)   > RF_REARM_SILENCE_MS) {
         rf_driver_rearm_rx(&s_right, &s_rcfg);
         s_right_rearm_ms = now;
-        ESP_LOGW(TAG, "watchdog: re-armed RIGHT radio (silent %lu ms)",
-                 (unsigned long)(now - s_hb_right.last_hb_ms));
+        ESP_LOGW(TAG, "watchdog: re-armed RIGHT radio (no rx %lu ms)",
+                 (unsigned long)(now - s_right_last_rx_ms));
     }
 }
 
