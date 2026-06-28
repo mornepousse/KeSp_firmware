@@ -65,6 +65,7 @@ static SemaphoreHandle_t s_tx_mutex;
 static uint8_t s_last_mod;
 static uint8_t s_last_kb[6];
 static bool    s_have_last;
+static esp_timer_handle_t s_refresh_timer;   /* periodic refresh; stopped during sleep */
 
 static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
 {
@@ -208,9 +209,27 @@ void kbd_relay_init(void)
     const esp_timer_create_args_t ta = {
         .callback = kbd_relay_refresh_cb, .name = "kbd_refresh",
     };
-    esp_timer_handle_t th;
-    if (esp_timer_create(&ta, &th) == ESP_OK)
-        esp_timer_start_periodic(th, (uint64_t)KBD_RELAY_REFRESH_MS * 1000);
+    if (esp_timer_create(&ta, &s_refresh_timer) == ESP_OK)
+        esp_timer_start_periodic(s_refresh_timer, (uint64_t)KBD_RELAY_REFRESH_MS * 1000);
+}
+
+/* ── Light-sleep hooks (V2D wireless) ─────────────────────────────────────── */
+
+void kbd_relay_sleep_prepare(void)
+{
+    /* Stop the refresh timer (no NRF access during sleep), then take the TX mutex
+     * and power the NRF down. Hold the mutex across sleep so nothing transmits. */
+    if (s_refresh_timer) esp_timer_stop(s_refresh_timer);
+    if (s_tx_mutex) xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(50));
+    rf_driver_power_down(&s_radio);
+}
+
+void kbd_relay_wake_restore(void)
+{
+    rf_driver_power_up(&s_radio);
+    if (s_tx_mutex) xSemaphoreGive(s_tx_mutex);
+    if (s_refresh_timer) esp_timer_start_periodic(s_refresh_timer,
+                                                  (uint64_t)KBD_RELAY_REFRESH_MS * 1000);
 }
 
 bool kbd_relay_active(void)

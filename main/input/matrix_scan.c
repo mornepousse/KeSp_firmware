@@ -11,6 +11,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "status_display.h"
+#include "driver/gpio.h"
+#include "esp_sleep.h"
 
 #define TAG "MATRIX_SCAN"
 
@@ -124,6 +126,42 @@ void rtc_matrix_deinit(void)
         keyboard_button_delete(s_kbd);
         s_kbd = NULL;
     }
+}
+
+/* ── Light-sleep matrix key-wake (V2D wireless) ──────────────────────────────
+ * The scan driver drives COLS (outputs) and reads ROWS (inputs). For a static
+ * wake, drive every COL HIGH and arm each ROW as a HIGH-level wake source: a
+ * keypress ties a HIGH col to its row → row goes HIGH → wakes light-sleep.
+ * gpio_sleep_sel_dis keeps this config live during sleep (else IDF isolates the
+ * pads and no key can wake). Call rtc_matrix_deinit() first (driver released).
+ * BENCH-TUNE: active level is HIGH here; flip if the matrix is active-low. */
+void matrix_arm_key_wake(void)
+{
+    const int cols[MATRIX_COLS] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5,
+                                    COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
+    const int rows[MATRIX_ROWS] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+
+    for (int i = 0; i < MATRIX_COLS; i++) {
+        gpio_set_direction(cols[i], GPIO_MODE_OUTPUT);
+        gpio_set_level(cols[i], 1);
+        gpio_sleep_sel_dis(cols[i]);
+    }
+    for (int i = 0; i < MATRIX_ROWS; i++) {
+        gpio_set_direction(rows[i], GPIO_MODE_INPUT);
+        gpio_set_pull_mode(rows[i], GPIO_PULLDOWN_ONLY);
+        gpio_wakeup_enable(rows[i], GPIO_INTR_HIGH_LEVEL);
+        gpio_sleep_sel_dis(rows[i]);
+    }
+    esp_sleep_enable_gpio_wakeup();
+}
+
+void matrix_disarm_key_wake(void)
+{
+    const int rows[MATRIX_ROWS] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+    for (int i = 0; i < MATRIX_ROWS; i++) {
+        gpio_wakeup_disable(rows[i]);
+    }
+    /* matrix_setup() re-takes the pins for the scan driver. */
 }
 
 void matrix_setup(void)

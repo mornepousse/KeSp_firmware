@@ -54,6 +54,14 @@ void layer_changed(void);
 
 uint32_t get_last_activity_time_ms(void);
 
+void rtc_matrix_deinit(void);
+void matrix_setup(void);
+
+/* Light-sleep matrix key-wake (V2D wireless): arm/disarm matrix GPIOs as a
+ * keypress wake source around esp_light_sleep_start(). */
+void matrix_arm_key_wake(void);
+void matrix_disarm_key_wake(void);
+
 /* Matrix test mode: when true, scan callback sends key events
    via CDC binary protocol instead of filling HID reports */
 extern volatile bool matrix_test_mode;

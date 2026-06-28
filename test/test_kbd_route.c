@@ -1,6 +1,7 @@
 /* Tests for the wireless V2D HID output routing + VBUS debounce (pure logic). */
 #include "test_framework.h"
 #include "../main/comm/usb/usb_presence.h"
+#include "../main/comm/rf/v2d_sleep.h"
 
 static void test_route_usb_first(void)
 {
@@ -43,11 +44,22 @@ static void test_debounce_rejects_bounce(void)
     TEST_ASSERT(vbus_debounce_step(&d, false, 80, 50) == false, "80-30=50 >= window: flips");
 }
 
+static void test_v2d_should_sleep(void)
+{
+    /* Sleep only on RF, only past the idle threshold. */
+    TEST_ASSERT(!v2d_should_sleep(false, 999999, 60000), "USB path never sleeps");
+    TEST_ASSERT(!v2d_should_sleep(true,  59999, 60000),  "RF but under threshold: no");
+    TEST_ASSERT(v2d_should_sleep(true,  60000, 60000),   "RF at threshold: sleep");
+    TEST_ASSERT(v2d_should_sleep(true,  120000, 60000),  "RF over threshold: sleep");
+    TEST_ASSERT(!v2d_should_sleep(true, 0, 60000),       "RF just-active: no");
+}
+
 void test_kbd_route(void)
 {
-    printf("\n-- kbd_route / vbus_debounce --\n");
+    printf("\n-- kbd_route / vbus_debounce / v2d_sleep --\n");
     test_route_usb_first();
     test_debounce_seeds_first_sample();
     test_debounce_holds_until_window();
     test_debounce_rejects_bounce();
+    test_v2d_should_sleep();
 }

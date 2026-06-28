@@ -12,6 +12,10 @@
 #include "key_features.h"
 #include "keymap.h"
 #include "hid_transport.h"
+#if CONFIG_KASE_KBD_WIRELESS
+#include "v2d_sleep.h"
+#include "usb_presence.h"   /* kbd_active_route */
+#endif
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -128,6 +132,17 @@ void vTaskKeyboard(void *pvParameters)
                 send_hid_key();
             }
         }
+
+#if CONFIG_KASE_KBD_WIRELESS
+        /* RF-mode idle → light-sleep (USB stays awake). v2d_sleep_enter() blocks
+         * until a keypress wakes it, then restores everything. */
+        {
+            uint32_t idle = (uint32_t)(esp_timer_get_time() / 1000)
+                          - get_last_activity_time_ms();
+            if (v2d_should_sleep(kbd_active_route() == KBD_OUT_RF, idle, 60000))
+                v2d_sleep_enter();
+        }
+#endif
     }
 }
 

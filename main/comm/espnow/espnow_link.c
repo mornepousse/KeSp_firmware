@@ -266,6 +266,10 @@ bool espnow_link_restart_espnow(void)
     }
     espnow_reload_peers();
     esp_now_register_recv_cb(espnow_recv_cb);
+    /* esp_now_deinit() (sleep) dropped the send cb too — re-register it and reset
+     * the TX flow-control token, else espnow_send_blocking() would stall. */
+    if (s_send_done) xSemaphoreGive(s_send_done);
+    esp_now_register_send_cb(espnow_send_cb);
     ESP_LOGI(TAG, "espnow_link_restart_espnow: ESP-NOW re-init OK");
     return true;
 }

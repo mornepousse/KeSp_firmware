@@ -95,6 +95,7 @@ if(CONFIG_KASE_KBD_WIRELESS)
         "comm/rf/rf_driver.c"
         "comm/rf/rf_pairing.c"
         "comm/rf/kbd_relay_tx.c"
+        "comm/rf/v2d_sleep.c"
         "comm/usb/usb_presence.c"
         "comm/espnow/espnow_link.c"
         "comm/espnow/espnow_info.c")
