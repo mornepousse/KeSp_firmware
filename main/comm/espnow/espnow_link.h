@@ -67,3 +67,10 @@ bool espnow_link_restart_espnow(void);
  * The function prepends [type] before payload in the ESP-NOW frame.
  * Returns true if esp_now_send() accepted the frame (fire-and-forget; no ACK). */
 bool espnow_send(const uint8_t mac[6], uint8_t type, const void *payload, uint16_t len);
+
+/* Flow-controlled variant: blocks until the previous frame's TX completes (send
+ * callback) before queuing the next, so a burst of chunks never overflows the
+ * WiFi TX ring. Call only from a blockable task context (NOT the recv callback).
+ * Returns false on timeout or send error. */
+bool espnow_send_blocking(const uint8_t mac[6], uint8_t type,
+                          const void *payload, uint16_t len, uint32_t timeout_ms);

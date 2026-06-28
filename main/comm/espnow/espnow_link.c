@@ -21,6 +21,8 @@
 #include "esp_mac.h"       /* esp_read_mac, ESP_MAC_WIFI_STA */
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #endif /* TEST_HOST */
 
 #include <string.h>
@@ -40,6 +42,20 @@
 
 static uint8_t s_peer_macs[ESPNOW_MAX_PEERS][6];
 static int     s_peer_count = 0;
+
+#ifndef TEST_HOST
+/* TX flow control: esp_now_send queues to a small (~6) WiFi TX ring; firing many
+ * chunks back-to-back overflows it and silently drops the tail. This binary
+ * semaphore serializes to one in-flight frame — given on init and by the send
+ * callback when each frame completes, taken before the next send. */
+static SemaphoreHandle_t s_send_done;
+
+static void espnow_send_cb(const esp_now_send_info_t *info, esp_now_send_status_t status)
+{
+    (void)info; (void)status;
+    if (s_send_done) xSemaphoreGive(s_send_done);
+}
+#endif
 
 /* Store up to ESPNOW_MAX_PEERS MAC addresses for recv filtering.
  * Call once in espnow_link_init(), before registering the recv callback.
@@ -219,6 +235,11 @@ bool espnow_link_init(void)
         return false;
     }
 
+    /* TX flow control: 1 in-flight frame at a time (see s_send_done). */
+    if (!s_send_done) s_send_done = xSemaphoreCreateBinary();
+    if (s_send_done) xSemaphoreGive(s_send_done);   /* start "free" */
+    esp_now_register_send_cb(espnow_send_cb);
+
     /* Derive the WiFi channel + register peer MACs from NVS. The SAME path is
      * re-run after a pairing completes (espnow_reload_peers) so a freshly paired
      * half is reachable without a dongle reboot. Must follow esp_now_init(). */
@@ -267,6 +288,27 @@ bool espnow_send(const uint8_t mac[6], uint8_t type, const void *payload, uint16
         return false;
     }
     return true;
+}
+
+/* Flow-controlled send: waits for the previous frame's TX to complete before
+ * queuing the next, so a burst of chunks never overflows the WiFi TX ring.
+ * MUST be called from a task context that can block (NOT the recv callback).
+ * Returns false on timeout or send error. */
+bool espnow_send_blocking(const uint8_t mac[6], uint8_t type,
+                          const void *payload, uint16_t len, uint32_t timeout_ms)
+{
+    if (s_send_done &&
+        xSemaphoreTake(s_send_done, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        ESP_LOGW(TAG, "send_blocking: prior TX did not complete in %ums", (unsigned)timeout_ms);
+        return false;
+    }
+    bool ok = espnow_send(mac, type, payload, len);
+    if (!ok && s_send_done) {
+        /* esp_now_send failed synchronously → the send cb will NOT fire; restore
+         * the token so the link doesn't wedge. */
+        xSemaphoreGive(s_send_done);
+    }
+    return ok;
 }
 
 #endif /* TEST_HOST */

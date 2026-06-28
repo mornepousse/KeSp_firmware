@@ -40,6 +40,7 @@
 #if CONFIG_KASE_HAS_ESPNOW
 #include "espnow_info.h"
 #include "espnow_link.h"
+#include "cfg_bridge.h"   /* cfg_bridge_kbd_worker_start (wireless config tunnel) */
 #endif
 
 #if CONFIG_KASE_HAS_RF_RX
@@ -278,6 +279,7 @@ void app_main(void) {
    * (NRF) but cannot configure this keyboard (keymap/macros/layout JSON). */
   espnow_info_init();
   espnow_link_init();
+  cfg_bridge_kbd_worker_start();   /* dispatch forwarded config frames off the recv cb */
 #endif
 #endif
 

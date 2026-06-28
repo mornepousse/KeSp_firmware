@@ -117,8 +117,13 @@ static void cfg_bridge_send_chunked(const uint8_t mac[6], uint8_t en_type,
             ESP_LOGW(TAG_CFG, "send: chunk %u build failed (abort)", idx);
             return;
         }
-        /* espnow_send prepends the type byte; payload is [idx][total][slice]. */
-        espnow_send(mac, en_type, chunk, clen);
+        /* Flow-controlled: wait for the previous chunk's TX before queuing the
+         * next, else a burst (e.g. ~23 chunks for the 4.5KB layout JSON) overflows
+         * the WiFi TX ring and the tail is dropped. payload = [idx][total][slice]. */
+        if (!espnow_send_blocking(mac, en_type, chunk, clen, 200)) {
+            ESP_LOGW(TAG_CFG, "send: chunk %u TX failed (abort frame)", idx);
+            return;
+        }
     }
 }
 #endif /* DONGLE || KBD_WIRELESS */
@@ -176,7 +181,20 @@ void cfg_bridge_recv_kr_chunk(const uint8_t mac[6],
 
 #if CONFIG_KASE_KBD_WIRELESS
 #include "cdc_binary_protocol.h"   /* ks_dispatch_frame, ks_resp_redirect_* */
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 #include <string.h>
+
+/* A complete KS frame is dispatched + answered on a WORKER task, never in the
+ * ESP-NOW recv callback: the reply goes out via espnow_send_blocking() (waits on
+ * the send callback) and blocking inside the WiFi recv callback would deadlock.
+ * The controller is strictly request→response, so one in-flight frame is enough. */
+static uint8_t          s_worker_frame[CFG_FRAME_MAX];
+static uint16_t         s_worker_len;
+static uint8_t          s_worker_mac[6];
+static volatile bool    s_worker_busy;
+static SemaphoreHandle_t s_worker_ready;
 
 void cfg_bridge_handle_ks_frame(const uint8_t mac[6],
                                 const uint8_t *frame, uint16_t len)
@@ -192,13 +210,41 @@ void cfg_bridge_handle_ks_frame(const uint8_t mac[6],
     }
 }
 
+static void cfg_worker_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        if (xSemaphoreTake(s_worker_ready, portMAX_DELAY) != pdTRUE) continue;
+        cfg_bridge_handle_ks_frame(s_worker_mac, s_worker_frame, s_worker_len);
+        s_worker_busy = false;   /* ready for the next frame */
+    }
+}
+
+void cfg_bridge_kbd_worker_start(void)
+{
+    if (s_worker_ready) return;   /* idempotent */
+    s_worker_ready = xSemaphoreCreateBinary();
+    /* 6KB stack: dispatch can build large responses (layout JSON) on the redirect
+     * buffer (static) but handlers still use some stack. */
+    xTaskCreate(cfg_worker_task, "cfg_worker", 6144, NULL, 4, NULL);
+}
+
 void cfg_bridge_recv_ks_chunk(const uint8_t mac[6],
                               const uint8_t *chunk, uint16_t chunk_len)
 {
     static cfg_reasm_t s_ks_reasm;   /* keyboard: reassemble KS from dongle */
     uint16_t out_len = 0;
     if (cfg_reasm_add(&s_ks_reasm, chunk, chunk_len, &out_len)) {
-        cfg_bridge_handle_ks_frame(mac, s_ks_reasm.buf, out_len);
+        /* Hand the complete frame to the worker (copy out so reasm can be reused).
+         * Drop if the worker is still busy with the previous request (the
+         * controller serializes, so this should not happen in practice). */
+        if (s_worker_ready && !s_worker_busy && out_len <= sizeof(s_worker_frame)) {
+            memcpy(s_worker_frame, s_ks_reasm.buf, out_len);
+            memcpy(s_worker_mac, mac, 6);
+            s_worker_len = out_len;
+            s_worker_busy = true;
+            xSemaphoreGive(s_worker_ready);
+        }
         memset(&s_ks_reasm, 0, sizeof(s_ks_reasm));
     }
 }

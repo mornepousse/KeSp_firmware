@@ -9,7 +9,11 @@ CONFIG_TINYUSB_CDC_ENABLED=y
 CONFIG_TINYUSB_CDC_COUNT=1
 CONFIG_TINYUSB_HID_COUNT=1
 CONFIG_TINYUSB_CDC_RX_BUFSIZE=512
-CONFIG_TINYUSB_CDC_TX_BUFSIZE=512
+# TX ring must hold a whole KR frame in one queue+flush. The dongle relays a
+# reassembled tunnel response (e.g. the ~4.5KB layout JSON) via cdc_send_binary in
+# one shot from the WiFi recv callback (can't loop/flush there), so 512 truncated
+# it. 8192 covers CFG_FRAME_MAX (6144) + margin.
+CONFIG_TINYUSB_CDC_TX_BUFSIZE=8192
 CONFIG_TINYUSB_CDC_EP_BUFSIZE=512
 
 # Flash size + custom partition table

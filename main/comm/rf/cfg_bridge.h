@@ -72,6 +72,10 @@ void cfg_bridge_recv_kr_chunk(const uint8_t mac[6],
 #endif /* CONFIG_KASE_DEVICE_ROLE_DONGLE */
 
 #if CONFIG_KASE_KBD_WIRELESS
+/* Smart keyboard: start the worker task that dispatches forwarded KS frames and
+ * sends the KR back (off the WiFi recv callback). Call once after espnow init. */
+void cfg_bridge_kbd_worker_start(void);
+
 /* Smart keyboard: feed one received EN_KS_CHUNK payload ([idx][total][slice]);
  * on the chunk that completes the KS frame, dispatch it locally and chunk the
  * KR response back to the dongle over ESP-NOW (EN_KR_CHUNK). */
