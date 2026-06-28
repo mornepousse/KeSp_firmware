@@ -62,6 +62,18 @@ config KASE_KBD_WIRELESS
       over NRF24 and exchanges config over ESP-NOW, instead of acting as its own
       USB device. Wired keyboards (V1/V2) leave this off.
 
+config KASE_VBUS_SENSE
+    bool "Use a VBUS-sense GPIO for the USB-first auto-switch"
+    default n
+    depends on KASE_KBD_WIRELESS
+    help
+      ON: read USB-cable presence from BOARD_VBUS_SENSE_GPIO (a VBUS divider) —
+      reliable in both directions (plug→USB, unplug→RF). Requires the divider.
+      OFF (default): fall back to tud_mounted() (USB enumerated by a host). Works
+      plugged-in without any extra wiring, but unplug detection is unreliable on
+      the ESP32-S3 (TinyUSB may not see the disconnect), so it can stay on USB
+      after unplug. Flip ON once the GPIO33 divider is soldered.
+
 config KASE_HAS_RF_RX
     bool
     default y if KASE_DEVICE_ROLE_DONGLE

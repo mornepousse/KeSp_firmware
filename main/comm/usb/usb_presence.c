@@ -7,6 +7,9 @@
 #include "board.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
+#if !CONFIG_KASE_VBUS_SENSE
+#include "tinyusb.h"   /* tud_mounted() fallback when no VBUS divider is wired */
+#endif
 
 #ifndef BOARD_VBUS_SENSE_GPIO
 #define BOARD_VBUS_SENSE_GPIO GPIO_NUM_33   /* fallback; real value in board.h */
@@ -19,6 +22,7 @@ static kbd_out_t       s_route = KBD_OUT_USB;   /* USB-first default before firs
 
 void usb_presence_init(void)
 {
+#if CONFIG_KASE_VBUS_SENSE
     gpio_config_t io = {
         .pin_bit_mask = 1ULL << BOARD_VBUS_SENSE_GPIO,
         .mode         = GPIO_MODE_INPUT,
@@ -27,11 +31,16 @@ void usb_presence_init(void)
         .intr_type    = GPIO_INTR_DISABLE,
     };
     gpio_config(&io);
+#endif
 }
 
 bool usb_presence_active(void)
 {
-    bool raw = gpio_get_level(BOARD_VBUS_SENSE_GPIO) != 0;
+#if CONFIG_KASE_VBUS_SENSE
+    bool raw = gpio_get_level(BOARD_VBUS_SENSE_GPIO) != 0;   /* VBUS divider */
+#else
+    bool raw = tud_mounted();   /* no divider: USB enumerated by a host */
+#endif
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
     return vbus_debounce_step(&s_db, raw, now_ms, VBUS_DEBOUNCE_MS);
 }
