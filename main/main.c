@@ -272,6 +272,13 @@ void app_main(void) {
 
 #if CONFIG_KASE_KBD_WIRELESS
   kbd_relay_init();
+#if CONFIG_KASE_HAS_ESPNOW
+  /* Config tunnel: receive KS chunks forwarded by the dongle over ESP-NOW,
+   * dispatch locally, chunk the KR back. Without this the dongle can relay HID
+   * (NRF) but cannot configure this keyboard (keymap/macros/layout JSON). */
+  espnow_info_init();
+  espnow_link_init();
+#endif
 #endif
 
   ESP_LOGI(TAG, "Task Matrix init");

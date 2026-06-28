@@ -154,7 +154,9 @@ void espnow_reload_peers(void)
         if (mac_l[0]||mac_l[1]||mac_l[2]||mac_l[3]||mac_l[4]||mac_l[5]) memcpy(tmp_macs[tmp_count++], mac_l, 6);
         if (mac_r[0]||mac_r[1]||mac_r[2]||mac_r[3]||mac_r[4]||mac_r[5]) memcpy(tmp_macs[tmp_count++], mac_r, 6);
 #endif
-#if CONFIG_KASE_DEVICE_ROLE_HALF
+#if CONFIG_KASE_DEVICE_ROLE_HALF || CONFIG_KASE_KBD_WIRELESS
+        /* Half and wireless-relay keyboard both peer with the dongle, stored under
+         * the same NVS key by rf_pairing_save_half(). */
         uint8_t mac_d[6] = {0};
         size_t sz = 6; nvs_get_blob(nvs_peer, "mac_dongle", mac_d, &sz);
         if (mac_d[0]||mac_d[1]||mac_d[2]||mac_d[3]||mac_d[4]||mac_d[5]) memcpy(tmp_macs[tmp_count++], mac_d, 6);

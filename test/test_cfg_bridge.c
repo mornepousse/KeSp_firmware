@@ -51,8 +51,9 @@ static void test_cfg_chunking(void) {
     TEST_ASSERT_EQ(cfg_chunk_count(0),   0, "empty -> 0");
     TEST_ASSERT_EQ(cfg_chunk_count(200), 1, "exactly 200 -> 1");
     TEST_ASSERT_EQ(cfg_chunk_count(201), 2, "201 -> 2");
-    TEST_ASSERT_EQ(cfg_chunk_count(CFG_FRAME_MAX), 3, "512 -> 3 chunks");
-    TEST_ASSERT_EQ(cfg_chunk_count(CFG_FRAME_MAX + 1), 0, "513 -> 0 (too large)");
+    uint8_t max_chunks = (uint8_t)((CFG_FRAME_MAX + CFG_CHUNK_PAYLOAD - 1) / CFG_CHUNK_PAYLOAD);
+    TEST_ASSERT_EQ(cfg_chunk_count(CFG_FRAME_MAX), max_chunks, "CFG_FRAME_MAX -> max chunks");
+    TEST_ASSERT_EQ(cfg_chunk_count(CFG_FRAME_MAX + 1), 0, "over CFG_FRAME_MAX -> 0 (too large)");
 
     /* round-trip in order */
     cfg_reasm_t st;

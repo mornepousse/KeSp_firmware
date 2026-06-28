@@ -116,6 +116,7 @@ config KASE_HAS_ESPNOW
     bool
     default y if KASE_DEVICE_ROLE_DONGLE
     default y if KASE_DEVICE_ROLE_HALF
+    default y if KASE_KBD_WIRELESS
     default n
     help
         Compiles ESP-NOW stack (espnow_link.c + espnow_info.c).

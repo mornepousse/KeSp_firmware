@@ -13,7 +13,11 @@ bool cfg_is_dongle_local(uint8_t cmd_id);
  * ----------------------------------------------------------------------- */
 
 #define CFG_CHUNK_PAYLOAD 200          /* KS-frame bytes per ESP-NOW chunk */
-#define CFG_FRAME_MAX     512          /* max reassembled KS frame          */
+/* Max reassembled KS/KR frame. Must hold the largest forwarded response — the
+ * board layout JSON is ~4.5KB (GET_LAYOUT_JSON), so 512 was far too small and
+ * silently dropped it (cfg_chunk_count returns 0 > CFG_FRAME_MAX). 6144 = 31
+ * chunks (< 256 idx limit) with headroom. Sizes the reasm + redirect buffers. */
+#define CFG_FRAME_MAX     6144
 #define CFG_CHUNK_HDR     2            /* [idx][total]                      */
 
 /* How many chunks a frame of frame_len bytes needs (>=1).
