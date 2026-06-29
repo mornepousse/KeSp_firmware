@@ -7,9 +7,7 @@
 #include "board.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
-#if !CONFIG_KASE_VBUS_SENSE
-#include "tinyusb.h"   /* tud_mounted() fallback when no VBUS divider is wired */
-#endif
+#include "tinyusb.h"   /* tud_mounted/tud_suspended/tud_remote_wakeup */
 
 #ifndef BOARD_VBUS_SENSE_GPIO
 #define BOARD_VBUS_SENSE_GPIO GPIO_NUM_33   /* fallback; real value in board.h */
@@ -56,6 +54,15 @@ void usb_presence_poll(bool relay_active)
 kbd_out_t kbd_active_route(void)
 {
     return s_route;
+}
+
+void usb_try_remote_wakeup(void)
+{
+    /* If the USB host is suspended (PC asleep) but the cable is mounted, send a
+     * resume signal so a keypress wakes the PC. Harmless otherwise (returns false
+     * when not suspended / host didn't enable remote wakeup). The config
+     * descriptor already advertises REMOTE_WAKEUP. */
+    if (tud_mounted() && tud_suspended()) tud_remote_wakeup();
 }
 
 bool usb_cable_present_now(void)

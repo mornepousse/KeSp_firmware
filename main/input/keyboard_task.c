@@ -119,6 +119,12 @@ void vTaskKeyboard(void *pvParameters)
 
         /* Matrix changed → full processing cycle */
         if (stat_matrix_changed == 1) {
+#if CONFIG_KASE_KBD_WIRELESS
+            /* A keypress while the USB host is suspended (PC asleep, cable in) →
+             * remote-wakeup so the key wakes the PC (even though the route may have
+             * flipped to RF on suspend). No-op when not suspended. */
+            usb_try_remote_wakeup();
+#endif
             build_keycode_report();
             stat_matrix_changed = 0;
             process_matrix_changes();

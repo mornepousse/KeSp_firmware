@@ -75,4 +75,8 @@ bool usb_sleep_blocked(void);
 /* Instantaneous "USB cable present" read (VBUS gpio, or tud_mounted without a
  * divider). Used by the light-sleep poll loop to wake on USB plug-in. */
 bool usb_cable_present_now(void);
+
+/* On a keypress: if the USB host is suspended (PC asleep, cable in), send a USB
+ * remote-wakeup so the keypress wakes the PC. No-op otherwise. */
+void usb_try_remote_wakeup(void);
 #endif
