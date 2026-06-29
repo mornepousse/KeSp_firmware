@@ -65,4 +65,10 @@ void usb_presence_poll(bool relay_active);
 /* Cached HID output route (cheap read for the sender + the OLED). Defaults to
  * KBD_OUT_USB until the first poll (an unpaired keyboard only has USB anyway). */
 kbd_out_t kbd_active_route(void);
+
+/* True if RF light-sleep must be suppressed because USB is present. Without a VBUS
+ * divider this is tud_mounted() (don't sleep while the cable is enumerated, so the
+ * keyboard stays awake when the host PC sleeps); with the divider the route gate
+ * already handles it. */
+bool usb_sleep_blocked(void);
 #endif

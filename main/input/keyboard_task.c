@@ -139,7 +139,8 @@ void vTaskKeyboard(void *pvParameters)
         {
             uint32_t idle = (uint32_t)(esp_timer_get_time() / 1000)
                           - get_last_activity_time_ms();
-            if (v2d_should_sleep(kbd_active_route() == KBD_OUT_RF, idle, 60000))
+            if (v2d_should_sleep(kbd_active_route() == KBD_OUT_RF, idle, 60000)
+                && !usb_sleep_blocked())   /* never sleep while USB is present */
                 v2d_sleep_enter();
         }
 #endif

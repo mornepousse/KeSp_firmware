@@ -57,3 +57,18 @@ kbd_out_t kbd_active_route(void)
 {
     return s_route;
 }
+
+bool usb_sleep_blocked(void)
+{
+#if CONFIG_KASE_VBUS_SENSE
+    /* VBUS sense already distinguishes unplugged from host-asleep: route==RF only
+     * when truly unplugged, so the route-based sleep gate is sufficient. */
+    return false;
+#else
+    /* No divider: never sleep while the USB cable is enumerated (tud_mounted stays
+     * true when the host suspends), so the keyboard doesn't sleep when the PC
+     * sleeps. Trade-off: tud_mounted misses real unplug → no battery sleep until a
+     * power cycle without USB. */
+    return tud_mounted();
+#endif
+}
