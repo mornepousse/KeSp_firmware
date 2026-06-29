@@ -31,6 +31,12 @@
  * different pad is more accessible on the bodge (nothing else depends on it). */
 #define BOARD_VBUS_SENSE_GPIO   GPIO_NUM_33
 
+/* OLED off after 5s idle (vs 60s on V2) — save the panel/battery in wireless use.
+ * Decoupled from the RF light-sleep (60s, hard-coded in keyboard_task): screen
+ * blanks fast, the system sleeps later. Wakes on the next keypress (<500ms). */
+#undef BOARD_DISPLAY_SLEEP_MS
+#define BOARD_DISPLAY_SLEEP_MS  5000
+
 /* Override product info */
 #undef GATTS_TAG
 #define GATTS_TAG   "KaSe_V2_DBG"
