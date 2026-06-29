@@ -6,10 +6,13 @@
 #include "matrix_scan.h"        /* rtc_matrix_deinit / matrix_setup / arm/disarm wake */
 #include "kbd_relay_tx.h"       /* kbd_relay_sleep_prepare / wake_restore */
 #include "status_display.h"     /* status_display_sleep / wake */
+#include "usb_presence.h"       /* usb_cable_present_now — wake on USB plug */
 #include "esp_sleep.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_lvgl_port.h"      /* lvgl_port_lock / unlock — quiesce LVGL vs WiFi-stop */
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #if CONFIG_KASE_HAS_ESPNOW
 #include "espnow_link.h"        /* espnow_link_restart_espnow */
@@ -44,10 +47,20 @@ void v2d_sleep_enter(void)
     rtc_matrix_deinit();          /* stop the scan driver (releases the matrix GPIOs) */
     kbd_relay_sleep_prepare();    /* refresh timer off, NRF power-down (holds TX mutex) */
 
-    matrix_arm_key_wake();
     ESP_LOGI(TAG, "SLEEP: entering light-sleep");
-    esp_light_sleep_start();      /* returns on a matrix keypress */
-    matrix_disarm_key_wake();
+    /* Sleep loop: wake on a matrix keypress (GPIO) OR every 3s on a timer to poll
+     * for a USB plug-in. On a timer wake with no USB and no key, re-sleep without
+     * the (expensive) WiFi/scan restore — so plugging USB wakes the keyboard
+     * within ~3s without a dedicated VBUS wake source. */
+    for (;;) {
+        matrix_arm_key_wake();
+        esp_sleep_enable_timer_wakeup((uint64_t)3 * 1000 * 1000);
+        esp_light_sleep_start();
+        matrix_disarm_key_wake();
+        if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) break;  /* keypress */
+        vTaskDelay(pdMS_TO_TICKS(30));        /* let the USB stack settle after wake */
+        if (usb_cable_present_now()) break;   /* USB plugged → wake up */
+    }
     ESP_LOGI(TAG, "WAKE: restore");
 
     kbd_relay_wake_restore();     /* NRF power-up, refresh timer on */

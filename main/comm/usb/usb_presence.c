@@ -58,6 +58,15 @@ kbd_out_t kbd_active_route(void)
     return s_route;
 }
 
+bool usb_cable_present_now(void)
+{
+#if CONFIG_KASE_VBUS_SENSE
+    return gpio_get_level(BOARD_VBUS_SENSE_GPIO) != 0;
+#else
+    return tud_mounted();
+#endif
+}
+
 bool usb_sleep_blocked(void)
 {
 #if CONFIG_KASE_VBUS_SENSE

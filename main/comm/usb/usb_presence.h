@@ -71,4 +71,8 @@ kbd_out_t kbd_active_route(void);
  * keyboard stays awake when the host PC sleeps); with the divider the route gate
  * already handles it. */
 bool usb_sleep_blocked(void);
+
+/* Instantaneous "USB cable present" read (VBUS gpio, or tud_mounted without a
+ * divider). Used by the light-sleep poll loop to wake on USB plug-in. */
+bool usb_cable_present_now(void);
 #endif
