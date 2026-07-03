@@ -47,6 +47,12 @@ config entre boards (cf. Workflow anti-régression). 6 boards au total : V1, V2,
 V2D, dongle, half_left, half_right. Pour tout vérifier d'un coup :
 `./scripts/check.sh`.
 
+**ccache** : `check.sh` exporte `IDF_CCACHE_ENABLE=1` — les 6 boards partagent
+la plupart des composants, donc après le 1er board les suivants réutilisent les
+objets compilés (gros gain sur le build full + pre-push). Pour tes builds
+interactifs, ajoute `export IDF_CCACHE_ENABLE=1` à ton shell (ou source-le avant
+`idf.py`). Stats : `ccache -s`.
+
 **Important** : avec `-DSDKCONFIG=build_kase_<name>/sdkconfig`, chaque board a
 son sdkconfig isolé dans son dossier build — plus de fuite de config entre
 boards. Le `sdkconfig` historique à la racine reste celui d'un build legacy

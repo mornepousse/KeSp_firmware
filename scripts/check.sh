@@ -13,6 +13,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
+# ccache : les 6 boards partagent la majorité des composants → cache hit croisé.
+# ESP-IDF respecte cette variable ; après le 1er board, les suivants réutilisent
+# les objets compilés. Gros gain wall-clock sur le build full + pre-push, sans risque.
+export IDF_CCACHE_ENABLE=1
+
 ALL_BOARDS=(kase_v1 kase_v2 kase_v2_debug kase_dongle kase_half_left kase_half_right)
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YEL=$'\033[1;33m'; NC=$'\033[0m'
