@@ -1,0 +1,18 @@
+# Exemple : config esp-dev pour KaSe_firmware (6 boards ESP-IDF multi-board).
+# À copier en `.esp-dev.yml` à la racine du projet.
+boards: [kase_v1, kase_v2, kase_v2_debug, kase_dongle, kase_half_left, kase_half_right]
+current_board_file: .kase-board
+
+build:      "idf.py -B build_{board} -DBOARD={board} -DSDKCONFIG=build_{board}/sdkconfig build"
+flash_app:  "idf.py -B build_{board} -p {port} flash"
+flash_full: "esptool.py --chip esp32s3 -p {port} erase_flash  # ALLOW_ERASE && idf.py -B build_{board} -p {port} flash"
+
+port_glob: "/dev/ttyACM* /dev/ttyUSB*"
+
+# V1/V2/V2D : CONSOLE_NONE (le CDC est binaire KS/KR, pas de log texte).
+# halves : console UART toujours ; dongle : console en bring-up seulement.
+console_none_boards: [kase_v1, kase_v2, kase_v2_debug]
+
+monitor: serial-mcp
+baud: 115200
+idf_export: ~/esp/esp-idf/export.sh
