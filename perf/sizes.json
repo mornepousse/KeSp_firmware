@@ -1,0 +1,11 @@
+{
+  "boards": {
+    "kase_dongle": 856064,
+    "kase_half_left": 1072208,
+    "kase_half_right": 1072208,
+    "kase_v1": 1151072,
+    "kase_v2": 1112208,
+    "kase_v2_debug": 1112224
+  },
+  "factory": 2097152
+}
