@@ -1,10 +1,19 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/cc_pre_bash.sh" }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
-          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/cc_post_edit.sh" }
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/cc_post_edit.sh" },
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/cc_static_edit.sh" }
         ]
       }
     ],
