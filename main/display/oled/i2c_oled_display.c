@@ -11,7 +11,6 @@
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
 #include "esp_lcd_panel_vendor.h"
-#include "driver/i2c.h"
 #include "driver/gpio.h"
 
 static const char *TAG_DISP = "I2C_OLED";
