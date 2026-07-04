@@ -117,9 +117,23 @@ static void test_td_max_taps_survives_tick(void) {
                    "4 taps → action[2]=C consommé même après un tick");
 }
 
+/* Interruption par une autre touche pendant un count → résout la danse courante
+ * au tap count actuel (logique QMK), en plus de rejeter la nouvelle touche (M9). */
+static void test_td_interrupt_resolves_current(void) {
+    td_reset(); configure_slot0();
+    tap_dance_on_press(0, 0, 0);           /* danse 0, tap_count=1 */
+    tap_dance_on_release(0, 0);
+    tap_dance_on_press(0, 0, 0);           /* tap_count=2 */
+    /* Une AUTRE touche (index 1) interrompt avant le timeout */
+    TEST_ASSERT(!tap_dance_on_press(1, 0, 1), "autre touche → rejetée (return false)");
+    TEST_ASSERT(tap_dance_just_resolved(), "interruption → danse courante résolue (M9)");
+    TEST_ASSERT_EQ(tap_dance_consume(), 0x05, "2 taps interrompus → action[1]=B");
+}
+
 void test_tap_dance(void) {
     TEST_SUITE("Tap Dance — module réel");
     TEST_RUN(test_td_single_tap);
+    TEST_RUN(test_td_interrupt_resolves_current);
     TEST_RUN(test_td_max_taps_survives_tick);
     TEST_RUN(test_td_double_tap);
     TEST_RUN(test_td_triple_tap);

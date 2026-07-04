@@ -92,7 +92,15 @@ bool tap_dance_on_press(uint8_t index, uint8_t row, uint8_t col)
         return true;
     }
 
-    /* Different key or state — resolve current dance and reject */
+    /* Different key (or dance) pressed during a count → QMK: l'interruption résout
+     * la danse COURANTE à son tap count actuel, puis la nouvelle touche est traitée
+     * normalement (le return false ne l'absorbe pas) — audit M9. */
+    if (active.state == TD_COUNTING) {
+        uint8_t action_idx = (active.tap_count > TAP_DANCE_MAX_TAPS)
+                           ? TAP_DANCE_MAX_TAPS - 1
+                           : (uint8_t)(active.tap_count - 1);
+        resolve_dance(action_idx);
+    }
     return false;
 }
 
