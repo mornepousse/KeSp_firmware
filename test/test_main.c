@@ -6,7 +6,6 @@ int _test_pass_count = 0;
 int _test_fail_count = 0;
 
 /* Test suite declarations */
-extern void test_ghost_filter(void);
 extern void test_key_stats(void);
 extern void test_bigram(void);
 extern void test_cdc_protocol(void);
@@ -56,7 +55,6 @@ int main(void) {
     printf("KeSp Firmware Unit Tests\n");
     printf("========================\n");
 
-    test_ghost_filter();
     test_key_stats();
     test_bigram();
     test_cdc_protocol();

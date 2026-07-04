@@ -157,12 +157,10 @@ static void test_rf_pair_roundtrip(void)
     }
 }
 
-/* ── TDD: declared-slot PKT_PAIR_REQ (RF-declared-slot spec) ───────────────
- * Ces tests encodent le contrat de la NOUVELLE API (non encore implémentée) :
+/* ── PKT_PAIR_REQ declared-slot API (RF-declared-slot spec) ────────────────
+ * Régression de l'API désormais implémentée dans rf_packet.h :
  *   rf_encode_pair_req(buf, mac, slot) → 8 octets
  *   rf_decode_pair_req(buf, len, mac_out, slot_out) → bool, 4 paramètres
- * Ils doivent ÉCHOUER À LA COMPILATION tant que rf_packet.h n'est pas mis à jour.
- * Ne pas implémenter la production pour les faire passer — TDD red state.
  */
 
 /* Roundtrip slot=0x01 : encode 8 octets, decode préserve mac et slot. */

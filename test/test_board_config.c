@@ -94,11 +94,10 @@ void test_board_gpio_no_collision(void) {
                 char msg[64];
                 snprintf(msg, sizeof(msg), "GPIO collision: pin[%d]=%d == pin[%d]=%d", i, all_gpios[i], j, all_gpios[j]);
                 TEST_ASSERT(0, msg);
-            } else {
-                _test_pass_count++;
             }
         }
     }
+    TEST_ASSERT(1, "no GPIO collision among matrix pins");
 }
 
 /* Test: display config macros are consistent */
@@ -113,7 +112,7 @@ void test_board_display_config(void) {
 #elif !defined(BOARD_DISPLAY_BACKEND_ROUND) && !defined(BOARD_DISPLAY_BACKEND_OLED)
     TEST_ASSERT(0, "no display backend defined");
 #else
-    _test_pass_count++;
+    TEST_ASSERT(1, "exactly one display backend defined");
 #endif
 }
 
@@ -129,8 +128,7 @@ void test_board_led_strip_config(void) {
     TEST_ASSERT(BOARD_LED_STRIP_GPIO >= 0 && BOARD_LED_STRIP_GPIO <= 48, "LED strip GPIO in range");
     TEST_ASSERT(BOARD_LED_STRIP_NUM_LEDS > 0, "LED strip has LEDs");
 #else
-    _test_pass_count++;
-    _test_pass_count++;
+    TEST_ASSERT(1, "board without LED strip (ok)");
 #endif
 }
 

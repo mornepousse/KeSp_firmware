@@ -131,13 +131,8 @@ void test_rf_pairing(void)
                                                             "match: empty store → no match");
 }
 
-/* ── TDD: rf_pairing_resolve_slot (RF-declared-slot spec) ──────────────────
- * Encode le contrat de la NOUVELLE fonction pure (non encore implémentée) :
- *   bool rf_pairing_resolve_slot(uint8_t declared_slot,
- *                                uint8_t paired_count,
- *                                uint8_t *slot_out)
- * Doit ÉCHOUER À LA COMPILATION jusqu'à ce que rf_pairing.h/.c soient mis à
- * jour. Ne pas implémenter la production pour faire passer ces tests.
+/* ── rf_pairing_resolve_slot (RF-declared-slot spec) ───────────────────────
+ * Régression de la fonction pure désormais implémentée dans rf_pairing.c.
  *
  * Contrat :
  *   - declared_slot 0x01 ou 0x02 → identité (slot_out = declared_slot), true.
