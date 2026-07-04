@@ -1,8 +1,16 @@
 # KeSp — Keyboard ESP32 Framework
 
-Open-source keyboard firmware framework for ESP32-S3, designed for custom mechanical keyboards with display, USB HID, Bluetooth HID, advanced keycodes, and a virtual pet.
+Open-source firmware framework for ESP32-S3 custom mechanical keyboards — from
+a single unibody board to a **wireless split** (two halves + a USB dongle),
+with display, USB/Bluetooth HID, advanced QMK-like keycodes, a virtual pet, and
+an optional **security co-processor** on the dongle.
 
 > KeSp provides the framework. Your board definition provides the hardware specifics.
+
+**Six board targets** share the codebase via `boards/<name>/` and per-board
+Kconfig gates: `kase_v1` (round display), `kase_v2` (OLED), `kase_v2_debug`
+(V2 + debug/wireless overrides), `kase_dongle` (USB receiver), `kase_half_left`
+and `kase_half_right` (wireless e-ink halves).
 
 ---
 
@@ -29,6 +37,23 @@ Open-source keyboard firmware framework for ESP32-S3, designed for custom mechan
 - **WS2812 LED strip** — Reactive animations (breathe, chase, KPM bar)
 - **OTA firmware update** — Flash new firmware over USB CDC, no programmer needed
 - **Deep sleep** — Configurable inactivity timeout
+- **Trackpad** — Cirque/IQS5xx pointing device on a half (gestures, accel curve)
+- **E-ink status display** — SSD1681 monochrome dashboard on the halves (link/USB/battery)
+
+### Wireless split & dongle
+- **NRF24L01+ RF link** — Halves (PTX) → USB dongle (PRX), Enhanced ShockBurst
+- **ESP-NOW side channel** — Pairing, config bridge (KS/KR tunnelled), e-ink status push
+- **USB dongle** — Presents as a plain keyboard to the host; runs the key engine
+  and relays HID; per-set addressing + pairing so multiple keyboards coexist
+- **Wireless relay mode** — A full keyboard (e.g. V2D) can process locally and
+  relay its final HID report to the dongle over RF
+- **Half power management** — Heartbeat throttle + light-sleep with keypress wake
+
+### Security co-processor (dongle, optional)
+- **Compile-time personality** (Kconfig): `NONE` / OTP-HID (YubiKey-style CR-HMAC)
+  / **OpenPGP smartcard** over USB CCID (gpg sign / decrypt / SSH-auth, touch-gated)
+- Touch-gate confirm keycode, NVS-encryption + Secure-Boot V2 options
+- *Currently frozen to `NONE`* — the OpenPGP surface compiles out; re-enable via Kconfig
 
 ### Statistics & Pet
 - **Key statistics** — Per-key press counts and bigram tracking, auto-saved to NVS
@@ -50,9 +75,12 @@ Open-source keyboard firmware framework for ESP32-S3, designed for custom mechan
 
 ```
 boards/
-  kase_v1/              # Round SPI display, LED strip
-  kase_v2/              # I2C OLED
-  kase_v2_debug/        # V2 with debug GPIO overrides
+  kase_v1/              # Round SPI display (GC9A01), LED strip
+  kase_v2/              # I2C OLED (SSD1306)
+  kase_v2_debug/        # V2 + debug/wireless GPIO overrides (V2D)
+  kase_dongle/          # USB receiver (NRF24 RX), plain-keyboard to host
+  kase_half_left/       # Wireless half: matrix TX + e-ink + trackpad
+  kase_half_right/      # Wireless half (mirror)
 main/
   input/                # Matrix scan, key processing, HID reports
     keyboard_task.c     # Main coordinator (ISR → process → send)
@@ -74,6 +102,10 @@ main/
       cdc_ota.c         # OTA firmware update (binary only)
     ble/                # Bluetooth HID stack
     usb/                # USB HID (TinyUSB)
+    rf/                 # NRF24 driver, dongle RX / half TX, pairing, cfg bridge
+    espnow/             # ESP-NOW pairing + info channel
+  security/             # Dongle co-processor: SEC slots, OTP-HID, OpenPGP/CCID
+  periph/               # E-ink (SSD1681), trackpad (IQS5xx)
   display/
     status_display.c    # Backend-agnostic coordinator
     display_backend.h   # Backend interface (vtable)
@@ -86,7 +118,7 @@ main/
   led/                  # WS2812 LED strip animations
   sys/                  # NVS helpers, CPU monitoring
   config/               # Version
-test/                   # Host-side unit tests (1008 tests)
+test/                   # Host-side unit tests (CMake, link real modules)
 docs/                   # Protocol documentation
 scripts/                # Build automation, sprite conversion
 ```
@@ -97,31 +129,37 @@ scripts/                # Build automation, sprite conversion
 
 ### Build
 
-Requires [ESP-IDF v5.x](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/).
+Requires [ESP-IDF v5.5](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/).
 
 ```bash
 source ~/esp/esp-idf/export.sh
 
-# Build for a specific board
-idf.py -DBOARD=kase_v2_debug build
-idf.py -DBOARD=kase_v1 build
+# Per-board build — each board keeps its OWN isolated sdkconfig
+# (prevents config leaking between boards)
+idf.py -B build_kase_v2_debug -DBOARD=kase_v2_debug \
+       -DSDKCONFIG=build_kase_v2_debug/sdkconfig build
+idf.py -B build_kase_dongle   -DBOARD=kase_dongle \
+       -DSDKCONFIG=build_kase_dongle/sdkconfig   build
 
-# Full flash (required for first flash or partition table change)
-esptool --chip esp32s3 -p /dev/ttyUSB0 -b 460800 write-flash \
-  0x0 build/bootloader/bootloader.bin \
-  0x8000 build/partition_table/partition-table.bin \
-  0xf000 build/ota_data_initial.bin \
-  0x20000 build/KeSp.bin \
-  0x420000 build/storage.bin
+# Build all 6 boards + run host tests (anti-regression gate)
+./scripts/check.sh
 
-# After first flash, use OTA via CDC (no programmer needed)
+# App-only flash — preserves NVS (keymaps/macros/stats)
+idf.py -B build_kase_v2_debug -p /dev/ttyUSB0 app-flash
+
+# Full flash (first flash or partition-table change) — esptool merge_bin
+# offsets from build_<board>/flash_args. After first flash: OTA over USB CDC.
 ```
 
 ### Tests
 
+Host-side unit tests (no hardware needed). Tests link the real firmware modules
+and are gated by a test-count ratchet + bite-proof discipline.
+
 ```bash
-cd test && mkdir -p build && cd build && cmake .. && make && ./test_runner
-# 1008 tests, 0 failures
+./scripts/check.sh --host-only     # host tests only (~seconds)
+# or manually:
+cmake -S test -B test/build && cmake --build test/build && ./test/build/test_runner
 ```
 
 ---
