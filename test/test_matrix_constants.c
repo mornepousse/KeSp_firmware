@@ -1,12 +1,16 @@
 /* Test matrix constants introduced during audit cleanup */
 #include "test_framework.h"
 
-/* Mirror constants from matrix.c */
-#define MAX_REPORT_KEYS  6       /* HID boot protocol: max 6 simultaneous keys */
-#define INVALID_KEY_POS  0xFF
+/* Vrais headers de prod (host-safe) : INVALID_KEY_POS + MATRIX_ROWS/COLS via
+ * matrix_scan.h, STORAGE_NAMESPACE via keyboard_config.h (tiré par matrix_scan.h).
+ * Une dérive de ces constantes casse maintenant le test. */
+#include "matrix_scan.h"
 
-/* Mirror STORAGE_NAMESPACE from keyboard_config.h */
-#define STORAGE_NAMESPACE "storage"
+/* MAX_REPORT_KEYS n'est exposé dans AUCUN header : c'est un #define dupliqué
+ * dans matrix_scan.c / rf_rx_task.c / dongle_engine_state.c / cdc_half_stubs.c.
+ * Ce test garde l'invariant du protocole HID boot (6 touches simultanées max)
+ * que ces copies doivent respecter — il ne peut pas le sourcer depuis un header. */
+#define MAX_REPORT_KEYS  6
 
 /* Test: MAX_REPORT_KEYS matches HID boot protocol */
 void test_max_report_keys(void) {

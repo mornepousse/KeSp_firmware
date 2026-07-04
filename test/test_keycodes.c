@@ -1,49 +1,10 @@
-/* Tests for advanced keycode encoding/decoding */
+/* Tests for advanced keycode encoding/decoding.
+ * Linke le VRAI header de prod (key_definitions.h, partagé avec KaSe_soft) au
+ * lieu de recopier les macros : une dérive d'encodage casse maintenant le test.
+ * key_definitions.h est autonome (tinyusb.h stubé) et compile déjà host-side
+ * via key_processor.c. */
 #include "test_framework.h"
-
-/* Reproduce the defines from key_definitions.h */
-#define K_OSM_BASE  0x3000
-#define K_OSM(mod)  (K_OSM_BASE | (mod))
-#define K_IS_OSM(kc) (((kc) & 0xFF00) == K_OSM_BASE)
-#define K_OSM_MOD(kc) ((kc) & 0xFF)
-
-#define K_OSL_BASE  0x3100
-#define K_OSL(layer) (K_OSL_BASE | (layer))
-#define K_IS_OSL(kc) (((kc) & 0xFFF0) == K_OSL_BASE)
-#define K_OSL_LAYER(kc) ((kc) & 0x0F)
-
-#define K_CAPS_WORD 0x3200
-#define K_REPEAT    0x3300
-#define K_LEADER    0x3400
-
-#define K_LT_BASE   0x4000
-#define K_LT(layer, kc) (K_LT_BASE | ((layer) << 8) | (kc))
-#define K_IS_LT(kc) (((kc) & 0xF000) == K_LT_BASE)
-#define K_LT_LAYER(kc) (((kc) >> 8) & 0x0F)
-#define K_LT_KEY(kc) ((kc) & 0xFF)
-
-#define K_MT_BASE   0x5000
-#define K_MT(mod, kc) (K_MT_BASE | ((mod) << 8) | (kc))
-#define K_IS_MT(kc) (((kc) & 0xF000) == K_MT_BASE)
-#define K_MT_MOD(kc) (((kc) >> 8) & 0x0F)
-#define K_MT_KEY(kc) ((kc) & 0xFF)
-
-#define K_TD_BASE   0x6000
-#define K_TD(index) (K_TD_BASE | ((index) << 8))
-#define K_IS_TD(kc) (((kc) & 0xF000) == K_TD_BASE)
-#define K_TD_INDEX(kc) (((kc) >> 8) & 0x0F)
-
-#define K_IS_ADVANCED(kc) ((kc) > 0x00FF)
-
-#define K_SEC_BASE    0x3E00
-#define K_SEC_CONFIRM 0x3E00
-#define K_IS_SEC(kc)  (((kc) & 0xFF00) == K_SEC_BASE)
-#define K_SEC_TYPE(kc) ((kc) & 0xFF)
-
-#define MOD_LCTL 0x01
-#define MOD_LSFT 0x02
-#define MOD_LALT 0x04
-#define MOD_LGUI 0x08
+#include "key_definitions.h"
 
 /* ── OSM tests ───────────────────────────────────────────────────── */
 
@@ -84,7 +45,8 @@ static void test_lt_encoding(void) {
 }
 
 static void test_lt_all_layers(void) {
-    for (int layer = 0; layer < 10; layer++) {
+    /* Le nibble de couche tient 0..15 — couvrir toute la plage, pas seulement 0..9 */
+    for (int layer = 0; layer < 16; layer++) {
         uint16_t kc = K_LT(layer, 0x04); /* LT(layer, A) */
         TEST_ASSERT(K_IS_LT(kc), "LT detection for all layers");
         TEST_ASSERT_EQ(K_LT_LAYER(kc), layer, "LT layer extraction");
