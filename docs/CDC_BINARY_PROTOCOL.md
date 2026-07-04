@@ -76,6 +76,7 @@ def crc8(data: bytes) -> int:
 | 0x04 | ERR_RANGE | Parameter out of range |
 | 0x05 | ERR_BUSY | Resource busy (OTA in progress) |
 | 0x06 | ERR_OVERFLOW | Payload exceeds max size |
+| 0x07 | ERR_STORAGE | NVS persistence failed (e.g. NVS full) — the in-RAM change applied but was not saved |
 
 ## Backward Compatibility
 

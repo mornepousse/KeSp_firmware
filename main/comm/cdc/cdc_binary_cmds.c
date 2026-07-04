@@ -137,8 +137,10 @@ static void bin_cmd_setkey(uint8_t cmd, const uint8_t *p, uint16_t l)
     }
 
     keymaps[layer][row][col] = value;
-    save_keymaps((uint16_t *)keymaps,
-                 (size_t)LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
+    if (!save_keymaps((uint16_t *)keymaps,
+                 (size_t)LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t))) {
+        ks_respond_err(cmd, KS_STATUS_ERR_STORAGE); return;
+    }
     ks_respond_ok(cmd);
 }
 
@@ -159,10 +161,11 @@ static void bin_cmd_setlayer(uint8_t cmd, const uint8_t *p, uint16_t l)
             keymaps[layer][r][c] = val;
         }
     }
-    save_keymaps((uint16_t *)keymaps,
+    bool saved = save_keymaps((uint16_t *)keymaps,
                  (size_t)LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
     if (layer == current_layout)
         status_display_update_layer_name();
+    if (!saved) { ks_respond_err(cmd, KS_STATUS_ERR_STORAGE); return; }
     ks_respond_ok(cmd);
 }
 
@@ -217,10 +220,11 @@ static void bin_cmd_set_layout_name(uint8_t cmd, const uint8_t *p, uint16_t l)
     if (nlen >= MAX_LAYOUT_NAME_LENGTH) nlen = MAX_LAYOUT_NAME_LENGTH - 1;
     memcpy(default_layout_names[layer], p + 1, nlen);
     default_layout_names[layer][nlen] = '\0';
-    save_layout_names(default_layout_names, LAYERS);
+    bool saved = save_layout_names(default_layout_names, LAYERS);
 
     if (layer == current_layout)
         status_display_update_layer_name();
+    if (!saved) { ks_respond_err(cmd, KS_STATUS_ERR_STORAGE); return; }
     ks_respond_ok(cmd);
 }
 
@@ -756,7 +760,7 @@ static void bin_cmd_macro_add(uint8_t cmd, const uint8_t *p, uint16_t l)
     memset(macros_list[slot].steps, 0, sizeof(macros_list[slot].steps));
     macros_list[slot].key_definition = macro_kc_from_index(slot);
     if ((size_t)(slot + 1) > macros_count) macros_count = slot + 1;
-    save_macros(macros_list, macros_count);
+    if (!save_macros(macros_list, macros_count)) { ks_respond_err(cmd, KS_STATUS_ERR_STORAGE); return; }
     ks_respond_ok(cmd);
 }
 
@@ -787,7 +791,7 @@ static void bin_cmd_macro_add_seq(uint8_t cmd, const uint8_t *p, uint16_t l)
 
     macros_list[slot].key_definition = macro_kc_from_index(slot);
     if ((size_t)(slot + 1) > macros_count) macros_count = slot + 1;
-    save_macros(macros_list, macros_count);
+    if (!save_macros(macros_list, macros_count)) { ks_respond_err(cmd, KS_STATUS_ERR_STORAGE); return; }
     ks_respond_ok(cmd);
 }
 
@@ -802,7 +806,7 @@ static void bin_cmd_macro_delete(uint8_t cmd, const uint8_t *p, uint16_t l)
     memset(macros_list[slot].steps, 0, sizeof(macros_list[slot].steps));
     macros_list[slot].key_definition = macro_kc_from_index(slot);
     recalc_macros_count();
-    save_macros(macros_list, macros_count);
+    if (!save_macros(macros_list, macros_count)) { ks_respond_err(cmd, KS_STATUS_ERR_STORAGE); return; }
     ks_respond_ok(cmd);
 }
 

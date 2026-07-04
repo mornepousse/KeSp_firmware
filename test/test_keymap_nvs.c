@@ -220,6 +220,21 @@ static void test_recalc_macros_count(void)
                    "recalc: tous vides → count = 0");
 }
 
+/* ── save_keymaps propage l'échec NVS (E4) ─────────────────────── */
+
+static void test_save_keymaps_propagates_error(void)
+{
+    nvs_fake_reset();
+    uint16_t buf[LAYERS][MATRIX_ROWS][MATRIX_COLS];
+    memset(buf, 0, sizeof(buf));
+    TEST_ASSERT(save_keymaps((uint16_t *)buf, sizeof(buf)),
+                "save_keymaps sans faute → true (persisté)");
+    nvs_fake_fail_writes(1);   /* simule NVS pleine */
+    TEST_ASSERT(!save_keymaps((uint16_t *)buf, sizeof(buf)),
+                "save_keymaps avec NVS pleine → false (échec propagé, pas de faux OK)");
+    nvs_fake_fail_writes(0);
+}
+
 /* ── Suite runner ────────────────────────────────────────────── */
 
 void test_keymap_nvs(void)
@@ -228,6 +243,7 @@ void test_keymap_nvs(void)
     TEST_RUN(test_keymaps_real_roundtrip);
     TEST_RUN(test_load_keymaps_empty_nvs_unchanged);
     TEST_RUN(test_load_keymaps_size_guard);
+    TEST_RUN(test_save_keymaps_propagates_error);
     TEST_RUN(test_layout_names_real_roundtrip);
     TEST_RUN(test_macro_t_struct_layout);
     TEST_RUN(test_macros_real_roundtrip);

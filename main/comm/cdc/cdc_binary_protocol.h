@@ -133,6 +133,7 @@ typedef enum {
     KS_STATUS_ERR_RANGE     = 0x04,
     KS_STATUS_ERR_BUSY      = 0x05,
     KS_STATUS_ERR_OVERFLOW  = 0x06,
+    KS_STATUS_ERR_STORAGE   = 0x07,   /* persistance NVS échouée (ex. NVS pleine) */
 } ks_status_t;
 
 /* ── Binary command handler ─────────────────────────────────────── */

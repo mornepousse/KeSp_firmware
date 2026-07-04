@@ -1,5 +1,6 @@
 #pragma once
 #include <stddef.h>   /* size_t — nécessaire pour les signatures de fonctions */
+#include <stdbool.h>  /* bool — retour des save_* (échec de persistance NVS) */
 #include "keyboard_config.h"
 extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
 extern char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH];
@@ -23,12 +24,12 @@ typedef struct {
   uint16_t key_definition;
 } macro_t;
 
-void save_keymaps(uint16_t *data, size_t size_bytes);
+bool save_keymaps(uint16_t *data, size_t size_bytes);   /* true = persisté OK */
 void load_keymaps(uint16_t *data, size_t size_bytes);
 void keymap_init_nvs(void);
-void save_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count);
+bool save_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count);
 void load_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count);
-void save_macros(macro_t *macros, size_t count);
+bool save_macros(macro_t *macros, size_t count);
 void load_macros(macro_t *macros, size_t count);
 void recalc_macros_count(void);
 

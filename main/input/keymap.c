@@ -25,27 +25,31 @@ void recalc_macros_count(void) {
     macros_count = 0;
 }
 
-void save_keymaps(uint16_t *data, size_t size_bytes) {
+bool save_keymaps(uint16_t *data, size_t size_bytes) {
     nvs_handle_t my_handle;
     esp_err_t err;
 
     err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) opening NVS!", esp_err_to_name(err));
-        return;
+        return false;
     }
 
+    bool ok = true;
     err = nvs_set_blob(my_handle, "keymaps", data, size_bytes);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) writing keymaps!", esp_err_to_name(err));
+        ok = false;
     }
 
     err = nvs_commit(my_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) committing keymaps!", esp_err_to_name(err));
+        ok = false;
     }
 
     nvs_close(my_handle);
+    return ok;
 }
 
 void load_keymaps(uint16_t *data, size_t size_bytes) {
@@ -84,7 +88,7 @@ void load_keymaps(uint16_t *data, size_t size_bytes) {
     nvs_close(my_handle);
 }
 
-void save_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count) {
+bool save_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count) {
     nvs_handle_t my_handle;
     esp_err_t err;
     size_t size_bytes = layer_count * MAX_LAYOUT_NAME_LENGTH;
@@ -92,20 +96,24 @@ void save_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count)
     err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) opening NVS!", esp_err_to_name(err));
-        return;
+        return false;
     }
 
+    bool ok = true;
     err = nvs_set_blob(my_handle, "layout_names", names, size_bytes);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) writing layout names!", esp_err_to_name(err));
+        ok = false;
     }
 
     err = nvs_commit(my_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) committing layout names!", esp_err_to_name(err));
+        ok = false;
     }
 
     nvs_close(my_handle);
+    return ok;
 }
 
 void load_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count) {
@@ -131,7 +139,7 @@ void load_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count)
     nvs_close(my_handle);
 }
 
-void save_macros(macro_t *macros, size_t count) {
+bool save_macros(macro_t *macros, size_t count) {
     nvs_handle_t my_handle;
     esp_err_t err;
     size_t size_bytes = MAX_MACROS * sizeof(macro_t);
@@ -139,25 +147,30 @@ void save_macros(macro_t *macros, size_t count) {
     err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) opening NVS!", esp_err_to_name(err));
-        return;
+        return false;
     }
 
+    bool ok = true;
     err = nvs_set_blob(my_handle, "macros", macros, size_bytes);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) writing macros!", esp_err_to_name(err));
+        ok = false;
     }
 
     err = nvs_set_u32(my_handle, "macros_count", (uint32_t)count);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) writing macros count!", esp_err_to_name(err));
+        ok = false;
     }
 
     err = nvs_commit(my_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) committing macros!", esp_err_to_name(err));
+        ok = false;
     }
 
     nvs_close(my_handle);
+    return ok;
 }
 
 void load_macros(macro_t *macros, size_t count) {

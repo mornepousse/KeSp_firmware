@@ -30,6 +30,7 @@ typedef struct {
 
 static nvs_entry_t s_store[NVS_MAX_ENTRIES];
 static int         s_entry_count;
+static int         s_fail_writes;   /* injection de faute pour nvs_set_blob */
 
 static char s_handle_ns[NVS_MAX_HANDLES][NVS_NS_LEN];
 static int  s_handle_used[NVS_MAX_HANDLES];
@@ -41,7 +42,10 @@ void nvs_fake_reset(void)
     memset(s_store,      0, sizeof(s_store));
     memset(s_handle_used, 0, sizeof(s_handle_used));
     s_entry_count = 0;
+    s_fail_writes = 0;
 }
+
+void nvs_fake_fail_writes(int enable) { s_fail_writes = enable; }
 
 /* ── Helpers internes ────────────────────────────────────────── */
 
@@ -124,6 +128,7 @@ esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key,
     int idx = (int)handle - 1;
     if (idx < 0 || idx >= NVS_MAX_HANDLES || !s_handle_used[idx])
         return ESP_FAIL;
+    if (s_fail_writes) return ESP_FAIL;   /* injection de faute (simule NVS pleine) */
     if (length > NVS_BLOB_MAX) return ESP_FAIL;
     nvs_entry_t *e = get_or_create(s_handle_ns[idx], key);
     if (!e) return ESP_FAIL;
