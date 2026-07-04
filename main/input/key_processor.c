@@ -139,7 +139,7 @@ static int16_t pending_macro_idx = -1;
 
 static uint8_t macro_hold_mods = 0;  /* modifier mask from held no-delay macro */
 
-static void expand_macro(uint16_t keycode)
+static void expand_macro(uint16_t keycode, bool is_new)
 {
     if (keycode < MACRO_1 || keycode > MACRO_20) return;
     int16_t idx = (keycode - MACRO_1) / 256;
@@ -163,8 +163,11 @@ static void expand_macro(uint16_t keycode)
     }
 
     if (has_delay) {
-        /* Sequential: queue for keyboard_task playback */
-        pending_macro_idx = idx;
+        /* Sequential: queue for keyboard_task playback — seulement au nouvel appui,
+         * sinon la macro est re-armée à chaque scan tant que la touche est tenue
+         * → rejeu en boucle (audit M8). */
+        if (is_new)
+            pending_macro_idx = idx;
     } else {
         /* Hold: inject keycodes + mods into current report while key is held */
         for (int s = 0; s < MACRO_MAX_STEPS && steps[s].keycode != 0; s++) {
@@ -353,7 +356,7 @@ void build_keycode_report(void)
 
         /* Legacy: macros, BT, internal functions (MO/TO already resolved in first pass) */
         detect_internal_function(kc);
-        expand_macro(kc);
+        expand_macro(kc, is_new_press(row, col));
 
         if (current_row_layer_changer == row && current_col_layer_changer == col) {
             /* Layer changer key — absorbed */

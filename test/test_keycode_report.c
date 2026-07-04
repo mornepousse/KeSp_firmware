@@ -504,6 +504,26 @@ static void test_kp_macro_delay_sets_pending(void)
                 "après consume : pending_macro_idx vide");
 }
 
+/* 22b. Macro à délai TENUE : ne se re-arme pas au scan suivant tant que la touche
+ * est tenue (audit M8 — sinon rejeu en boucle à chaque changement matrice). */
+static void test_kp_macro_delay_no_retrigger_held(void)
+{
+    reset_kp_state();
+    macros_list[0].name[0]            = 's';
+    macros_list[0].steps[0].keycode   = T_KC_A;
+    macros_list[0].steps[1].keycode   = MACRO_DELAY_MARKER;
+    macros_list[0].steps[1].modifier  = 5;
+    macros_list[0].steps[2].keycode   = T_KC_B;
+    keymaps[0][0][0] = T_MACRO_1;
+    press_key(0, 0, 0);
+    build_keycode_report();                          /* 1er appui → en attente */
+    TEST_ASSERT(key_processor_has_pending_macro(), "1er appui macro-délai → en attente");
+    (void)key_processor_consume_macro();             /* keyboard_task la joue → consomme */
+    build_keycode_report();                          /* touche toujours tenue */
+    TEST_ASSERT(!key_processor_has_pending_macro(),
+                "macro-délai tenue → pas de re-armement au scan suivant (M8)");
+}
+
 /* 23. Macro legacy (steps[0].keycode == 0) : utilise keys[] au lieu de steps[].
  *     Le keys[0] doit apparaître dans keycodes[] après build_keycode_report(). */
 static void test_kp_macro_legacy_injects_keys(void)
@@ -573,5 +593,6 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_macro_inline_injects_steps);
     TEST_RUN(test_kp_macro_empty_name_noop);
     TEST_RUN(test_kp_macro_delay_sets_pending);
+    TEST_RUN(test_kp_macro_delay_no_retrigger_held);
     TEST_RUN(test_kp_macro_legacy_injects_keys);
 }
