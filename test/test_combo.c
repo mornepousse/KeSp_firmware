@@ -99,9 +99,33 @@ static void test_cb_released_expires(void) {
     TEST_ASSERT_EQ(combo_consume_expired(), 0x0A, "relâchée avant partenaire → ressort");
 }
 
+/* Épuisement de slots (6KRO) : combo non résolu → touches NON supprimées (M3).
+ * L'ancien code posait combo_active=true avant de vérifier le defer → les 2
+ * touches d'un combo non déférable (slots pleins) étaient supprimées = perte. */
+static void test_cb_slot_exhaustion_no_suppress(void) {
+    cb_reset();
+    combo_config_t cfg = { .row1 = 0, .col1 = 0, .row2 = 0, .col2 = 1, .result = 0x29 };
+    combo_set(0, &cfg);
+    /* Sature les 4 slots deferred avec d'autres touches */
+    combo_defer_key(2, 0, 0xA0);
+    combo_defer_key(2, 1, 0xA1);
+    combo_defer_key(2, 2, 0xA2);
+    combo_defer_key(2, 3, 0xA3);
+    /* Les 2 touches du combo ne peuvent plus être déférées (alloc échoue) */
+    combo_defer_key(0, 0, 0x0A);
+    combo_defer_key(0, 1, 0x0B);
+    uint8_t pr[6], pc[6]; press2(0, 0, 0, 1, pr, pc);
+    combo_process(pr, pc);
+    TEST_ASSERT(!combo_is_suppressed(0, 0),
+                "slots pleins → combo non résolu → (0,0) PAS supprimée (pas de perte)");
+    TEST_ASSERT(!combo_is_suppressed(0, 1),
+                "slots pleins → combo non résolu → (0,1) PAS supprimée");
+}
+
 void test_combo(void) {
     TEST_SUITE("Combos — module réel");
     TEST_RUN(test_cb_fires);
+    TEST_RUN(test_cb_slot_exhaustion_no_suppress);
     TEST_RUN(test_cb_should_defer);
     TEST_RUN(test_cb_one_key_no_fire);
     TEST_RUN(test_cb_timeout_expired);
