@@ -59,6 +59,25 @@ static void test_load_keymaps_empty_nvs_unchanged(void)
                 "load_keymaps sur NVS vide : buffer inchange");
 }
 
+/* ── 2b. load_keymaps : blob stocké de MAUVAISE taille → garde → défauts (E3) ── */
+
+static void test_load_keymaps_size_guard(void)
+{
+    nvs_fake_reset();
+    /* Blob "keymaps" plus petit que la taille attendue (config d'un autre build). */
+    uint8_t fake_blob[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    nvs_fake_put_blob(STORAGE_NAMESPACE, "keymaps", fake_blob, sizeof(fake_blob));
+
+    uint16_t buf[LAYERS][MATRIX_ROWS][MATRIX_COLS];
+    memset(buf, 0xAB, sizeof(buf));
+    load_keymaps((uint16_t *)buf, sizeof(buf));
+
+    uint16_t sentinel[LAYERS][MATRIX_ROWS][MATRIX_COLS];
+    memset(sentinel, 0xAB, sizeof(sentinel));
+    TEST_ASSERT(memcmp(buf, sentinel, sizeof(buf)) == 0,
+                "load_keymaps taille incorrecte → défauts préservés (pas de remplissage partiel)");
+}
+
 /* ── 3. Round-trip layout_names ─────────────────────────────── */
 
 static void test_layout_names_real_roundtrip(void)
@@ -208,6 +227,7 @@ void test_keymap_nvs(void)
     TEST_SUITE("Keymap NVS — persistance reelle (keymap.c + fake NVS RAM)");
     TEST_RUN(test_keymaps_real_roundtrip);
     TEST_RUN(test_load_keymaps_empty_nvs_unchanged);
+    TEST_RUN(test_load_keymaps_size_guard);
     TEST_RUN(test_layout_names_real_roundtrip);
     TEST_RUN(test_macro_t_struct_layout);
     TEST_RUN(test_macros_real_roundtrip);

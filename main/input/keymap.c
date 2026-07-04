@@ -58,6 +58,18 @@ void load_keymaps(uint16_t *data, size_t size_bytes) {
         return;
     }
 
+    /* Garde de taille : un blob de taille différente (LAYERS/matrice changés
+     * entre firmwares) ne doit PAS être chargé partiellement → garder les
+     * défauts compile-time. Symétrique à load_macros. */
+    size_t stored_size = 0;
+    err = nvs_get_blob(my_handle, "keymaps", NULL, &stored_size);
+    if (err == ESP_OK && stored_size != size_bytes) {
+        ESP_LOGW(TAG, "Keymaps NVS size %u != expected %u — keeping defaults",
+                 (unsigned)stored_size, (unsigned)size_bytes);
+        nvs_close(my_handle);
+        return;
+    }
+
     size_t required_size = size_bytes;
     err = nvs_get_blob(my_handle, "keymaps", data, &required_size);
 
