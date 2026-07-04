@@ -753,9 +753,12 @@ static void bin_cmd_macro_add(uint8_t cmd, const uint8_t *p, uint16_t l)
     uint8_t nlen = p[1];
     if (l < (uint16_t)(2 + nlen + 6)) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
 
-    if (nlen >= MAX_MACRO_NAME_LENGTH) nlen = MAX_MACRO_NAME_LENGTH - 1;
-    memcpy(macros_list[slot].name, p + 2, nlen);
-    macros_list[slot].name[nlen] = '\0';
+    /* Nom tronqué à MAX_MACRO_NAME_LENGTH-1, mais les keys sont lues à l'offset
+     * du nlen ORIGINAL (là où l'hôte les a mises) : clamper nlen avant l'offset
+     * décalait la lecture des keys dans le nom (données incohérentes) — audit M13. */
+    uint8_t name_len = (nlen < MAX_MACRO_NAME_LENGTH) ? nlen : (uint8_t)(MAX_MACRO_NAME_LENGTH - 1);
+    memcpy(macros_list[slot].name, p + 2, name_len);
+    macros_list[slot].name[name_len] = '\0';
     memcpy(macros_list[slot].keys, p + 2 + nlen, 6);
     memset(macros_list[slot].steps, 0, sizeof(macros_list[slot].steps));
     macros_list[slot].key_definition = macro_kc_from_index(slot);
@@ -777,9 +780,10 @@ static void bin_cmd_macro_add_seq(uint8_t cmd, const uint8_t *p, uint16_t l)
     if (step_count > MACRO_MAX_STEPS) step_count = MACRO_MAX_STEPS;
     if (l < (uint16_t)(2 + nlen + 1 + step_count * 2)) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
 
-    if (nlen >= MAX_MACRO_NAME_LENGTH) nlen = MAX_MACRO_NAME_LENGTH - 1;
-    memcpy(macros_list[slot].name, p + 2, nlen);
-    macros_list[slot].name[nlen] = '\0';
+    /* idem macro_add (M13) : nom tronqué mais offset steps au nlen original. */
+    uint8_t name_len = (nlen < MAX_MACRO_NAME_LENGTH) ? nlen : (uint8_t)(MAX_MACRO_NAME_LENGTH - 1);
+    memcpy(macros_list[slot].name, p + 2, name_len);
+    macros_list[slot].name[name_len] = '\0';
     memset(macros_list[slot].keys, 0, sizeof(macros_list[slot].keys));
     memset(macros_list[slot].steps, 0, sizeof(macros_list[slot].steps));
 
