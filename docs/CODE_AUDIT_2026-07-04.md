@@ -237,13 +237,13 @@ clamper avant de calculer les offsets, ou rejeter `nlen >= MAX_MACRO_NAME_LENGTH
 ---
 
 ## Priorisation suggérée
-1. **C1** (clamp couche LT/OSL) — sûreté mémoire, fix court, test facile.
-2. **E1/E2** (tap_hold couche per-entry) — vrai bug utilisateur (couche bloquée).
-3. **M1** (RF verify_rx one-liner) — masque une vraie panne radio.
-4. **E3/E4** (NVS garde + faux OK) — perte de config utilisateur.
-5. **E6** (key override) — feature cassée.
-6. **E5** (CDC re-CRC/lock) — durcissement entrée hostile.
+1. ✅ **C1** (clamp couche LT/OSL) — FIXÉ (f41efcb5, TDD).
+2. ✅ **E1/E2** (tap_hold couche per-entry) — FIXÉ (c8faa84b, TDD).
+3. ✅ **M1** (RF verify_rx one-liner) — FIXÉ (cc5f5e2b).
+4. ⏳ **E3/E4** (NVS garde + faux OK) — E3 FIXÉ (aad52582, TDD) ; **E4 reste** (save_* → esp_err_t + CDC ks_respond_err, refactor de signature).
+5. ⬜ **E6** (key override) — feature cassée.
+6. ⬜ **E5** (CDC re-CRC/lock) — durcissement entrée hostile.
 7. Le reste (MOYEN/edge) au fil de l'eau ; E7/RF-injection = décision archi (HMAC).
 
 Tous les modules input ont maintenant des tests host branchés sur le vrai code
-→ chaque fix peut se faire en TDD (test rouge → fix → vert), comme le bug leader.
+→ chaque fix se fait en TDD (test rouge → fix → vert), comme le bug leader.
