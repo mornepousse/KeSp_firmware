@@ -1,7 +1,9 @@
 /* Tamagotchi game engine */
 #include "tama_engine.h"
+#ifndef TEST_HOST
 #include "nvs_utils.h"
 #include "keyboard_config.h"
+#endif
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <string.h>
@@ -89,6 +91,7 @@ void tama_engine_init(void)
     stats.energy = TAMA2_STAT_MAX;
     stats.health = TAMA2_STAT_MAX;
 
+#ifndef TEST_HOST
     /* Try loading from NVS */
     uint32_t dummy = 0;
     esp_err_t err = nvs_load_blob_with_total(STORAGE_NAMESPACE, "tama_stats", &stats,
@@ -98,8 +101,20 @@ void tama_engine_init(void)
     } else {
         ESP_LOGI(TAG, "New tama created");
     }
+#endif
 
     stats.session_keys = 0;
+
+    /* Reset state machine — ensures deterministic state after init() */
+    state = TAMA2_IDLE;
+    enabled = true;
+    keys_since_hunger_tick = 0;
+    keys_since_energy_tick = 0;
+    keys_since_happiness_tick = 0;
+    last_action = -1;
+    last_action_ms = 0;
+    state_hold_keys = 0;
+
     clamp_stats();
 }
 
@@ -198,11 +213,13 @@ void tama_engine_set_enabled(bool e) { enabled = e; }
 
 void tama_engine_save(void)
 {
+#ifndef TEST_HOST
     uint32_t ver = 1;
     esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "tama_stats", &stats,
                                               sizeof(stats), "tama_ver", ver);
     if (err != ESP_OK)
         ESP_LOGE(TAG, "Failed to save tama stats: %s", esp_err_to_name(err));
+#endif
 }
 
 void tama_engine_session_start(void)
@@ -230,3 +247,28 @@ uint8_t tama_engine_get_critter(void)
 {
     return (stats.level <= MAX_LEVEL) ? (uint8_t)stats.level : MAX_LEVEL;
 }
+
+#ifdef TEST_HOST
+/* Injecte des stats arbitraires pour les tests host : applique clamp_stats()
+ * pour calculer health, remet state=IDLE et state_hold_keys=0, et reset les
+ * compteurs de décroissance pour que les effets sur 50 keypresses soient
+ * prévisibles. Pas disponible en build production. */
+void tama_engine_test_set_stats(uint16_t hunger, uint16_t happiness,
+                                 uint16_t energy, uint16_t level, uint16_t xp)
+{
+    stats.hunger       = hunger;
+    stats.happiness    = happiness;
+    stats.energy       = energy;
+    stats.level        = level;
+    stats.xp           = xp;
+    stats.total_keys   = 0;
+    stats.session_keys = 0;
+    stats.max_kpm      = 0;
+    clamp_stats();                  /* compute health + enforce TAMA2_STAT_MAX */
+    state                   = TAMA2_IDLE;
+    state_hold_keys         = 0;
+    keys_since_hunger_tick    = 0;
+    keys_since_energy_tick    = 0;
+    keys_since_happiness_tick = 0;
+}
+#endif

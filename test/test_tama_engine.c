@@ -1,165 +1,318 @@
-/* Tests for tamagotchi game engine logic */
+/* Tests pour la logique du moteur tamagotchi — rewired sur le vrai tama_engine.c.
+ *
+ * Tous les tests passent par l'API publique + le test accessor
+ * tama_engine_test_set_stats() (disponible sous TEST_HOST uniquement).
+ * reset_tama() avant chaque test garantit un état déterministe.
+ *
+ * Comportements couverts que la copie locale omettait :
+ *  - Hystérésis STATE_HOLD_MIN : transition retardée jusqu'au 50e keypress
+ *  - xp_for_level scaling +250/niveau (pas un seuil plat)
+ *  - Level-up multi-niveaux via while-loop
+ *  - Clamp critter à MAX_LEVEL=19 pour level>19
+ */
 #include "test_framework.h"
+#include "tama_engine.h"
+#include "host_clock.h"
 
-#define TAMA2_STAT_MAX 1000
-
-typedef struct {
-    uint16_t hunger, happiness, energy, health;
-    uint32_t total_keys, session_keys, max_kpm;
-    uint16_t level, xp;
-} tama_stats_t;
-
-typedef enum {
-    TAMA2_IDLE, TAMA2_HAPPY, TAMA2_EXCITED, TAMA2_EATING,
-    TAMA2_SLEEPY, TAMA2_SLEEPING, TAMA2_SICK, TAMA2_SAD, TAMA2_CELEBRATING
-} tama_state_t;
-
-/* Simulate stat clamping */
-static void clamp(tama_stats_t *s) {
-    if (s->hunger > TAMA2_STAT_MAX) s->hunger = TAMA2_STAT_MAX;
-    if (s->happiness > TAMA2_STAT_MAX) s->happiness = TAMA2_STAT_MAX;
-    if (s->energy > TAMA2_STAT_MAX) s->energy = TAMA2_STAT_MAX;
-    s->health = (s->hunger + s->happiness + s->energy) / 3;
+/* Réinitialise le moteur à son état par défaut entre chaque test.
+ * tama_engine_init() sous TEST_HOST : memset stats, valeurs par défaut,
+ * reset de state/state_hold_keys/decay ticks (NVS gated). */
+static void reset_tama(void)
+{
+    host_clock_reset();
+    tama_engine_init();
 }
 
-/* Simulate state update */
-static tama_state_t compute_state(tama_stats_t *s, uint32_t kpm) {
-    if (s->health < 200) return TAMA2_SICK;
-    if (s->happiness < 200) return TAMA2_SAD;
-    if (s->energy < 100) return TAMA2_SLEEPING;
-    if (s->energy < 300) return TAMA2_SLEEPY;
-    if (kpm > 200) return TAMA2_EXCITED;
-    if (kpm > 80) return TAMA2_HAPPY;
-    return TAMA2_IDLE;
+/* ── Stat clamping (via clamp_stats() dans le vrai module) ─────────── */
+
+static void test_tama_clamp_max(void)
+{
+    reset_tama();
+    /* tama_engine_test_set_stats appelle clamp_stats() en interne */
+    tama_engine_test_set_stats(1500, 1200, 1100, 0, 0);
+    const tama2_stats_t *s = tama_engine_get_stats();
+    TEST_ASSERT_EQ(s->hunger,    1000, "Hunger clamped to TAMA2_STAT_MAX");
+    TEST_ASSERT_EQ(s->happiness, 1000, "Happiness clamped to TAMA2_STAT_MAX");
+    TEST_ASSERT_EQ(s->energy,    1000, "Energy clamped to TAMA2_STAT_MAX");
 }
 
-/* ── Stat clamping ───────────────────────────────────────────────── */
-
-static void test_tama_clamp_max(void) {
-    tama_stats_t s = {1500, 1200, 1100, 0};
-    clamp(&s);
-    TEST_ASSERT_EQ(s.hunger, 1000, "Hunger clamped to 1000");
-    TEST_ASSERT_EQ(s.happiness, 1000, "Happiness clamped to 1000");
-    TEST_ASSERT_EQ(s.energy, 1000, "Energy clamped to 1000");
+static void test_tama_health_average(void)
+{
+    reset_tama();
+    tama_engine_test_set_stats(600, 300, 900, 0, 0);
+    const tama2_stats_t *s = tama_engine_get_stats();
+    TEST_ASSERT_EQ(s->health, 600, "Health = (600+300+900)/3 = 600");
 }
 
-static void test_tama_health_average(void) {
-    tama_stats_t s = {600, 300, 900, 0};
-    clamp(&s);
-    TEST_ASSERT_EQ(s.health, 600, "Health = (600+300+900)/3 = 600");
+static void test_tama_health_zero(void)
+{
+    reset_tama();
+    tama_engine_test_set_stats(0, 0, 0, 0, 0);
+    const tama2_stats_t *s = tama_engine_get_stats();
+    TEST_ASSERT_EQ(s->health, 0, "Health = 0 quand toutes les stats = 0");
 }
 
-static void test_tama_health_zero(void) {
-    tama_stats_t s = {0, 0, 0, 0};
-    clamp(&s);
-    TEST_ASSERT_EQ(s.health, 0, "Health = 0 when all stats 0");
+/* ── State transitions (via update_state() déclenché par keypress) ─── */
+
+/* Chaque test injecte des stats favorables à un état, puis appuie
+ * STATE_HOLD_MIN=50 fois pour déclencher le changement d'état. */
+
+static void test_tama_state_sick(void)
+{
+    reset_tama();
+    /* health = (100+100+100)/3 = 100 < 200 → SICK */
+    tama_engine_test_set_stats(100, 100, 100, 0, 0);
+    for (int i = 0; i < 50; i++)
+        tama_engine_keypress(0);
+    TEST_ASSERT_EQ(tama_engine_get_state(), TAMA2_SICK,
+                   "health < 200 → SICK après STATE_HOLD_MIN keypresses");
 }
 
-/* ── State transitions ───────────────────────────────────────────── */
-
-static void test_tama_state_sick(void) {
-    tama_stats_t s = {100, 100, 100, 0};
-    clamp(&s); /* health = 100 */
-    TEST_ASSERT_EQ(compute_state(&s, 0), TAMA2_SICK, "Health < 200 → SICK");
+static void test_tama_state_sad(void)
+{
+    reset_tama();
+    /* happiness=100 < 200, health=566 > 200 → SAD */
+    tama_engine_test_set_stats(800, 100, 800, 0, 0);
+    for (int i = 0; i < 50; i++)
+        tama_engine_keypress(0);
+    TEST_ASSERT_EQ(tama_engine_get_state(), TAMA2_SAD,
+                   "happiness < 200 → SAD après STATE_HOLD_MIN keypresses");
 }
 
-static void test_tama_state_sad(void) {
-    tama_stats_t s = {800, 100, 800, 0};
-    clamp(&s); /* health = 566, happiness = 100 */
-    TEST_ASSERT_EQ(compute_state(&s, 0), TAMA2_SAD, "Happiness < 200 → SAD");
+static void test_tama_state_sleeping(void)
+{
+    reset_tama();
+    /* energy=50 < 100 → SLEEPING (50 keypresses < decay thresholds → pas de décroissance) */
+    tama_engine_test_set_stats(800, 800, 50, 0, 0);
+    for (int i = 0; i < 50; i++)
+        tama_engine_keypress(0);
+    TEST_ASSERT_EQ(tama_engine_get_state(), TAMA2_SLEEPING,
+                   "energy < 100 → SLEEPING après STATE_HOLD_MIN keypresses");
 }
 
-static void test_tama_state_sleeping(void) {
-    tama_stats_t s = {800, 800, 50, 0};
-    clamp(&s);
-    TEST_ASSERT_EQ(compute_state(&s, 0), TAMA2_SLEEPING, "Energy < 100 → SLEEPING");
+static void test_tama_state_sleepy(void)
+{
+    reset_tama();
+    /* energy=250, 100 ≤ 250 < 300 → SLEEPY */
+    tama_engine_test_set_stats(800, 800, 250, 0, 0);
+    for (int i = 0; i < 50; i++)
+        tama_engine_keypress(0);
+    TEST_ASSERT_EQ(tama_engine_get_state(), TAMA2_SLEEPY,
+                   "100 ≤ energy < 300 → SLEEPY après STATE_HOLD_MIN keypresses");
 }
 
-static void test_tama_state_sleepy(void) {
-    tama_stats_t s = {800, 800, 250, 0};
-    clamp(&s);
-    TEST_ASSERT_EQ(compute_state(&s, 0), TAMA2_SLEEPY, "Energy < 300 → SLEEPY");
+static void test_tama_state_excited(void)
+{
+    reset_tama();
+    /* stats par défaut (energy=1000, health=933) : kpm=300 > 200 → EXCITED */
+    for (int i = 0; i < 50; i++)
+        tama_engine_keypress(300);
+    TEST_ASSERT_EQ(tama_engine_get_state(), TAMA2_EXCITED,
+                   "kpm > 200 → EXCITED après STATE_HOLD_MIN keypresses");
 }
 
-static void test_tama_state_excited(void) {
-    tama_stats_t s = {800, 800, 800, 0};
-    clamp(&s);
-    TEST_ASSERT_EQ(compute_state(&s, 250), TAMA2_EXCITED, "KPM > 200 → EXCITED");
+static void test_tama_state_happy(void)
+{
+    reset_tama();
+    /* 80 < kpm=120 ≤ 200 → HAPPY */
+    for (int i = 0; i < 50; i++)
+        tama_engine_keypress(120);
+    TEST_ASSERT_EQ(tama_engine_get_state(), TAMA2_HAPPY,
+                   "80 < kpm ≤ 200 → HAPPY après STATE_HOLD_MIN keypresses");
 }
 
-static void test_tama_state_happy(void) {
-    tama_stats_t s = {800, 800, 800, 0};
-    clamp(&s);
-    TEST_ASSERT_EQ(compute_state(&s, 120), TAMA2_HAPPY, "KPM > 80 → HAPPY");
+static void test_tama_state_idle(void)
+{
+    reset_tama();
+    /* kpm=30 < 80, bonnes stats → new_state = IDLE = état initial → inchangé */
+    for (int i = 0; i < 50; i++)
+        tama_engine_keypress(30);
+    TEST_ASSERT_EQ(tama_engine_get_state(), TAMA2_IDLE,
+                   "kpm < 80, bonnes stats → IDLE (état initial préservé)");
 }
 
-static void test_tama_state_idle(void) {
-    tama_stats_t s = {800, 800, 800, 0};
-    clamp(&s);
-    TEST_ASSERT_EQ(compute_state(&s, 30), TAMA2_IDLE, "KPM < 80 → IDLE");
+/* ── Hystérésis STATE_HOLD_MIN ─────────────────────────────────────── */
+
+/* L'état NE change PAS avant STATE_HOLD_MIN keypresses consécutifs vers
+ * le même new_state — comportement absent de l'ancienne copie locale. */
+static void test_tama_hysteresis_not_before_hold_min(void)
+{
+    reset_tama();
+    /* 49 keypresses kpm=300 : state_hold_keys va de 0 à 49 < 50 → IDLE */
+    for (int i = 0; i < 49; i++)
+        tama_engine_keypress(300);
+    TEST_ASSERT_EQ(tama_engine_get_state(), TAMA2_IDLE,
+                   "< STATE_HOLD_MIN keypresses → état inchangé (hystérésis)");
 }
 
-/* ── State priority ──────────────────────────────────────────────── */
-
-static void test_tama_sick_overrides_excited(void) {
-    tama_stats_t s = {50, 50, 50, 0};
-    clamp(&s); /* health < 200 */
-    TEST_ASSERT_EQ(compute_state(&s, 300), TAMA2_SICK, "SICK overrides EXCITED");
+static void test_tama_hysteresis_changes_at_hold_min(void)
+{
+    reset_tama();
+    /* Au 50e keypress : state_hold_keys = 50 ≥ 50 → bascule vers EXCITED */
+    for (int i = 0; i < 50; i++)
+        tama_engine_keypress(300);
+    TEST_ASSERT_EQ(tama_engine_get_state(), TAMA2_EXCITED,
+                   "= STATE_HOLD_MIN keypresses → état bascule vers EXCITED");
 }
 
-/* ── Actions ─────────────────────────────────────────────────────── */
+/* ── Priorité des états ─────────────────────────────────────────────── */
 
-static void test_tama_feed(void) {
-    tama_stats_t s = {500, 800, 800, 0};
-    s.hunger = (s.hunger + 300 > TAMA2_STAT_MAX) ? TAMA2_STAT_MAX : s.hunger + 300;
-    TEST_ASSERT_EQ(s.hunger, 800, "Feed: 500 + 300 = 800");
+static void test_tama_sick_overrides_excited(void)
+{
+    reset_tama();
+    /* health < 200 même si kpm > 200 → SICK prioritaire sur EXCITED */
+    tama_engine_test_set_stats(50, 50, 50, 0, 0);
+    for (int i = 0; i < 50; i++)
+        tama_engine_keypress(300);
+    TEST_ASSERT_EQ(tama_engine_get_state(), TAMA2_SICK,
+                   "SICK prioritaire sur EXCITED (health < 200)");
 }
 
-static void test_tama_feed_clamp(void) {
-    tama_stats_t s = {900, 800, 800, 0};
-    s.hunger = (s.hunger + 300 > TAMA2_STAT_MAX) ? TAMA2_STAT_MAX : s.hunger + 300;
-    TEST_ASSERT_EQ(s.hunger, 1000, "Feed: 900 + 300 clamped to 1000");
+/* ── Actions ────────────────────────────────────────────────────────── */
+
+static void test_tama_feed(void)
+{
+    reset_tama();
+    tama_engine_test_set_stats(500, 800, 800, 0, 0);
+    tama_engine_action(TAMA2_ACTION_FEED);      /* +300 → 800 */
+    TEST_ASSERT_EQ(tama_engine_get_stats()->hunger, 800,
+                   "FEED : 500 + 300 = 800");
 }
 
-static void test_tama_play(void) {
-    tama_stats_t s = {800, 600, 800, 0};
-    s.happiness = (s.happiness + 200 > TAMA2_STAT_MAX) ? TAMA2_STAT_MAX : s.happiness + 200;
-    TEST_ASSERT_EQ(s.happiness, 800, "Play: 600 + 200 = 800");
+static void test_tama_feed_clamp(void)
+{
+    reset_tama();
+    tama_engine_test_set_stats(900, 800, 800, 0, 0);
+    tama_engine_action(TAMA2_ACTION_FEED);      /* 900 + 300 = 1200 → clamped 1000 */
+    TEST_ASSERT_EQ(tama_engine_get_stats()->hunger, 1000,
+                   "FEED : 900 + 300 clamped à TAMA2_STAT_MAX");
 }
 
-static void test_tama_sleep_action(void) {
-    tama_stats_t s = {800, 800, 400, 0};
-    s.energy = (s.energy + 400 > TAMA2_STAT_MAX) ? TAMA2_STAT_MAX : s.energy + 400;
-    TEST_ASSERT_EQ(s.energy, 800, "Sleep: 400 + 400 = 800");
+static void test_tama_play(void)
+{
+    reset_tama();
+    tama_engine_test_set_stats(800, 600, 800, 0, 0);
+    tama_engine_action(TAMA2_ACTION_PLAY);      /* +200 → 800 */
+    TEST_ASSERT_EQ(tama_engine_get_stats()->happiness, 800,
+                   "PLAY : 600 + 200 = 800");
 }
 
-/* ── Level up ────────────────────────────────────────────────────── */
-
-static void test_tama_level_up(void) {
-    tama_stats_t s = {800, 800, 800, 0, 0, 0, 0, 0, 500};
-    /* XP = 500, threshold = 500 → level up */
-    if (s.xp >= 500) { s.xp -= 500; s.level++; }
-    TEST_ASSERT_EQ(s.level, 1, "Level 0 → 1");
-    TEST_ASSERT_EQ(s.xp, 0, "XP consumed");
+static void test_tama_sleep_action(void)
+{
+    reset_tama();
+    tama_engine_test_set_stats(800, 800, 400, 0, 0);
+    tama_engine_action(TAMA2_ACTION_SLEEP);     /* +400 → 800 */
+    TEST_ASSERT_EQ(tama_engine_get_stats()->energy, 800,
+                   "SLEEP action : 400 + 400 = 800");
 }
 
-static void test_tama_max_level(void) {
-    tama_stats_t s = {800, 800, 800, 0, 0, 0, 0, 19, 500};
-    /* Level 19 = max, should not exceed */
-    if (s.xp >= 500 && s.level < 19) { s.xp -= 500; s.level++; }
-    TEST_ASSERT_EQ(s.level, 19, "Max level stays at 19");
-    TEST_ASSERT_EQ(s.xp, 500, "XP not consumed at max level");
+/* ── XP scaling : +250 XP seuil par niveau ─────────────────────────── */
+
+/* Vérifie que le seuil level N→N+1 croît de +250 par niveau.
+ * xp_for_level(level) = 500 + level * 250.
+ * La copie locale utilisait un seuil plat de 500 — ce test le détecte. */
+static void test_tama_xp_scaling_per_level(void)
+{
+    reset_tama();
+    /* Level 0→1 : seuil = 500. Inject xp=449, +50 via 1000 keypresses → xp=499 < 500 : pas de level-up */
+    tama_engine_test_set_stats(800, 800, 800, 0, 449);
+    for (int i = 0; i < 1000; i++)
+        tama_engine_keypress(0);
+    TEST_ASSERT_EQ(tama_engine_get_stats()->level, 0,
+                   "xp=449+50=499 < seuil 500 → pas de level-up niveau 0");
+
+    /* Level 0→1 : inject xp=499, +50 → xp=549 ≥ 500 → level-up, xp=49 */
+    tama_engine_test_set_stats(800, 800, 800, 0, 499);
+    for (int i = 0; i < 1000; i++)
+        tama_engine_keypress(0);
+    const tama2_stats_t *s = tama_engine_get_stats();
+    TEST_ASSERT_EQ(s->level, 1, "xp=499+50=549 ≥ 500 → level 0→1");
+    TEST_ASSERT_EQ(s->xp,   49, "XP restant = 549 - 500 = 49");
+
+    /* Level 1→2 : seuil = 750 (pas 500). Inject level=1 xp=699, +50 → 749 < 750 → pas de level-up */
+    tama_engine_test_set_stats(800, 800, 800, 1, 699);
+    for (int i = 0; i < 1000; i++)
+        tama_engine_keypress(0);
+    TEST_ASSERT_EQ(tama_engine_get_stats()->level, 1,
+                   "xp=699+50=749 < seuil 750 → pas de level-up niveau 1 (scaling +250)");
+
+    /* Level 1→2 : inject xp=749, +50 → 799 ≥ 750 → level-up, xp=49 */
+    tama_engine_test_set_stats(800, 800, 800, 1, 749);
+    for (int i = 0; i < 1000; i++)
+        tama_engine_keypress(0);
+    s = tama_engine_get_stats();
+    TEST_ASSERT_EQ(s->level, 2, "xp=749+50=799 ≥ 750 → level 1→2 (seuil +250 confirmé)");
+    TEST_ASSERT_EQ(s->xp,   49, "XP restant = 799 - 750 = 49");
 }
 
-static void test_tama_critter_index(void) {
+/* ── Level-up multi-niveaux (while-loop) ────────────────────────────── */
+
+/* Un seul événement XP (+50) peut franchir plusieurs seuils d'un coup.
+ * La copie locale n'avait pas de while-loop — ce test le prouve. */
+static void test_tama_levelup_multilevel(void)
+{
+    reset_tama();
+    /* Seuils : lvl 0→1 = 500, lvl 1→2 = 750. Total = 1250.
+     * Inject xp=1249, +50 → xp=1299.
+     * while: 1299 ≥ 500 → lvl=1, xp=799. 799 ≥ 750 → lvl=2, xp=49. 49 < 1000 → stop. */
+    tama_engine_test_set_stats(800, 800, 800, 0, 1249);
+    for (int i = 0; i < 1000; i++)
+        tama_engine_keypress(0);
+    const tama2_stats_t *s = tama_engine_get_stats();
+    TEST_ASSERT_EQ(s->level, 2,
+                   "Level-up while-loop : 1299 XP franchit 2 seuils → level=2");
+    TEST_ASSERT_EQ(s->xp,   49,
+                   "XP restant après double level-up : 1299 - 500 - 750 = 49");
+}
+
+/* ── Cap MAX_LEVEL ──────────────────────────────────────────────────── */
+
+static void test_tama_max_level_cap(void)
+{
+    reset_tama();
+    /* Au niveau MAX_LEVEL=19, plus de level-up même avec un XP excédentaire */
+    tama_engine_test_set_stats(800, 800, 800, 19, 9999);
+    for (int i = 0; i < 1000; i++)
+        tama_engine_keypress(0);
+    TEST_ASSERT_EQ(tama_engine_get_stats()->level, 19,
+                   "MAX_LEVEL : pas de level-up au-delà de 19");
+}
+
+/* ── Critter index ──────────────────────────────────────────────────── */
+
+/* Clamp critter à 19 pour level > MAX_LEVEL — absent de l'ancienne copie. */
+static void test_tama_critter_clamp_at_max(void)
+{
+    reset_tama();
+    /* Injection directe level=21 > MAX_LEVEL=19 → critter doit être 19 */
+    tama_engine_test_set_stats(800, 800, 800, 21, 0);
+    TEST_ASSERT_EQ(tama_engine_get_critter(), 19,
+                   "level > MAX_LEVEL → critter clamped à 19");
+}
+
+static void test_tama_critter_at_max_level(void)
+{
+    reset_tama();
+    tama_engine_test_set_stats(800, 800, 800, 19, 0);
+    TEST_ASSERT_EQ(tama_engine_get_critter(), 19,
+                   "level = MAX_LEVEL=19 → critter = 19");
+}
+
+static void test_tama_critter_matches_level(void)
+{
     for (uint16_t level = 0; level <= 19; level++) {
-        uint8_t critter = (level <= 19) ? (uint8_t)level : 19;
-        TEST_ASSERT_EQ(critter, level, "Critter index matches level");
+        reset_tama();
+        tama_engine_test_set_stats(800, 800, 800, level, 0);
+        TEST_ASSERT_EQ((int)tama_engine_get_critter(), (int)level,
+                       "Critter index = level pour levels 0-19");
     }
 }
 
-void test_tama_engine(void) {
-    TEST_SUITE("Tama Engine");
+/* ── Suite runner ───────────────────────────────────────────────────── */
+
+void test_tama_engine(void)
+{
+    TEST_SUITE("Tama Engine (vrai module)");
     TEST_RUN(test_tama_clamp_max);
     TEST_RUN(test_tama_health_average);
     TEST_RUN(test_tama_health_zero);
@@ -170,12 +323,17 @@ void test_tama_engine(void) {
     TEST_RUN(test_tama_state_excited);
     TEST_RUN(test_tama_state_happy);
     TEST_RUN(test_tama_state_idle);
+    TEST_RUN(test_tama_hysteresis_not_before_hold_min);
+    TEST_RUN(test_tama_hysteresis_changes_at_hold_min);
     TEST_RUN(test_tama_sick_overrides_excited);
     TEST_RUN(test_tama_feed);
     TEST_RUN(test_tama_feed_clamp);
     TEST_RUN(test_tama_play);
     TEST_RUN(test_tama_sleep_action);
-    TEST_RUN(test_tama_level_up);
-    TEST_RUN(test_tama_max_level);
-    TEST_RUN(test_tama_critter_index);
+    TEST_RUN(test_tama_xp_scaling_per_level);
+    TEST_RUN(test_tama_levelup_multilevel);
+    TEST_RUN(test_tama_max_level_cap);
+    TEST_RUN(test_tama_critter_clamp_at_max);
+    TEST_RUN(test_tama_critter_at_max_level);
+    TEST_RUN(test_tama_critter_matches_level);
 }

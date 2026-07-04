@@ -77,3 +77,11 @@ uint8_t tama_engine_get_critter(void);
 
 /* Get last action performed (returns action + timestamp, or -1 if none recent) */
 int tama_engine_get_last_action(uint32_t *age_ms);
+
+#ifdef TEST_HOST
+/* Test-only: inject specific stats without NVS or keypress loops.
+ * Calls clamp_stats() to compute health and enforce TAMA2_STAT_MAX.
+ * Resets state to IDLE, state_hold_keys to 0, and all decay tick counters. */
+void tama_engine_test_set_stats(uint16_t hunger, uint16_t happiness,
+                                 uint16_t energy, uint16_t level, uint16_t xp);
+#endif

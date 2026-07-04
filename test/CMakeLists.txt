@@ -28,6 +28,7 @@ add_executable(test_runner
     test_leader.c
     ../main/input/leader.c
     test_tama_engine.c
+    ../main/tama/tama_engine.c
     test_rf_packet.c
     test_heartbeat.c
     ../main/comm/rf/heartbeat.c

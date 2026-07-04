@@ -101,9 +101,9 @@ void     rtc_matrix_deinit(void)          {}
  * plus de stubs ici. OSM/OSL/CapsWord/Repeat/GraveEsc/LayerLock/WPM/KeyOverride/
  * TriLayer sont exercés en réel (key_override NVS guardé #ifndef TEST_HOST). */
 
-/* ── Stubs tama_engine.h ─────────────────────────────────────────────── */
-
-void tama_engine_action(tama2_action_t a) { (void)a; }
+/* tama_engine.h : le VRAI module est linké (../main/tama/tama_engine.c) — plus de
+ * stubs. Aucun test de cette suite ne met de K_TAMA keycode dans le keymap,
+ * donc le vrai tama_engine_action() n'est jamais appelé ici. */
 
 /* ── Stubs hid_bluetooth_manager.h ──────────────────────────────────── */
 
