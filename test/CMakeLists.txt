@@ -14,6 +14,7 @@ add_executable(test_runner
     test_keymap_nvs.c
     test_keycodes.c
     test_key_features.c
+    ../main/input/key_features.c
     test_tap_hold.c
     test_macro_seq.c
     test_tap_dance.c

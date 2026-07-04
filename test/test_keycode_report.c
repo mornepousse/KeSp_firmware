@@ -77,11 +77,8 @@ static uint8_t  g_th_active_mods  = 0;
 static int8_t   g_th_active_layer = -1;
 static bool     g_th_is_hold      = false;
 static uint8_t  g_th_tap_kc       = 0;
-static uint8_t  g_osm_pending     = 0;
-static int8_t   g_osl_layer       = -1;
 static uint8_t  g_combo_kc        = 0;
 static bool     g_leader_active   = false;
-static int8_t   g_osl_arm_val     = -1; /* dernière valeur passée à osl_arm */
 
 /* ── Stubs matrix_scan.h ─────────────────────────────────────────────── */
 
@@ -166,65 +163,9 @@ bool    leader_is_active(void)     { return g_leader_active; }
 void    leader_save(void)          {}
 void    leader_load(void)          {}
 
-/* ── Stubs key_features.h ────────────────────────────────────────────── */
-
-/* OSM */
-void    osm_arm(uint8_t m)   { (void)m; }
-uint8_t osm_consume(void)    { uint8_t m = g_osm_pending; g_osm_pending = 0; return m; }
-bool    osm_is_active(void)  { return g_osm_pending != 0; }
-
-/* OSL */
-void   osl_arm(uint8_t layer)
-{
-    g_osl_layer   = (int8_t)layer;
-    g_osl_arm_val = (int8_t)layer;
-}
-int8_t osl_get_layer(void)   { return g_osl_layer; }
-void   osl_consume(void)     { g_osl_layer = -1; }
-
-/* Caps Word (state-less stubs — logique testée dans test_key_features.c) */
-void caps_word_toggle(void)                              {}
-bool caps_word_is_active(void)                           { return false; }
-void caps_word_process(uint8_t *kc, uint8_t *mod)
-     { (void)kc; (void)mod; }
-
-/* Repeat Key */
-void    repeat_key_record(uint8_t kc) { (void)kc; }
-uint8_t repeat_key_get(void)          { return 0; }
-
-/* Grave Escape */
-uint8_t grave_esc_resolve(uint8_t mods)
-{
-    /* Shift (bit1) ou GUI (bit3) → grave (0x35), sinon ESC (0x29) */
-    return (mods & 0x0A) ? 0x35u : 0x29u;
-}
-
-/* Layer Lock */
-void   layer_lock_toggle(void)      {}
-bool   layer_lock_is_locked(void)   { return false; }
-int8_t layer_lock_get(void)         { return -1; }
-
-/* WPM */
-void     wpm_record_keypress(void)  {}
-uint16_t wpm_get(void)              { return 0; }
-void     wpm_tick(void)             {}
-
-/* Key Override */
-void key_override_init(void)                                                {}
-void key_override_set(uint8_t idx, const key_override_t *cfg)
-     { (void)idx; (void)cfg; }
-const key_override_t *key_override_get(uint8_t idx)
-     { (void)idx; return NULL; }
-uint8_t key_override_check(uint8_t kc, uint8_t mods, uint8_t *out_mod)
-     { (void)kc; (void)mods; *out_mod = 0; return 0; }
-void key_override_save(void)                                                {}
-void key_override_load(void)                                                {}
-
-/* Tri-Layer */
-void   tri_layer_set(uint8_t l1, uint8_t l2, uint8_t lr)
-       { (void)l1; (void)l2; (void)lr; }
-int8_t tri_layer_check(uint8_t al, uint8_t ll)
-       { (void)al; (void)ll; return -1; }
+/* key_features.h : le VRAI module est linké (../main/input/key_features.c) —
+ * plus de stubs ici. OSM/OSL/CapsWord/Repeat/GraveEsc/LayerLock/WPM/KeyOverride/
+ * TriLayer sont exercés en réel (key_override NVS guardé #ifndef TEST_HOST). */
 
 /* ── Stubs tama_engine.h ─────────────────────────────────────────────── */
 
@@ -319,9 +260,9 @@ static void reset_kp_state(void)
     g_th_active_layer = -1;
     g_th_is_hold      = false;
     g_th_tap_kc       = 0;
-    g_osm_pending     = 0;
-    g_osl_layer       = -1;
-    g_osl_arm_val     = -1;
+    (void)osm_consume();                           /* vide l'OSM réel */
+    osl_consume();                                 /* OSL réel → -1 */
+    if (caps_word_is_active()) caps_word_toggle(); /* CapsWord réel → off */
     g_combo_kc        = 0;
     g_leader_active   = false;
 
@@ -455,33 +396,33 @@ static void test_kp_kno_fallback(void)
                 "K_NO sur couche active → fallback couche 0 = A (0x04)");
 }
 
-/* 10. OSM via stub : osm_consume() retourne un mask → modificateur injecté */
+/* 10. OSM réel : osm_arm() puis build → osm_consume() injecte le modificateur */
 static void test_kp_osm_mod_injection(void)
 {
     reset_kp_state();
-    g_osm_pending = T_MOD_LSFT;   /* MOD_LSFT = bit 1 → HID_KEY_CONTROL_LEFT + 1 = 0xE1 */
+    osm_arm(T_MOD_LSFT);          /* MOD_LSFT = bit 1 → HID_KEY_CONTROL_LEFT + 1 = 0xE1 */
     /* Aucune touche pressée : le modificateur OSM sort seul */
     build_keycode_report();
     TEST_ASSERT(keycode_in_report(T_KC_LSHIFT),
-                "osm_consume() retourne MOD_LSFT → 0xE1 injecté dans keycodes");
+                "osm_arm(MOD_LSFT) → 0xE1 injecté dans keycodes");
 }
 
-/* 11a. OSL arm : press K_OSL(1) → osl_arm(1) est appelé */
+/* 11a. OSL arm réel : press K_OSL(1) → le vrai osl_arm(1) est appelé */
 static void test_kp_osl_arm_called(void)
 {
     reset_kp_state();
     keymaps[0][0][0] = T_OSL_1;       /* K_OSL(1) = 0x3101 */
     press_key(0, 0, 0);
     build_keycode_report();
-    TEST_ASSERT_EQ(g_osl_arm_val, 1,
-                   "press K_OSL(1) → osl_arm(1) appelé");
+    TEST_ASSERT_EQ(osl_get_layer(), 1,
+                   "press K_OSL(1) → osl armé sur couche 1");
 }
 
-/* 11b. OSL active layer : osl_get_layer() non-négatif → active_layer écrasé */
+/* 11b. OSL active layer réel : osl_arm(2) → active_layer écrasé sur 2 */
 static void test_kp_osl_active_layer(void)
 {
     reset_kp_state();
-    g_osl_layer = 2;               /* OSL couche 2 déjà armé */
+    osl_arm(2);                    /* OSL couche 2 armé (vrai module) */
     keymaps[2][0][0] = T_KC_B;    /* B sur couche 2 */
     press_key(0, 0, 0);
     build_keycode_report();

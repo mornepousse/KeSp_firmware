@@ -2,7 +2,9 @@
 #include "key_features.h"
 #include "key_definitions.h"
 #include "keyboard_config.h"
+#ifndef TEST_HOST
 #include "nvs_utils.h"
+#endif
 #include "esp_log.h"
 #include <string.h>
 
@@ -186,18 +188,22 @@ uint8_t key_override_check(uint8_t keycode, uint8_t active_mods, uint8_t *out_mo
 }
 
 void key_override_save(void) {
+#ifndef TEST_HOST
     uint8_t count = 0;
     for (int i = 0; i < KEY_OVERRIDE_MAX_SLOTS; i++)
         if (overrides[i].trigger_key != 0) count = i + 1;
     esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "ko_cfg", overrides,
                                               sizeof(overrides), "ko_cnt", count);
     if (err != ESP_OK) ESP_LOGE("KEY_OVERRIDE", "Save failed: %s", esp_err_to_name(err));
+#endif
 }
 
 void key_override_load(void) {
+#ifndef TEST_HOST
     uint32_t count = 0;
     nvs_load_blob_with_total(STORAGE_NAMESPACE, "ko_cfg", overrides,
                               sizeof(overrides), "ko_cnt", &count);
+#endif
 }
 
 /* ── Tri-Layer ──────────────────────────────────────────────────── */
