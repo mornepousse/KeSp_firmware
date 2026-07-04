@@ -1,117 +1,121 @@
-/* Tests for leader key sequence matching */
+/* Leader Key engine tests — VRAI module linké (../main/input/leader.c).
+ * Pilote le vrai matcher interne (try_match, réputé alambiqué) via l'API :
+ * leader_set → leader_start → leader_feed → (tick) → leader_consume.
+ * host_clock pour la fenêtre LEADER_TIMEOUT_MS. Si le vrai matcher divergeait
+ * de l'intention, un de ces tests rougirait (= vrai bug de prod à signaler). */
 #include "test_framework.h"
+#include "leader.h"
+#include "host_clock.h"
 
-#define LEADER_MAX_SEQ_LEN 4
-#define LEADER_MAX_ENTRIES 16
+static void ld_reset(void) { leader_init(); host_clock_reset(); }
 
-typedef struct {
-    uint8_t sequence[LEADER_MAX_SEQ_LEN];
-    uint8_t result;
-    uint8_t result_mod;
-} leader_entry_t;
-
-/* Simulate sequence matching logic */
-static bool try_match(const leader_entry_t *entries, int n_entries,
-                      const uint8_t *buffer, uint8_t buf_len,
-                      uint8_t *out_result, uint8_t *out_mod)
-{
-    for (int i = 0; i < n_entries; i++) {
-        if (entries[i].result == 0) continue;
-        uint8_t entry_len = 0;
-        for (int j = 0; j < LEADER_MAX_SEQ_LEN && entries[i].sequence[j] != 0; j++)
-            entry_len++;
-        if (entry_len != buf_len) continue;
-
-        bool match = true;
-        for (int j = 0; j < buf_len; j++) {
-            if (entries[i].sequence[j] != buffer[j]) { match = false; break; }
-        }
-        if (match) {
-            *out_result = entries[i].result;
-            *out_mod = entries[i].result_mod;
-            return true;
-        }
-    }
-    return false;
+static void set_entry(uint8_t idx, uint8_t s0, uint8_t s1, uint8_t s2, uint8_t s3,
+                      uint8_t result, uint8_t mod) {
+    leader_entry_t e = { .sequence = { s0, s1, s2, s3 }, .result = result, .result_mod = mod };
+    leader_set(idx, &e);
 }
 
-static void test_leader_single_key_match(void) {
-    leader_entry_t entries[1] = { { {0x04, 0, 0, 0}, 0x29, 0 } }; /* A → ESC */
-    uint8_t buf[1] = {0x04};
-    uint8_t result = 0, mod = 0;
-    TEST_ASSERT(try_match(entries, 1, buf, 1, &result, &mod), "Single key match");
-    TEST_ASSERT_EQ(result, 0x29, "Result = ESC");
+/* 1. Séquence 1 touche [A] → ESC. */
+static void test_ld_single(void) {
+    ld_reset();
+    set_entry(0, 0x04, 0, 0, 0, 0x29, 0);
+    leader_start();
+    TEST_ASSERT(leader_feed(0x04), "feed A absorbé");
+    uint8_t mod = 0xFF;
+    TEST_ASSERT_EQ(leader_consume(&mod), 0x29, "[A] → ESC");
+    TEST_ASSERT_EQ(mod, 0, "pas de modificateur");
 }
 
-static void test_leader_two_key_match(void) {
-    leader_entry_t entries[1] = { { {0x09, 0x16, 0, 0}, 0x16, 0x01 } }; /* F+S → Ctrl+S */
-    uint8_t buf[2] = {0x09, 0x16};
-    uint8_t result = 0, mod = 0;
-    TEST_ASSERT(try_match(entries, 1, buf, 2, &result, &mod), "Two key match");
-    TEST_ASSERT_EQ(result, 0x16, "Result = S");
-    TEST_ASSERT_EQ(mod, 0x01, "Mod = Ctrl");
+/* 2. Séquence 2 touches [F,S] → Ctrl+S. */
+static void test_ld_two_key(void) {
+    ld_reset();
+    set_entry(0, 0x09, 0x16, 0, 0, 0x16, 0x01);
+    leader_start();
+    leader_feed(0x09);
+    leader_feed(0x16);
+    uint8_t mod = 0;
+    TEST_ASSERT_EQ(leader_consume(&mod), 0x16, "[F,S] → S");
+    TEST_ASSERT_EQ(mod, 0x01, "modificateur = Ctrl");
 }
 
-static void test_leader_no_match(void) {
-    leader_entry_t entries[1] = { { {0x04, 0, 0, 0}, 0x29, 0 } };
-    uint8_t buf[1] = {0x05}; /* B, not A */
-    uint8_t result = 0, mod = 0;
-    TEST_ASSERT(!try_match(entries, 1, buf, 1, &result, &mod), "No match for wrong key");
+/* 3. Mauvaise touche → pas de match. */
+static void test_ld_wrong_key(void) {
+    ld_reset();
+    set_entry(0, 0x04, 0, 0, 0, 0x29, 0);
+    leader_start();
+    leader_feed(0x05);            /* B, pas A */
+    uint8_t mod;
+    TEST_ASSERT_EQ(leader_consume(&mod), 0, "mauvaise touche → rien");
 }
 
-static void test_leader_partial_no_match(void) {
-    leader_entry_t entries[1] = { { {0x04, 0x05, 0, 0}, 0x29, 0 } }; /* A+B → ESC */
-    uint8_t buf[1] = {0x04}; /* only A, not A+B */
-    uint8_t result = 0, mod = 0;
-    TEST_ASSERT(!try_match(entries, 1, buf, 1, &result, &mod), "Partial sequence doesn't match");
+/* 4. Séquence partielle → pas de match, leader reste actif. */
+static void test_ld_partial(void) {
+    ld_reset();
+    set_entry(0, 0x04, 0x05, 0, 0, 0x29, 0);   /* [A,B] */
+    leader_start();
+    leader_feed(0x04);            /* seulement A */
+    uint8_t mod;
+    TEST_ASSERT_EQ(leader_consume(&mod), 0, "partielle → pas de match");
+    TEST_ASSERT(leader_is_active(), "toujours actif en attente de B");
 }
 
-static void test_leader_empty_sequence(void) {
-    leader_entry_t entries[1] = { { {0, 0, 0, 0}, 0x29, 0 } }; /* empty seq */
-    uint8_t buf[1] = {0x04};
-    uint8_t result = 0, mod = 0;
-    TEST_ASSERT(!try_match(entries, 1, buf, 1, &result, &mod), "Empty entry skipped");
+/* 5. Entrée non configurée (result=0) ignorée. */
+static void test_ld_unconfigured(void) {
+    ld_reset();
+    set_entry(0, 0x04, 0, 0, 0, 0, 0);   /* result = 0 */
+    leader_start();
+    leader_feed(0x04);
+    uint8_t mod;
+    TEST_ASSERT_EQ(leader_consume(&mod), 0, "result=0 → entrée ignorée");
 }
 
-static void test_leader_unconfigured_entry(void) {
-    leader_entry_t entries[1] = { { {0x04, 0, 0, 0}, 0, 0 } }; /* result=0 */
-    uint8_t buf[1] = {0x04};
-    uint8_t result = 0, mod = 0;
-    TEST_ASSERT(!try_match(entries, 1, buf, 1, &result, &mod), "result=0 entry skipped");
+/* 6. Plusieurs entrées : la bonne matche selon longueur + contenu. */
+static void test_ld_multiple(void) {
+    ld_reset();
+    set_entry(0, 0x04, 0, 0, 0, 0x29, 0);       /* [A]   → ESC */
+    set_entry(1, 0x05, 0, 0, 0, 0x28, 0);       /* [B]   → Enter */
+    set_entry(2, 0x04, 0x05, 0, 0, 0x2A, 0);    /* [A,B] → Backspace */
+    leader_start();
+    leader_feed(0x05);                           /* B */
+    uint8_t mod;
+    TEST_ASSERT_EQ(leader_consume(&mod), 0x28, "[B] → Enter");
+    leader_start();
+    leader_feed(0x04);
+    leader_feed(0x05);
+    TEST_ASSERT_EQ(leader_consume(&mod), 0x2A, "[A,B] → Backspace");
 }
 
-static void test_leader_multiple_entries(void) {
-    leader_entry_t entries[3] = {
-        { {0x04, 0, 0, 0}, 0x29, 0 },    /* A → ESC */
-        { {0x05, 0, 0, 0}, 0x28, 0 },    /* B → Enter */
-        { {0x04, 0x05, 0, 0}, 0x2A, 0 }, /* A+B → Backspace */
-    };
-    uint8_t buf1[1] = {0x05};
-    uint8_t result = 0, mod = 0;
-    TEST_ASSERT(try_match(entries, 3, buf1, 1, &result, &mod), "B matches entry 1");
-    TEST_ASSERT_EQ(result, 0x28, "B → Enter");
-
-    uint8_t buf2[2] = {0x04, 0x05};
-    TEST_ASSERT(try_match(entries, 3, buf2, 2, &result, &mod), "A+B matches entry 2");
-    TEST_ASSERT_EQ(result, 0x2A, "A+B → Backspace");
+/* 7. Séquence pleine (4 touches) → match (exerce le chemin sequence[j+1]). */
+static void test_ld_four_key(void) {
+    ld_reset();
+    set_entry(0, 0x04, 0x05, 0x06, 0x07, 0x29, 0x02);
+    leader_start();
+    leader_feed(0x04); leader_feed(0x05); leader_feed(0x06); leader_feed(0x07);
+    uint8_t mod = 0;
+    TEST_ASSERT_EQ(leader_consume(&mod), 0x29, "[A,B,C,D] → ESC");
+    TEST_ASSERT_EQ(mod, 0x02, "modificateur = Shift");
 }
 
-static void test_leader_four_key_sequence(void) {
-    leader_entry_t entries[1] = { { {0x04, 0x05, 0x06, 0x07}, 0x29, 0x02 } };
-    uint8_t buf[4] = {0x04, 0x05, 0x06, 0x07};
-    uint8_t result = 0, mod = 0;
-    TEST_ASSERT(try_match(entries, 1, buf, 4, &result, &mod), "4-key match");
-    TEST_ASSERT_EQ(mod, 0x02, "Mod = Shift");
+/* 8. Timeout : séquence partielle non complétée → tick annule après le délai. */
+static void test_ld_timeout_cancels(void) {
+    ld_reset();
+    set_entry(0, 0x04, 0x05, 0, 0, 0x29, 0);   /* [A,B] */
+    leader_start();
+    leader_feed(0x04);                           /* partiel */
+    host_clock_advance_ms(1000);                 /* == LEADER_TIMEOUT_MS */
+    TEST_ASSERT(!leader_tick(), "timeout sans match complet → pas de résolution");
+    TEST_ASSERT(!leader_is_active(), "timeout → leader désactivé");
 }
 
 void test_leader(void) {
-    TEST_SUITE("Leader Key");
-    TEST_RUN(test_leader_single_key_match);
-    TEST_RUN(test_leader_two_key_match);
-    TEST_RUN(test_leader_no_match);
-    TEST_RUN(test_leader_partial_no_match);
-    TEST_RUN(test_leader_empty_sequence);
-    TEST_RUN(test_leader_unconfigured_entry);
-    TEST_RUN(test_leader_multiple_entries);
-    TEST_RUN(test_leader_four_key_sequence);
+    TEST_SUITE("Leader Key — module réel");
+    TEST_RUN(test_ld_single);
+    TEST_RUN(test_ld_two_key);
+    TEST_RUN(test_ld_wrong_key);
+    TEST_RUN(test_ld_partial);
+    TEST_RUN(test_ld_unconfigured);
+    TEST_RUN(test_ld_multiple);
+    TEST_RUN(test_ld_four_key);
+    TEST_RUN(test_ld_timeout_cancels);
+    leader_init();   /* laisse le module propre */
 }

@@ -1,12 +1,16 @@
 /* Leader Key engine */
 #include "leader.h"
 #include "keyboard_config.h"
+#ifndef TEST_HOST
 #include "nvs_utils.h"
+#endif
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <string.h>
 
+#ifndef TEST_HOST
 static const char *TAG = "LEADER";
+#endif
 
 static leader_entry_t entries[LEADER_MAX_ENTRIES];
 
@@ -24,29 +28,50 @@ static uint32_t now_ms(void)
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
-static void try_match(void)
+static uint8_t entry_seq_len(int i)
+{
+    uint8_t len = 0;
+    for (int j = 0; j < LEADER_MAX_SEQ_LEN && entries[i].sequence[j] != 0; j++)
+        len++;
+    return len;
+}
+
+/* Le buffer courant est-il le préfixe STRICT d'une séquence configurée plus
+ * longue ? Si oui, résoudre tout de suite occulterait la séquence longue
+ * (ex. [A] configuré tuerait [A,B]). */
+static bool buffer_is_prefix_of_longer(void)
 {
     for (int i = 0; i < LEADER_MAX_ENTRIES; i++) {
         if (entries[i].result == 0) continue;
-
-        /* Compare sequence */
-        bool match = true;
-        for (int j = 0; j < LEADER_MAX_SEQ_LEN; j++) {
-            if (entries[i].sequence[j] == 0 && j == buf_len) break; /* exact match */
-            if (j >= buf_len || entries[i].sequence[j] != buffer[j]) {
-                match = false;
-                break;
-            }
-            if (entries[i].sequence[j + 1] == 0 && j + 1 == buf_len) break; /* end of entry seq */
+        if (entry_seq_len(i) <= buf_len) continue;   /* pas plus longue */
+        bool pref = true;
+        for (int j = 0; j < buf_len; j++) {
+            if (entries[i].sequence[j] != buffer[j]) { pref = false; break; }
         }
+        if (pref) return true;
+    }
+    return false;
+}
 
-        /* Verify lengths match */
-        uint8_t entry_len = 0;
-        for (int j = 0; j < LEADER_MAX_SEQ_LEN && entries[i].sequence[j] != 0; j++)
-            entry_len++;
-        if (!match || entry_len != buf_len) continue;
+/* Cherche une correspondance EXACTE (même longueur, même contenu) et résout.
+ * defer_on_prefix : appelé sur un feed → ne pas résoudre si le buffer est encore
+ * le préfixe d'une séquence plus longue (attendre la suite). Au timeout, appelé
+ * avec false → on résout ce qu'on a. */
+static void try_match(bool defer_on_prefix)
+{
+    if (defer_on_prefix && buffer_is_prefix_of_longer())
+        return;
 
-        /* Match found */
+    for (int i = 0; i < LEADER_MAX_ENTRIES; i++) {
+        if (entries[i].result == 0) continue;
+        if (entry_seq_len(i) != buf_len) continue;
+
+        bool match = true;
+        for (int j = 0; j < buf_len; j++) {
+            if (entries[i].sequence[j] != buffer[j]) { match = false; break; }
+        }
+        if (!match) continue;
+
         resolved_key = entries[i].result;
         resolved_mod = entries[i].result_mod;
         resolved_flag = true;
@@ -98,7 +123,7 @@ bool leader_feed(uint8_t keycode)
     if (buf_len < LEADER_MAX_SEQ_LEN) {
         buffer[buf_len++] = keycode;
         last_key_ms = now_ms();
-        try_match();
+        try_match(true);   /* feed : différer si préfixe d'une séquence plus longue */
         return true;
     }
 
@@ -115,7 +140,7 @@ bool leader_tick(void)
 
     if ((now_ms() - last_key_ms) >= LEADER_TIMEOUT_MS) {
         /* Timeout — try match with current buffer, then cancel */
-        if (buf_len > 0) try_match();
+        if (buf_len > 0) try_match(false);   /* timeout : résoudre ce qu'on a */
         cancel();
         return resolved_flag;
     }
@@ -136,6 +161,7 @@ bool leader_is_active(void) { return active; }
 
 void leader_save(void)
 {
+#ifndef TEST_HOST
     uint8_t count = 0;
     for (int i = 0; i < LEADER_MAX_ENTRIES; i++)
         if (entries[i].result != 0) count = i + 1;
@@ -145,13 +171,16 @@ void leader_save(void)
         ESP_LOGE(TAG, "Failed to save leader: %s", esp_err_to_name(err));
     else
         ESP_LOGI(TAG, "Leader sequences saved (%d)", count);
+#endif
 }
 
 void leader_load(void)
 {
+#ifndef TEST_HOST
     uint32_t count = 0;
     nvs_load_blob_with_total(STORAGE_NAMESPACE, "leader_cfg", entries,
                               sizeof(entries), "leader_cnt", &count);
     if (count > 0)
         ESP_LOGI(TAG, "Leader sequences loaded (%lu)", (unsigned long)count);
+#endif
 }

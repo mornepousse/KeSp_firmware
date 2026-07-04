@@ -24,6 +24,7 @@ add_executable(test_runner
     test_combo.c
     ../main/input/combo.c
     test_leader.c
+    ../main/input/leader.c
     test_tama_engine.c
     test_rf_packet.c
     test_heartbeat.c

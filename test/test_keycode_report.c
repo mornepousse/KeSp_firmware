@@ -71,10 +71,6 @@ char      default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH];
 TaskHandle_t keyboard_task_handle = NULL;
 volatile bool matrix_test_mode    = false;
 
-/* ── État interne des stubs stateful ────────────────────────────────── */
-
-static bool     g_leader_active   = false;
-
 /* ── Stubs matrix_scan.h ─────────────────────────────────────────────── */
 
 void     layer_changed(void)              {}
@@ -97,17 +93,9 @@ void     rtc_matrix_deinit(void)          {}
 
 /* ── Stubs leader.h ──────────────────────────────────────────────────── */
 
-void    leader_init(void)                                                  {}
-void    leader_set(uint8_t idx, const leader_entry_t *e)
-        { (void)idx; (void)e; }
-const leader_entry_t *leader_get(uint8_t idx) { (void)idx; return NULL; }
-void    leader_start(void)                                                 {}
-bool    leader_feed(uint8_t kc)    { (void)kc; return false; }
-bool    leader_tick(void)          { return false; }
-uint8_t leader_consume(uint8_t *m) { if (m) *m = 0; return 0; }
-bool    leader_is_active(void)     { return g_leader_active; }
-void    leader_save(void)          {}
-void    leader_load(void)          {}
+/* leader.h : le VRAI module est linké (../main/input/leader.c) — plus de stubs.
+ * Aucun test de cette suite ne presse K_LEADER, le vrai module reste inactif
+ * ici ; le matcher est exercé dans test_leader.c. */
 
 /* key_features.h : le VRAI module est linké (../main/input/key_features.c) —
  * plus de stubs ici. OSM/OSL/CapsWord/Repeat/GraveEsc/LayerLock/WPM/KeyOverride/
@@ -208,7 +196,7 @@ static void reset_kp_state(void)
     osl_consume();                                 /* OSL réel → -1 */
     if (caps_word_is_active()) caps_word_toggle(); /* CapsWord réel → off */
     combo_init();                                  /* réinit le vrai combo */
-    g_leader_active   = false;
+    leader_init();                                 /* réinit le vrai leader */
 
     /* Vide le macro pending interne (opaque static dans key_processor.c) */
     (void)key_processor_consume_macro();
