@@ -68,6 +68,7 @@ if(CONFIG_KASE_HAS_DISPLAY)
         "display/assets/img_signal.c"
         "display/assets/img_bluetooth.c"
         "led/led_strip_anim.c"
+        "led/led_curve.c"
     )
 endif()
 

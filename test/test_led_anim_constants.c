@@ -1,122 +1,52 @@
-/* Test LED animation constants introduced during audit cleanup */
+/* LED animation math tests — VRAI module linké (../main/led/led_curve.c).
+ * Fini les #define recopiés + formules inline : les constantes, la courbe
+ * réactive et le mapping KPM bar testés sont ceux de la prod (led_curve.h/.c). */
 #include "test_framework.h"
+#include "led_curve.h"
 
-/* Mirror constants from led_strip_anim.c */
-#define REACTIVE_ATTACK_MS  100
-#define REACTIVE_DECAY_MS   500
-#define KPM_BAR_MAX         400
-#define LED_STRIP_FRAME_MS  20
-
-/* Test: reactive timing constants are coherent */
+/* Constantes cohérentes (contre les vraies valeurs de led_curve.h). */
 void test_reactive_timing(void) {
     TEST_ASSERT(REACTIVE_ATTACK_MS > 0, "attack > 0");
     TEST_ASSERT(REACTIVE_DECAY_MS > REACTIVE_ATTACK_MS, "decay > attack");
-    TEST_ASSERT(REACTIVE_DECAY_MS <= 2000, "decay <= 2s (reasonable)");
+    TEST_ASSERT(REACTIVE_DECAY_MS <= 2000, "decay <= 2s (raisonnable)");
 }
 
-/* Test: reactive brightness calculation at key moments */
+/* Courbe réactive RÉELLE aux moments clés. */
 void test_reactive_brightness_curve(void) {
-    /* At t=0 (during attack phase): full brightness */
-    uint32_t elapsed = 0;
-    uint8_t brightness;
-    if (elapsed < REACTIVE_ATTACK_MS) {
-        brightness = 255;
-    } else if (elapsed < REACTIVE_DECAY_MS) {
-        brightness = 255 - ((elapsed - REACTIVE_ATTACK_MS) * 255 / (REACTIVE_DECAY_MS - REACTIVE_ATTACK_MS));
-    } else {
-        brightness = 0;
-    }
-    TEST_ASSERT_EQ(brightness, 255, "t=0: full brightness");
-
-    /* At t=attack (start of decay): still full */
-    elapsed = REACTIVE_ATTACK_MS - 1;
-    if (elapsed < REACTIVE_ATTACK_MS) {
-        brightness = 255;
-    } else if (elapsed < REACTIVE_DECAY_MS) {
-        brightness = 255 - ((elapsed - REACTIVE_ATTACK_MS) * 255 / (REACTIVE_DECAY_MS - REACTIVE_ATTACK_MS));
-    } else {
-        brightness = 0;
-    }
-    TEST_ASSERT_EQ(brightness, 255, "t=attack-1: full brightness");
-
-    /* At t=attack (just entered decay): brightness starts dropping */
-    elapsed = REACTIVE_ATTACK_MS;
-    if (elapsed < REACTIVE_ATTACK_MS) {
-        brightness = 255;
-    } else if (elapsed < REACTIVE_DECAY_MS) {
-        brightness = 255 - ((elapsed - REACTIVE_ATTACK_MS) * 255 / (REACTIVE_DECAY_MS - REACTIVE_ATTACK_MS));
-    } else {
-        brightness = 0;
-    }
-    TEST_ASSERT_EQ(brightness, 255, "t=attack: brightness=255 (start of decay)");
-
-    /* At t=decay: off */
-    elapsed = REACTIVE_DECAY_MS;
-    if (elapsed < REACTIVE_ATTACK_MS) {
-        brightness = 255;
-    } else if (elapsed < REACTIVE_DECAY_MS) {
-        brightness = 255 - ((elapsed - REACTIVE_ATTACK_MS) * 255 / (REACTIVE_DECAY_MS - REACTIVE_ATTACK_MS));
-    } else {
-        brightness = 0;
-    }
-    TEST_ASSERT_EQ(brightness, 0, "t=decay: off");
-
-    /* Well past decay: still off */
-    elapsed = REACTIVE_DECAY_MS + 1000;
-    if (elapsed < REACTIVE_ATTACK_MS) {
-        brightness = 255;
-    } else if (elapsed < REACTIVE_DECAY_MS) {
-        brightness = 255 - ((elapsed - REACTIVE_ATTACK_MS) * 255 / (REACTIVE_DECAY_MS - REACTIVE_ATTACK_MS));
-    } else {
-        brightness = 0;
-    }
-    TEST_ASSERT_EQ(brightness, 0, "t=decay+1000: still off");
+    TEST_ASSERT_EQ(led_reactive_brightness(0), 255, "t=0 → plein éclat");
+    TEST_ASSERT_EQ(led_reactive_brightness(REACTIVE_ATTACK_MS - 1), 255, "fin d'attaque → plein");
+    TEST_ASSERT_EQ(led_reactive_brightness(REACTIVE_ATTACK_MS), 255, "t=attack → 255 (début décroissance)");
+    /* Milieu de la décroissance → ~127. */
+    uint32_t mid = REACTIVE_ATTACK_MS + (REACTIVE_DECAY_MS - REACTIVE_ATTACK_MS) / 2;
+    uint8_t b_mid = led_reactive_brightness(mid);
+    TEST_ASSERT(b_mid > 120 && b_mid < 135, "milieu décroissance ≈ 127");
+    TEST_ASSERT_EQ(led_reactive_brightness(REACTIVE_DECAY_MS), 0, "t=decay → éteint");
+    TEST_ASSERT_EQ(led_reactive_brightness(REACTIVE_DECAY_MS + 1000), 0, "au-delà de decay → éteint");
 }
 
-/* Test: KPM bar calculation */
+/* KPM bar RÉEL : mapping linéaire + clamp. */
 void test_kpm_bar_mapping(void) {
-    int num_leds = 10;  /* Example strip */
-
-    /* 0 KPM = 0 LEDs */
-    uint32_t kpm = 0;
-    int lit = (kpm * num_leds) / KPM_BAR_MAX;
-    if (lit > num_leds) lit = num_leds;
-    TEST_ASSERT_EQ(lit, 0, "0 KPM = 0 LEDs");
-
-    /* Max KPM = all LEDs */
-    kpm = KPM_BAR_MAX;
-    lit = (kpm * num_leds) / KPM_BAR_MAX;
-    if (lit > num_leds) lit = num_leds;
-    TEST_ASSERT_EQ(lit, num_leds, "max KPM = all LEDs");
-
-    /* Half KPM = half LEDs */
-    kpm = KPM_BAR_MAX / 2;
-    lit = (kpm * num_leds) / KPM_BAR_MAX;
-    if (lit > num_leds) lit = num_leds;
-    TEST_ASSERT_EQ(lit, num_leds / 2, "half KPM = half LEDs");
-
-    /* Over max = clamped */
-    kpm = KPM_BAR_MAX * 2;
-    lit = (kpm * num_leds) / KPM_BAR_MAX;
-    if (lit > num_leds) lit = num_leds;
-    TEST_ASSERT_EQ(lit, num_leds, "over max = clamped");
+    const uint8_t n = 10;
+    TEST_ASSERT_EQ(led_kpm_bar_lit(0, n), 0, "0 KPM → 0 LED");
+    TEST_ASSERT_EQ(led_kpm_bar_lit(KPM_BAR_MAX, n), n, "KPM max → toutes les LEDs");
+    TEST_ASSERT_EQ(led_kpm_bar_lit(KPM_BAR_MAX / 2, n), n / 2, "moitié KPM → moitié des LEDs");
+    TEST_ASSERT_EQ(led_kpm_bar_lit(KPM_BAR_MAX * 2, n), n, "au-delà du max → clampé à n");
 }
 
-/* Test: frame rate is reasonable */
+/* Frame rate raisonnable. */
 void test_frame_rate(void) {
-    TEST_ASSERT(LED_STRIP_FRAME_MS > 0, "frame period > 0");
+    TEST_ASSERT(LED_STRIP_FRAME_MS > 0, "période de frame > 0");
     int fps = 1000 / LED_STRIP_FRAME_MS;
-    TEST_ASSERT(fps >= 25 && fps <= 100, "FPS in [25, 100]");
+    TEST_ASSERT(fps >= 25 && fps <= 100, "FPS dans [25, 100]");
 }
 
-/* Test: KPM_BAR_MAX is positive and reasonable */
 void test_kpm_bar_max(void) {
     TEST_ASSERT(KPM_BAR_MAX > 0, "KPM_BAR_MAX > 0");
-    TEST_ASSERT(KPM_BAR_MAX <= 1000, "KPM_BAR_MAX <= 1000");
+    TEST_ASSERT(KPM_BAR_MAX <= 1000, "KPM_BAR_MAX <= 1000 (raisonnable)");
 }
 
 void test_led_anim_constants(void) {
-    TEST_SUITE("LED Animation Constants");
+    TEST_SUITE("LED Animation — module réel");
     TEST_RUN(test_reactive_timing);
     TEST_RUN(test_reactive_brightness_curve);
     TEST_RUN(test_kpm_bar_mapping);
