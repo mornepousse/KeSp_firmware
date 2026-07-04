@@ -14,6 +14,8 @@ add_executable(test_runner
     test_led_anim_constants.c
     ../main/led/led_curve.c
     test_keymap_nvs.c
+    nvs_fake.c
+    ../main/input/keymap.c
     test_keycodes.c
     test_key_features.c
     ../main/input/key_features.c

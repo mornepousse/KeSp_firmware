@@ -1,151 +1,217 @@
-/* Test keymap data integrity (save/load round-trip simulation) */
+/* Tests de la persistance réelle de keymap.c via le fake NVS RAM-backed.
+ *
+ * Ce TU linke keymap.c (le vrai code) et nvs_fake.c (primitives NVS en RAM).
+ * Chaque test appelle nvs_fake_reset() pour garantir l'isolation.
+ *
+ * Logique testée :
+ *   save_keymaps / load_keymaps
+ *   save_layout_names / load_layout_names
+ *   save_macros / load_macros
+ *   recalc_macros_count
+ *   garde de taille de load_macros (stored_size != expected → skip)
+ */
 #include "test_framework.h"
+#include "keymap.h"
+#include "nvs_fake.h"
+#include "keyboard_config.h"
+#include <stddef.h>
 
-#define LAYERS 10
-#define MAX_LAYOUT_NAME_LENGTH 15
+/* ── 1. Round-trip keymaps ─────────────────────────────────────── */
 
-/* Simulate NVS blob save/load as a memcpy round-trip */
-static uint8_t nvs_blob[32768];
-static size_t nvs_blob_size = 0;
+static void test_keymaps_real_roundtrip(void)
+{
+    nvs_fake_reset();
 
-static void fake_nvs_set_blob(const void *data, size_t size) {
-    memcpy(nvs_blob, data, size);
-    nvs_blob_size = size;
-}
+    uint16_t src[LAYERS][MATRIX_ROWS][MATRIX_COLS];
+    uint16_t dst[LAYERS][MATRIX_ROWS][MATRIX_COLS];
 
-static bool fake_nvs_get_blob(void *data, size_t size) {
-    if (nvs_blob_size == 0) return false;
-    if (size != nvs_blob_size) return false;
-    memcpy(data, nvs_blob, size);
-    return true;
-}
-
-/* Test: keymap round-trip (save then load produces identical data) */
-void test_keymap_roundtrip(void) {
-    uint16_t original[LAYERS][MATRIX_ROWS][MATRIX_COLS];
-    uint16_t loaded[LAYERS][MATRIX_ROWS][MATRIX_COLS];
-
-    /* Fill with test data */
     for (int l = 0; l < LAYERS; l++)
         for (int r = 0; r < MATRIX_ROWS; r++)
             for (int c = 0; c < MATRIX_COLS; c++)
-                original[l][r][c] = (uint16_t)(l * 1000 + r * 100 + c);
+                src[l][r][c] = (uint16_t)(l * 1000 + r * 100 + c + 1);
 
-    size_t size = sizeof(original);
-    fake_nvs_set_blob(original, size);
+    save_keymaps((uint16_t *)src, sizeof(src));
 
-    memset(loaded, 0xFF, sizeof(loaded));
-    bool ok = fake_nvs_get_blob(loaded, size);
+    memset(dst, 0, sizeof(dst));
+    load_keymaps((uint16_t *)dst, sizeof(dst));
 
-    TEST_ASSERT(ok, "blob loaded");
-    TEST_ASSERT(memcmp(original, loaded, size) == 0, "keymap round-trip identical");
+    TEST_ASSERT(memcmp(src, dst, sizeof(src)) == 0,
+                "save_keymaps puis load_keymaps produit les donnees identiques");
+    /* Verifier une cle specifique pour prouver que ce n'est pas un no-op */
+    TEST_ASSERT_EQ(dst[3][2][5], src[3][2][5],
+                   "cle specifique [3][2][5] correctement restauree");
 }
 
-/* Test: layout names round-trip */
-void test_layout_names_roundtrip(void) {
-    char original[LAYERS][MAX_LAYOUT_NAME_LENGTH];
-    char loaded[LAYERS][MAX_LAYOUT_NAME_LENGTH];
+/* ── 2. load_keymaps sur NVS vide ne corrompt pas le buffer ──── */
 
-    /* Fill with test names */
-    const char *names[] = {"DVORAK", "QWERTY", "AZERTY", "COLEMAK", "GAMING",
-                           "NUMPAD", "NAV", "FN", "MEDIA", "SYSTEM"};
+static void test_load_keymaps_empty_nvs_unchanged(void)
+{
+    nvs_fake_reset();
+
+    uint16_t buf[LAYERS][MATRIX_ROWS][MATRIX_COLS];
+    memset(buf, 0xAB, sizeof(buf));
+
+    load_keymaps((uint16_t *)buf, sizeof(buf));
+
+    uint16_t sentinel[LAYERS][MATRIX_ROWS][MATRIX_COLS];
+    memset(sentinel, 0xAB, sizeof(sentinel));
+    TEST_ASSERT(memcmp(buf, sentinel, sizeof(buf)) == 0,
+                "load_keymaps sur NVS vide : buffer inchange");
+}
+
+/* ── 3. Round-trip layout_names ─────────────────────────────── */
+
+static void test_layout_names_real_roundtrip(void)
+{
+    nvs_fake_reset();
+
+    char src[LAYERS][MAX_LAYOUT_NAME_LENGTH];
+    char dst[LAYERS][MAX_LAYOUT_NAME_LENGTH];
+
+    const char *names[] = { "DVORAK", "QWERTY", "AZERTY", "COLEMAK",
+                            "GAMING", "NUMPAD", "NAV",    "FN",
+                            "MEDIA",  "SYS" };
     for (int i = 0; i < LAYERS; i++) {
-        strncpy(original[i], names[i], MAX_LAYOUT_NAME_LENGTH - 1);
-        original[i][MAX_LAYOUT_NAME_LENGTH - 1] = '\0';
+        strncpy(src[i], names[i], MAX_LAYOUT_NAME_LENGTH - 1);
+        src[i][MAX_LAYOUT_NAME_LENGTH - 1] = '\0';
     }
 
-    size_t size = sizeof(original);
-    fake_nvs_set_blob(original, size);
+    save_layout_names(src, LAYERS);
 
-    memset(loaded, 0, sizeof(loaded));
-    bool ok = fake_nvs_get_blob(loaded, size);
+    memset(dst, 0, sizeof(dst));
+    load_layout_names(dst, LAYERS);
 
-    TEST_ASSERT(ok, "names loaded");
     for (int i = 0; i < LAYERS; i++) {
-        TEST_ASSERT(strcmp(original[i], loaded[i]) == 0, "name matches");
+        TEST_ASSERT(strcmp(src[i], dst[i]) == 0,
+                    "save_layout_names puis load : nom de couche identique");
     }
 }
 
-/* Test: layout name truncation */
-void test_layout_name_truncation(void) {
-    char name[MAX_LAYOUT_NAME_LENGTH];
-    const char *long_name = "THIS_IS_WAY_TOO_LONG_FOR_A_LAYOUT_NAME";
+/* ── 4. Structure macro_t reelle (steps[] present et bien place) */
 
-    strncpy(name, long_name, MAX_LAYOUT_NAME_LENGTH - 1);
-    name[MAX_LAYOUT_NAME_LENGTH - 1] = '\0';
-
-    TEST_ASSERT(strlen(name) == MAX_LAYOUT_NAME_LENGTH - 1, "name truncated");
-    TEST_ASSERT(name[MAX_LAYOUT_NAME_LENGTH - 1] == '\0', "null terminated");
+static void test_macro_t_struct_layout(void)
+{
+    TEST_ASSERT_EQ(offsetof(macro_t, name), 0,
+                   "name au debut de macro_t (offset 0)");
+    TEST_ASSERT_EQ(offsetof(macro_t, steps), (size_t)MAX_MACRO_NAME_LENGTH,
+                   "steps[] immediatement apres name[MAX_MACRO_NAME_LENGTH]");
+    TEST_ASSERT_EQ(sizeof(((macro_t *)0)->steps),
+                   MACRO_MAX_STEPS * sizeof(macro_step_t),
+                   "steps[] = MACRO_MAX_STEPS entrees de 2 octets");
+    size_t min_size = sizeof(char[MAX_MACRO_NAME_LENGTH])
+                    + sizeof(macro_step_t[MACRO_MAX_STEPS])
+                    + sizeof(uint8_t[6])
+                    + sizeof(uint16_t);
+    TEST_ASSERT(sizeof(macro_t) >= min_size,
+                "sizeof(macro_t) >= somme des champs declares");
 }
 
-/* Test: keymap size calculation */
-void test_keymap_size(void) {
-    size_t expected = LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t);
-    TEST_ASSERT_EQ(expected, 10 * 5 * 13 * 2, "keymap size = 1300 bytes");
+/* ── 5. Round-trip macros (vraie struct avec steps[]) ───────── */
+
+static void test_macros_real_roundtrip(void)
+{
+    nvs_fake_reset();
+
+    macro_t src[MAX_MACROS];
+    macro_t dst[MAX_MACROS];
+    memset(src, 0, sizeof(src));
+    memset(dst, 0xFF, sizeof(dst));
+
+    strncpy(src[0].name, "TestA", MAX_MACRO_NAME_LENGTH - 1);
+    src[0].steps[0].keycode  = 0x04;
+    src[0].steps[0].modifier = 0x00;
+    src[0].key_definition    = 0x1500;
+
+    strncpy(src[1].name, "TestB", MAX_MACRO_NAME_LENGTH - 1);
+    src[1].steps[0].keycode  = 0x05;
+    src[1].steps[0].modifier = 0x02;
+    src[1].key_definition    = 0x1501;
+
+    save_macros(src, 2);
+    load_macros(dst, MAX_MACROS);
+
+    TEST_ASSERT(memcmp(src, dst, sizeof(src)) == 0,
+                "save_macros puis load_macros : contenu identique (inclus steps[])");
+    TEST_ASSERT_EQ(dst[0].steps[0].keycode, 0x04,
+                   "macro[0].steps[0].keycode = 'A' (0x04)");
+    TEST_ASSERT_EQ(dst[1].steps[0].modifier, 0x02,
+                   "macro[1].steps[0].modifier = LSHIFT (0x02)");
 }
 
-/* Test: single layer extraction */
-void test_single_layer_extract(void) {
-    uint16_t keymaps[LAYERS][MATRIX_ROWS][MATRIX_COLS];
-    memset(keymaps, 0, sizeof(keymaps));
+/* ── 6. macros_count persiste a travers save/load ─────────── */
 
-    /* Set a specific key in layer 3 */
-    keymaps[3][2][5] = 0x04;  /* HID 'a' */
+static void test_macros_count_persisted(void)
+{
+    nvs_fake_reset();
 
-    /* Extract layer 3 as a flat buffer */
-    uint16_t *layer_ptr = &keymaps[3][0][0];
-    size_t layer_size = MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t);
+    macro_t buf[MAX_MACROS];
+    memset(buf, 0, sizeof(buf));
+    strncpy(buf[0].name, "X", MAX_MACRO_NAME_LENGTH - 1);
+    strncpy(buf[1].name, "Y", MAX_MACRO_NAME_LENGTH - 1);
+    strncpy(buf[2].name, "Z", MAX_MACRO_NAME_LENGTH - 1);
 
-    TEST_ASSERT_EQ(layer_size, 130, "single layer = 130 bytes");
-    TEST_ASSERT_EQ(layer_ptr[2 * MATRIX_COLS + 5], 0x04, "key at (2,5) = 0x04");
+    save_macros(buf, 3);
+
+    macros_count = 99;
+    TEST_ASSERT_EQ((int)macros_count, 99,
+                   "macros_count = 99 (sentinelle avant load)");
+    load_macros(buf, MAX_MACROS);
+    TEST_ASSERT_EQ((int)macros_count, 3,
+                   "macros_count restaure = 3 apres load");
 }
 
-/* Test: empty NVS returns false */
-void test_nvs_empty(void) {
-    nvs_blob_size = 0;
-    uint16_t data[MATRIX_ROWS][MATRIX_COLS];
-    bool ok = fake_nvs_get_blob(data, sizeof(data));
-    TEST_ASSERT(!ok, "empty NVS returns false");
+/* ── 7. Garde de taille : blob de mauvaise taille → pas de load */
+
+static void test_macro_size_guard_skips_load(void)
+{
+    nvs_fake_reset();
+
+    /* Sentinelle dans macros_list[0] */
+    macros_list[0].name[0] = '\xCC';
+
+    /* Blob de taille incorrecte (100 octets != MAX_MACROS * sizeof(macro_t)) */
+    uint8_t fake_blob[100] = {0};
+    nvs_fake_put_blob(STORAGE_NAMESPACE, "macros", fake_blob, sizeof(fake_blob));
+
+    load_macros(macros_list, MAX_MACROS);
+
+    TEST_ASSERT(macros_list[0].name[0] == '\xCC',
+                "load_macros : blob taille incorrecte → donnees inchangees (garde active)");
 }
 
-/* Test: wrong size blob rejected */
-void test_nvs_wrong_size(void) {
-    uint8_t small[10] = {0};
-    fake_nvs_set_blob(small, sizeof(small));
+/* ── 8. recalc_macros_count : compte le dernier nom non-vide ── */
 
-    uint16_t data[MATRIX_ROWS][MATRIX_COLS];
-    bool ok = fake_nvs_get_blob(data, sizeof(data));
-    TEST_ASSERT(!ok, "wrong size rejected");
+static void test_recalc_macros_count(void)
+{
+    macro_t buf[MAX_MACROS];
+    memset(buf, 0, sizeof(buf));
+    strncpy(buf[0].name, "A", MAX_MACRO_NAME_LENGTH - 1);
+    strncpy(buf[3].name, "D", MAX_MACRO_NAME_LENGTH - 1);
+    memcpy(macros_list, buf, sizeof(buf));
+
+    macros_count = 0;
+    recalc_macros_count();
+    TEST_ASSERT_EQ((int)macros_count, 4,
+                   "recalc: dernier nom non-vide a index 3 → count = 4");
+
+    memset(macros_list, 0, sizeof(macros_list));
+    macros_count = 99;
+    recalc_macros_count();
+    TEST_ASSERT_EQ((int)macros_count, 0,
+                   "recalc: tous vides → count = 0");
 }
 
-/* Test: macro structure layout */
-void test_macro_structure(void) {
-    typedef struct {
-        char name[16];
-        uint8_t keys[6];
-        uint16_t key_definition;
-    } macro_t;
+/* ── Suite runner ────────────────────────────────────────────── */
 
-    macro_t m;
-    memset(&m, 0, sizeof(m));
-    strncpy(m.name, "CopyPaste", 15);
-    m.keys[0] = 0xE0;  /* Left Ctrl */
-    m.keys[1] = 0x04;  /* 'a' */
-    m.key_definition = 0x1100;
-
-    TEST_ASSERT(strcmp(m.name, "CopyPaste") == 0, "macro name");
-    TEST_ASSERT_EQ(m.keys[0], 0xE0, "first key = LCtrl");
-    TEST_ASSERT_EQ(m.key_definition, 0x1100, "key definition");
-}
-
-void test_keymap_nvs(void) {
-    TEST_SUITE("Keymap NVS Round-trip");
-    TEST_RUN(test_keymap_roundtrip);
-    TEST_RUN(test_layout_names_roundtrip);
-    TEST_RUN(test_layout_name_truncation);
-    TEST_RUN(test_keymap_size);
-    TEST_RUN(test_single_layer_extract);
-    TEST_RUN(test_nvs_empty);
-    TEST_RUN(test_nvs_wrong_size);
-    TEST_RUN(test_macro_structure);
+void test_keymap_nvs(void)
+{
+    TEST_SUITE("Keymap NVS — persistance reelle (keymap.c + fake NVS RAM)");
+    TEST_RUN(test_keymaps_real_roundtrip);
+    TEST_RUN(test_load_keymaps_empty_nvs_unchanged);
+    TEST_RUN(test_layout_names_real_roundtrip);
+    TEST_RUN(test_macro_t_struct_layout);
+    TEST_RUN(test_macros_real_roundtrip);
+    TEST_RUN(test_macros_count_persisted);
+    TEST_RUN(test_macro_size_guard_skips_load);
+    TEST_RUN(test_recalc_macros_count);
 }

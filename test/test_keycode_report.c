@@ -64,8 +64,7 @@ volatile uint8_t  is_layer_changed    = 0;
 volatile uint32_t last_activity_time_ms = 0;
 uint8_t           usb_bl_state        = 0;
 
-macro_t   macros_list[MAX_MACROS];
-size_t    macros_count = 0;
+/* macros_list et macros_count sont définis dans keymap.c (now linked) */
 char      default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH];
 
 TaskHandle_t keyboard_task_handle = NULL;
@@ -122,18 +121,8 @@ void keyboard_worker_init(void)    {}
 void vTaskKeyboard(void *pv)       { (void)pv; }
 void keyboard_manager_init(void)   {}
 
-/* ── Stubs keymap.h (NVS) ────────────────────────────────────────────── */
-
-void save_keymaps(uint16_t *d, size_t s)               { (void)d; (void)s; }
-void load_keymaps(uint16_t *d, size_t s)               { (void)d; (void)s; }
-void keymap_init_nvs(void)                             {}
-void save_layout_names(char n[][MAX_LAYOUT_NAME_LENGTH], size_t c)
-     { (void)n; (void)c; }
-void load_layout_names(char n[][MAX_LAYOUT_NAME_LENGTH], size_t c)
-     { (void)n; (void)c; }
-void save_macros(macro_t *m, size_t c)                { (void)m; (void)c; }
-void load_macros(macro_t *m, size_t c)                { (void)m; (void)c; }
-void recalc_macros_count(void)                        {}
+/* keymap.h (NVS) : les vraies implémentations viennent de keymap.c (now linked).
+ * Pas de stubs ici — la collision multiple definition était le problème. */
 
 /* ══════════════════════════════════════════════════════════════════════ */
 /* Helpers de test                                                       */

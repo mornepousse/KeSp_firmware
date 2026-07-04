@@ -1,4 +1,5 @@
 #pragma once
+#include <stddef.h>   /* size_t — nécessaire pour les signatures de fonctions */
 #include "keyboard_config.h"
 extern uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS];
 extern char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH];
