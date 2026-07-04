@@ -246,16 +246,15 @@ clamper avant de calculer les offsets, ou rejeter `nlen >= MAX_MACRO_NAME_LENGTH
 7. MOYEN traités : **M1** (cc5f5e2b), **M2** tap_dance 4ᵉ tap (fa989357), **M3** combo 6KRO
    (54ce58d3), **M4** consume_tap OSM (12f7fb28), **M5** OSM logique QMK (1238f724), **M8** macro
    delay re-trigger (84356387), **M9** tap_dance interrupt→QMK (67a0cb6d), **M10**+**M12** NVS
-   (67bbc3df), **M11** version blob macros (1d0cbd9f), **M13** MACRO_ADD offset (96959187).
+   (67bbc3df), **M11** version blob macros (1d0cbd9f), **M13** MACRO_ADD offset (96959187),
+   **M7** mods dans loctet modifier séparé — vrai fix, pas un log (bffdf4ec).
 
-**État : 🔴 CRITIQUE + 🟠 ÉLEVÉ + 12 MOYEN corrigés
-(C1, E1/E2, E3, E4, E5, E6, M1-M5, M8-M13).**
+**État : 🔴 CRITIQUE + 🟠 ÉLEVÉ + 13 MOYEN corrigés
+(C1, E1/E2, E3, E4, E5, E6, M1-M13).**
 
-Reste :
-- **M6** MO bloqué si MO mappé sur sa propre couche — **dépend du contenu keymap** ; non déclenché
-  si les défauts mettent du transparent (`K_NO`) sur la couche x à cet emplacement. Garde défensif possible sur demande.
-- **M7** mods perdus si report plein (7+ touches) — **skippé** (log dans le chemin de build report =
-  contre-convention « pas de log dans le scan », edge à 7+ touches simultanées).
+Reste (2) :
+- **M6** MO bloqué si MO mappé sur sa propre couche — **dépend du contenu keymap** ; ✅ confirmé NON
+  déclenché sur le V2D (MO/TO marchent). Garde défensif possible sur demande.
 - **E7 / injection RF** — **décision archi à définir** (auth HMAC du lien NRF non-authentifié, cf. project_dongle_rf_security).
 
 Tous les modules input ont maintenant des tests host branchés sur le vrai code
