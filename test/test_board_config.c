@@ -52,6 +52,19 @@
 
 #include "board.h"
 
+/* Helper macros: convert display backend defined/undefined state to 0/1 for runtime checks */
+#ifdef BOARD_DISPLAY_BACKEND_ROUND
+#define _BACKEND_ROUND 1
+#else
+#define _BACKEND_ROUND 0
+#endif
+
+#ifdef BOARD_DISPLAY_BACKEND_OLED
+#define _BACKEND_OLED 1
+#else
+#define _BACKEND_OLED 0
+#endif
+
 /* Test: required product info macros are defined and non-empty */
 void test_board_product_info(void) {
     TEST_ASSERT(strlen(GATTS_TAG) > 0, "GATTS_TAG defined");
@@ -87,8 +100,10 @@ void test_board_gpio_no_collision(void) {
                        COLS0, COLS1, COLS2, COLS3, COLS4, COLS5,
                        COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12};
     int n = 18;
+    int scanned = 0;
 
     for (int i = 0; i < n; i++) {
+        scanned++;
         for (int j = i + 1; j < n; j++) {
             if (all_gpios[i] == all_gpios[j]) {
                 char msg[64];
@@ -97,7 +112,7 @@ void test_board_gpio_no_collision(void) {
             }
         }
     }
-    TEST_ASSERT(1, "no GPIO collision among matrix pins");
+    TEST_ASSERT_EQ(scanned, 18, "collision scan covered 18 pins");
 }
 
 /* Test: display config macros are consistent */
@@ -112,7 +127,7 @@ void test_board_display_config(void) {
 #elif !defined(BOARD_DISPLAY_BACKEND_ROUND) && !defined(BOARD_DISPLAY_BACKEND_OLED)
     TEST_ASSERT(0, "no display backend defined");
 #else
-    TEST_ASSERT(1, "exactly one display backend defined");
+    TEST_ASSERT(_BACKEND_ROUND + _BACKEND_OLED <= 1, "at most one display backend defined");
 #endif
 }
 
@@ -128,7 +143,7 @@ void test_board_led_strip_config(void) {
     TEST_ASSERT(BOARD_LED_STRIP_GPIO >= 0 && BOARD_LED_STRIP_GPIO <= 48, "LED strip GPIO in range");
     TEST_ASSERT(BOARD_LED_STRIP_NUM_LEDS > 0, "LED strip has LEDs");
 #else
-    TEST_ASSERT(1, "board without LED strip (ok)");
+    TEST_ASSERT_EQ(BOARD_HAS_LED_STRIP, 0, "LED strip absent on this board");
 #endif
 }
 
