@@ -128,6 +128,28 @@ static void test_th_lt_layer_out_of_bounds(void) {
     current_layout = save_cur; last_layer = save_last;
 }
 
+/* 10. Deux LT tenues simultanément (bug audit E1) : relâcher la plus récente
+ *     doit revenir à la couche de la LT encore tenue, PAS tout perdre ; relâcher
+ *     les deux revient à la base. L'ancien code mettait active_hold_layer=-1 dès
+ *     le 1er release → couche perdue, puis clavier bloqué. */
+static void test_th_two_lt_concurrent(void) {
+    th_reset();
+    uint8_t save_cur = current_layout, save_last = last_layer;
+    current_layout = 0;
+    tap_hold_on_press(K_LT(1, 0x2C), 0, 0);   /* P1 = LT(1) */
+    advance_ms(200); tap_hold_tick();
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "P1 tenu → couche 1");
+    tap_hold_on_press(K_LT(2, 0x2D), 0, 1);   /* P2 = LT(2), plus récent */
+    advance_ms(200); tap_hold_tick();
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 2, "P2 tenu → couche 2 (plus récent)");
+    tap_hold_on_release(0, 1);                 /* relâche P2 (P1 toujours tenu) */
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "release P2 → retour couche 1 (P1 tenu)");
+    tap_hold_on_release(0, 0);                 /* relâche P1 */
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), -1, "release P1 → plus de couche LT");
+    TEST_ASSERT_EQ(current_layout, 0, "retour à la base 0 (pas bloqué)");
+    current_layout = save_cur; last_layer = save_last;
+}
+
 void test_tap_hold(void) {
     TEST_SUITE("Tap/Hold State Machine — module réel");
     TEST_RUN(test_th_mt_tap);
@@ -136,6 +158,7 @@ void test_tap_hold(void) {
     TEST_RUN(test_th_interrupt_forces_hold);
     TEST_RUN(test_th_lt_hold_layer);
     TEST_RUN(test_th_lt_layer_out_of_bounds);
+    TEST_RUN(test_th_two_lt_concurrent);
     TEST_RUN(test_th_osm_tap_arms);
     TEST_RUN(test_th_ignores_normal_key);
     TEST_RUN(test_th_slot_exhaustion);

@@ -23,6 +23,8 @@ static tap_hold_entry_t pending[TAP_HOLD_MAX_PENDING];
 static uint8_t active_hold_mods = 0;
 static int8_t active_hold_layer = -1;
 static bool hold_activated_flag = false;
+static uint32_t th_seq = 0;         /* compteur d'ordre d'activation des LT holds */
+static int8_t th_layer_base = -1;   /* couche à restaurer quand plus aucune LT tenue (-1 = pas de LT) */
 
 static uint32_t now_ms(void)
 {
@@ -50,6 +52,32 @@ static tap_hold_entry_t *find_free(void)
     return NULL;
 }
 
+/* Recalcule la couche pilotée par les LT holds actifs : la LT activée le plus
+ * récemment (activate_seq max) gagne ; quand plus aucune LT n'est tenue, restaure
+ * la couche de base capturée à la 1re LT. Robuste au relâchement dans le désordre
+ * de plusieurs LT concurrentes (le bug audit E1 : le mono-slot perdait la couche
+ * de la LT encore tenue au 1er release). */
+static void recompute_lt_layer(void)
+{
+    tap_hold_entry_t *top = NULL;
+    for (int i = 0; i < TAP_HOLD_MAX_PENDING; i++) {
+        if (pending[i].state == TH_HOLD && K_IS_LT(pending[i].keycode) &&
+            (!top || pending[i].activate_seq > top->activate_seq))
+            top = &pending[i];
+    }
+    if (top) {
+        active_hold_layer = (int8_t)K_LT_LAYER(top->keycode);
+        current_layout = (uint8_t)active_hold_layer;
+    } else {
+        active_hold_layer = -1;
+        if (th_layer_base >= 0) {
+            current_layout = (uint8_t)th_layer_base;
+            th_layer_base = -1;
+        }
+    }
+    layer_changed();
+}
+
 static void activate_hold(tap_hold_entry_t *e)
 {
     e->state = TH_HOLD;
@@ -60,10 +88,10 @@ static void activate_hold(tap_hold_entry_t *e)
     } else if (K_IS_LT(kc)) {
         uint8_t layer = K_LT_LAYER(kc);
         if (layer < LAYERS) {   /* couche hors bornes → pas de changement (évite l'OOB keymaps[]) */
-            active_hold_layer = (int8_t)layer;
-            last_layer = current_layout;
-            current_layout = active_hold_layer;
-            layer_changed();
+            if (active_hold_layer < 0)         /* 1re LT active → mémorise la couche de base */
+                th_layer_base = (int8_t)current_layout;
+            e->activate_seq = ++th_seq;
+            recompute_lt_layer();              /* e (TH_HOLD, seq max) devient la couche active */
         }
     } else if (K_IS_OSM(kc)) {
         active_hold_mods |= K_OSM_MOD(kc);
@@ -79,10 +107,8 @@ static void deactivate_hold(tap_hold_entry_t *e)
     } else if (K_IS_LT(kc)) {
         uint8_t layer = K_LT_LAYER(kc);
         if (layer < LAYERS) {   /* symétrique à activate_hold : la couche hors bornes n'avait rien changé */
-            if (active_hold_layer == (int8_t)layer)
-                active_hold_layer = -1;
-            current_layout = last_layer;
-            layer_changed();
+            e->state = TH_IDLE;                /* retirer ce hold avant de recalculer la couche */
+            recompute_lt_layer();              /* → LT encore tenue la + récente, ou couche de base */
         }
     } else if (K_IS_OSM(kc)) {
         active_hold_mods &= ~K_OSM_MOD(kc);
@@ -98,6 +124,8 @@ void tap_hold_init(void)
     memset(pending, 0, sizeof(pending));
     active_hold_mods = 0;
     active_hold_layer = -1;
+    th_seq = 0;
+    th_layer_base = -1;
 }
 
 bool tap_hold_on_press(uint16_t keycode, uint8_t row, uint8_t col)

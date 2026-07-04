@@ -26,6 +26,7 @@ typedef struct {
     uint8_t row;            /* Matrix position */
     uint8_t col;
     uint32_t press_time_ms; /* When the key was pressed */
+    uint32_t activate_seq;  /* Ordre d'activation du hold (LT) — le + récent pilote la couche */
 } tap_hold_entry_t;
 
 /* Initialize the tap/hold engine */
