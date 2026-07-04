@@ -243,10 +243,21 @@ clamper avant de calculer les offsets, ou rejeter `nlen >= MAX_MACRO_NAME_LENGTH
 4. ✅ **E3/E4** (NVS garde + faux OK) — FIXÉS (E3 aad52582, E4 eea12f7f ; save_* → bool + CDC ks_respond_err KS_STATUS_ERR_STORAGE=0x07, TDD).
 5. ✅ **E6** (key override) — FIXÉ (bf616538, TDD ; mods physiques + result_mod + suppression du mod déclencheur).
 6. ✅ **E5** (CDC handoff verrouillé) — FIXÉ (3b0d27a1 ; ready_frame + mutex, vérifié par construction, non bite-testable comme M1).
-7. Le reste (MOYEN/edge) au fil de l'eau ; E7/RF-injection = décision archi (HMAC).
+7. MOYEN traités : **M1** (cc5f5e2b), **M2** tap_dance 4ᵉ tap (fa989357), **M3** combo 6KRO
+   (54ce58d3), **M4** consume_tap OSM (12f7fb28), **M10** garde load_layout_names + **M12**
+   nvs_save propagation (67bbc3df), **M13** MACRO_ADD offset (96959187).
 
-**État : toute la tranche 🔴 CRITIQUE + 🟠 ÉLEVÉ + le 🟡 M1 actionnable sont corrigés
-(C1, E1/E2, E3, E4, E5, E6, M1).** Reste les MOYEN/edge (TDD-ables) et E7 (décision archi).
+**État : 🔴 CRITIQUE + 🟠 ÉLEVÉ + 7 MOYEN corrigés (C1, E1/E2, E3, E4, E5, E6, M1-M4, M10, M12, M13).**
+
+Reste — **décisions / hors périmètre TDD net** (non faits, demandent un choix ou touchent large) :
+- **M5** OSM gaspillé par un release — le comportement actuel (OSM injecté sans frappe) est
+  couvert par un test existant → **changer = décision de sémantique** (QMK attend l'attente d'une frappe).
+- **M6** MO bloqué si MO mappé sur sa propre couche — **dépend du contenu keymap** (à confirmer côté éditeur/défauts).
+- **M7** mods perdus si report plein (7+ touches) — **skippé** (log dans le chemin de build report = contre-convention, edge rarissime).
+- **M8** macro à délai re-déclenchée tant que tenue — **auto-repeat voulu ou bug ?** (décision d'intention).
+- **M9** tap_dance interruption ne résout pas la danse courante — **divergence QMK** (décision comportementale).
+- **M11** garde NVS = taille seule (pas de magic/version) — **robustesse plus large** (préfixe magic+version sur plusieurs blobs, à concevoir).
+- **E7 / injection RF** — décision archi (auth HMAC du lien NRF).
 
 Tous les modules input ont maintenant des tests host branchés sur le vrai code
 → chaque fix se fait en TDD (test rouge → fix → vert), comme le bug leader.
