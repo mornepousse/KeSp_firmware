@@ -317,15 +317,24 @@ static void test_kp_kno_fallback(void)
                 "K_NO sur couche active → fallback couche 0 = A (0x04)");
 }
 
-/* 10. OSM réel : osm_arm() puis build → osm_consume() injecte le modificateur */
-static void test_kp_osm_mod_injection(void)
+/* 10. OSM (logique QMK, M5) : le one-shot mod s'applique à la PROCHAINE frappe et
+ * n'est consommé que là — un cycle sans frappe (release/idle) le laisse armé. */
+static void test_kp_osm_applies_to_next_press(void)
 {
     reset_kp_state();
     osm_arm(T_MOD_LSFT);          /* MOD_LSFT = bit 1 → HID_KEY_CONTROL_LEFT + 1 = 0xE1 */
-    /* Aucune touche pressée : le modificateur OSM sort seul */
+    /* Cycle sans frappe : l'OSM reste armé, PAS injecté */
     build_keycode_report();
-    TEST_ASSERT(keycode_in_report(T_KC_LSHIFT),
-                "osm_arm(MOD_LSFT) → 0xE1 injecté dans keycodes");
+    TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT),
+                "OSM sans frappe → mod PAS injecté (reste armé, M5/QMK)");
+    TEST_ASSERT(osm_is_active(), "OSM toujours armé après un cycle sans frappe");
+    /* Frappe cible : elle reçoit le mod OSM, alors consommé */
+    keymaps[0][0][0] = T_KC_A;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_A), "frappe cible présente");
+    TEST_ASSERT(keycode_in_report(T_KC_LSHIFT), "OSM appliqué à la frappe (0xE1)");
+    TEST_ASSERT(!osm_is_active(), "OSM consommé par la frappe");
 }
 
 /* 11a. OSL arm réel : press K_OSL(1) → le vrai osl_arm(1) est appelé */
@@ -582,7 +591,7 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_mo_deactivates_on_release);
     TEST_RUN(test_kp_to_toggle_on);
     TEST_RUN(test_kp_kno_fallback);
-    TEST_RUN(test_kp_osm_mod_injection);
+    TEST_RUN(test_kp_osm_applies_to_next_press);
     TEST_RUN(test_kp_osl_arm_called);
     TEST_RUN(test_kp_osl_active_layer);
     TEST_RUN(test_kp_combo_result_injected);

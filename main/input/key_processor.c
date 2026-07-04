@@ -413,8 +413,12 @@ void build_keycode_report(void)
         }
     }
 
-    /* Step 5: apply modifiers (tap/hold + one-shot + LM + macro hold + override) */
-    uint8_t extra_mods = th_mods | osm_consume() | lm_active_mods | macro_hold_mods;
+    /* Step 5: apply modifiers (tap/hold + one-shot + LM + macro hold + override).
+     * OSM (logique QMK, M5) : consommé seulement sur une vraie frappe ; un cycle
+     * sans frappe (release/idle) laisse l'OSM armé pour la frappe suivante — même
+     * garde que l'OSL (has_normal_press). */
+    uint8_t osm_mods = has_normal_press ? osm_consume() : 0;
+    uint8_t extra_mods = th_mods | osm_mods | lm_active_mods | macro_hold_mods;
     extra_mods = (uint8_t)((extra_mods & ~override_suppress_mods) | override_add_mods);
 
     /* Step 6: caps word + repeat key tracking */
