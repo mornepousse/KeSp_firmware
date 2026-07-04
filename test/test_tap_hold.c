@@ -112,6 +112,22 @@ static void test_th_slot_exhaustion(void) {
     for (int i = 0; i < TAP_HOLD_MAX_PENDING; i++) tap_hold_on_release(0, i);
 }
 
+/* 9. LT avec couche HORS BORNES (>= LAYERS=10) → ignorée (sinon lecture OOB de
+ *    keymaps[] + current_layout bloqué sur une couche illégale). */
+static void test_th_lt_layer_out_of_bounds(void) {
+    th_reset();
+    uint8_t save_cur = current_layout, save_last = last_layer;
+    current_layout = 0;
+    tap_hold_on_press(K_LT(15, 0x2C), 0, 0);   /* couche 15 >= LAYERS */
+    advance_ms(200);
+    tap_hold_tick();
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), -1,
+                   "LT couche 15 (>= LAYERS) → ignorée, aucune couche active");
+    TEST_ASSERT_EQ(current_layout, 0, "current_layout non corrompu par LT hors bornes");
+    tap_hold_on_release(0, 0);
+    current_layout = save_cur; last_layer = save_last;
+}
+
 void test_tap_hold(void) {
     TEST_SUITE("Tap/Hold State Machine — module réel");
     TEST_RUN(test_th_mt_tap);
@@ -119,6 +135,7 @@ void test_tap_hold(void) {
     TEST_RUN(test_th_timeout_boundary);
     TEST_RUN(test_th_interrupt_forces_hold);
     TEST_RUN(test_th_lt_hold_layer);
+    TEST_RUN(test_th_lt_layer_out_of_bounds);
     TEST_RUN(test_th_osm_tap_arms);
     TEST_RUN(test_th_ignores_normal_key);
     TEST_RUN(test_th_slot_exhaustion);

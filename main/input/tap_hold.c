@@ -58,10 +58,13 @@ static void activate_hold(tap_hold_entry_t *e)
     if (K_IS_MT(kc)) {
         active_hold_mods |= K_MT_MOD(kc);
     } else if (K_IS_LT(kc)) {
-        active_hold_layer = K_LT_LAYER(kc);
-        last_layer = current_layout;
-        current_layout = active_hold_layer;
-        layer_changed();
+        uint8_t layer = K_LT_LAYER(kc);
+        if (layer < LAYERS) {   /* couche hors bornes → pas de changement (évite l'OOB keymaps[]) */
+            active_hold_layer = (int8_t)layer;
+            last_layer = current_layout;
+            current_layout = active_hold_layer;
+            layer_changed();
+        }
     } else if (K_IS_OSM(kc)) {
         active_hold_mods |= K_OSM_MOD(kc);
     }
@@ -74,10 +77,13 @@ static void deactivate_hold(tap_hold_entry_t *e)
     if (K_IS_MT(kc)) {
         active_hold_mods &= ~K_MT_MOD(kc);
     } else if (K_IS_LT(kc)) {
-        if (active_hold_layer == K_LT_LAYER(kc))
-            active_hold_layer = -1;
-        current_layout = last_layer;
-        layer_changed();
+        uint8_t layer = K_LT_LAYER(kc);
+        if (layer < LAYERS) {   /* symétrique à activate_hold : la couche hors bornes n'avait rien changé */
+            if (active_hold_layer == (int8_t)layer)
+                active_hold_layer = -1;
+            current_layout = last_layer;
+            layer_changed();
+        }
     } else if (K_IS_OSM(kc)) {
         active_hold_mods &= ~K_OSM_MOD(kc);
     }

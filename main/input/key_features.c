@@ -26,7 +26,7 @@ uint8_t osm_consume(void)
 
 static int8_t osl_pending_layer = -1;
 
-void osl_arm(uint8_t layer)      { osl_pending_layer = (int8_t)layer; }
+void osl_arm(uint8_t layer)      { if (layer < LAYERS) osl_pending_layer = (int8_t)layer; }
 int8_t osl_get_layer(void)       { return osl_pending_layer; }
 
 void osl_consume(void)

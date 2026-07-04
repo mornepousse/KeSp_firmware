@@ -115,6 +115,13 @@ static void test_repeat_ignores_zero(void) {
     TEST_ASSERT_EQ(repeat_key_get(), 0x04, "Repeat ignores zero");
 }
 
+/* OSL couche HORS BORNES (>= LAYERS=10) → ignorée (sinon OOB keymaps[]). */
+static void test_osl_out_of_bounds(void) {
+    reset_osl();
+    osl_arm(15);   /* 15 >= LAYERS */
+    TEST_ASSERT_EQ(osl_get_layer(), -1, "OSL couche 15 (>= LAYERS) → ignorée, pas d'OOB");
+}
+
 /* ── Suite runner ────────────────────────────────────────────────── */
 
 void test_key_features(void) {
@@ -122,6 +129,7 @@ void test_key_features(void) {
     TEST_RUN(test_osm_arm_consume);
     TEST_RUN(test_osm_multi_mod);
     TEST_RUN(test_osl_arm_consume);
+    TEST_RUN(test_osl_out_of_bounds);
     TEST_RUN(test_caps_word_letters);
     TEST_RUN(test_caps_word_numbers);
     TEST_RUN(test_caps_word_space_deactivates);
