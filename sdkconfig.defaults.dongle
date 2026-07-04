@@ -43,8 +43,11 @@ CONFIG_TINYUSB_HID_COUNT=2
 # HID_COUNT=2 covers the OTP personality (instance 1). Under OPENPGP/NONE
 # instance 1 is simply unused (a few bytes of RAM).
 
-# --- Dongle security personality (OPENPGP = CCID smartcard; see main/Kconfig.projbuild) ---
-CONFIG_KASE_SEC_OPENPGP=y
+# --- Dongle security personality — PGP GELÉ 2026-07-04 : personnalité NONE,
+# toute la surface OpenPGP (CCID / openpgp_card / crypto / DO) est compilée out.
+# Réactivation = CONFIG_KASE_SEC_OPENPGP=y (+ default Kconfig) puis rm sdkconfig.
+# Les blobs NVS pgp_keys/pins/dos restent dormants (chiffrés, jamais relus). ---
+CONFIG_KASE_SEC_NONE=y
 
 # --- NVS encryption (HMAC scheme) — encrypts pgp_keys/pins/dos/sec_slots at rest.
 # XTS key derived from an eFuse HMAC key auto-generated on-chip on first boot
