@@ -7,6 +7,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -g -DTEST_HOST")
 add_executable(test_runner
     test_key_stats.c
     test_bigram.c
+    ../main/input/key_stats.c
     test_cdc_protocol.c
     test_board_config.c
     test_matrix_constants.c

@@ -4,10 +4,12 @@
 #include <stdint.h>
 #include "esp_log.h"
 #include "keyboard_config.h"
+#ifndef TEST_HOST
 #include "nvs_utils.h"
 #include "nvs.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#endif
+#include "freertos/FreeRTOS.h"
 
 static const char *TAG = "KEY_STATS";
 
@@ -29,17 +31,21 @@ static const char *TAG = "KEY_STATS";
 
 uint32_t key_stats[MATRIX_ROWS][MATRIX_COLS] = {0};
 uint32_t key_stats_total = 0;
+#ifndef TEST_HOST
 static uint32_t key_stats_last_saved_total = 0;
 static TickType_t key_stats_last_save_tick = 0;
+#endif
 
 /* ── Bigram data ─────────────────────────────────────────────────── */
 
 uint16_t bigram_stats[NUM_KEYS][NUM_KEYS] = {0};
 uint32_t bigram_total = 0;
 static int16_t last_key_idx = -1;
+#ifndef TEST_HOST
 static uint32_t bigram_last_saved_total = 0;
 static TickType_t bigram_last_save_tick = 0;
 static bool bigram_save_disabled = false;
+#endif
 
 /* ── Record a keypress ───────────────────────────────────────────── */
 
@@ -110,6 +116,7 @@ void reset_bigram_stats(void)
 
 /* ── NVS persistence ─────────────────────────────────────────────── */
 
+#ifndef TEST_HOST
 void save_key_stats(void)
 {
     esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "key_stats", key_stats,
@@ -182,3 +189,10 @@ void key_stats_check_save(void)
             save_bigram_stats();
     }
 }
+#else
+void save_key_stats(void)    {}
+void load_key_stats(void)    {}
+void save_bigram_stats(void) {}
+void load_bigram_stats(void) {}
+void key_stats_check_save(void) {}
+#endif

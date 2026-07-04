@@ -1,106 +1,77 @@
-/* Test key statistics logic */
+/* Test key statistics logic — rewired sur main/input/key_stats.c */
 #include "test_framework.h"
+#include "key_stats.h"
 
-/* Simulated key_stats storage */
-static uint32_t ks_data[MATRIX_ROWS][MATRIX_COLS];
-static uint32_t ks_data_total;
+/*
+ * Chaque test appelle reset_key_stats() en début pour isoler l'état.
+ * reset_key_stats() appelle save_key_stats() qui est un no-op sous TEST_HOST.
+ */
 
-static void reset_test_stats(void) {
-    memset(ks_data, 0, sizeof(ks_data));
-    ks_data_total = 0;
+/* Test: record_press incrémente la bonne case et le total */
+static void test_key_stats_record_press(void) {
+    reset_key_stats();
+    key_stats_record_press(2, 3);
+    key_stats_record_press(2, 3);
+    key_stats_record_press(2, 3);
+    TEST_ASSERT_EQ(get_key_stats_val(2, 3), 3, "key (2,3) pressée 3 fois == 3");
+    TEST_ASSERT_EQ(key_stats_total, 3, "total == 3");
 }
 
-static uint32_t get_stats_max(void) {
-    uint32_t max = 0;
-    for (int r = 0; r < MATRIX_ROWS; r++)
-        for (int c = 0; c < MATRIX_COLS; c++)
-            if (ks_data[r][c] > max)
-                max = ks_data[r][c];
-    return max;
+/* Test: plusieurs touches différentes accumulent indépendamment */
+static void test_key_stats_multiple_keys(void) {
+    reset_key_stats();
+    key_stats_record_press(0, 0);
+    key_stats_record_press(1, 5);
+    key_stats_record_press(1, 5);
+    key_stats_record_press(4, 12);
+    TEST_ASSERT_EQ(get_key_stats_val(0, 0),  1, "key (0,0) == 1");
+    TEST_ASSERT_EQ(get_key_stats_val(1, 5),  2, "key (1,5) == 2");
+    TEST_ASSERT_EQ(get_key_stats_val(4, 12), 1, "key (4,12) == 1");
+    TEST_ASSERT_EQ(key_stats_total, 4, "total == 4");
 }
 
-/* Simulate a keypress at (row, col) — mirrors callback logic */
-static void simulate_keypress(uint8_t row, uint8_t col) {
-    if (row < MATRIX_ROWS && col < MATRIX_COLS) {
-        ks_data[row][col]++;
-        ks_data_total++;
-    }
+/* Test: get_key_stats_max retourne le maximum sur la matrice */
+static void test_key_stats_max(void) {
+    reset_key_stats();
+    key_stats_record_press(0, 0);
+    for (int i = 0; i < 100; i++) key_stats_record_press(2, 5);
+    key_stats_record_press(3, 7);
+    TEST_ASSERT_EQ(get_key_stats_max(), 100, "max == 100");
 }
 
-/* Test: basic stats accumulation */
-void test_stats_basic(void) {
-    reset_test_stats();
-    simulate_keypress(2, 3);
-    simulate_keypress(2, 3);
-    simulate_keypress(2, 3);
-    TEST_ASSERT_EQ(ks_data[2][3], 3, "key pressed 3 times");
-    TEST_ASSERT_EQ(ks_data_total, 3, "total is 3");
+/* Test: reset_key_stats efface toutes les cases et le total */
+static void test_key_stats_reset(void) {
+    reset_key_stats();
+    key_stats_record_press(1, 1);
+    key_stats_record_press(2, 2);
+    reset_key_stats();
+    TEST_ASSERT_EQ(get_key_stats_val(1, 1), 0, "reset efface key (1,1)");
+    TEST_ASSERT_EQ(get_key_stats_val(2, 2), 0, "reset efface key (2,2)");
+    TEST_ASSERT_EQ(key_stats_total, 0, "reset efface total");
+    TEST_ASSERT_EQ(get_key_stats_max(), 0, "max == 0 apres reset");
 }
 
-/* Test: multiple keys */
-void test_stats_multiple_keys(void) {
-    reset_test_stats();
-    simulate_keypress(0, 0);
-    simulate_keypress(1, 5);
-    simulate_keypress(1, 5);
-    simulate_keypress(4, 12);
-    TEST_ASSERT_EQ(ks_data[0][0], 1, "key (0,0) pressed once");
-    TEST_ASSERT_EQ(ks_data[1][5], 2, "key (1,5) pressed twice");
-    TEST_ASSERT_EQ(ks_data[4][12], 1, "key (4,12) pressed once");
-    TEST_ASSERT_EQ(ks_data_total, 4, "total is 4");
+/* Test: frappes OOB ignorées (row >= MATRIX_ROWS ou col >= MATRIX_COLS) */
+static void test_key_stats_bounds_ignored(void) {
+    reset_key_stats();
+    key_stats_record_press(MATRIX_ROWS, 0);
+    key_stats_record_press(0, MATRIX_COLS);
+    TEST_ASSERT_EQ(key_stats_total, 0, "frappes OOB n'incrementent pas le total");
+    TEST_ASSERT_EQ(get_key_stats_max(), 0, "frappes OOB n'incrementent pas le max");
 }
 
-/* Test: max calculation */
-void test_stats_max(void) {
-    reset_test_stats();
-    simulate_keypress(0, 0);
-    for (int i = 0; i < 100; i++) simulate_keypress(2, 5);
-    simulate_keypress(3, 7);
-    TEST_ASSERT_EQ(get_stats_max(), 100, "max is 100");
-}
-
-/* Test: reset clears everything */
-void test_stats_reset(void) {
-    reset_test_stats();
-    simulate_keypress(1, 1);
-    simulate_keypress(2, 2);
-    reset_test_stats();
-    TEST_ASSERT_EQ(ks_data[1][1], 0, "reset clears key (1,1)");
-    TEST_ASSERT_EQ(ks_data[2][2], 0, "reset clears key (2,2)");
-    TEST_ASSERT_EQ(ks_data_total, 0, "reset clears total");
-    TEST_ASSERT_EQ(get_stats_max(), 0, "max after reset is 0");
-}
-
-/* Test: bounds check */
-void test_stats_bounds(void) {
-    reset_test_stats();
-    simulate_keypress(MATRIX_ROWS, 0);  /* out of bounds row */
-    simulate_keypress(0, MATRIX_COLS);  /* out of bounds col */
-    TEST_ASSERT_EQ(ks_data_total, 0, "OOB presses ignored");
-}
-
-/* Test: save threshold logic (simulates key_stats_check_save) */
-void test_stats_save_threshold(void) {
-    reset_test_stats();
-    uint32_t last_saved_total = 0;
-
-    /* Simulate 99 keypresses — should not trigger save */
-    for (int i = 0; i < 99; i++) simulate_keypress(0, 0);
-    uint32_t diff = ks_data_total - last_saved_total;
-    TEST_ASSERT(diff < 100, "99 presses: no save trigger");
-
-    /* One more — should trigger */
-    simulate_keypress(0, 0);
-    diff = ks_data_total - last_saved_total;
-    TEST_ASSERT(diff >= 100, "100 presses: save triggered");
+/* Test: get_key_stats_val retourne 0 pour les indices OOB */
+static void test_key_stats_val_oob(void) {
+    TEST_ASSERT_EQ(get_key_stats_val(MATRIX_ROWS, 0), 0, "val OOB row == 0");
+    TEST_ASSERT_EQ(get_key_stats_val(0, MATRIX_COLS), 0, "val OOB col == 0");
 }
 
 void test_key_stats(void) {
     TEST_SUITE("Key Statistics");
-    TEST_RUN(test_stats_basic);
-    TEST_RUN(test_stats_multiple_keys);
-    TEST_RUN(test_stats_max);
-    TEST_RUN(test_stats_reset);
-    TEST_RUN(test_stats_bounds);
-    TEST_RUN(test_stats_save_threshold);
+    TEST_RUN(test_key_stats_record_press);
+    TEST_RUN(test_key_stats_multiple_keys);
+    TEST_RUN(test_key_stats_max);
+    TEST_RUN(test_key_stats_reset);
+    TEST_RUN(test_key_stats_bounds_ignored);
+    TEST_RUN(test_key_stats_val_oob);
 }
