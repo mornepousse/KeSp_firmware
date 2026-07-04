@@ -311,7 +311,7 @@ bool rf_driver_verify_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
            && (en_aa == 0x01)
            && (en_rx == 0x01)
            && (ch_v  == cfg->channel)
-           && (rf_v  == 0x0E)
+           && (rf_v  == 0x06)   /* 1 Mbps — DOIT matcher rf_driver_init/rearm (était 0x0E=2Mbps, cf. audit M1) */
            && (addr_lsb == cfg->addr_suffix);
 
     if (ok) {
@@ -320,7 +320,7 @@ bool rf_driver_verify_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
                  cfg->pin_csn, cfg_v, en_aa, en_rx, ch_v, rf_v, addr_lsb);
     } else {
         ESP_LOGW(TAG, "verify csn=%d FAIL CONFIG=0x%02x(exp 0x3F) EN_AA=0x%02x(exp 0x01) "
-                      "EN_RX=0x%02x(exp 0x01) RF_CH=%u(exp %u) RF_SETUP=0x%02x(exp 0x0E) "
+                      "EN_RX=0x%02x(exp 0x01) RF_CH=%u(exp %u) RF_SETUP=0x%02x(exp 0x06) "
                       "ADDR.lsb=0x%02x(exp 0x%02x)",
                  cfg->pin_csn, cfg_v, en_aa, en_rx, ch_v, cfg->channel,
                  rf_v, addr_lsb, cfg->addr_suffix);
