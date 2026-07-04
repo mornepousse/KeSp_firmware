@@ -299,6 +299,18 @@ void build_keycode_report(void)
     uint8_t th_mods = tap_hold_get_active_mods();
     bool has_normal_press = false;
 
+    /* Modificateurs physiques tenus (Shift/Ctrl/… encodés 0xE0-0xE7 dans le keymap)
+     * — les key overrides doivent voir la vraie combinaison, pas seulement th_mods. */
+    uint8_t physical_mods = 0;
+    for (uint8_t i = 0; i < 6; i++) {
+        if (current_press_col[i] == INVALID_KEY_POS) continue;
+        uint16_t mkc = keymaps[active_layer][current_press_row[i]][current_press_col[i]];
+        if (mkc >= 0xE0 && mkc <= 0xE7)
+            physical_mods |= (uint8_t)(1u << (mkc - 0xE0));
+    }
+    uint8_t override_add_mods = 0;       /* result_mod des overrides déclenchés */
+    uint8_t override_suppress_mods = 0;  /* trigger_mod à retirer du report */
+
     /* Step 4: process each pressed key */
     for (uint8_t i = 0; i < 6; i++) {
         if (current_press_col[i] == INVALID_KEY_POS) {
@@ -351,12 +363,15 @@ void build_keycode_report(void)
             if (kc > 0xFF) {
                 extra_keycodes[i] = kc;
             } else {
-                /* Key override: check if modifier+key should be replaced */
-                uint8_t override_mod = 0;
-                uint8_t override_kc = key_override_check(kc, th_mods, &override_mod);
+                /* Key override: remplace la combo mod+touche (mods physiques inclus) */
+                uint8_t override_mod = 0, trigger_mod = 0;
+                uint8_t override_kc = key_override_check(
+                    (uint8_t)kc, (uint8_t)(th_mods | physical_mods),
+                    &override_mod, &trigger_mod);
                 if (override_kc != 0) {
                     kc = override_kc;
-                    /* TODO: apply override_mod */
+                    override_add_mods |= override_mod;
+                    override_suppress_mods |= trigger_mod;
                 }
 
                 /* Combo deferral: hold back combo candidate keys */
@@ -384,8 +399,20 @@ void build_keycode_report(void)
         th_mods = tap_hold_get_active_mods();
     }
 
-    /* Step 5: apply modifiers (tap/hold + one-shot + LM + macro hold) */
+    /* Key override: retirer du report les modificateurs déclencheurs (ex. le Shift
+     * de "Shift+, → ;") pour ne pas les combiner au result_key. */
+    if (override_suppress_mods) {
+        for (uint8_t i = 0; i < 6; i++) {
+            uint8_t k = keycodes[i];
+            if (k >= 0xE0 && k <= 0xE7 &&
+                (override_suppress_mods & (uint8_t)(1u << (k - 0xE0))))
+                keycodes[i] = 0;
+        }
+    }
+
+    /* Step 5: apply modifiers (tap/hold + one-shot + LM + macro hold + override) */
     uint8_t extra_mods = th_mods | osm_consume() | lm_active_mods | macro_hold_mods;
+    extra_mods = (uint8_t)((extra_mods & ~override_suppress_mods) | override_add_mods);
 
     /* Step 6: caps word + repeat key tracking */
     for (uint8_t i = 0; i < 6; i++) {

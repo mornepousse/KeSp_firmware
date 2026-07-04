@@ -519,6 +519,32 @@ static void test_kp_macro_legacy_injects_keys(void)
                 "expand_macro legacy (steps[0]==0) : keys[0] injecté dans keycodes[]");
 }
 
+/* Key override déclenché par un mod PHYSIQUE + result_mod appliqué + mod
+ * déclencheur retiré (audit E6 : l'override ne voyait que th_mods et jetait
+ * result_mod → jamais déclenché en usage normal). */
+static void test_kp_key_override_physical_mod(void)
+{
+    reset_kp_state();
+    key_override_init();
+    key_override_t ov = { .trigger_key = T_KC_A, .trigger_mod = 0x02 /* LShift */,
+                          .result_key = T_KC_B,  .result_mod  = 0x01 /* LCtrl  */ };
+    key_override_set(0, &ov);
+    keymaps[0][0][0] = T_KC_LSHIFT;   /* Shift physique en (0,0) */
+    keymaps[0][0][1] = T_KC_A;        /* A en (0,1) */
+    press_key(0, 0, 0);
+    press_key(1, 0, 1);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_B),
+                "override: Shift physique + A → B émis (déclenché par mod physique)");
+    TEST_ASSERT(!keycode_in_report(T_KC_A),
+                "override: A remplacé, absent du report");
+    TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT),
+                "override: Shift déclencheur retiré du report");
+    TEST_ASSERT(keycode_in_report(T_KC_LCTRL),
+                "override: result_mod (Ctrl) appliqué");
+    key_override_init();   /* laisse propre pour les suites suivantes */
+}
+
 /* ══════════════════════════════════════════════════════════════════════ */
 /* Suite runner                                                          */
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -529,6 +555,7 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_simple_press);
     TEST_RUN(test_kp_simple_release);
     TEST_RUN(test_kp_modifier_in_report);
+    TEST_RUN(test_kp_key_override_physical_mod);
     TEST_RUN(test_kp_mo_activates_layer);
     TEST_RUN(test_kp_mo_key_absorbed);
     TEST_RUN(test_kp_mo_active_layer_keycode);

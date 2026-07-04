@@ -174,13 +174,15 @@ const key_override_t *key_override_get(uint8_t index) {
     return &overrides[index];
 }
 
-uint8_t key_override_check(uint8_t keycode, uint8_t active_mods, uint8_t *out_mod)
+uint8_t key_override_check(uint8_t keycode, uint8_t active_mods,
+                           uint8_t *out_mod, uint8_t *out_trigger_mod)
 {
     for (int i = 0; i < KEY_OVERRIDE_MAX_SLOTS; i++) {
         if (overrides[i].trigger_key == 0) continue;
         if (overrides[i].trigger_key == keycode &&
             (active_mods & overrides[i].trigger_mod) == overrides[i].trigger_mod) {
             if (out_mod) *out_mod = overrides[i].result_mod;
+            if (out_trigger_mod) *out_trigger_mod = overrides[i].trigger_mod;
             return overrides[i].result_key;
         }
     }

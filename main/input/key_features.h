@@ -93,8 +93,11 @@ void key_override_set(uint8_t index, const key_override_t *cfg);
 const key_override_t *key_override_get(uint8_t index);
 
 /* Check if a key+mod combo should be overridden.
-   Returns the override result keycode, or 0 if no override. */
-uint8_t key_override_check(uint8_t keycode, uint8_t active_mods, uint8_t *out_mod);
+   Returns the override result keycode, or 0 if no override.
+   out_mod = result_mod to apply, out_trigger_mod = trigger_mod to suppress
+   (both optional). */
+uint8_t key_override_check(uint8_t keycode, uint8_t active_mods,
+                           uint8_t *out_mod, uint8_t *out_trigger_mod);
 
 void key_override_save(void);
 void key_override_load(void);
