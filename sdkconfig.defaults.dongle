@@ -49,24 +49,23 @@ CONFIG_TINYUSB_HID_COUNT=2
 # Les blobs NVS pgp_keys/pins/dos restent dormants (chiffrés, jamais relus). ---
 CONFIG_KASE_SEC_NONE=y
 
-# --- NVS encryption (HMAC scheme) — encrypts pgp_keys/pins/dos/sec_slots at rest.
-# XTS key derived from an eFuse HMAC key auto-generated on-chip on first boot
-# (read-protected, never leaves the chip). No nvs_keys partition / no PT change.
-# Spec: docs/superpowers/specs/2026-06-25-dongle-nvs-encryption-design.md
-CONFIG_NVS_ENCRYPTION=y
-CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC=y
-CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID=0
-
-# --- Secure Boot V2 (RSA-3072) — only signed firmware boots; closes the
-# "malicious firmware decrypts NVS" gap left by NVS-enc alone. Validated end-to-end
-# on a spare ESP32-S3 (2026-06-25). Requires the signing key (gitignored, NOT in
-# repo) — losing it = no more dongle updates. The signed bootloader (>0x8000)
-# forces the partition table to 0x10000 → partitions_dongle.csv reflow.
-# IRREVERSIBLE once flashed (SECURE_BOOT_EN + Secure Download Mode burn on 1st boot).
-CONFIG_SECURE_BOOT=y
-CONFIG_SECURE_BOOT_V2_ENABLED=y
-CONFIG_SECURE_BOOT_V2_RSA_ENABLED=y
-CONFIG_SECURE_BOOT_SIGNING_KEY="secure_boot_signing_key.pem"
-CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_dongle.csv"
-CONFIG_PARTITION_TABLE_OFFSET=0x10000
+# --- ⚠️ DURCISSEMENT DÉSACTIVÉ « pour l'instant » (2026-07-04, demande Mae) ---
+# Le dongle physique tourne en config DEV NON durcie : NVS EN CLAIR, PAS de secure
+# boot, partitions STANDARD (partitions.csv héritée de sdkconfig.defaults → table à
+# PT 0x8000, factory app @ 0x20000). Vérifié par dump flash du device 2026-07-04.
+# Les réglages ci-dessous sont la CIBLE de durcissement (différée). NE PAS les
+# réactiver sans reflasher le dongle en conséquence : le secure boot repousse la
+# table à 0x10000 (partitions_dongle.csv) → si le device est encore en 0x8000, un
+# app-flash écrit l'app au mauvais offset et la corrompt (bug vécu 2026-07-04).
+# Réactivation NVS-enc seule : décommenter les 3 CONFIG_NVS_* (n'exige pas de reflow).
+# Réactivation Secure Boot : décommenter le bloc complet + full flash cohérent.
+# CONFIG_NVS_ENCRYPTION=y
+# CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC=y
+# CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID=0
+# CONFIG_SECURE_BOOT=y
+# CONFIG_SECURE_BOOT_V2_ENABLED=y
+# CONFIG_SECURE_BOOT_V2_RSA_ENABLED=y
+# CONFIG_SECURE_BOOT_SIGNING_KEY="secure_boot_signing_key.pem"
+# CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
+# CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_dongle.csv"
+# CONFIG_PARTITION_TABLE_OFFSET=0x10000
