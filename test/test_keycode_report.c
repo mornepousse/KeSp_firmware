@@ -73,7 +73,6 @@ volatile bool matrix_test_mode    = false;
 
 /* ── État interne des stubs stateful ────────────────────────────────── */
 
-static uint8_t  g_combo_kc        = 0;
 static bool     g_leader_active   = false;
 
 /* ── Stubs matrix_scan.h ─────────────────────────────────────────────── */
@@ -92,33 +91,9 @@ void     rtc_matrix_deinit(void)          {}
  * stubs. Aucun test de cette suite ne presse de touche TD, le vrai module reste
  * inactif ici ; la logique est exercée dans test_tap_dance.c (horloge partagée). */
 
-/* ── Stubs combo.h ───────────────────────────────────────────────────── */
-
-void    combo_init(void)                                                   {}
-void    combo_set(uint8_t idx, const combo_config_t *cfg)
-        { (void)idx; (void)cfg; }
-const combo_config_t *combo_get(uint8_t idx) { (void)idx; return NULL; }
-bool    combo_should_defer(uint8_t row, uint8_t col)
-        { (void)row; (void)col; return false; }
-void    combo_defer_key(uint8_t row, uint8_t col, uint8_t kc)
-        { (void)row; (void)col; (void)kc; }
-bool    combo_is_suppressed(uint8_t row, uint8_t col)
-        { (void)row; (void)col; return false; }
-int     combo_process(const uint8_t pr[6], const uint8_t pc[6])
-        { (void)pr; (void)pc; return 0; }
-uint8_t combo_consume(uint8_t *r1, uint8_t *c1, uint8_t *r2, uint8_t *c2)
-{
-    uint8_t k = g_combo_kc;
-    g_combo_kc = 0;
-    if (r1) *r1 = INVALID_KEY_POS;
-    if (c1) *c1 = INVALID_KEY_POS;
-    if (r2) *r2 = INVALID_KEY_POS;
-    if (c2) *c2 = INVALID_KEY_POS;
-    return k;
-}
-uint8_t combo_consume_expired(void) { return 0; }
-void    combo_save(void)            {}
-void    combo_load(void)            {}
+/* combo.h : le VRAI module est linké (../main/input/combo.c) — plus de stubs.
+ * Le combo est exercé en réel ici (test_kp_combo_result_injected) et dans
+ * test_combo.c ; reset via combo_init(). */
 
 /* ── Stubs leader.h ──────────────────────────────────────────────────── */
 
@@ -232,7 +207,7 @@ static void reset_kp_state(void)
     (void)osm_consume();                           /* vide l'OSM réel */
     osl_consume();                                 /* OSL réel → -1 */
     if (caps_word_is_active()) caps_word_toggle(); /* CapsWord réel → off */
-    g_combo_kc        = 0;
+    combo_init();                                  /* réinit le vrai combo */
     g_leader_active   = false;
 
     /* Vide le macro pending interne (opaque static dans key_processor.c) */
@@ -399,14 +374,21 @@ static void test_kp_osl_active_layer(void)
                 "osl_get_layer() = 2 → key (0,0) résout sur couche 2 = B (0x05)");
 }
 
-/* 14. Combo : combo_consume() retourne un keycode → injecté dans keycodes[] */
+/* 14. Combo réel : 2 touches d'un combo pressées ensemble → result injecté.
+ *     Le pipeline défère les 2 touches (combo_should_defer/defer_key), puis
+ *     combo_process les voit toutes deux présentes+déférées → résout → consume. */
 static void test_kp_combo_result_injected(void)
 {
     reset_kp_state();
-    g_combo_kc = T_KC_A;   /* simulation : combo J+K = A */
-    build_keycode_report(); /* aucune touche pressée mais combo_consume retourne A */
+    combo_config_t cfg = { .row1 = 0, .col1 = 0, .row2 = 0, .col2 = 1, .result = T_KC_A };
+    combo_set(0, &cfg);
+    keymaps[0][0][0] = 0x0A;   /* G — keycode quelconque non nul */
+    keymaps[0][0][1] = 0x0B;   /* H */
+    press_key(0, 0, 0);
+    press_key(1, 0, 1);
+    build_keycode_report();
     TEST_ASSERT(keycode_in_report(T_KC_A),
-                "combo_consume() retourne 0x04 → A injecté dans keycodes");
+                "combo (0,0)+(0,1) pressé → A (0x04) injecté dans keycodes");
 }
 
 /* 15. Plusieurs touches simultanées → toutes dans keycodes[] */

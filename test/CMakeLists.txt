@@ -22,6 +22,7 @@ add_executable(test_runner
     test_tap_dance.c
     ../main/input/tap_dance.c
     test_combo.c
+    ../main/input/combo.c
     test_leader.c
     test_tama_engine.c
     test_rf_packet.c

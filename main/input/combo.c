@@ -5,12 +5,16 @@
    If the timeout expires, the deferred key is released normally. */
 #include "combo.h"
 #include "keyboard_config.h"
+#ifndef TEST_HOST
 #include "nvs_utils.h"
+#endif
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <string.h>
 
+#ifndef TEST_HOST
 static const char *TAG = "COMBO";
+#endif
 
 static combo_config_t configs[COMBO_MAX_SLOTS];
 
@@ -208,6 +212,7 @@ uint8_t combo_consume_expired(void)
 
 void combo_save(void)
 {
+#ifndef TEST_HOST
     uint8_t count = 0;
     for (int i = 0; i < COMBO_MAX_SLOTS; i++) {
         if (configs[i].result != 0) count = i + 1;
@@ -218,13 +223,16 @@ void combo_save(void)
         ESP_LOGE(TAG, "Failed to save combos: %s", esp_err_to_name(err));
     else
         ESP_LOGI(TAG, "Combos saved (%d slots)", count);
+#endif
 }
 
 void combo_load(void)
 {
+#ifndef TEST_HOST
     uint32_t count = 0;
     nvs_load_blob_with_total(STORAGE_NAMESPACE, "combo_cfg", configs,
                               sizeof(configs), "combo_cnt", &count);
     if (count > 0)
         ESP_LOGI(TAG, "Combos loaded (%lu slots)", (unsigned long)count);
+#endif
 }
