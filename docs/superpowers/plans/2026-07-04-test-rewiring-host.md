@@ -4,6 +4,25 @@
 
 **Goal:** Les ~15 suites qui testent une copie locale de la logique linkent le vrai module de prod ; chaque suite rewirée prouve qu'elle mord (sabotage transitoire → rouge) ; `ghost_filter` (code fantôme) supprimé.
 
+> ## ✅ AVANCEMENT (2026-07-04)
+> - **Phase 0** (quick wins) FAIT : ghost_filter supprimé, commentaires menteurs
+>   corrigés, compteurs board_config réels (commits 5583538f / 1f23bf76).
+> - **Phase 2 / T6a** FAIT : `keycodes` + `matrix_constants` sur vrais headers
+>   (commit 3a31ccb8). Reste **T6b** (`led_anim_constants`).
+> - **Phase 1 COMPLÈTE** — stratégie **intégration** choisie (les stubs de
+>   `test_keycode_report.c` retirés, il tourne sur les vrais modules) :
+>   - T5 `key_features` (dd54fa87), T1 `tap_hold` (2c8247ab, + stub `esp_timer`),
+>     T2 `tap_dance` (bdf5f0c3, + `host_clock` partagé), T3 `combo` (ba30723a),
+>     T4 `leader` (63d8f6c4). Preuve de morsure sur chaque.
+>   - ⚠️ **T4 a RÉVÉLÉ UN VRAI BUG de prod** (corrigé, 63d8f6c4) : une séquence
+>     leader préfixe d'une autre l'occultait (`[A]` rendait `[A,B]` inatteignable).
+>     Fix : différer la résolution tant que le buffer est préfixe d'une séquence
+>     plus longue ; matcher réécrit propre (supprime aussi un OOB read latent).
+> - Infra posée : `test/esp_timer.h`, `test/host_clock.{c,h}` (horloge injectable).
+> - **Reste** : T6b (led_anim), Phase 3 (cas à instruire : cdc_protocol,
+>   tama_engine, en_status, key_stats/bigram, keymap_nvs, macro_seq), Phase 4
+>   (gaps de couverture des bons tests).
+
 **Architecture:** Le runner host (`test/CMakeLists.txt`) compile déjà des `.c` de prod (pattern établi : `../main/comm/rf/heartbeat.c` etc.) avec stubs host (`test/esp_log.h`, `test/freertos/`). Chaque tâche = une suite : ajouter le vrai `.c` (ou header) au runner, supprimer la copie locale du test, appeler les vraies fonctions, prouver la morsure.
 
 **Tech Stack:** C host (CMake), harnais `test_runner` existant, tripwire v0.9.0 (ratchet 1223, garde d'assertions sur `test/`).
