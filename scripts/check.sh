@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tripwire-template: v0.9.0
+# tripwire-template: v0.10.1
 # Tripwire anti-régression KaSe — source unique de vérité du "quoi vérifier".
 # Généré par /tripwire:init. Adapter ICI ; les hooks ne font qu'appeler ce script.
 # Modes:

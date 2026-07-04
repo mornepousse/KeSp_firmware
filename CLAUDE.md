@@ -198,7 +198,7 @@ chemins temp partagés. Mocks NVS via fake implementations dans le test.
 
 ## Workflow anti-régression (OBLIGATOIRE)
 
-Source unique de vérité : `scripts/check.sh` (scaffold tripwire v0.7.0 ;
+Source unique de vérité : `scripts/check.sh` (scaffold tripwire v0.10.1 ;
 `--host-only`/`--board` sont des alias conservés de `--fast`/`--variant`).
 - `./scripts/check.sh --host-only` — tests host (~secondes)
 - `./scripts/check.sh --board <name>` — host + build d'un board
@@ -227,6 +227,18 @@ Toute nouvelle fonction de logique pure (keymap, layers, combo, tap-hold,
 parsing CDC, encoding keycodes…) : test host écrit **d'abord**, ajouté à
 `test/CMakeLists.txt` + déclaré dans `test/test_main.c`. Invoquer l'agent
 `kase-test-author`.
+
+### Économie de modèles (subagents)
+Le pipeline check.sh permet de descendre en gamme SANS risque d'hallucination,
+mais seulement là où un oracle rattrape l'erreur :
+- **Modèle économique (haiku) OK** : transcription de code déjà spécifié,
+  refactors mécaniques, extraction citée (`fichier:ligne` obligatoire) — le
+  check, la compilation ou le recoupement des citations attrapent la dérive.
+- **Jamais en dessous de sonnet** : review, audit, debug, **et l'écriture
+  d'assertions de test** — une assertion tautologique ou un verdict halluciné
+  passent l'oracle mécanique au vert. Le jugement ne descend pas en gamme.
+- Toute tâche économique DOIT finir par `./scripts/check.sh --host-only` vert, et
+  un test rewiré/écrit DOIT prouver qu'il mord (bug transitoire → rouge → revert).
 
 ### Quand invoquer les agents kase-*
 - `kase-firmware-debugger` → backtrace / boot loop / crash.
