@@ -5,6 +5,7 @@
 set -uo pipefail
 REPO="$(git rev-parse --show-toplevel)"
 echo "[pre-push] check.sh complet…"
+export TRIPWIRE_RATCHET_STRICT=1   # au push, une baisse du nombre de tests bloque
 if [ -z "${IDF_PATH:-}" ] && [ -f "$HOME/esp/esp-idf/export.sh" ]; then
   source "$HOME/esp/esp-idf/export.sh" >/dev/null 2>&1 || true
 fi

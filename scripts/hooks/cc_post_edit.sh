@@ -25,4 +25,16 @@ if [ "$rc" -ne 0 ]; then
   echo "$OUT" | tail -8 >&2
   exit 2   # remonte à Claude
 fi
+# Garde anti-affaiblissement : perte nette d'assertions vs HEAD dans un test ?
+case "$FP" in
+  *"/test/"*)
+    REL="${FP#"$REPO"/}"
+    NOLD="$(git show "HEAD:$REL" 2>/dev/null | grep -cE 'TEST_ASSERT')"
+    NNEW="$(grep -cE 'TEST_ASSERT' "$FP" 2>/dev/null)"
+    if git cat-file -e "HEAD:$REL" 2>/dev/null && [ "$NOLD" -gt "$NNEW" ] 2>/dev/null; then
+      python3 -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":sys.argv[1]}}, ensure_ascii=False))' \
+        "tripwire: $((NOLD-NNEW)) assertion(s) en moins dans $REL vs HEAD — refactor légitime ou affaiblissement ? Rétablir ou justifier."
+    fi
+    ;;
+esac
 exit 0
