@@ -242,8 +242,11 @@ clamper avant de calculer les offsets, ou rejeter `nlen >= MAX_MACRO_NAME_LENGTH
 3. ✅ **M1** (RF verify_rx one-liner) — FIXÉ (cc5f5e2b).
 4. ✅ **E3/E4** (NVS garde + faux OK) — FIXÉS (E3 aad52582, E4 eea12f7f ; save_* → bool + CDC ks_respond_err KS_STATUS_ERR_STORAGE=0x07, TDD).
 5. ✅ **E6** (key override) — FIXÉ (bf616538, TDD ; mods physiques + result_mod + suppression du mod déclencheur).
-6. ⬜ **E5** (CDC re-CRC/lock) — durcissement entrée hostile (dépend du modèle de threading CDC RX ; dur à unit-tester).
+6. ✅ **E5** (CDC handoff verrouillé) — FIXÉ (3b0d27a1 ; ready_frame + mutex, vérifié par construction, non bite-testable comme M1).
 7. Le reste (MOYEN/edge) au fil de l'eau ; E7/RF-injection = décision archi (HMAC).
+
+**État : toute la tranche 🔴 CRITIQUE + 🟠 ÉLEVÉ + le 🟡 M1 actionnable sont corrigés
+(C1, E1/E2, E3, E4, E5, E6, M1).** Reste les MOYEN/edge (TDD-ables) et E7 (décision archi).
 
 Tous les modules input ont maintenant des tests host branchés sur le vrai code
 → chaque fix se fait en TDD (test rouge → fix → vert), comme le bug leader.
