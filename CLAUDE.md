@@ -198,10 +198,15 @@ chemins temp partagés. Mocks NVS via fake implementations dans le test.
 
 ## Workflow anti-régression (OBLIGATOIRE)
 
-Source unique de vérité : `scripts/check.sh`.
+Source unique de vérité : `scripts/check.sh` (scaffold tripwire v0.7.0 ;
+`--host-only`/`--board` sont des alias conservés de `--fast`/`--variant`).
 - `./scripts/check.sh --host-only` — tests host (~secondes)
 - `./scripts/check.sh --board <name>` — host + build d'un board
 - `./scripts/check.sh` — host + build des 6 boards (sdkconfig isolé par board)
+- Skip-si-déjà-vert : état inchangé depuis le dernier vert → sortie immédiate ;
+  `--force` pour relancer quand même.
+- Sur rouge : le détail de la commande fautive est dans
+  `.git/tripwire/last-fail.log` — le lire au lieu de relancer le build.
 
 **Activation des hooks git (une fois par clone)** :
 ```bash

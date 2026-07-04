@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Hook git pre-push KaSe — bloque le push si le tripwire est rouge.
-# Activation: git config core.hooksPath scripts/hooks
+# Activation: ./scripts/install-hooks.sh  (git config core.hooksPath scripts/hooks)
 # Échappatoire WIP: git push --no-verify
 set -uo pipefail
 REPO="$(git rev-parse --show-toplevel)"
-echo "[pre-push] check.sh complet (6 boards)…"
+echo "[pre-push] check.sh complet…"
 if [ -z "${IDF_PATH:-}" ] && [ -f "$HOME/esp/esp-idf/export.sh" ]; then
   source "$HOME/esp/esp-idf/export.sh" >/dev/null 2>&1 || true
 fi
