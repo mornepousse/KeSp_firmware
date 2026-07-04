@@ -127,6 +127,17 @@ void load_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count)
         return;
     }
 
+    /* Garde de taille (cf. E3) : ne pas charger partiellement un blob d'une autre
+     * config → garder les défauts. */
+    size_t stored_size = 0;
+    err = nvs_get_blob(my_handle, "layout_names", NULL, &stored_size);
+    if (err == ESP_OK && stored_size != required_size) {
+        ESP_LOGW(TAG, "Layout names NVS size %u != expected %u — keeping defaults",
+                 (unsigned)stored_size, (unsigned)required_size);
+        nvs_close(my_handle);
+        return;
+    }
+
     esp_err_t blob_err = nvs_get_blob(my_handle, "layout_names", names, &required_size);
     if (blob_err == ESP_OK) {
         ESP_LOGI(TAG, "Layout names loaded from NVS");

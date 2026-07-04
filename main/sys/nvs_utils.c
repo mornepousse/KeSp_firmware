@@ -20,10 +20,18 @@ esp_err_t nvs_save_blob_with_total(const char *ns, const char *blob_key, const v
         nvs_close(h);
         return err;
     }
-    nvs_set_u32(h, total_key, total);
-    nvs_commit(h);
+    err = nvs_set_u32(h, total_key, total);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG_NVS, "NVS write total(%s) failed: %s", total_key, esp_err_to_name(err));
+        nvs_close(h);
+        return err;
+    }
+    err = nvs_commit(h);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG_NVS, "NVS commit(%s) failed: %s", blob_key, esp_err_to_name(err));
+    }
     nvs_close(h);
-    return ESP_OK;
+    return err;   /* propage l'échec commit → le caller (stats) peut désactiver la sauvegarde */
 }
 
 esp_err_t nvs_load_blob_with_total(const char *ns, const char *blob_key, void *blob,

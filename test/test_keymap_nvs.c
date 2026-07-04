@@ -106,6 +106,23 @@ static void test_layout_names_real_roundtrip(void)
     }
 }
 
+/* load_layout_names : blob de MAUVAISE taille → garde → défauts (M10, miroir E3). */
+static void test_load_layout_names_size_guard(void)
+{
+    nvs_fake_reset();
+    uint8_t fake_blob[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    nvs_fake_put_blob(STORAGE_NAMESPACE, "layout_names", fake_blob, sizeof(fake_blob));
+
+    char buf[LAYERS][MAX_LAYOUT_NAME_LENGTH];
+    memset(buf, 0xAB, sizeof(buf));
+    load_layout_names(buf, LAYERS);
+
+    char sentinel[LAYERS][MAX_LAYOUT_NAME_LENGTH];
+    memset(sentinel, 0xAB, sizeof(sentinel));
+    TEST_ASSERT(memcmp(buf, sentinel, sizeof(buf)) == 0,
+                "load_layout_names taille incorrecte → défauts préservés (garde)");
+}
+
 /* ── 4. Structure macro_t reelle (steps[] present et bien place) */
 
 static void test_macro_t_struct_layout(void)
@@ -245,6 +262,7 @@ void test_keymap_nvs(void)
     TEST_RUN(test_load_keymaps_size_guard);
     TEST_RUN(test_save_keymaps_propagates_error);
     TEST_RUN(test_layout_names_real_roundtrip);
+    TEST_RUN(test_load_layout_names_size_guard);
     TEST_RUN(test_macro_t_struct_layout);
     TEST_RUN(test_macros_real_roundtrip);
     TEST_RUN(test_macros_count_persisted);
