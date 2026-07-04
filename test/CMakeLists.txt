@@ -47,6 +47,7 @@ add_executable(test_runner
     test_espnow_peer_filter.c
     ../main/comm/espnow/espnow_link.c
     test_en_status.c
+    ../main/periph/eink/en_label.c
     test_rf_signal_q255.c
     ../main/comm/rf/rf_rx_task.c
     test_half_power.c

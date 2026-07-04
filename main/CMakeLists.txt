@@ -191,6 +191,7 @@ if(CONFIG_KASE_HAS_EINK)
     list(APPEND srcs
         "periph/eink/eink.c"
         "periph/eink/eink_lvgl.c"
+        "periph/eink/en_label.c"    # pure formatters, also linked by host tests
     )
     list(APPEND priv_requires lvgl)   # raw LVGL v8 — managed component
 endif()

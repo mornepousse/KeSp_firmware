@@ -1,41 +1,18 @@
 /*
  * test_en_status.c — Host tests for:
  *   1. en_encode_status / en_decode_status (codec round-trip, wire byte layout)
- *   2. build_link_label() formatting (ASCII-only glyphs, clamp, sides)
- *   3. build_usb_label() formatting
+ *   2. en_build_link_label() — vrai code extrait de eink_lvgl.c via en_label.c
+ *   3. en_build_usb_label()  — idem
  *
  * All tested functions are pure (no I/O, no FreeRTOS).
  */
 #include "test_framework.h"
 #include "../main/comm/espnow/espnow_msg.h"
+#include "en_label.h"
 #include <string.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-
-/* ── build_link_label and build_usb_label are defined in eink_lvgl.c.
- * For host testing, reproduce them here as static helpers with the EXACT
- * same logic as the implementation. If the implementation changes, update
- * both. The test validates the specification, not just the current impl. */
-
-static void build_link_label(char *buf, char side,
-                              bool dongle_alive, bool link_up, uint8_t bars)
-{
-    const char dot = dongle_alive ? (link_up ? '*' : '-') : '?';
-    bars = (bars > 4) ? 4 : bars;
-    char bstr[7];
-    bstr[0] = '[';
-    for (int i = 0; i < 4; i++) bstr[1 + i] = (i < (int)bars) ? '|' : '.';
-    bstr[5] = ']';
-    bstr[6] = '\0';
-    snprintf(buf, 16, "%c %c %s", side, dot, bstr);
-}
-
-static void build_usb_label(char *buf, bool dongle_alive, bool usb_active)
-{
-    const char dot = dongle_alive ? (usb_active ? '*' : '-') : '?';
-    snprintf(buf, 10, "USB %c", dot);
-}
 
 void test_en_status(void)
 {
@@ -98,59 +75,72 @@ void test_en_status(void)
         TEST_ASSERT_EQ(dec.sig_right, 4, "sig_right=4");
     }
 
-    TEST_SUITE("build_link_label");
+    TEST_SUITE("en_build_link_label");
 
-    char buf[16];
+    char lbuf[28];
 
-    /* ── Link up, 4 bars ──────────────────────────────────────────── */
-    build_link_label(buf, 'L', true, true, 4);
-    TEST_ASSERT(strcmp(buf, "L * [||||]") == 0, "L up 4 bars");
+    /* ── Dongle absent : affiche --/255 quelle que soit q255 ────── */
+    en_build_link_label(lbuf, sizeof(lbuf), 'L', false, 200);
+    TEST_ASSERT(strcmp(lbuf, LV_SYMBOL_WIFI " L --/255 --%") == 0,
+                "dongle absent side L: --/255");
 
-    /* ── Link up, 0 bars ──────────────────────────────────────────── */
-    build_link_label(buf, 'R', true, true, 0);
-    TEST_ASSERT(strcmp(buf, "R * [....]") == 0, "R up 0 bars");
+    en_build_link_label(lbuf, sizeof(lbuf), 'R', false, 0);
+    TEST_ASSERT(strcmp(lbuf, LV_SYMBOL_WIFI " R --/255 --%") == 0,
+                "dongle absent side R: --/255");
 
-    /* ── Link up, 3 bars ──────────────────────────────────────────── */
-    build_link_label(buf, 'L', true, true, 3);
-    TEST_ASSERT(strcmp(buf, "L * [|||.]") == 0, "L up 3 bars");
+    /* ── Dongle présent, qualité maximale (255) ──────────────────── */
+    en_build_link_label(lbuf, sizeof(lbuf), 'L', true, 255);
+    TEST_ASSERT(strcmp(lbuf, LV_SYMBOL_WIFI " L 255/255 --%") == 0,
+                "dongle alive side L q255=255");
 
-    /* ── Link up, 2 bars ──────────────────────────────────────────── */
-    build_link_label(buf, 'R', true, true, 2);
-    TEST_ASSERT(strcmp(buf, "R * [||..]") == 0, "R up 2 bars");
+    /* ── Dongle présent, qualité nulle (0) ───────────────────────── */
+    en_build_link_label(lbuf, sizeof(lbuf), 'R', true, 0);
+    TEST_ASSERT(strcmp(lbuf, LV_SYMBOL_WIFI " R 0/255 --%") == 0,
+                "dongle alive side R q255=0");
 
-    /* ── Link up, 1 bar ───────────────────────────────────────────── */
-    build_link_label(buf, 'L', true, true, 1);
-    TEST_ASSERT(strcmp(buf, "L * [|...]") == 0, "L up 1 bar");
+    /* ── Valeurs intermédiaires ───────────────────────────────────── */
+    en_build_link_label(lbuf, sizeof(lbuf), 'L', true, 128);
+    TEST_ASSERT(strcmp(lbuf, LV_SYMBOL_WIFI " L 128/255 --%") == 0,
+                "dongle alive side L q255=128");
 
-    /* ── Link down ────────────────────────────────────────────────── */
-    build_link_label(buf, 'L', true, false, 0);
-    TEST_ASSERT(strcmp(buf, "L - [....]") == 0, "L link down");
+    en_build_link_label(lbuf, sizeof(lbuf), 'R', true, 64);
+    TEST_ASSERT(strcmp(lbuf, LV_SYMBOL_WIFI " R 64/255 --%") == 0,
+                "dongle alive side R q255=64");
 
-    /* ── Dongle timeout: '?' override regardless of link_up ──────── */
-    build_link_label(buf, 'R', false, true,  3);
-    TEST_ASSERT(strcmp(buf, "R ? [|||.]") == 0, "R timeout up 3 bars to '?'");
-    build_link_label(buf, 'L', false, false, 0);
-    TEST_ASSERT(strcmp(buf, "L ? [....]") == 0, "L timeout down to '?'");
+    en_build_link_label(lbuf, sizeof(lbuf), 'L', true, 1);
+    TEST_ASSERT(strcmp(lbuf, LV_SYMBOL_WIFI " L 1/255 --%") == 0,
+                "dongle alive side L q255=1 (low quality)");
 
-    /* ── Clamp bars > 4 → 4 ──────────────────────────────────────── */
-    build_link_label(buf, 'L', true, true, 5);
-    TEST_ASSERT(strcmp(buf, "L * [||||]") == 0, "bars=5 clamped to 4");
-    build_link_label(buf, 'R', true, true, 255);
-    TEST_ASSERT(strcmp(buf, "R * [||||]") == 0, "bars=255 clamped to 4");
+    en_build_link_label(lbuf, sizeof(lbuf), 'R', true, 200);
+    TEST_ASSERT(strcmp(lbuf, LV_SYMBOL_WIFI " R 200/255 --%") == 0,
+                "dongle alive side R q255=200 (high quality)");
 
-    TEST_SUITE("build_usb_label");
+    /* ── Préfixe WiFi glyph présent (octets non-ASCII) ───────────── */
+    TEST_ASSERT(memcmp(lbuf, "\xEF\x87\xAB", 3) == 0,
+                "WiFi glyph prefix is 3-byte FontAwesome sequence");
 
-    char ubuf[10];
+    TEST_SUITE("en_build_usb_label");
 
-    build_usb_label(ubuf, true, true);
-    TEST_ASSERT(strcmp(ubuf, "USB *") == 0, "USB active");
+    char ubuf[16];
 
-    build_usb_label(ubuf, true, false);
-    TEST_ASSERT(strcmp(ubuf, "USB -") == 0, "USB inactive");
+    /* ── Dongle présent, USB actif ────────────────────────────────── */
+    en_build_usb_label(ubuf, sizeof(ubuf), true, true);
+    TEST_ASSERT(strcmp(ubuf, LV_SYMBOL_USB " on") == 0, "USB on");
 
-    build_usb_label(ubuf, false, true);
-    TEST_ASSERT(strcmp(ubuf, "USB ?") == 0, "USB timeout active but unknown");
+    /* ── Dongle présent, USB inactif ─────────────────────────────── */
+    en_build_usb_label(ubuf, sizeof(ubuf), true, false);
+    TEST_ASSERT(strcmp(ubuf, LV_SYMBOL_USB " off") == 0, "USB off");
 
-    build_usb_label(ubuf, false, false);
-    TEST_ASSERT(strcmp(ubuf, "USB ?") == 0, "USB timeout inactive but unknown");
+    /* ── Dongle absent : '?' quelle que soit la valeur usb_active ── */
+    en_build_usb_label(ubuf, sizeof(ubuf), false, true);
+    TEST_ASSERT(strcmp(ubuf, LV_SYMBOL_USB " ?") == 0,
+                "dongle absent usb_active=true -> '?'");
+
+    en_build_usb_label(ubuf, sizeof(ubuf), false, false);
+    TEST_ASSERT(strcmp(ubuf, LV_SYMBOL_USB " ?") == 0,
+                "dongle absent usb_active=false -> '?'");
+
+    /* ── Préfixe USB glyph présent ───────────────────────────────── */
+    TEST_ASSERT(memcmp(ubuf, "\xEF\x8a\x87", 3) == 0,
+                "USB glyph prefix is 3-byte FontAwesome sequence");
 }

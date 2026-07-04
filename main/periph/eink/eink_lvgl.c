@@ -37,6 +37,7 @@
 #include "eink.h"           /* eink_push, eink_fb_set_px, EINK_WIDTH/HEIGHT/FB_SIZE */
 #include "espnow_info.h"    /* g_half_state, g_half_state_mutex, half_state_t */
 #include "lvgl.h"
+#include "en_label.h"       /* en_build_link_label, en_build_usb_label */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"     /* esp_get_free_heap_size */
@@ -217,20 +218,8 @@ static void eink_lvgl_flush_cb(lv_disp_drv_t *drv,
 /* ── Fastfetch info-line formatters (unscii_8 monospace, ~19 cols) ──────────
  * Battery is a placeholder "--%" until the ADC feature lands (L+R slots reserved). */
 
-/* build_link_label() — " L 248/255 --%" with WiFi glyph (FontAwesome via Montserrat).
- * side: 'L'/'R'. q255: raw 0..255 link quality (0 = link down). buf >= 28 bytes. */
-static void build_link_label(char *buf, char side, bool dongle_alive, uint8_t q255)
-{
-    if (!dongle_alive) snprintf(buf, 28, LV_SYMBOL_WIFI " %c --/255 --%%", side);
-    else               snprintf(buf, 28, LV_SYMBOL_WIFI " %c %u/255 --%%", side, (unsigned)q255);
-}
-
-/* build_usb_label() — "  on" / "  off" / "  ?" with USB glyph. buf >= 16 bytes. */
-static void build_usb_label(char *buf, bool dongle_alive, bool usb_active)
-{
-    const char *s = dongle_alive ? (usb_active ? "on" : "off") : "?";
-    snprintf(buf, 16, LV_SYMBOL_USB " %s", s);
-}
+/* build_link_label / build_usb_label extracted to en_label.{h,c} for host testing.
+ * Call through en_build_link_label / en_build_usb_label (see en_label.h). */
 
 /* build_mem_label() — "207K · 42°C" (heap free + CPU temp), with charge glyph.
  * Quantized: heap to nearest 8 KB, temp to integer °C → text rarely changes →
@@ -397,9 +386,9 @@ static void eink_lvgl_task(void *arg)
         /* ── Update status labels if needed ───────────────────────── */
         if (update_status) {
             char lbuf[28], rbuf[28], ubuf[16], mbuf[28];
-            build_link_label(lbuf, 'L', dongle_alive, sig_left);
-            build_link_label(rbuf, 'R', dongle_alive, sig_right);
-            build_usb_label(ubuf, dongle_alive, usb_active);
+            en_build_link_label(lbuf, sizeof(lbuf), 'L', dongle_alive, sig_left);
+            en_build_link_label(rbuf, sizeof(rbuf), 'R', dongle_alive, sig_right);
+            en_build_usb_label(ubuf, sizeof(ubuf), dongle_alive, usb_active);
 
             /* mem line: heap free + CPU temp (quantized in build_mem_label). */
             int temp_c = INT16_MIN;
