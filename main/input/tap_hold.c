@@ -216,11 +216,11 @@ uint8_t tap_hold_consume_tap(void)
 
         if (K_IS_LT(kc)) return K_LT_KEY(kc);
         if (K_IS_MT(kc)) return K_MT_KEY(kc);
-        if (K_IS_OSM(kc)) {
+        if (K_IS_OSM(kc))
             osm_arm(K_OSM_MOD(kc));
-            return 0;
-        }
-        return 0;
+        /* OSM armé (ou tap sans keycode direct) → continuer à scanner les autres
+         * taps en attente au lieu de rendre 0, ce qui arrêterait la boucle du
+         * caller et perdrait un tap MT/LT résolu le même cycle (audit M4). */
     }
     return 0;
 }

@@ -96,6 +96,22 @@ static void test_th_osm_tap_arms(void) {
     (void)osm_consume();                   /* nettoie */
 }
 
+/* 6b. Un tap OSM (slot 0) + un tap MT (slot 1) le même cycle : consume_tap ne
+ * doit pas s'arrêter sur l'OSM (retour 0) et perdre le tap MT (audit M4). */
+static void test_th_consume_osm_then_mt(void) {
+    th_reset();
+    (void)osm_consume();
+    tap_hold_on_press(K_OSM(MOD_LGUI), 0, 0);       /* slot 0 = OSM */
+    tap_hold_on_press(K_MT(MOD_LSFT, 0x04), 0, 1);  /* slot 1 = MT(Shift, A) */
+    advance_ms(30);
+    tap_hold_on_release(0, 0);   /* OSM tap */
+    tap_hold_on_release(0, 1);   /* MT tap */
+    TEST_ASSERT_EQ(tap_hold_consume_tap(), 0x04,
+                   "consume_tap saute l'OSM armé → rend le tap MT (0x04) (M4)");
+    TEST_ASSERT(osm_is_active(), "OSM tout de même armé au passage");
+    (void)osm_consume();
+}
+
 /* 7. Touche normale (non LT/MT/OSM) → non trackée. */
 static void test_th_ignores_normal_key(void) {
     th_reset();
@@ -160,6 +176,7 @@ void test_tap_hold(void) {
     TEST_RUN(test_th_lt_layer_out_of_bounds);
     TEST_RUN(test_th_two_lt_concurrent);
     TEST_RUN(test_th_osm_tap_arms);
+    TEST_RUN(test_th_consume_osm_then_mt);
     TEST_RUN(test_th_ignores_normal_key);
     TEST_RUN(test_th_slot_exhaustion);
     tap_hold_init();   /* laisse le module propre pour les suites suivantes */
