@@ -244,20 +244,19 @@ clamper avant de calculer les offsets, ou rejeter `nlen >= MAX_MACRO_NAME_LENGTH
 5. ✅ **E6** (key override) — FIXÉ (bf616538, TDD ; mods physiques + result_mod + suppression du mod déclencheur).
 6. ✅ **E5** (CDC handoff verrouillé) — FIXÉ (3b0d27a1 ; ready_frame + mutex, vérifié par construction, non bite-testable comme M1).
 7. MOYEN traités : **M1** (cc5f5e2b), **M2** tap_dance 4ᵉ tap (fa989357), **M3** combo 6KRO
-   (54ce58d3), **M4** consume_tap OSM (12f7fb28), **M10** garde load_layout_names + **M12**
-   nvs_save propagation (67bbc3df), **M13** MACRO_ADD offset (96959187).
+   (54ce58d3), **M4** consume_tap OSM (12f7fb28), **M5** OSM logique QMK (1238f724), **M8** macro
+   delay re-trigger (84356387), **M9** tap_dance interrupt→QMK (67a0cb6d), **M10**+**M12** NVS
+   (67bbc3df), **M11** version blob macros (1d0cbd9f), **M13** MACRO_ADD offset (96959187).
 
-**État : 🔴 CRITIQUE + 🟠 ÉLEVÉ + 7 MOYEN corrigés (C1, E1/E2, E3, E4, E5, E6, M1-M4, M10, M12, M13).**
+**État : 🔴 CRITIQUE + 🟠 ÉLEVÉ + 12 MOYEN corrigés
+(C1, E1/E2, E3, E4, E5, E6, M1-M5, M8-M13).**
 
-Reste — **décisions / hors périmètre TDD net** (non faits, demandent un choix ou touchent large) :
-- **M5** OSM gaspillé par un release — le comportement actuel (OSM injecté sans frappe) est
-  couvert par un test existant → **changer = décision de sémantique** (QMK attend l'attente d'une frappe).
-- **M6** MO bloqué si MO mappé sur sa propre couche — **dépend du contenu keymap** (à confirmer côté éditeur/défauts).
-- **M7** mods perdus si report plein (7+ touches) — **skippé** (log dans le chemin de build report = contre-convention, edge rarissime).
-- **M8** macro à délai re-déclenchée tant que tenue — **auto-repeat voulu ou bug ?** (décision d'intention).
-- **M9** tap_dance interruption ne résout pas la danse courante — **divergence QMK** (décision comportementale).
-- **M11** garde NVS = taille seule (pas de magic/version) — **robustesse plus large** (préfixe magic+version sur plusieurs blobs, à concevoir).
-- **E7 / injection RF** — décision archi (auth HMAC du lien NRF).
+Reste :
+- **M6** MO bloqué si MO mappé sur sa propre couche — **dépend du contenu keymap** ; non déclenché
+  si les défauts mettent du transparent (`K_NO`) sur la couche x à cet emplacement. Garde défensif possible sur demande.
+- **M7** mods perdus si report plein (7+ touches) — **skippé** (log dans le chemin de build report =
+  contre-convention « pas de log dans le scan », edge à 7+ touches simultanées).
+- **E7 / injection RF** — **décision archi à définir** (auth HMAC du lien NRF non-authentifié, cf. project_dongle_rf_security).
 
 Tous les modules input ont maintenant des tests host branchés sur le vrai code
 → chaque fix se fait en TDD (test rouge → fix → vert), comme le bug leader.
