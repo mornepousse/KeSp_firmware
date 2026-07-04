@@ -182,6 +182,10 @@ uint16_t ks_rx_feed(const char *data, uint16_t len);
 /* Reset parser state (e.g. on timeout or error) */
 void ks_rx_reset(void);
 
+/* Create the RX handoff mutex — appeler une fois au init CDC, avant que la tâche
+ * de dispatch et le callback RX ne tournent (audit E5). */
+void ks_rx_init(void);
+
 /* Process a fully assembled binary command from the FIFO.
  * Called from the CDC processing task. Returns true if a command was processed. */
 bool ks_process_one(void);

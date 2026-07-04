@@ -4,6 +4,25 @@
 #include "cfg_bridge.h"   /* CFG_FRAME_MAX, cfg_is_dongle_local, bridge fns */
 #include <string.h>
 
+/* ── RX handoff lock (audit E5) ──────────────────────────────────────
+ * ks_rx_feed() (tâche callback USB) et ks_process_one() (tâche cdc_cmd)
+ * tournent sur des tâches différentes. Le buffer d'assemblage était aussi le
+ * buffer de dispatch → un hôte qui pipeline (n'attend pas la réponse) pouvait
+ * faire dispatcher un payload en cours de réécriture (jamais re-CRC comme un
+ * tout). On copie la frame validée dans ready_frame sous mutex ; feed ne la
+ * réécrit pas tant qu'elle n'est pas consommée. */
+#ifndef TEST_HOST
+#include "freertos/semphr.h"
+static SemaphoreHandle_t s_rx_mutex = NULL;
+static inline void ks_rx_lock(void)   { if (s_rx_mutex) xSemaphoreTake(s_rx_mutex, portMAX_DELAY); }
+static inline void ks_rx_unlock(void) { if (s_rx_mutex) xSemaphoreGive(s_rx_mutex); }
+void ks_rx_init(void)                 { if (!s_rx_mutex) s_rx_mutex = xSemaphoreCreateMutex(); }
+#else
+static inline void ks_rx_lock(void)   {}
+static inline void ks_rx_unlock(void) {}
+void ks_rx_init(void)                 {}
+#endif
+
 /* ── Response redirect (ESP-NOW config bridge) ──────────────────────
  * When set (only on a smart keyboard handling an ESP-NOW-arrived KS frame), KS
  * responses accumulate into s_resp_redirect_buf instead of USB CDC, and are sent
@@ -174,15 +193,25 @@ static struct {
     uint8_t  hdr_buf[3];   /* cmd_id, len_lo, len_hi */
     uint8_t  hdr_pos;
     uint8_t  payload[KS_PAYLOAD_MAX];
-    bool     ready;        /* complete frame waiting for dispatch */
 } bin_rx;
+
+/* Frame validée en attente de dispatch — copiée depuis bin_rx sous ks_rx_lock().
+ * Découple l'assemblage (bin_rx, écrit uniquement par feed) du dispatch. */
+static struct {
+    uint8_t  cmd_id;
+    uint16_t payload_len;
+    uint8_t  payload[KS_PAYLOAD_MAX];
+    bool     ready;
+} ready_frame;
 
 void ks_rx_reset(void)
 {
     bin_rx.state = KS_RX_IDLE;
-    bin_rx.ready = false;
     bin_rx.hdr_pos = 0;
     bin_rx.payload_pos = 0;
+    ks_rx_lock();
+    ready_frame.ready = false;
+    ks_rx_unlock();
 }
 
 uint16_t ks_rx_feed(const char *data, uint16_t len)
@@ -257,7 +286,19 @@ uint16_t ks_rx_feed(const char *data, uint16_t len)
             consumed = i + 1;
             uint8_t expected = ks_crc8(bin_rx.payload, bin_rx.payload_len);
             if (b == expected) {
-                bin_rx.ready = true;
+                /* Copie atomique de la frame validée pour le dispatcher. */
+                ks_rx_lock();
+                if (!ready_frame.ready) {
+                    ready_frame.cmd_id      = bin_rx.cmd_id;
+                    ready_frame.payload_len = bin_rx.payload_len;
+                    if (bin_rx.payload_len)
+                        memcpy(ready_frame.payload, bin_rx.payload, bin_rx.payload_len);
+                    ready_frame.ready = true;
+                } else {
+                    ESP_LOGW(TAG_CDC, "BIN frame dropped (dispatcher busy) cmd=0x%02X",
+                             bin_rx.cmd_id);
+                }
+                ks_rx_unlock();
             } else {
                 ESP_LOGW(TAG_CDC, "BIN CRC mismatch cmd=0x%02X (got 0x%02X, exp 0x%02X)",
                          bin_rx.cmd_id, b, expected);
@@ -300,18 +341,24 @@ void ks_dispatch_frame(const uint8_t *frame, uint16_t len)
 
 bool ks_process_one(void)
 {
-    if (!bin_rx.ready)
+    ks_rx_lock();
+    bool have = ready_frame.ready;
+    ks_rx_unlock();
+    if (!have)
         return false;
 
-    bin_rx.ready = false;
-    uint8_t cmd_id = bin_rx.cmd_id;
+    /* Dispatch depuis ready_frame : feed ne le réécrit pas tant que ready est
+     * vrai, donc payload reste stable pendant toute la commande (audit E5). */
+    uint8_t        cmd_id      = ready_frame.cmd_id;
+    uint16_t       payload_len = ready_frame.payload_len;
+    const uint8_t *payload     = ready_frame.payload;
 
 #if CONFIG_KASE_DEVICE_ROLE_DONGLE
     /* Config bridge: config-class commands are owned by the paired smart
      * keyboard. Reconstruct the raw KS frame and tunnel it over ESP-NOW; the
      * KR returns asynchronously via EN_KR_CHUNK and is written out USB CDC. */
     if (!cfg_is_dongle_local(cmd_id) && cfg_bridge_have_smart_kbd()) {
-        uint16_t full_len = (uint16_t)(6 + bin_rx.payload_len);
+        uint16_t full_len = (uint16_t)(6 + payload_len);
         if (full_len <= CFG_FRAME_MAX) {
             /* static, not on the stack: CFG_FRAME_MAX is 6KB and the CDC dispatch
              * task stack would overflow (reboot). ks_process_one is the single,
@@ -320,15 +367,16 @@ bool ks_process_one(void)
             frame[0] = KS_MAGIC_0;
             frame[1] = KS_MAGIC_1;
             frame[2] = cmd_id;
-            frame[3] = (uint8_t)(bin_rx.payload_len & 0xFF);
-            frame[4] = (uint8_t)((bin_rx.payload_len >> 8) & 0xFF);
-            if (bin_rx.payload_len)
-                memcpy(frame + 5, bin_rx.payload, bin_rx.payload_len);
-            frame[5 + bin_rx.payload_len] = ks_crc8(bin_rx.payload, bin_rx.payload_len);
+            frame[3] = (uint8_t)(payload_len & 0xFF);
+            frame[4] = (uint8_t)((payload_len >> 8) & 0xFF);
+            if (payload_len)
+                memcpy(frame + 5, payload, payload_len);
+            frame[5 + payload_len] = ks_crc8(payload, payload_len);
             cfg_bridge_forward_frame(frame, full_len);
         } else {
             ks_respond_err(cmd_id, KS_STATUS_ERR_OVERFLOW);
         }
+        ks_rx_lock(); ready_frame.ready = false; ks_rx_unlock();
         return true;
     }
 #endif
@@ -336,10 +384,12 @@ bool ks_process_one(void)
     ks_bin_handler_t handler = find_handler(cmd_id);
 
     if (handler) {
-        handler(cmd_id, bin_rx.payload, bin_rx.payload_len);
+        handler(cmd_id, payload, payload_len);
     } else {
         ESP_LOGW(TAG_CDC, "Unknown binary cmd 0x%02X", cmd_id);
         ks_respond_err(cmd_id, KS_STATUS_ERR_UNKNOWN);
     }
+
+    ks_rx_lock(); ready_frame.ready = false; ks_rx_unlock();
     return true;
 }
