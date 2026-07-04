@@ -448,6 +448,78 @@ static void test_kp_sec_confirm_authorizes(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+/* Tests expand_macro via le pipeline                                    */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+/* 20. Macro inline (pas de step MACRO_DELAY_MARKER) : les keycodes des steps
+ *     sont injectés dans keycodes[] par expand_macro depuis build_keycode_report. */
+static void test_kp_macro_inline_injects_steps(void)
+{
+    reset_kp_state();
+    macros_list[0].name[0] = 'm';
+    macros_list[0].steps[0].keycode   = T_KC_A;
+    macros_list[0].steps[0].modifier  = 0;
+    /* steps[1].keycode = 0 → fin de séquence (déjà 0 via memset dans reset_kp_state) */
+    keymaps[0][0][0] = T_MACRO_1;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_A),
+                "expand_macro inline : step.keycode injecté dans keycodes[]");
+}
+
+/* 21. Macro avec name[0]=='\0' → guard actif, aucun keycode injecté (no-op) */
+static void test_kp_macro_empty_name_noop(void)
+{
+    reset_kp_state();
+    /* macros_list[0].name[0] = '\0' → déjà via memset dans reset_kp_state */
+    macros_list[0].steps[0].keycode = T_KC_A;  /* ne doit PAS être injecté */
+    keymaps[0][0][0] = T_MACRO_1;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT(!keycode_in_report(T_KC_A),
+                "expand_macro : name vide → no-op, aucun keycode injecté");
+}
+
+/* 22. Macro séquentielle (step MACRO_DELAY_MARKER présent) → pending_macro_idx
+ *     positionné ; consommable via key_processor_consume_macro(). */
+static void test_kp_macro_delay_sets_pending(void)
+{
+    reset_kp_state();
+    macros_list[0].name[0]            = 's';
+    macros_list[0].steps[0].keycode   = T_KC_A;
+    macros_list[0].steps[0].modifier  = 0;
+    macros_list[0].steps[1].keycode   = MACRO_DELAY_MARKER;
+    macros_list[0].steps[1].modifier  = 5; /* 50ms */
+    macros_list[0].steps[2].keycode   = T_KC_B;
+    macros_list[0].steps[2].modifier  = 0;
+    /* steps[3].keycode = 0 → fin (via memset) */
+    keymaps[0][0][0] = T_MACRO_1;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT(key_processor_has_pending_macro(),
+                "expand_macro délai : pending_macro_idx positionné");
+    TEST_ASSERT_EQ(key_processor_consume_macro(), 0,
+                   "consume_macro retourne l'index 0");
+    TEST_ASSERT(!key_processor_has_pending_macro(),
+                "après consume : pending_macro_idx vide");
+}
+
+/* 23. Macro legacy (steps[0].keycode == 0) : utilise keys[] au lieu de steps[].
+ *     Le keys[0] doit apparaître dans keycodes[] après build_keycode_report(). */
+static void test_kp_macro_legacy_injects_keys(void)
+{
+    reset_kp_state();
+    macros_list[0].name[0] = 'l';
+    /* steps[0].keycode = 0 → chemin legacy (déjà 0 via memset dans reset_kp_state) */
+    macros_list[0].keys[0] = T_KC_A;
+    keymaps[0][0][0] = T_MACRO_1;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_A),
+                "expand_macro legacy (steps[0]==0) : keys[0] injecté dans keycodes[]");
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 /* Suite runner                                                          */
 /* ══════════════════════════════════════════════════════════════════════ */
 
@@ -471,4 +543,8 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_macro_does_not_starve_to);
     TEST_RUN(test_kp_double_mo_resolves_from_base_layer);
     TEST_RUN(test_kp_sec_confirm_authorizes);
+    TEST_RUN(test_kp_macro_inline_injects_steps);
+    TEST_RUN(test_kp_macro_empty_name_noop);
+    TEST_RUN(test_kp_macro_delay_sets_pending);
+    TEST_RUN(test_kp_macro_legacy_injects_keys);
 }

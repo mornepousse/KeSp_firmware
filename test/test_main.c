@@ -15,7 +15,6 @@ extern void test_keymap_nvs(void);
 extern void test_keycodes(void);
 extern void test_key_features(void);
 extern void test_tap_hold(void);
-extern void test_macro_seq(void);
 extern void test_tap_dance(void);
 extern void test_combo(void);
 extern void test_leader(void);
@@ -63,7 +62,6 @@ int main(void) {
     test_keycodes();
     test_key_features();
     test_tap_hold();
-    test_macro_seq();
     test_tap_dance();
     test_combo();
     test_leader();
