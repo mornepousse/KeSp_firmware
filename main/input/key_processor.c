@@ -138,6 +138,9 @@ static void dispatch_internal_function(void)
 static int16_t pending_macro_idx = -1;
 
 static uint8_t macro_hold_mods = 0;  /* modifier mask from held no-delay macro */
+static uint8_t report_mods = 0;      /* mods (tap-hold/OSM/LM/macro/override) portés
+                                        vers l'octet modifier SÉPARÉ du report HID au
+                                        lieu d'occuper une slot de keycode (audit M7) */
 
 static void expand_macro(uint16_t keycode, bool is_new)
 {
@@ -186,6 +189,12 @@ bool key_processor_has_pending_macro(void)
 }
 
 /* Get and clear the pending macro index */
+/* Modificateurs à OR dans l'octet modifier du report HID (portés hors keycodes[], M7). */
+uint8_t key_processor_report_mods(void)
+{
+    return report_mods;
+}
+
 int16_t key_processor_consume_macro(void)
 {
     int16_t idx = pending_macro_idx;
@@ -429,14 +438,11 @@ void build_keycode_report(void)
         }
     }
 
-    /* Step 7: inject modifier keycodes */
-    for (uint8_t bit = 0; bit < 8; bit++) {
-        if (!(extra_mods & (1 << bit))) continue;
-        uint8_t mod_hid = HID_KEY_CONTROL_LEFT + bit;
-        for (uint8_t i = 0; i < 6; i++) {
-            if (keycodes[i] == 0) { keycodes[i] = mod_hid; break; }
-        }
-    }
+    /* Step 7: les modificateurs ne sont PLUS empilés dans keycodes[] (où ils
+     * volaient une slot → un mod perdu si les 6 slots étaient pleins, M7). Ils sont
+     * portés séparément et OR'és dans l'octet modifier par send_hid_key via
+     * key_processor_report_mods(). Un report standard = 6 touches + 8 mods. */
+    report_mods = extra_mods;
 
     /* Step 8: inject resolved taps (key already released) */
     {

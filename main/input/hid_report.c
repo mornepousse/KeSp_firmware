@@ -4,6 +4,7 @@
 #include "keyboard_task.h"
 #include "matrix_scan.h"
 #include "key_definitions.h"
+#include "key_processor.h"   /* key_processor_report_mods() — mods portés hors keycodes[] (M7) */
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -133,7 +134,8 @@ void send_hid_key(void)
     static TickType_t last_tick = 0;
 
     uint8_t modifier = 0;
-    extract_modifiers(keycodes, &modifier);
+    extract_modifiers(keycodes, &modifier);      /* mods de touches physiques (0xE0-0xE7) */
+    modifier |= key_processor_report_mods();     /* + mods tap-hold/OSM/… portés à part (M7) */
     current_modifiers = modifier;
 
     /* Coalesce identical reports */

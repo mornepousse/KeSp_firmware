@@ -333,7 +333,8 @@ static void test_kp_osm_applies_to_next_press(void)
     press_key(0, 0, 0);
     build_keycode_report();
     TEST_ASSERT(keycode_in_report(T_KC_A), "frappe cible présente");
-    TEST_ASSERT(keycode_in_report(T_KC_LSHIFT), "OSM appliqué à la frappe (0xE1)");
+    TEST_ASSERT((key_processor_report_mods() & 0x02) != 0,
+                "OSM appliqué à la frappe (octet modifier, porté hors keycodes[] — M7)");
     TEST_ASSERT(!osm_is_active(), "OSM consommé par la frappe");
 }
 
@@ -569,9 +570,30 @@ static void test_kp_key_override_physical_mod(void)
                 "override: A remplacé, absent du report");
     TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT),
                 "override: Shift déclencheur retiré du report");
-    TEST_ASSERT(keycode_in_report(T_KC_LCTRL),
-                "override: result_mod (Ctrl) appliqué");
+    TEST_ASSERT((key_processor_report_mods() & 0x01) != 0,
+                "override: result_mod (Ctrl) appliqué (octet modifier — M7)");
     key_override_init();   /* laisse propre pour les suites suivantes */
+}
+
+/* Mods portés hors keycodes[] : un mod (OSM Shift) survit même quand les 6 slots
+ * sont pleins de vraies touches — avant, le mod volait/perdait une slot (audit M7). */
+static void test_kp_mod_survives_full_report(void)
+{
+    reset_kp_state();
+    /* 6 touches normales → remplissent keycodes[] (row 0, cols 0..5) */
+    for (uint8_t c = 0; c < 6; c++) {
+        keymaps[0][0][c] = (uint16_t)(T_KC_A + c);
+        press_key(c, 0, c);
+    }
+    osm_arm(T_MOD_LSFT);          /* un mod via OSM → extra_mods */
+    build_keycode_report();
+    int keys = 0;
+    for (int i = 0; i < 6; i++) if (keycodes[i] != 0) keys++;
+    TEST_ASSERT_EQ(keys, 6, "les 6 touches remplissent keycodes[]");
+    TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT),
+                "le mod n'occupe PAS une slot de keycode");
+    TEST_ASSERT((key_processor_report_mods() & 0x02) != 0,
+                "Shift (OSM) porté dans l'octet modifier même report plein (M7)");
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -585,6 +607,7 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_simple_release);
     TEST_RUN(test_kp_modifier_in_report);
     TEST_RUN(test_kp_key_override_physical_mod);
+    TEST_RUN(test_kp_mod_survives_full_report);
     TEST_RUN(test_kp_mo_activates_layer);
     TEST_RUN(test_kp_mo_key_absorbed);
     TEST_RUN(test_kp_mo_active_layer_keycode);
