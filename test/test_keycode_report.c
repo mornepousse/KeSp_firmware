@@ -88,22 +88,9 @@ void     rtc_matrix_deinit(void)          {}
  * touche MT/LT/OSM pressée), donc le vrai module reste inactif ici ; la logique
  * tap/hold est exercée dans test_tap_hold.c (horloge contrôlable). */
 
-/* ── Stubs tap_dance.h ───────────────────────────────────────────────── */
-
-void     tap_dance_init(void)                                              {}
-bool     tap_dance_on_press(uint8_t idx, uint8_t row, uint8_t col)
-         { (void)idx; (void)row; (void)col; return false; }
-void     tap_dance_on_release(uint8_t row, uint8_t col)
-         { (void)row; (void)col; }
-void     tap_dance_tick(void)                                              {}
-uint8_t  tap_dance_consume(void)         { return 0; }
-bool     tap_dance_just_resolved(void)   { return false; }
-void     tap_dance_set(uint8_t idx, const uint8_t acts[4])
-         { (void)idx; (void)acts; }
-const tap_dance_config_t *tap_dance_get(uint8_t idx)
-         { (void)idx; return NULL; }
-void     tap_dance_save(void)                                              {}
-void     tap_dance_load(void)                                              {}
+/* tap_dance.h : le VRAI module est linké (../main/input/tap_dance.c) — plus de
+ * stubs. Aucun test de cette suite ne presse de touche TD, le vrai module reste
+ * inactif ici ; la logique est exercée dans test_tap_dance.c (horloge partagée). */
 
 /* ── Stubs combo.h ───────────────────────────────────────────────────── */
 
@@ -241,6 +228,7 @@ static void reset_kp_state(void)
 
     /* Stubs stateful */
     tap_hold_init();                               /* réinit le vrai tap/hold */
+    tap_dance_init();                              /* réinit le vrai tap dance */
     (void)osm_consume();                           /* vide l'OSM réel */
     osl_consume();                                 /* OSL réel → -1 */
     if (caps_word_is_active()) caps_word_toggle(); /* CapsWord réel → off */

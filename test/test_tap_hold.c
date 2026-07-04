@@ -7,17 +7,16 @@
 #include "key_definitions.h"   /* K_MT / K_LT / K_OSM, MOD_* */
 #include "key_features.h"      /* osm_is_active / osm_consume (branche OSM du tap) */
 
-/* ── Horloge host contrôlable (tap_hold.c → now_ms() → esp_timer_get_time) ── */
-static int64_t g_now_us = 0;
-int64_t esp_timer_get_time(void) { return g_now_us; }
-static void advance_ms(uint32_t ms) { g_now_us += (int64_t)ms * 1000; }
+/* Horloge host contrôlable partagée (host_clock.c définit esp_timer_get_time) */
+#include "host_clock.h"
+static void advance_ms(uint32_t ms) { host_clock_advance_ms(ms); }
 
 /* Globales de layer définies par key_processor.c (linké) — sauvées/restaurées
  * autour du test LT pour ne pas polluer les autres suites. */
 extern uint8_t current_layout;
 extern uint8_t last_layer;
 
-static void th_reset(void) { tap_hold_init(); g_now_us = 0; }
+static void th_reset(void) { tap_hold_init(); host_clock_reset(); }
 
 /* 1. MT relâché avant le timeout → TAP : consume_tap rend la touche de tap. */
 static void test_th_mt_tap(void) {
