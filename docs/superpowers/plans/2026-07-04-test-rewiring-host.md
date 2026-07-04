@@ -68,6 +68,31 @@ dans test_rf_packet.c:160 / test_rf_pairing.c:134.
   d'assertions — c'est le cas assumé prévu par le design : mettre à jour
   `.tripwire-testcount` DANS LE MÊME COMMIT (diff visible, motivé).
 
+### ⚠️ Blocker Phase 1 — collision de stubs (découvert 2026-07-04)
+
+`test_keycode_report.c` compile `key_processor.c` et **définit lui-même les
+stubs host** de tous les modules input que key_processor appelle : `osm_arm/
+consume/is_active`, `osl_get_layer/consume`, `caps_word_toggle/is_active/
+process`, `repeat_key_record/get`, `wpm_record_keypress` (≈ lignes 172-208) —
+et idem pour `tap_hold`/`tap_dance`/`combo`/`leader`. Donc **ajouter le vrai
+`key_features.c` (ou `tap_hold.c`, …) au runner → erreur linker « multiple
+definition »** (vérifié). Les tâches T1-T5 ne sont **PAS indépendantes** :
+chacune exige de retirer les stubs correspondants de `test_keycode_report.c`,
+ce qui fait basculer cette suite sur les vrais modules (elle devient un test
+d'intégration et ses propres tests osm/osl doivent piloter le vrai état via
+l'API au lieu des globales `g_osm_pending`/`g_osl_layer`). Alternative : sortir
+tous ces stubs dans **un seul TU opt-in** partagé.
+
+**Décision requise avant T1** : (a) `test_keycode_report` en intégration (vrais
+modules) — moins de stubs, mais réécriture de ses tests osm/osl ; ou (b) stubs
+centralisés dans un TU dédié, chaque suite choisissant réel-vs-stub. Phase 2
+(constantes, sans linking) n'est PAS concernée par ce blocker.
+
+Note deps confirmées (T5 `key_features.c`) : `wpm`/`layer_lock` sont purs ou
+tirent des externs déjà fournis par `key_processor.c` ; seul `key_override`
+tire NVS → guarder ses appels sous `#ifndef TEST_HOST` (pattern `sec_store.c`),
+`esp_timer` non requis pour key_features.
+
 ### Phase 1 — Modules réels existants, 2-3 includes IDF (5 tâches, les plus rentables)
 
 | Tâche | Suite | Module réel | Stubs |
@@ -82,10 +107,15 @@ dans test_rf_packet.c:160 / test_rf_pairing.c:134.
 
 ### Phase 2 — Suites « constantes » : inclure le vrai header (1 tâche groupée)
 
-- [ ] **T6** : `test_keycodes.c` → `main/input/key_definitions.h` réel ;
-  `test_matrix_constants.c` → `main/input/keyboard_config.h`/`matrix_scan.h` ;
-  `test_led_anim_constants.c` → `main/led/led_strip_anim.h`. Supprimer chaque
-  copie de `#define`. Preuve de morsure : changer une constante réelle → rouge.
+- [x] **T6a** ✅ (commit 3a31ccb8) : `test_keycodes.c` → `key_definitions.h` réel
+  (valeurs recopiées = OK, pas de dérive ; +couverture LT 10-15) ;
+  `test_matrix_constants.c` → `matrix_scan.h` réel (INVALID_KEY_POS +
+  STORAGE_NAMESPACE). `MAX_REPORT_KEYS` reste local (aucun header source —
+  dupliqué dans 5 `.c`) avec commentaire honnête. 1757/0.
+- [ ] **T6b** : `test_led_anim_constants.c` → `main/led/led_strip_anim.h` (ou
+  extraire la courbe pure). Supprimer les `#define` recopiés + la tautologie
+  `REACTIVE_DECAY_MS > REACTIVE_ATTACK_MS`. Preuve de morsure : changer une
+  constante réelle → rouge.
 
 ### Phase 3 — Cas à instruire d'abord (3 tâches, chacune commence par 10 min d'investigation citée)
 
