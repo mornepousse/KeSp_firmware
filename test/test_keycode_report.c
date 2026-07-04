@@ -73,10 +73,6 @@ volatile bool matrix_test_mode    = false;
 
 /* ── État interne des stubs stateful ────────────────────────────────── */
 
-static uint8_t  g_th_active_mods  = 0;
-static int8_t   g_th_active_layer = -1;
-static bool     g_th_is_hold      = false;
-static uint8_t  g_th_tap_kc       = 0;
 static uint8_t  g_combo_kc        = 0;
 static bool     g_leader_active   = false;
 
@@ -87,22 +83,10 @@ uint32_t get_last_activity_time_ms(void)  { return 0; }
 void     matrix_setup(void)               {}
 void     rtc_matrix_deinit(void)          {}
 
-/* ── Stubs tap_hold.h ────────────────────────────────────────────────── */
-
-void     tap_hold_init(void)                                               {}
-bool     tap_hold_on_press(uint16_t kc, uint8_t row, uint8_t col)
-         { (void)kc; (void)row; (void)col; return false; }
-bool     tap_hold_on_release(uint8_t row, uint8_t col)
-         { (void)row; (void)col; return false; }
-void     tap_hold_tick(void)                                               {}
-void     tap_hold_interrupt(void)                                          {}
-uint16_t tap_hold_get_resolved(uint8_t row, uint8_t col, bool *is_hold)
-         { (void)row; (void)col; *is_hold = g_th_is_hold; return 0; }
-uint8_t  tap_hold_get_active_mods(void)  { return g_th_active_mods; }
-int8_t   tap_hold_get_active_layer(void) { return g_th_active_layer; }
-uint8_t  tap_hold_consume_tap(void)
-         { uint8_t k = g_th_tap_kc; g_th_tap_kc = 0; return k; }
-bool     tap_hold_hold_just_activated(void) { return false; }
+/* tap_hold.h : le VRAI module est linké (../main/input/tap_hold.c) — plus de
+ * stubs ici. Aucun test de cette suite ne pilote tap_hold en état actif (aucune
+ * touche MT/LT/OSM pressée), donc le vrai module reste inactif ici ; la logique
+ * tap/hold est exercée dans test_tap_hold.c (horloge contrôlable). */
 
 /* ── Stubs tap_dance.h ───────────────────────────────────────────────── */
 
@@ -256,10 +240,7 @@ static void reset_kp_state(void)
     current_col_layer_changer   = INVALID_KEY_POS;
 
     /* Stubs stateful */
-    g_th_active_mods  = 0;
-    g_th_active_layer = -1;
-    g_th_is_hold      = false;
-    g_th_tap_kc       = 0;
+    tap_hold_init();                               /* réinit le vrai tap/hold */
     (void)osm_consume();                           /* vide l'OSM réel */
     osl_consume();                                 /* OSL réel → -1 */
     if (caps_word_is_active()) caps_word_toggle(); /* CapsWord réel → off */
