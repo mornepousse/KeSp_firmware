@@ -270,20 +270,6 @@ static void detect_releases(void)
 
 /* ── Main report builder ─────────────────────────────────────────── */
 
-/* Track Shift release for double-tap Caps Lock */
-static bool prev_shift_pressed = false;
-
-static bool any_shift_pressed_now(uint8_t layer)
-{
-    for (uint8_t i = 0; i < 6; i++) {
-        if (current_press_col[i] == INVALID_KEY_POS) continue;
-        uint16_t kc = keymaps[layer][current_press_row[i]][current_press_col[i]];
-        if (kc == HID_KEY_SHIFT_LEFT || kc == HID_KEY_SHIFT_RIGHT)
-            return true;
-    }
-    return false;
-}
-
 void build_keycode_report(void)
 {
     tap_injected_slots = 0;
@@ -309,14 +295,6 @@ void build_keycode_report(void)
     if (lt_layer >= 0) active_layer = (uint8_t)lt_layer;
     int8_t osl_layer = osl_get_layer();
     if (osl_layer >= 0) active_layer = (uint8_t)osl_layer;
-
-    /* Shift release detection for double-tap Caps Lock — evaluated on the
-     * active layer so a Shift reached via an LT/OSL layer is still seen
-     * (reading current_layout here would miss it). */
-    bool shift_now = any_shift_pressed_now(active_layer);
-    if (prev_shift_pressed && !shift_now)
-        shift_double_tap_release();
-    prev_shift_pressed = shift_now;
 
     uint8_t th_mods = tap_hold_get_active_mods();
     bool has_normal_press = false;
@@ -379,15 +357,6 @@ void build_keycode_report(void)
                 if (override_kc != 0) {
                     kc = override_kc;
                     /* TODO: apply override_mod */
-                }
-
-                /* Double-tap Shift → Caps Lock (tap sent by keyboard_task) */
-                if (is_new_press(row, col) &&
-                    (kc == HID_KEY_SHIFT_LEFT || kc == HID_KEY_SHIFT_RIGHT)) {
-                    if (shift_double_tap_press()) {
-                        extra_keycodes[i] = kc; /* suppress Shift from report */
-                        continue;
-                    }
                 }
 
                 /* Combo deferral: hold back combo candidate keys */

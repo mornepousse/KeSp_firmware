@@ -154,54 +154,6 @@ uint16_t wpm_get(void)
     return (uint16_t)(total * 60 / (WPM_WINDOW_SIZE * WPM_CHARS_PER_WORD));
 }
 
-/* ── Double-Tap Shift → Caps Lock ──────────────────────────────── */
-
-#define SHIFT_DTAP_TIMEOUT_TICKS  20  /* 20 × 10ms = 200ms window */
-
-static uint8_t sdt_ticks = 0;
-static bool    sdt_first_released = false;  /* first tap released, window active */
-static bool    sdt_first_pressed = false;   /* first tap press seen, not yet released */
-static bool    sdt_caps_pending = false;
-
-bool shift_double_tap_press(void)
-{
-    /* If first tap was released and we're still in the window → this is tap 2 */
-    if (sdt_first_released) {
-        sdt_first_released = false;
-        sdt_ticks = 0;
-        sdt_caps_pending = true;
-        return true;
-    }
-    /* Otherwise, this is tap 1 — track until release */
-    sdt_first_pressed = true;
-    return false;
-}
-
-void shift_double_tap_release(void)
-{
-    if (sdt_first_pressed) {
-        sdt_first_pressed = false;
-        sdt_first_released = true;
-        sdt_ticks = 0;
-    }
-}
-
-void shift_double_tap_tick(void)
-{
-    if (sdt_first_released) {
-        sdt_ticks++;
-        if (sdt_ticks >= SHIFT_DTAP_TIMEOUT_TICKS)
-            sdt_first_released = false;
-    }
-}
-
-bool shift_double_tap_consume(void)
-{
-    if (!sdt_caps_pending) return false;
-    sdt_caps_pending = false;
-    return true;
-}
-
 /* ── Key Override / Mod-Morph ───────────────────────────────────── */
 
 static key_override_t overrides[KEY_OVERRIDE_MAX_SLOTS];

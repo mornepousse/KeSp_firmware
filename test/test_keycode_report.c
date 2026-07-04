@@ -6,7 +6,7 @@
  *
  * Stubs stateful : tap_hold_get_active_mods, tap_hold_get_active_layer,
  *                  osl_get_layer / osl_consume / osl_arm,
- *                  osm_consume, shift_double_tap_press, combo_consume.
+ *                  osm_consume, combo_consume.
  * Les autres stubs sont de purs no-ops.
  */
 #include "test_framework.h"
@@ -79,11 +79,9 @@ static bool     g_th_is_hold      = false;
 static uint8_t  g_th_tap_kc       = 0;
 static uint8_t  g_osm_pending     = 0;
 static int8_t   g_osl_layer       = -1;
-static bool     g_shift_dbl_tap   = false;
 static uint8_t  g_combo_kc        = 0;
 static bool     g_leader_active   = false;
 static int8_t   g_osl_arm_val     = -1; /* dernière valeur passée à osl_arm */
-static int      g_shift_dbl_release_count = 0; /* nb d'appels shift_double_tap_release */
 
 /* ── Stubs matrix_scan.h ─────────────────────────────────────────────── */
 
@@ -211,12 +209,6 @@ void     wpm_record_keypress(void)  {}
 uint16_t wpm_get(void)              { return 0; }
 void     wpm_tick(void)             {}
 
-/* Double-Tap Shift → Caps Lock */
-bool shift_double_tap_press(void)   { return g_shift_dbl_tap; }
-void shift_double_tap_release(void) { g_shift_dbl_release_count++; }
-void shift_double_tap_tick(void)    {}
-bool shift_double_tap_consume(void) { return false; }
-
 /* Key Override */
 void key_override_init(void)                                                {}
 void key_override_set(uint8_t idx, const key_override_t *cfg)
@@ -330,7 +322,6 @@ static void reset_kp_state(void)
     g_osm_pending     = 0;
     g_osl_layer       = -1;
     g_osl_arm_val     = -1;
-    g_shift_dbl_tap   = false;
     g_combo_kc        = 0;
     g_leader_active   = false;
 
@@ -498,39 +489,6 @@ static void test_kp_osl_active_layer(void)
                 "osl_get_layer() = 2 → key (0,0) résout sur couche 2 = B (0x05)");
 }
 
-/* 12. Double-tap Shift supprimé : quand shift_double_tap_press() = true,
- *     la touche Shift va dans extra_keycodes, pas dans keycodes */
-static void test_kp_shift_dbl_tap_suppressed(void)
-{
-    reset_kp_state();
-    keymaps[0][0][0] = T_KC_LSHIFT;
-    g_shift_dbl_tap = true;
-    press_key(0, 0, 0);
-    build_keycode_report();
-    TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT),
-                "shift_double_tap_press() = true → Shift supprimé de keycodes");
-    TEST_ASSERT_EQ(extra_keycodes[0], (uint16_t)T_KC_LSHIFT,
-                   "Shift supprimé → présent dans extra_keycodes[0]");
-}
-
-/* 13. Shift tenu un 2e cycle : is_new_press = false → suppression ne se déclenche pas */
-static void test_kp_shift_held_not_suppressed_second_cycle(void)
-{
-    reset_kp_state();
-    keymaps[0][0][0] = T_KC_LSHIFT;
-    g_shift_dbl_tap = true;           /* double-tap actif pour tout le test */
-
-    /* Cycle 1 : 1re pression (nouveau) → supprimé */
-    press_key(0, 0, 0);
-    build_keycode_report();
-    TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT), "1er cycle : Shift supprimé");
-
-    /* Cycle 2 : touche toujours tenue → is_new_press = false → NON supprimée */
-    build_keycode_report();
-    TEST_ASSERT(keycode_in_report(T_KC_LSHIFT),
-                "2e cycle (tenu) : Shift NON supprimé car pas nouvelle pression");
-}
-
 /* 14. Combo : combo_consume() retourne un keycode → injecté dans keycodes[] */
 static void test_kp_combo_result_injected(void)
 {
@@ -579,30 +537,6 @@ static void test_kp_macro_does_not_starve_to(void)
 
     TEST_ASSERT_EQ(current_layout, 1,
                    "MACRO + TO co-pressés → TO togglé (macro n'affame plus le slot interne)");
-}
-
-/* 17. Détection Shift sur la couche ACTIVE : un Shift atteint via une couche
- *     OSL (et non sur la couche de base) doit quand même être vu par la
- *     détection de release du double-tap (edge descendant → release appelé). */
-static void test_kp_shift_detected_on_active_osl_layer(void)
-{
-    reset_kp_state();
-    g_shift_dbl_release_count = 0;
-
-    g_osl_layer = 2;                    /* couche OSL 2 active */
-    keymaps[2][0][0] = T_KC_LSHIFT;     /* Shift sur couche 2 (rien sur couche 0) */
-
-    /* Cycle 1 : press → la touche résout en Shift sur la couche active 2 */
-    press_key(0, 0, 0);
-    build_keycode_report();
-
-    /* Cycle 2 : release → l'edge descendant "Shift pressé" doit déclencher
-     * shift_double_tap_release() */
-    release_all_keys();
-    build_keycode_report();
-
-    TEST_ASSERT(g_shift_dbl_release_count >= 1,
-                "Shift sur couche OSL active → edge release détecté (release appelé)");
 }
 
 /* 18. Double MO simultané : chaque touche MO est résolue depuis la couche
@@ -663,12 +597,9 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_osm_mod_injection);
     TEST_RUN(test_kp_osl_arm_called);
     TEST_RUN(test_kp_osl_active_layer);
-    TEST_RUN(test_kp_shift_dbl_tap_suppressed);
-    TEST_RUN(test_kp_shift_held_not_suppressed_second_cycle);
     TEST_RUN(test_kp_combo_result_injected);
     TEST_RUN(test_kp_multi_key_press);
     TEST_RUN(test_kp_macro_does_not_starve_to);
-    TEST_RUN(test_kp_shift_detected_on_active_osl_layer);
     TEST_RUN(test_kp_double_mo_resolves_from_base_layer);
     TEST_RUN(test_kp_sec_confirm_authorizes);
 }

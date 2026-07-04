@@ -77,21 +77,6 @@ uint16_t wpm_get(void);
 /* Tick WPM sampling (call every ~1 second) */
 void wpm_tick(void);
 
-/* ── Double-Tap Shift → Caps Lock ──────────────────────────────── */
-
-/* Call when a Shift key is newly pressed (LShift 0xE1 or RShift 0xE5).
-   Returns true if double-tap detected → Caps Lock tap should be sent. */
-bool shift_double_tap_press(void);
-
-/* Call when a Shift key is released — arms the window for a second tap. */
-void shift_double_tap_release(void);
-
-/* Tick the double-tap timer (call every ~10ms from keyboard task) */
-void shift_double_tap_tick(void);
-
-/* Check and consume pending Caps Lock tap (call from keyboard task) */
-bool shift_double_tap_consume(void);
-
 /* ── Key Override / Mod-Morph ───────────────────────────────────── */
 
 #define KEY_OVERRIDE_MAX_SLOTS 16
