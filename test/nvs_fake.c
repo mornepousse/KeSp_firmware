@@ -82,6 +82,14 @@ void nvs_fake_put_blob(const char *ns, const char *key,
     memcpy(e->blob, data, size);
 }
 
+void nvs_fake_put_u32(const char *ns, const char *key, uint32_t value)
+{
+    nvs_entry_t *e = get_or_create(ns, key);
+    if (!e) return;
+    e->is_u32  = 1;
+    e->u32_val = value;
+}
+
 /* ── Implémentations des primitives NVS ─────────────────────── */
 
 esp_err_t nvs_flash_init(void)

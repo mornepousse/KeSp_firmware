@@ -150,6 +150,12 @@ void load_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count)
     nvs_close(my_handle);
 }
 
+/* Version du layout on-disk du blob macros. À bumper si macro_t / macro_step_t
+ * change de disposition SANS changer de taille (que la garde de taille laisse
+ * passer) — audit M11. L'absence de clé de version (données pré-M11) est acceptée
+ * (layout compatible) ; une version présente et différente → défauts. */
+#define MACROS_NVS_VERSION 1u
+
 bool save_macros(macro_t *macros, size_t count) {
     nvs_handle_t my_handle;
     esp_err_t err;
@@ -171,6 +177,12 @@ bool save_macros(macro_t *macros, size_t count) {
     err = nvs_set_u32(my_handle, "macros_count", (uint32_t)count);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) writing macros count!", esp_err_to_name(err));
+        ok = false;
+    }
+
+    err = nvs_set_u32(my_handle, "macros_ver", MACROS_NVS_VERSION);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) writing macros version!", esp_err_to_name(err));
         ok = false;
     }
 
@@ -201,6 +213,18 @@ void load_macros(macro_t *macros, size_t count) {
     if (size_err == ESP_OK && stored_size != required_size) {
         ESP_LOGW(TAG, "Macros NVS size mismatch (stored=%u, expected=%u), using defaults",
                  (unsigned)stored_size, (unsigned)required_size);
+        nvs_close(my_handle);
+        return;
+    }
+
+    /* Garde de version : détecte un struct réordonné SANS changement de taille (que
+     * la garde de taille laisse passer). Absence de version acceptée (données
+     * pré-M11) ; version présente ≠ courante → défauts (audit M11). */
+    uint32_t stored_ver = 0;
+    esp_err_t ver_err = nvs_get_u32(my_handle, "macros_ver", &stored_ver);
+    if (ver_err == ESP_OK && stored_ver != MACROS_NVS_VERSION) {
+        ESP_LOGW(TAG, "Macros NVS version %u != %u, using defaults",
+                 (unsigned)stored_ver, (unsigned)MACROS_NVS_VERSION);
         nvs_close(my_handle);
         return;
     }

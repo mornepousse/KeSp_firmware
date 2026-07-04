@@ -215,6 +215,27 @@ static void test_macro_size_guard_skips_load(void)
                 "load_macros : blob taille incorrecte → donnees inchangees (garde active)");
 }
 
+/* 7b. Garde de version : un blob de BONNE taille mais version périmée (struct
+ * réordonné sans changer de taille) → défauts préservés (M11). */
+static void test_load_macros_version_guard(void)
+{
+    nvs_fake_reset();
+    macro_t src[MAX_MACROS];
+    memset(src, 0, sizeof(src));
+    src[0].name[0] = 'x';
+    save_macros(src, MAX_MACROS);                                  /* écrit blob + version courante */
+    nvs_fake_put_u32(STORAGE_NAMESPACE, "macros_ver", 0xDEAD);     /* force une version périmée */
+
+    macro_t dst[MAX_MACROS];
+    memset(dst, 0xAB, sizeof(dst));
+    load_macros(dst, MAX_MACROS);
+
+    macro_t sentinel[MAX_MACROS];
+    memset(sentinel, 0xAB, sizeof(sentinel));
+    TEST_ASSERT(memcmp(dst, sentinel, sizeof(dst)) == 0,
+                "load_macros : version périmée (bonne taille) → défauts préservés (M11)");
+}
+
 /* ── 8. recalc_macros_count : compte le dernier nom non-vide ── */
 
 static void test_recalc_macros_count(void)
@@ -267,5 +288,6 @@ void test_keymap_nvs(void)
     TEST_RUN(test_macros_real_roundtrip);
     TEST_RUN(test_macros_count_persisted);
     TEST_RUN(test_macro_size_guard_skips_load);
+    TEST_RUN(test_load_macros_version_guard);
     TEST_RUN(test_recalc_macros_count);
 }

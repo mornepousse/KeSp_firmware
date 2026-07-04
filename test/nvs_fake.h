@@ -2,6 +2,7 @@
  * Permet de tester la logique de persistance de keymap.c sans matériel. */
 #pragma once
 #include <stddef.h>
+#include <stdint.h>
 
 /* Réinitialise entièrement le store RAM (appeler au début de chaque test). */
 void nvs_fake_reset(void);
@@ -14,3 +15,6 @@ void nvs_fake_fail_writes(int enable);
  * Utile pour tester les gardes de taille (cas where stored_size != expected). */
 void nvs_fake_put_blob(const char *ns, const char *key,
                        const void *data, size_t size);
+
+/* Injecte une valeur u32 (pour tester les gardes de version). */
+void nvs_fake_put_u32(const char *ns, const char *key, uint32_t value);
