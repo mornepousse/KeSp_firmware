@@ -102,6 +102,21 @@ dans test_rf_packet.c:160 / test_rf_pairing.c:134.
   point d'entrée testable existe, sinon documenter pourquoi (fonction statique
   enfouie → proposer l'extraction en tâche future, ne pas forcer).
 
+### Phase 4 — Gaps de couverture dans les *bons* tests (repris du plan de session, 1 tâche)
+
+- [ ] **T10** : ajouter dans les suites déjà fiables (indépendant du rewiring) :
+  `cdc_rx_feed` (cmd inconnue → `ERR_UNKNOWN`, borne len==4096, 2 frames/buffer) ;
+  `apdu` (Case 3E/4E extended-Lc + reject tronqué) ; `otp_proto` (chemin refus
+  `confirm==2` → report zéro + reset) ; `cfg_bridge` (gardes réassembleur :
+  total incohérent, slice sur-taille, overflow) ; `cr_crc16` (KAT sur
+  `"123456789"`). *(openpgp_crypto : basse prio, PGP gelé — hors périmètre.)*
+
+### Definition of Done (par suite rewirée — reprise du plan de session)
+
+- Le `.c` de prod est compilé dans le runner ; zéro `#define`/`typedef`/fonction
+  recopiés ; chaque assertion porte sur une sortie du vrai code ; les cas
+  limites listés sont couverts ; **preuve de morsure fournie**.
+
 ### Phase finale
 
 - [ ] **TF** : `./scripts/check.sh` full (6 boards) vert ; `.tripwire-testcount`
