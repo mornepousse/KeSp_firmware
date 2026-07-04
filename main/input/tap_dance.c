@@ -113,8 +113,9 @@ void tap_dance_on_release(uint8_t row, uint8_t col)
 
 void tap_dance_tick(void)
 {
-    resolved_flag = false;
-
+    /* Ne PAS effacer resolved_flag ici : une résolution posée par on_press (4ᵉ
+     * tap) doit survivre jusqu'à ce que le consumer la lise via consume (M2).
+     * Le flag est effacé dans tap_dance_consume. */
     if (active.state != TD_COUNTING) return;
 
     uint32_t t = now_ms();
@@ -140,6 +141,7 @@ uint8_t tap_dance_consume(void)
 {
     uint8_t kc = resolved_keycode;
     resolved_keycode = 0;
+    resolved_flag = false;   /* effacé à la consommation, plus dans tick (M2) */
     if (active.state == TD_RESOLVED)
         active.state = TD_IDLE;
     return kc;

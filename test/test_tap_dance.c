@@ -101,9 +101,26 @@ static void test_td_different_key_rejected(void) {
     tap_dance_on_release(0, 0);
 }
 
+/* 4ᵉ tap résout en on_press ; un tick tombant avant la consommation ne doit PAS
+ * effacer la résolution (audit M2 : tick faisait resolved_flag=false aveuglément
+ * → le keycode 3-tap n'était jamais envoyé). */
+static void test_td_max_taps_survives_tick(void) {
+    td_reset(); configure_slot0();
+    for (int i = 0; i < TAP_DANCE_MAX_TAPS + 1; i++) {   /* 4 pressions → résout en on_press */
+        tap_dance_on_press(0, 0, 0);
+        tap_dance_on_release(0, 0);
+    }
+    tap_dance_tick();   /* un tick tombe avant que le consumer ne lise la résolution */
+    TEST_ASSERT(tap_dance_just_resolved(),
+                "4ᵉ tap résolu en on_press survit à un tick (M2)");
+    TEST_ASSERT_EQ(tap_dance_consume(), 0x06,
+                   "4 taps → action[2]=C consommé même après un tick");
+}
+
 void test_tap_dance(void) {
     TEST_SUITE("Tap Dance — module réel");
     TEST_RUN(test_td_single_tap);
+    TEST_RUN(test_td_max_taps_survives_tick);
     TEST_RUN(test_td_double_tap);
     TEST_RUN(test_td_triple_tap);
     TEST_RUN(test_td_max_taps_clamped);
