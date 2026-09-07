@@ -83,6 +83,10 @@ bool rf_driver_verify_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg);
  * Switches to PTX on ch+addr, transmits payload once (CE pulse, poll TX_DS/MAX_RT),
  * then restores PRX on restore_ch+restore_addr and re-asserts CE high. Returns TX_DS.
  * Compiled in both roles (no KASE_HAS_RF_TX guard). */
+/* Issues des excursions : acquittees / MAX_RT / scrutin expire. Un compteur de
+ * timeouts qui monte veut dire que le dongle ne repond pas dans les 5 ms. */
+extern uint32_t rf_oob_ok, rf_oob_maxrt, rf_oob_timeout;
+
 bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
                       const uint8_t *payload, uint8_t len,
                       uint8_t restore_ch, const uint8_t restore_addr[5]);

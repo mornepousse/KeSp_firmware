@@ -131,6 +131,56 @@ void rf_driver_set_rx_address(rf_radio_t *r, const uint8_t addr[5])
     ce_high(r);
 }
 
+/* Budget de scrutin d'une émission, déduit de SETUP_RETR.
+ *
+ * Extrait de rf_driver_send le 2026-09-07 : rf_driver_oob_tx avait gardé un
+ * 5 ms EN DUR alors qu'il partage le même SETUP_RETR = 0x1F (ARC=15,
+ * ARD=500 µs), dont le pire cas vaut ~13 ms. La correction du 2026-08-26 n'a
+ * donc jamais atteint l'excursion — et là, un abandon prématuré est pire qu'un
+ * miscompte : on restaure PRX pendant que la puce retransmet encore.
+ *
+ * Pire cas par tentative = ARD + trame + ACK. ARD = ((SETUP_RETR>>4)+1) × 250 µs ;
+ * trame et ACK ≈ 250 µs à 1 Mbit/s, arrondi large. Tentatives = 1 + ARC. */
+static uint32_t rf_tx_poll_budget_us(rf_radio_t *r)
+{
+    uint8_t  retr   = rf_driver_read_reg(r, REG_SETUP_RETR);
+    uint32_t ard_us = (uint32_t)(((retr >> 4) & 0x0F) + 1) * 250u;
+    uint32_t essais = (uint32_t)(retr & 0x0F) + 1u;
+    return essais * (ard_us + 250u) + 1000u;   /* + 1 ms de marge */
+}
+
+/* ── Attentes d'établissement du nRF24 ──────────────────────────────────────
+ *
+ * TOUTES les temporisations de ce fichier étaient écrites `vTaskDelay(
+ * pdMS_TO_TICKS(2))` ou `(5)`. Or CONFIG_FREERTOS_HZ vaut 100 : le tick fait
+ * 10 ms, et pdMS_TO_TICKS de toute valeur inférieure vaut ZÉRO. vTaskDelay(0)
+ * ne dort pas — il cède la main, pour une durée non spécifiée qui peut être de
+ * quelques microsecondes.
+ *
+ * Autrement dit, aucune des attentes que ces lignes documentaient n'avait lieu.
+ * Le driver pilotait la puce sans respecter une seule de ses temporisations, et
+ * ça « marchait » parce que les transactions SPI intercalées coûtent elles-mêmes
+ * quelques dizaines de microsecondes — parfois assez, parfois non.
+ *
+ * Symptôme au banc le 2026-09-07 : en full RF, la moitié droite disparaissait
+ * au bout d'un moment. Le retour d'excursion remettait CE haut sur une puce qui
+ * n'avait pas fini de repasser en réception, et elle restait sourde — rien ne
+ * la réveillant ensuite, le lien était perdu jusqu'au reset.
+ *
+ * Une attente par busy-wait ne dépend d'aucun tick. Les durées viennent du
+ * nRF24L01+ Product Specification v1.0, tableau 16 p.24 :
+ *   Tpd2stby (power down → standby)  : 1,5 ms max
+ *   Tstby2a  (standby → TX/RX actif) : 130 µs
+ * On reste au-dessus, la marge ne coûte que des microsecondes. */
+#define RF_TSTBY2A_US   200u     /* bascule de mode, PWR_UP déjà à 1 */
+#define RF_TPD2STBY_US 2000u     /* sortie de power-down */
+#define RF_TPOR_US     5000u     /* mise sous tension, marge pour les clones */
+
+static inline void rf_settle_us(uint32_t us) { esp_rom_delay_us(us); }
+
+/* Issues des excursions PRX→PTX→PRX (relais HID de la moitie gauche). */
+uint32_t rf_oob_ok, rf_oob_maxrt, rf_oob_timeout;
+
 bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
                       const uint8_t *payload, uint8_t len,
                       uint8_t restore_ch, const uint8_t restore_addr[5])
@@ -141,7 +191,7 @@ bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
     write_reg_buf(r, REG_TX_ADDR_OOB, addr, 5);
     write_reg_buf(r, REG_RX_ADDR_P0,  addr, 5);   /* match TX_ADDR for ESB ACK */
     rf_driver_write_reg(r, REG_CONFIG, 0x3E);     /* PTX power-up, EN_CRC|CRCO */
-    vTaskDelay(pdMS_TO_TICKS(2));                  /* Tpd2stby */
+    rf_settle_us(RF_TSTBY2A_US);
 
     rf_driver_write_reg(r, REG_STATUS, 0x70);     /* clear flags */
     { uint8_t c = CMD_FLUSH_TX, rx; csn_low(r); spi_xfer(r, &c, &rx, 1); csn_high(r); }
@@ -154,22 +204,39 @@ bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
     ce_high(r); esp_rom_delay_us(15); ce_low(r);
 
     /* ── Poll TX_DS / MAX_RT ── */
-    uint32_t deadline = (uint32_t)(esp_timer_get_time() + 5000);
+    /* Budget déduit du registre, jamais écrit en dur — cf. rf_tx_poll_budget_us.
+     * Abandonner tôt ici ferait restaurer PRX sur une puce encore occupée à
+     * retransmettre, et l'écoute ne repartirait pas. */
+    uint32_t deadline = (uint32_t)(esp_timer_get_time() + rf_tx_poll_budget_us(r));
     uint8_t status = 0;
     do {
         status = rf_driver_read_reg(r, REG_STATUS);
         if (status & 0x30) break;
     } while ((uint32_t)esp_timer_get_time() < deadline);
     bool ok = (status & 0x20) != 0;   /* TX_DS = ACK received */
-    if (status & 0x10) { uint8_t c = CMD_FLUSH_TX, rx; csn_low(r); spi_xfer(r,&c,&rx,1); csn_high(r); }
+
+    /* Vider la FIFO d'emission des que l'envoi n'a PAS abouti — pas seulement
+     * sur MAX_RT. Si le scrutin expire sans qu'aucun des deux drapeaux ne soit
+     * venu, la charge reste dans la FIFO : trois de ces fuites la remplissent,
+     * et plus rien ne part ensuite. Degradation lente et silencieuse, du genre
+     * qui se lit comme « la liaison n'est pas tres bonne ». */
+    if (!ok) { uint8_t c = CMD_FLUSH_TX, rx; csn_low(r); spi_xfer(r,&c,&rx,1); csn_high(r); }
     rf_driver_write_reg(r, REG_STATUS, 0x30);
+
+    /* Instrument : sans lui, « ca marche mal » ne se distingue pas de « ca ne
+     * part pas ». Les trois issues sont exclusives et se comptent separement. */
+    if (ok)                    rf_oob_ok++;
+    else if (status & 0x10)    rf_oob_maxrt++;
+    else                       rf_oob_timeout++;
 
     /* ── Restore PRX on the data address/channel ── */
     ce_low(r);
     rf_driver_set_channel(r, restore_ch);
     write_reg_buf(r, REG_RX_ADDR_P0, restore_addr, 5);
     rf_driver_write_reg(r, REG_CONFIG, 0x3F);     /* PRX power-up */
-    vTaskDelay(pdMS_TO_TICKS(2));
+    /* L'attente qui manquait : sans elle, CE repasse haut sur une puce encore
+     * en transition et l'écoute ne redémarre pas. */
+    rf_settle_us(RF_TSTBY2A_US);
     rf_driver_write_reg(r, REG_STATUS, 0x70);
     { uint8_t c = CMD_FLUSH_RX, rx; csn_low(r); spi_xfer(r, &c, &rx, 1); csn_high(r); }
     ce_high(r);                                    /* resume listening */
@@ -188,8 +255,39 @@ bool rf_driver_probe(rf_radio_t *r)
 
 void rf_radio_set_irq_sem(rf_radio_t *r, void *sem) { r->irq_sem = sem; }
 
+/* ── Un circuit, un propriétaire ────────────────────────────────────────────
+ *
+ * Deux modules qui initialisent la MÊME puce se sont écrasés trois fois le
+ * 2026-09-05, toujours en silence : rf_probe reconfigurait la radio du lien sur
+ * le canal du dongle, puis kbd_relay a fait de même. La moitié gauche écoutait
+ * alors le mauvais canal et n'acquittait plus rien — symptôme indiscernable
+ * d'une radio morte ou d'un mauvais brochage. Des heures y sont passées.
+ *
+ * La broche CSN identifie le circuit : deux radios sur un même bus SPI en ont
+ * nécessairement deux différentes (c'est le cas du dongle, qui en a
+ * légitimement deux). Une seconde revendication de la même broche est donc
+ * toujours une faute, et elle le dit désormais. */
+#define RF_MAX_CHIPS 4
+static int  s_csn_pris[RF_MAX_CHIPS];
+static int  s_csn_n;
+
+static void rf_claim_chip(int csn, const char *mode)
+{
+    for (int i = 0; i < s_csn_n; i++) {
+        if (s_csn_pris[i] == csn) {
+            ESP_LOGE(TAG, "CONFLIT : la radio CSN=%d est DEJA initialisee — "
+                          "cette init en %s ecrase la configuration precedente "
+                          "(canal, adresse, mode). Une puce, un proprietaire.",
+                     csn, mode);
+            return;
+        }
+    }
+    if (s_csn_n < RF_MAX_CHIPS) s_csn_pris[s_csn_n++] = csn;
+}
+
 esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
 {
+    rf_claim_chip(cfg->pin_csn, "PRX");
     memset(r, 0, sizeof(*r));
     r->cfg = *cfg;
 
@@ -240,7 +338,7 @@ esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     };
     ESP_ERROR_CHECK(spi_bus_add_device(cfg->spi_host, &dev, &r->spi));
 
-    vTaskDelay(pdMS_TO_TICKS(5));  /* power-on settle */
+    rf_settle_us(RF_TPOR_US);      /* mise sous tension */
 
     if (!rf_driver_probe(r)) { r->present = false; return ESP_FAIL; }
 
@@ -267,7 +365,7 @@ esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     /* Power up as PRX: EN_CRC|CRCO|PWR_UP|PRIM_RX, mask TX_DS + MAX_RT IRQs.
      * RX_DR IRQ stays enabled (bit6 MASK_RX_DR = 0). */
     rf_driver_write_reg(r, REG_CONFIG, 0x3F);
-    vTaskDelay(pdMS_TO_TICKS(2));
+    rf_settle_us(RF_TSTBY2A_US);
     ce_high(r);                                        /* start listening */
 
     r->present = true;
@@ -310,9 +408,9 @@ void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_STATUS, 0x70);        /* clear RX_DR|TX_DS|MAX_RT */
     { uint8_t c = CMD_FLUSH_RX, rx; csn_low(r); spi_xfer(r, &c, &rx, 1); csn_high(r); }
     rf_driver_write_reg(r, REG_CONFIG, 0x3F);        /* PRX, powered, RX_DR IRQ on */
-    vTaskDelay(pdMS_TO_TICKS(2));                     /* Tpd2stby ≈1.5ms — MUST wait before
-                                                        CE-high if the radio was powered down
-                                                        (0x3C), else it never enters RX */
+    rf_settle_us(RF_TPD2STBY_US);                    /* la radio a pu etre en power-down
+                                                        (0x3C) : sans cette attente elle
+                                                        n'entre jamais en RX */
     ce_high(r);                                      /* resume listening */
 }
 
@@ -386,8 +484,7 @@ void rf_driver_power_up(rf_radio_t *r)
     uint8_t cfg = rf_driver_read_reg(r, REG_CONFIG);
     cfg |= (1u << 1);    /* set PWR_UP (bit1) */
     rf_driver_write_reg(r, REG_CONFIG, cfg);
-    vTaskDelay(pdMS_TO_TICKS(5));   /* Tpd2stby: 1.5 ms min, 5 ms for clone margin
-                                     * BENCH-TUNE: may reduce to 2 ms after validation */
+    rf_settle_us(RF_TPOR_US);       /* Tpd2stby 1,5 ms min, marge pour les clones */
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -411,6 +508,7 @@ uint32_t rf_tx_count    = 0;
 
 esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
 {
+    rf_claim_chip(cfg->pin_csn, "PTX");
     memset(r, 0, sizeof(*r));
     r->cfg = *cfg;
 
@@ -449,7 +547,7 @@ esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     };
     ESP_ERROR_CHECK(spi_bus_add_device(cfg->spi_host, &dev, &r->spi));
 
-    vTaskDelay(pdMS_TO_TICKS(5));   /* power-on settle */
+    rf_settle_us(RF_TPOR_US);       /* mise sous tension */
 
     if (!rf_driver_probe(r)) {
         r->present = false;
@@ -494,7 +592,7 @@ esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
      * MVP uses polling (STATUS register), so IRQ masks don't affect functionality.
      * Masking TX_DS and MAX_RT keeps the IRQ pin clean in case it's monitored later. */
     rf_driver_write_reg(r, REG_CONFIG, 0x3E);
-    vTaskDelay(pdMS_TO_TICKS(2));   /* Tpd2stby = 1.5 ms (datasheet) */
+    rf_settle_us(RF_TPD2STBY_US);
     /* CE stays LOW in PTX; it is pulsed only during rf_driver_send() */
 
     r->present = true;
@@ -535,11 +633,7 @@ bool rf_driver_send(rf_radio_t *r, const uint8_t *buf, uint8_t len)
      * Pire cas par tentative = ARD + trame + ACK. ARD = (SETUP_RETR>>4)+1 fois
      * 250 µs ; trame ~6 octets + adresse + CRC et son ACK ≈ 250 µs à 1 Mbit/s,
      * arrondi large. Nombre de tentatives = 1 + ARC. */
-    uint8_t retr = rf_driver_read_reg(r, REG_SETUP_RETR);
-    uint32_t ard_us  = (uint32_t)(((retr >> 4) & 0x0F) + 1) * 250u;
-    uint32_t essais  = (uint32_t)(retr & 0x0F) + 1u;
-    uint32_t budget  = essais * (ard_us + 250u) + 1000u;   /* + 1 ms de marge */
-    uint32_t deadline_us = (uint32_t)(esp_timer_get_time() + budget);
+    uint32_t deadline_us = (uint32_t)(esp_timer_get_time() + rf_tx_poll_budget_us(r));
     uint8_t status;
     do {
         status = rf_driver_read_reg(r, REG_STATUS);
@@ -582,7 +676,7 @@ uint16_t rf_driver_pair_listen(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
     rf_driver_set_channel(r, ch);
     write_reg_buf(r, REG_RX_ADDR_P0, addr, 5);
     rf_driver_write_reg(r, REG_CONFIG, 0x3F);    /* PRX power-up */
-    vTaskDelay(pdMS_TO_TICKS(2));
+    rf_settle_us(RF_TPD2STBY_US);
     rf_driver_write_reg(r, REG_STATUS, 0x70);
     { uint8_t c = CMD_FLUSH_RX, rx; csn_low(r); spi_xfer(r, &c, &rx, 1); csn_high(r); }
     ce_high(r);
@@ -594,7 +688,9 @@ uint16_t rf_driver_pair_listen(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
             got = rf_driver_read_rx(r, buf, maxlen);
             break;
         }
-        vTaskDelay(pdMS_TO_TICKS(2));
+        /* Sondage, pas etablissement : ici il FAUT rendre la main, sinon la
+         * boucle d'appairage affame l'IDLE. Un tick entier convient. */
+        vTaskDelay(1);
     }
     ce_low(r);
     /* Restore PTX mode: rf_driver_send() does NOT write CONFIG (it assumes PTX),
