@@ -33,10 +33,12 @@ tables verified against the netlist on each, matrix scanning, the radio link
 between them, keymap fusion, and HID relayed to the dongle. Typing on either
 half reaches the host.
 
-Three things are still open. **Battery power fails on both halves** — a hardware
-fault around the 3.3 V converter, not yet diagnosed; the boards currently run
-from USB or a probe's supply. **The trackpad has no driver.** **Sleep (< 50 µA)
-is unwritten** — it needs RTC-domain scanning and EXT1 wake, and nothing of that
+**Battery power works since 2026-09-07**, after a hardware repair around the
+3.3 V converter. Both halves run untethered and type together over the radio —
+the keyboard's nominal mode.
+
+Two things are still open. **The trackpad has no driver.** **Sleep (< 50 µA) is
+unwritten** — it needs RTC-domain scanning and EXT1 wake, and nothing of that
 exists yet.
 
 Two decisions shape the whole codebase, and they are worth stating plainly

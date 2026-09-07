@@ -54,8 +54,11 @@ Design complet : `docs/superpowers/specs/2026-08-19-niphargus-firmware-design.md
 brochage vérifié à la netlist sur les deux, lien radio inter-moitiés prouvé
 (canal 0x4F, adresse KaSe.03), fusion des keymaps, relais vers le dongle. Le
 risque R1 du design est levé (0 perte, 0,4 retransmission/paquet).
-Restent ouverts : l'alimentation batterie des deux moitiés (défaut matériel non
-diagnostiqué), B7 l'énergie, et le driver du trackpad.
+**Alimentation batterie réparée le 2026-09-07** : les deux moitiés fonctionnent
+en autonomie, sans aucun câble, et tapent ensemble par radio. C'est le mode
+nominal du clavier.
+Restent ouverts : B7 l'énergie (sommeil < 50 µA, scan RTC, réveil EXT1) et le
+driver du trackpad.
 Brochage : `docs/NIPHARGUS_V2_HARDWARE.md` (source de vérité, vérifié à la netlist).
 
 ## Board variants
