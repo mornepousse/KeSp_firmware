@@ -11,6 +11,9 @@
 
 #include "kbd_relay_tx.h"
 #include "rf_driver.h"
+#if CONFIG_KASE_HALF_LINK_RX
+#include "half_link.h"
+#endif
 #include "rf_packet.h"
 #include "rf_pairing.h"
 #include "usb_presence.h"   /* route poll + kbd_active_route (USB-first auto-switch) */
@@ -63,8 +66,20 @@ static const char *TAG = "kbd_relay";
 
 /* ── Module state ───────────────────────────────────────────────────────── */
 
+#if !CONFIG_KASE_HALF_LINK_RX
+/* La radio de CE module. Sous HALF_LINK_RX elle n'existe pas : la puce
+ * appartient à half_link, qui nous prête une excursion. */
 static rf_radio_t s_radio;
+#endif
 static bool s_paired = false;
+
+#if CONFIG_KASE_HALF_LINK_RX
+/* Moitié gauche du Niphargus : la radio ne nous appartient PAS. Elle écoute la
+ * droite en PRX, et half_link nous prête une excursion pour parler au dongle.
+ * On mémorise donc la cible plutôt qu'une configuration de puce. */
+static uint8_t s_dongle_ch;
+static uint8_t s_dongle_addr[5];
+#endif
 
 /* TX serialization (engine send + refresh timer share the single radio) +
  * last keyboard report for the periodic refresh. */
@@ -77,7 +92,14 @@ static esp_timer_handle_t s_refresh_timer;   /* periodic refresh; stopped during
 static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
 {
     if (s_tx_mutex && xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+#if CONFIG_KASE_HALF_LINK_RX
+        /* La radio écoute la droite : on ne peut pas simplement émettre, il
+         * faut en sortir et y revenir. half_link possède la puce et restaure
+         * lui-même le canal du lien. */
+        half_link_excursion_tx(s_dongle_ch, s_dongle_addr, buf, len);
+#else
         rf_driver_send(&s_radio, buf, len);
+#endif
         xSemaphoreGive(s_tx_mutex);
     }
 }
@@ -126,6 +148,10 @@ static rf_radio_cfg_t kbd_nrf_cfg(void)
  * keyboard, awaits PKT_PAIR_ACK, saves the assigned set_id/slot to NVS, then
  * reboots so kbd_relay_init() comes up paired (relay active). Runs only while
  * unpaired; the dongle's pairing window must be open (KS_CMD_RF_PAIR_START). */
+#if !CONFIG_KASE_HALF_LINK_RX
+/* Inutile quand le lien inter-moitiés tient la radio : l'appairage actif
+ * suppose d'écouter le canal de rendez-vous, donc d'abandonner l'écoute de la
+ * droite. Compilée hors de ce cas, elle serait une fonction statique morte. */
 static void kbd_pairing_task(void *arg)
 {
     (void)arg;
@@ -185,6 +211,7 @@ static void kbd_pairing_task(void *arg)
                   "(check CE wiring / dongle window)");
     vTaskDelete(NULL);
 }
+#endif /* !CONFIG_KASE_HALF_LINK_RX */
 
 /* ── Public API ─────────────────────────────────────────────────────────── */
 
@@ -203,12 +230,33 @@ void kbd_relay_init(void)
     uint16_t set_id = rf_pairing_load_set_id_half(BOARD_NRF_ADDR_SUFFIX, &slot);
     rf_apply_set_id(&nrf_cfg, set_id, slot);
 
+#if CONFIG_KASE_HALF_LINK_RX
+    /* PAS d'init : half_link_rx_start() a déjà configuré la puce en PRX sur le
+     * canal du lien, et une seconde init l'écraserait — c'est très exactement
+     * la panne qui a fait écouter cette moitié sur le canal du dongle. On ne
+     * retient que la cible de l'excursion.
+     *
+     * Conséquence assumée : l'appairage actif ne peut pas se faire ici, car il
+     * suppose d'écouter le canal de rendez-vous, donc d'abandonner l'écoute de
+     * la droite. Une moitié non appairée le reste, en le disant. */
+    s_dongle_ch = nrf_cfg.channel;
+    memcpy(s_dongle_addr, nrf_cfg.rx_addr, 4);
+    s_dongle_addr[4] = nrf_cfg.addr_suffix;
+    if (set_id == 0 || set_id == 0xFFFF) {
+        ESP_LOGE(TAG, "kbd_relay: NON APPAIRE et le lien inter-moities tient la "
+                      "radio — appairer d'abord (dongle + KS_CMD_RF_PAIR_START) "
+                      "sur un build sans HALF_LINK_RX");
+        return;   /* s_paired reste false : pas de relais, mais le lien vit */
+    }
+#else
     esp_err_t err = rf_driver_init_tx(&s_radio, &nrf_cfg);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "NRF PTX init failed (%d) — wireless relay disabled", err);
         return;   /* s_paired stays false */
     }
+#endif
 
+#if !CONFIG_KASE_HALF_LINK_RX
     if (set_id == 0 || set_id == 0xFFFF) {
         /* Unpaired: spawn the active pairing task. It REQs on the rendezvous and,
          * on ACK, saves NVS + reboots (relay comes up active). Open the dongle's
@@ -217,6 +265,7 @@ void kbd_relay_init(void)
         xTaskCreate(kbd_pairing_task, "kbd_pair", 4096, NULL, 5, NULL);
         return;   /* s_paired becomes true after the post-pairing reboot */
     }
+#endif
 
     ESP_LOGI(TAG, "kbd_relay: paired set_id=0x%04X slot=0x%02X — relay active",
              set_id, slot);
@@ -242,12 +291,16 @@ void kbd_relay_sleep_prepare(void)
      * and power the NRF down. Hold the mutex across sleep so nothing transmits. */
     if (s_refresh_timer) esp_timer_stop(s_refresh_timer);
     if (s_tx_mutex) xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(50));
-    rf_driver_power_down(&s_radio);
+#if !CONFIG_KASE_HALF_LINK_RX
+    rf_driver_power_down(&s_radio);   /* radio d'autrui sous HALF_LINK_RX */
+#endif
 }
 
 void kbd_relay_wake_restore(void)
 {
+#if !CONFIG_KASE_HALF_LINK_RX
     rf_driver_power_up(&s_radio);
+#endif
     if (s_tx_mutex) xSemaphoreGive(s_tx_mutex);
     if (s_refresh_timer) esp_timer_start_periodic(s_refresh_timer,
                                                   (uint64_t)KBD_RELAY_REFRESH_MS * 1000);

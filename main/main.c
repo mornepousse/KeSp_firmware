@@ -252,8 +252,7 @@ void app_main(void) {
 
   if (!safe_mode) {
 #if !CONFIG_KASE_NO_KEYMAP_ENGINE
-    load_keymaps((uint16_t *)keymaps,
-                 LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t));
+    load_keymaps((uint16_t *)keymaps, KEYMAP_BLOB_BYTES);
     load_layout_names(default_layout_names, LAYERS);
     load_macros(macros_list, MAX_MACROS);
     load_key_stats();
@@ -399,6 +398,10 @@ void app_main(void) {
   /* AVANT matrix_setup() : le callback de scan émettra dès le premier appui,
    * et il lui faut une radio prête. */
   half_link_tx_init();
+  /* APRES l'init : la tache reaffirme les maintiens, que le callback de scan ne
+   * peut pas produire (il ne se declenche que sur changement). Sans elle, une
+   * touche tenue plus de 250 ms est relachee a tort par la gauche. */
+  half_link_tx_refresh_start();
 #endif
   rtc_matrix_deinit();
   matrix_setup();

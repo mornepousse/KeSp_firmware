@@ -73,6 +73,57 @@ static inline bool half_state_pressed(const half_state_t *st, uint8_t row,
     return rf_bitmap_get(st->bitmap, row, col);
 }
 
+/* ── Géométrie : où ranger les colonnes de la moitié distante ───────────────
+ *
+ * Testée host dans test/test_half_col_map.c.
+ *
+ * Les deux moitiés sont le même PCB retourné : la colonne 0 de la gauche est sa
+ * touche la plus à GAUCHE, donc par symétrie la colonne 0 de la droite est sa
+ * touche la plus à DROITE. Un simple décalage `col + 7` range alors la moitié
+ * droite à l'envers — on tape la rangée de repos et il sort « ;lkjh ».
+ *
+ * Le miroir est une propriété du CÂBLAGE, pas du protocole : la droite émet ses
+ * coordonnées physiques et n'a pas à savoir où elle est posée. La conversion
+ * appartient donc au maître, et le drapeau vient de son board.h
+ * (BOARD_REMOTE_COLS_MIRRORED). */
+static inline uint8_t half_col_to_keymap(uint8_t col, uint8_t cols, bool miroir)
+{
+    return miroir ? (uint8_t)(2u * cols - 1u - col)
+                  : (uint8_t)(col + cols);
+}
+
+/* ── Cadence : quand la moitié droite doit-elle émettre ? ───────────────────
+ *
+ * Testée host dans test/test_half_tx_cadence.c.
+ *
+ * Deux règles écrites séparément se contredisaient : la droite n'émettait que
+ * sur CHANGEMENT (prémisse §2.3 du design, et la seule qui rende R1 tenable),
+ * tandis que la gauche RELÂCHE après un silence. Maintenir une touche ne
+ * produit aucun changement, donc aucune trame — et la gauche relâchait une
+ * touche pourtant enfoncée. Pas de répétition, et les modificateurs de la
+ * droite lâchaient en pleine frappe.
+ *
+ * La règle correcte distingue le REPOS de l'INACTIVITÉ : muet quand rien n'est
+ * enfoncé, rafraîchi tant que quelque chose l'est. Le repos ne coûte toujours
+ * rien, mais un maintien est réaffirmé avant que la gauche ne puisse en douter.
+ *
+ * ⚠ Les deux constantes sont liées : il faut qu'AU MOINS un rafraîchissement
+ * puisse se perdre sans que le délai tombe, sinon un seul paquet manqué relâche
+ * une touche tenue. Le test le vérifie. */
+#define HALF_TX_REFRESH_MS   100u
+#define HALF_LINK_TIMEOUT_MS 250u
+
+static inline bool half_tx_doit_emettre(bool change, bool tenu,
+                                        uint32_t now_ms, uint32_t dernier_ms,
+                                        uint32_t periode_ms)
+{
+    if (change) return true;
+    if (!tenu)  return false;   /* repos : silence, c'est la prémisse de R1 */
+    /* Écart en arithmétique non signée : le compteur de ms déborde à ~49 jours
+     * et une soustraction signée figerait l'émission ce jour-là. */
+    return (uint32_t)(now_ms - dernier_ms) >= periode_ms;
+}
+
 /* Émetteur — moitié droite. Initialise la radio en PTX sur le canal du lien.
  * Retourne false si la radio ne répond pas. */
 bool half_link_tx_init(void);
@@ -80,6 +131,21 @@ bool half_link_tx_init(void);
 /* Émet l'état courant de la demi-matrice. Le numéro de séquence est géré en
  * interne. Retourne true si le paquet a été acquitté par la gauche. */
 bool half_link_tx_matrix(const uint8_t *bitmap);
+
+/* Applique la règle de cadence puis émet s'il y a lieu.
+ *
+ * Le callback de scan appelle (bitmap, true) : du neuf, à publier tout de
+ * suite. La tâche de rafraîchissement appelle (NULL, false) : elle ne fournit
+ * PAS d'état, elle réaffirme celui qui est déjà enregistré. C'est ce qui garde
+ * un écrivain unique — sinon elle réécrirait un état lu au tour précédent et
+ * ressusciterait un relâchement publié entre-temps. */
+void half_link_tx_update(const uint8_t *bitmap, bool change);
+
+/* Démarre la tâche qui réaffirme les maintiens. Sans elle, une touche tenue
+ * plus de HALF_LINK_TIMEOUT_MS est relâchée à tort par la gauche : le callback
+ * du pilote ne se déclenche que sur changement, un maintien ne produit donc
+ * aucune trame. */
+bool half_link_tx_refresh_start(void);
 
 /* La touche (row, col) de la moitié DISTANTE est-elle enfoncée ? Coordonnées
  * locales à cette moitié — l'appelant décale vers les colonnes 7-13. Retourne
@@ -91,6 +157,14 @@ bool half_link_remote_pressed(uint8_t row, uint8_t col);
  * n'agir que sur du nouveau, sans jamais interférer avec le chemin local qui a
  * sa propre émission. */
 bool half_link_remote_changed(void);
+
+/* Émet une trame vers le dongle SANS cesser d'écouter la droite : excursion
+ * PRX→PTX→PRX sur la radio du lien, qui revient d'elle-même sur
+ * RF_CH_HALF_LINK. C'est le seul chemin d'émission autorisé quand HALF_LINK_RX
+ * est actif — une moitié n'a qu'une puce, et deux modules qui l'initialisent
+ * chacun de leur côté se sont déjà écrasés trois fois. */
+bool half_link_excursion_tx(uint8_t canal, const uint8_t addr[5],
+                            const uint8_t *payload, uint8_t len);
 
 /* Récepteur — moitié gauche. Initialise la radio en PRX et démarre la tâche
  * d'écoute, qui journalise chaque matrice reçue. */

@@ -41,6 +41,12 @@ uint8_t current_press_col[MAX_REPORT_KEYS];
 uint8_t current_press_stat[MAX_REPORT_KEYS];
 
 #if CONFIG_KASE_HALF_LINK_RX
+/* Sens de rangement des colonnes distantes — propriété du câblage, déclarée par
+ * le board.h du maître. 0 = simple décalage, 1 = miroir. */
+#ifndef BOARD_REMOTE_COLS_MIRRORED
+#define BOARD_REMOTE_COLS_MIRRORED 0
+#endif
+
 /* Frontière entre les entrées du balayage LOCAL et celles reçues par radio.
  * Tout ce qui est au-delà appartient à la moitié distante et se reconstruit à
  * chaque appel de matrix_apply_remote(). */
@@ -54,9 +60,11 @@ static uint8_t s_filled_local;
  * n'atteindraient jamais le moteur — c'est le défaut qui faisait que la droite
  * ne tapait rien alors que son lien était acquitté.
  *
- * Les touches distantes sont décalées de MATRIX_COLS : colonnes 0-6 cette
- * moitié, 7-13 l'autre. Le moteur ne sait pas d'où elles viennent, il indexe
- * keymaps[layer][row][col] et rien d'autre.
+ * Les touches distantes occupent les colonnes 7-13, cette moitié les 0-6. Le
+ * moteur ne sait pas d'où elles viennent, il indexe keymaps[layer][row][col] et
+ * rien d'autre. Le SENS de rangement dépend du câblage et passe par
+ * half_col_to_keymap() : les deux moitiés étant le même PCB retourné, la
+ * colonne 0 de la droite est sa touche la plus à droite.
  *
  * Le plafond MAX_REPORT_KEYS est respecté, et les touches locales gardent la
  * priorité puisqu'elles occupent le début du tableau. */
@@ -72,7 +80,8 @@ void matrix_apply_remote(void)
         for (uint8_t c = 0; c < MATRIX_COLS && filled < MAX_REPORT_KEYS; c++)
             if (half_link_remote_pressed(r, c)) {
                 current_press_row[filled]  = r;
-                current_press_col[filled]  = (uint8_t)(c + MATRIX_COLS);
+                current_press_col[filled]  = half_col_to_keymap(
+                        c, MATRIX_COLS, BOARD_REMOTE_COLS_MIRRORED);
                 current_press_stat[filled] = 1;
                 filled++;
             }
@@ -130,7 +139,7 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
             for (int r = 0; r < MATRIX_ROWS; r++)
                 for (int c = 0; c < MATRIX_COLS; c++)
                     if (new_state[r][c]) rf_bitmap_set(bm, (uint8_t)r, (uint8_t)c, true);
-            half_link_tx_matrix(bm);
+            half_link_tx_update(bm, true);
         }
     }
 #endif
@@ -196,11 +205,21 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
      *
      * La moitié droite du Niphargus scanne sans écran (module non compilé) : le
      * lien échouait sur ce seul symbole. Même cas que v2d_sleep.c. */
-#if CONFIG_KASE_HAS_DISPLAY
+    /* ⚠ LA FUSION N'A RIEN À VOIR AVEC L'ÉCRAN — ne jamais la remettre sous
+     * CONFIG_KASE_HAS_DISPLAY. Elle y a été imbriquée par accident le
+     * 2026-09-07, en corrigeant le piège du `for` sans accolades ci-dessus, et
+     * la moitié gauche n'ayant pas d'écran, ces deux lignes n'étaient PAS
+     * compilées : s_filled_local restait à zéro, donc matrix_apply_remote()
+     * repartait de l'indice 0 et ÉCRASAIT les touches locales, tandis que le
+     * chemin local n'appelait jamais la fusion et effaçait les distantes.
+     * Chaque moitié tapait seule, et AUCUNE combinaison entre les deux ne
+     * passait — Maj à gauche + lettre à droite, notamment. */
 #if CONFIG_KASE_HALF_LINK_RX
     s_filled_local = filled;   /* frontiere local / distant, pour la fusion */
     matrix_apply_remote();
 #endif
+
+#if CONFIG_KASE_HAS_DISPLAY
     for (uint8_t k = 0; k < new_keypresses; k++)
         status_display_notify_keypress();
 #else

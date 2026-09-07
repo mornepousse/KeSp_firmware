@@ -37,6 +37,22 @@ U6 = gauche (feuille `s3`), U5 = droite (feuille `right`). Nets de la droite suf
 - 100 Ω série sur chaque ligne côté MCU ; TVS SD05C côté switchs (transparent firmware).
 - 26 touches par moitié (rangées de 7/7/6/6).
 
+## Identifier les moitiés — adresse MAC
+
+Les deux moitiés se programment par le **même adaptateur FTDI**, déplacé de
+l'une à l'autre, et le port reste `/dev/ttyUSB2` dans les deux cas : rien dans
+`idf.py flash` ne dit sur laquelle il écrit.
+
+| Moitié | MAC (relevée le 2026-09-07) |
+|---|---|
+| gauche (maître) | `d0:cf:13:21:92:60` |
+| droite (scanner) | `80:b5:4e:eb:5e:08` |
+
+Le 2026-09-07, le firmware du maître a été écrit sur le scanner : la droite a
+cessé de scanner pour se mettre à écouter, et **rien n'a protesté** — le clavier
+avait perdu une moitié en silence. Flasher via `./scripts/flash-niphar.sh
+<left|right>`, qui lit la MAC et refuse si elle ne correspond pas.
+
 ## Pins communs aux deux MCU
 
 | Fonction | GPIO | Notes |

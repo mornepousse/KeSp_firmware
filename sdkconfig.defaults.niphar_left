@@ -38,10 +38,17 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # (comm/usb/usb_presence.c : tud_mounted) : USB branche -> HID par USB, USB
 # absent -> radio vers le slot clavier du dongle. Pas d'ESP-NOW ni de WiFi,
 # malgre l'intitule du Kconfig qui est un vestige.
-# ETAPE 1 de B3 : la gauche ECOUTE la droite. Le relais vers le dongle est
-# coupe — la meme radio ne peut pas faire les deux, c'est tout le risque R1.
-# On prouve d'abord que le lien porte ; la bascule PRX/PTX vient ensuite.
-# CONFIG_KASE_KBD_WIRELESS=y
+# ETAPE 2 de B3, 2026-09-07 : les DEUX en meme temps. La gauche ecoute la droite
+# en PRX sur le canal du lien ET relaie le HID fini au dongle, par excursion
+# PRX->PTX->PRX (half_link_excursion_tx). C'est le pari R1, mesure le 2026-09-05
+# a 50 excursions/s : 0 perte, 0,4 retransmission par paquet — soit bien plus
+# que ce qu'une frappe reelle provoque.
+#
+# La radio appartient a half_link, seul a l'initialiser ; kbd_relay la lui
+# emprunte. Deux `static rf_radio_t s_radio` concurrents ont fait ecouter cette
+# moitie sur le mauvais canal trois fois — rf_driver le dit desormais tout haut
+# (rf_claim_chip).
+CONFIG_KASE_KBD_WIRELESS=y
 CONFIG_KASE_HALF_LINK_RX=y
 
 # Epreuve R1 : mesurer ce que coute la bascule PRX/PTX.

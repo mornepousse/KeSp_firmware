@@ -150,8 +150,7 @@ static void bin_cmd_setkey(uint8_t cmd, const uint8_t *p, uint16_t l)
     }
 
     keymaps[layer][row][col] = value;
-    if (!save_keymaps((uint16_t *)keymaps,
-                 (size_t)LAYERS * MATRIX_ROWS * KEYMAP_COLS * sizeof(uint16_t))) {
+    if (!save_keymaps((uint16_t *)keymaps, KEYMAP_BLOB_BYTES)) {
         ks_respond_err(cmd, KS_STATUS_ERR_STORAGE); return;
     }
     ks_respond_ok(cmd);
@@ -174,8 +173,7 @@ static void bin_cmd_setlayer(uint8_t cmd, const uint8_t *p, uint16_t l)
             keymaps[layer][r][c] = val;
         }
     }
-    bool saved = save_keymaps((uint16_t *)keymaps,
-                 (size_t)LAYERS * MATRIX_ROWS * KEYMAP_COLS * sizeof(uint16_t));
+    bool saved = save_keymaps((uint16_t *)keymaps, KEYMAP_BLOB_BYTES);
     if (layer == current_layout)
         status_display_update_layer_name();
     if (!saved) { ks_respond_err(cmd, KS_STATUS_ERR_STORAGE); return; }

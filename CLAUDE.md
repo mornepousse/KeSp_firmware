@@ -57,6 +57,18 @@ risque R1 du design est levé (0 perte, 0,4 retransmission/paquet).
 **Alimentation batterie réparée le 2026-09-07** : les deux moitiés fonctionnent
 en autonomie, sans aucun câble, et tapent ensemble par radio. C'est le mode
 nominal du clavier.
+**Full RF le 2026-09-07** : la gauche écoute la droite en PRX sur le canal du
+lien ET relaie le HID fini au dongle, par excursion PRX→PTX→PRX. Le routage
+reste USB-first — USB branché → HID par USB, sur batterie → radio.
+
+⚠ **Une puce, un propriétaire.** La radio de chaque moitié appartient à
+`half_link` seul ; `kbd_relay_tx` la lui emprunte via `half_link_excursion_tx`.
+Deux modules qui l'initialisaient chacun de leur côté ont fait écouter la gauche
+sur le mauvais canal **trois fois**, toujours en silence. `rf_driver` refuse
+désormais de le taire (`rf_claim_chip`, revendication par broche CSN), et un
+mutex sérialise la tâche d'écoute et l'excursion — un propriétaire unique ne
+suffit pas s'il a deux bouches.
+
 Restent ouverts : B7 l'énergie (sommeil < 50 µA, scan RTC, réveil EXT1) et le
 driver du trackpad.
 Brochage : `docs/NIPHARGUS_V2_HARDWARE.md` (source de vérité, vérifié à la netlist).
@@ -73,7 +85,12 @@ Brochage : `docs/NIPHARGUS_V2_HARDWARE.md` (source de vérité, vérifié à la 
   trackpad (driver à écrire), relais vers le dongle
 - **niphar_right** : moitié DROITE, un scanner. Matrice 4×7 avec une table de
   brochage DIFFÉRENTE de la gauche (permutations de routage), émission de sa
-  demi-matrice par radio, ni keymap ni HID
+  demi-matrice par radio, ni keymap ni HID. Ses colonnes sont **en miroir** de
+  celles de la gauche (même PCB retourné) : la conversion est au maître, via
+  `BOARD_REMOTE_COLS_MIRRORED` et `half_col_to_keymap()`. Elle émet sur
+  changement, et **réaffirme les maintiens toutes les 100 ms** — le callback de
+  scan ne se déclenchant que sur changement, une touche tenue ne produirait plus
+  rien et la gauche la relâcherait au bout de 250 ms
 - **conchodytes** : souris (PMW3389), slot 2 du dongle
 
 Chaque variant sous `boards/<name>/` avec `board.h`, `board_keymap.c`,

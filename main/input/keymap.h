@@ -32,6 +32,20 @@ typedef struct {
 } macro_t;
 
 bool save_keymaps(uint16_t *data, size_t size_bytes);   /* true = persisté OK */
+/* Taille du blob « keymaps » en NVS — LA source unique, des deux côtés.
+ *
+ * Elle se calcule sur KEYMAP_COLS, PAS sur MATRIX_COLS : sur le maître d'un
+ * split, la keymap couvre les deux moitiés (14 colonnes) alors que la matrice
+ * locale n'en balaie que 7. Les deux formules coexistaient — écriture en
+ * KEYMAP_COLS (1120 octets), lecture en MATRIX_COLS (560) — et la garde de
+ * taille de load_keymaps rejetait donc le blob à CHAQUE démarrage, en gardant
+ * les valeurs d'usine. Le remappage de l'utilisateur était écrit, jamais relu,
+ * et rien ne le signalait. Constaté au banc le 2026-09-07.
+ *
+ * Verrouillé par test/test_keymap_blob_size.c. */
+#define KEYMAP_BLOB_BYTES \
+    ((size_t)LAYERS * MATRIX_ROWS * KEYMAP_COLS * sizeof(uint16_t))
+
 void load_keymaps(uint16_t *data, size_t size_bytes);
 void keymap_init_nvs(void);
 bool save_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count);

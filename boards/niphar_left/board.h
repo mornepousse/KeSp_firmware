@@ -65,6 +65,17 @@
  * Verrouillé par test/test_niphar_keymap_span.c. */
 #define KEYMAP_COLS  14
 
+/* Les deux moitiés sont le MÊME PCB retourné. La colonne 0 de cette moitié est
+ * sa touche la plus à gauche ; par symétrie, la colonne 0 de la droite est sa
+ * touche la plus à DROITE. Ses coordonnées se rangent donc à l'envers dans la
+ * keymap : colonne 0 → 13, colonne 6 → 7.
+ *
+ * Constaté au banc le 2026-09-07 : sans cela on tape la rangée de repos de la
+ * droite et il sort « ;lkjh » au lieu de « hjkl; ». La droite émet ses
+ * coordonnées physiques et n'a pas à savoir où elle est posée — la conversion
+ * appartient au maître, cf. half_col_to_keymap() dans comm/rf/half_link.h. */
+#define BOARD_REMOTE_COLS_MIRRORED  1
+
 /* ── Radio nRF24L01+ (SPI2, partagé avec l'écran côté droit) ── */
 #define BOARD_NRF_SPI_HOST   SPI2_HOST
 #define BOARD_NRF_SCK        GPIO_NUM_38
