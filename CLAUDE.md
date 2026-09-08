@@ -84,11 +84,32 @@ FIFO au retour détruisait des paquets déjà acquittés : la droite lisait 100 
 succès pendant que la gauche perdait 5 % des trames. Vider la FIFO AVANT
 d'émettre, jamais après.
 
-Restent ouverts : B7 l'énergie et le driver du trackpad. ⚠ La mesure exclut le
-« scan RTC » annoncé : le light sleep coûte 240 µA et l'ULP 170 µA (ESP32-S3
-datasheet v2.2, table 5-10, p. 68), donc une cible sous 50 µA n'admet que le
-deep sleep avec réveil EXT1 — au prix d'un redémarrage complet à la première
-frappe.
+**B7 fait le 2026-09-08** — veille hybride (`main/power/veille.c`) : light sleep
+après 1 min (~244 µA, état conservé, réveil ~1 ms), deep sleep après 4 h (~12 µA,
+réveil EXT1, redémarrage en 704 ms). Seuils réglables par Kconfig — éprouver
+EXT1 avec le défaut de 4 h demanderait d'attendre quatre heures.
+
+⚠ **L'ULP est exclu par la mesure** : 170 µA à lui seul (ESP32-S3 datasheet v2.2,
+table 5-10, p. 68), contre 50 µA de cible. Le « scan RTC » du design ne peut pas
+tenir — et il est inutile : le montage COL → interrupteur → diode → ROW permet de
+tenir les colonnes hautes et de réveiller sur n'importe quelle ligne.
+
+⚠ **La radio est éteinte dès l'étage léger** — écouter coûte 13,1 mA (nRF24L01+
+PS v1.0, table 4, p. 14) et le nRF24 n'a pas de mode d'écoute basse
+consommation. Une moitié endormie n'entend PAS l'autre : après une longue
+absence, la première frappe doit être sur la gauche. Au réveil, la réception
+doit être RÉARMÉE (`rf_driver_power_up` ne touche pas à CE), sinon la gauche
+repart alimentée mais sourde.
+
+⚠ **`rtc_gpio_hold_en()` survit au redémarrage**, pas seulement au sommeil.
+Sans `veille_liberer_gpio()` au boot, les colonnes restent figées et toute la
+matrice lit n'importe quoi — `gpio_reset_pin()` ne défait pas un maintien RTC.
+
+⚠ **L'horodatage des journaux ESP n'est pas du temps réel** : il suit le tick
+FreeRTOS, qui s'arrête en light sleep. Le compteur `up` du heartbeat, adossé à
+`esp_timer` et donc au RTC, est le seul témoin fiable de la durée d'un sommeil.
+
+Reste ouvert : le driver du trackpad.
 Brochage : `docs/NIPHARGUS_V2_HARDWARE.md` (source de vérité, vérifié à la netlist).
 
 ## Board variants

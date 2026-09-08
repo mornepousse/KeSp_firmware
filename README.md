@@ -44,11 +44,21 @@ that bind an emitter to a listener's patience now live together in
 `main/comm/rf/rf_slot.h`, because they are a contract between two firmwares
 rather than a number each side picks alone.
 
-Two things are still open. **The trackpad has no driver.** **Sleep is
-unwritten** — and the measurement rules out the obvious route: light sleep costs
-240 µA and the ULP coprocessor 170 µA (ESP32-S3 datasheet v2.2, table 5-10,
-p. 68), so a sub-50 µA target admits only deep sleep with EXT1 wake, at the cost
-of a full reboot on the first keypress.
+**Sleep landed on 2026-09-08**, as a hybrid: light sleep after a minute
+(~244 µA, state kept, ~1 ms wake) held for *hours* because at that current four
+of them cost 1 mAh out of 650 — then deep sleep beyond (~12 µA, EXT1 wake, 704 ms
+to reboot). The ULP coprocessor is ruled out by measurement rather than taste:
+170 µA on its own against a 50 µA target (ESP32-S3 datasheet v2.2, table 5-10,
+p. 68). It is also unnecessary — the COL → switch → diode → ROW wiring lets the
+columns be held high and any row wake the chip, so nothing needs scanning.
+
+The radio is off from the light tier onward: listening costs 13.1 mA (nRF24L01+
+PS v1.0, table 4, p. 14) and the nRF24 has no low-power listening mode. A
+sleeping half therefore cannot hear the other one, so after a long absence the
+first keypress has to land on the left half — the one that talks to the host.
+That is the chip's constraint, not an implementation shortcut.
+
+**The trackpad still has no driver.**
 
 Two decisions shape the whole codebase, and they are worth stating plainly
 because both replaced an earlier design that is still visible in the git history.
