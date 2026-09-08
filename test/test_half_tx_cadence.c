@@ -53,12 +53,25 @@ static void test_un_maintien_est_rafraichi(void)
 
 static void test_la_periode_tient_sous_le_delai_de_la_gauche(void)
 {
-    /* Contrainte de conception, pas de gout : la gauche relache a 250 ms. Une
-     * periode de rafraichissement doit laisser passer AU MOINS une trame
-     * perdue avant que ce delai ne tombe, sinon un seul paquet manque suffit a
-     * relacher une touche tenue. */
-    TEST_ASSERT(HALF_TX_REFRESH_MS * 2 < HALF_LINK_TIMEOUT_MS,
-                "deux rafraichissements tiennent dans le delai de relachement");
+    /* Contrainte de conception, pas de gout.
+     *
+     * La marge etait de DEUX rafraichissements (100 ms contre 250 ms), donc un
+     * seul paquet de reserve. Insuffisant, et pas seulement par malchance : le
+     * defaut s'auto-entretient. Quand le silence expire, la gauche relache les
+     * touches distantes, ce qui change le rapport HID, ce qui declenche une
+     * emission vers le dongle et ses reemissions bornees — autant d'excursions
+     * PRX->PTX->PRX pendant lesquelles elle est SOURDE. Le rafraichissement
+     * suivant de la droite tombe dans ce trou, le silence expire de nouveau, et
+     * la boucle se referme.
+     *
+     * Constate au banc le 2026-09-08 : un maintien long sur Backspace finissait
+     * par se relacher tout seul, alors que le lien ne perdait qu'un paquet sur
+     * 960. Ce n'etait pas la qualite du lien, c'etait la marge.
+     *
+     * QUATRE rafraichissements : il faut desormais quatre pertes CONSECUTIVES
+     * pour relacher a tort, ce qui sort du domaine de l'accident ordinaire. */
+    TEST_ASSERT(HALF_TX_REFRESH_MS * 4 <= HALF_LINK_TIMEOUT_MS,
+                "quatre rafraichissements tiennent dans le delai de relachement");
 }
 
 static void test_le_compteur_de_ms_peut_deborder(void)

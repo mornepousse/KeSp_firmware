@@ -309,12 +309,10 @@ static bool rf_rx_pairing_service(void)
  * redémarrage du dongle rétablissait le lien). Au-delà de RF_REARM_SILENCE_MS
  * sans le moindre paquet, on réécrit la configuration RX — pas de redémarrage.
  * Limité en cadence, et sans effet si le périphérique est simplement éteint. */
-#define RF_REARM_SILENCE_MS 2000u
+/* Constantes déplacées dans rf_slot.h : c'est un contrat avec le clavier,
+ * qui doit connaître le budget de silence qu'il ne faut pas dépasser. */
 
-/* Silence au-delà duquel un slot est déclaré perdu et son repli appliqué. Doit
- * rester nettement au-dessus de la cadence de la trame d'état au repos (~1 s)
- * pour ne pas relâcher un lien simplement inactif. */
-#define LINK_LOST_MS 2500u
+
 
 static void rearm_if_silent(rf_radio_t *radio, const rf_radio_cfg_t *cfg,
                             uint8_t slot, uint32_t *last_rearm_ms,
@@ -370,12 +368,12 @@ static void rf_rx_task(void *arg)
          * convenait plus : il parcourait un bitmap de matrice qui n'existe plus
          * ici, et n'aurait donc jamais rien relâché. */
         rf_safe_action_t a_kbd =
-            rf_slot_link_check(&s_link[RF_SLOT_KBD], RF_SLOT_KBD, now, LINK_LOST_MS);
+            rf_slot_link_check(&s_link[RF_SLOT_KBD], RF_SLOT_KBD, now, RF_LINK_LOST_MS);
         if (a_kbd != RF_SAFE_NONE) ESP_LOGW(TAG, "lien clavier perdu → touches relâchées");
         apply_safe_action(a_kbd);
 
         rf_safe_action_t a_mouse =
-            rf_slot_link_check(&s_link[RF_SLOT_MOUSE], RF_SLOT_MOUSE, now, LINK_LOST_MS);
+            rf_slot_link_check(&s_link[RF_SLOT_MOUSE], RF_SLOT_MOUSE, now, RF_LINK_LOST_MS);
         if (a_mouse != RF_SAFE_NONE) ESP_LOGW(TAG, "lien souris perdu → boutons relâchés");
         apply_safe_action(a_mouse);
 

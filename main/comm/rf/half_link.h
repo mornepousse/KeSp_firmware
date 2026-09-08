@@ -111,7 +111,11 @@ static inline uint8_t half_col_to_keymap(uint8_t col, uint8_t cols, bool miroir)
  * puisse se perdre sans que le délai tombe, sinon un seul paquet manqué relâche
  * une touche tenue. Le test le vérifie. */
 #define HALF_TX_REFRESH_MS   100u
-#define HALF_LINK_TIMEOUT_MS 250u
+/* 400 ms, et non 250 : à 100 ms de rafraîchissement, la marge n'était que d'un
+ * seul paquet. Il en faut désormais quatre consécutifs pour relâcher à tort.
+ * Une moitié réellement morte se déverrouille toujours en moins d'une
+ * demi-seconde, ce qui reste imperceptible. */
+#define HALF_LINK_TIMEOUT_MS 400u
 
 static inline bool half_tx_doit_emettre(bool change, bool tenu,
                                         uint32_t now_ms, uint32_t dernier_ms,

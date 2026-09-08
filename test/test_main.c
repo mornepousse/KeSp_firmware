@@ -46,6 +46,7 @@ extern void test_kbd_refresh(void);
 extern void test_niphar_keymap_span(void);
 extern void test_rf_channel_plan(void);
 extern void test_half_state(void);
+extern void test_rf_status_cadence(void);
 extern void test_keymap_blob_size(void);
 extern void test_half_col_map(void);
 extern void test_half_tx_cadence(void);
@@ -102,6 +103,7 @@ int main(void) {
     test_niphar_keymap_span();
     test_rf_channel_plan();
     test_half_state();
+    test_rf_status_cadence();
     test_keymap_blob_size();
     test_half_col_map();
     test_half_tx_cadence();

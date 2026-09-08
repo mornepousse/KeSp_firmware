@@ -15,6 +15,7 @@
 #include "half_link.h"
 #endif
 #include "rf_packet.h"
+#include "rf_slot.h"
 #include "rf_pairing.h"
 #include "usb_presence.h"   /* route poll + kbd_active_route (USB-first auto-switch) */
 #include "board.h"
@@ -89,18 +90,45 @@ static uint8_t s_last_kb[6];
 static kbd_refresh_t s_refresh;   /* répétition bornée — voir kbd_relay_tx.h */
 static esp_timer_handle_t s_refresh_timer;   /* periodic refresh; stopped during sleep */
 
+/* Bilan du chemin radio. Sans lui, une frappe perdue en mode RF est
+ * INDISCERNABLE : kbd_tx_locked abandonnait le rapport en silence quand le
+ * mutex n'était pas libre sous 20 ms, sans compteur ni journal. On distingue
+ * désormais les trois issues — remis à la radio, abandonné faute de mutex,
+ * refusé par l'excursion. */
+static uint32_t s_tx_remis, s_tx_sans_mutex, s_tx_refuses;
+
+/* Date de la DERNIÈRE émission, tous types confondus, et compteur de la trame
+ * d'état. Un rapport HID entretient le lien aussi bien qu'une trame de
+ * supervision : inutile d'en ajouter pendant la frappe. */
+static uint32_t s_derniere_emission_ms;
+static uint8_t  s_status_seq;
+
 static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
 {
-    if (s_tx_mutex && xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+    if (!s_tx_mutex) return;
+    if (xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(20)) != pdTRUE) {
+        s_tx_sans_mutex++;
+        ESP_LOGW(TAG, "rapport ABANDONNE (mutex occupe) — remis %u, perdus %u+%u",
+                 (unsigned)s_tx_remis, (unsigned)s_tx_sans_mutex,
+                 (unsigned)s_tx_refuses);
+        return;
+    }
+    {
 #if CONFIG_KASE_HALF_LINK_RX
         /* La radio écoute la droite : on ne peut pas simplement émettre, il
          * faut en sortir et y revenir. half_link possède la puce et restaure
          * lui-même le canal du lien. */
-        half_link_excursion_tx(s_dongle_ch, s_dongle_addr, buf, len);
+        bool ok = half_link_excursion_tx(s_dongle_ch, s_dongle_addr, buf, len);
 #else
-        rf_driver_send(&s_radio, buf, len);
+        bool ok = rf_driver_send(&s_radio, buf, len);
 #endif
+        if (ok) s_tx_remis++; else s_tx_refuses++;
+        s_derniere_emission_ms = (uint32_t)(esp_timer_get_time() / 1000);
         xSemaphoreGive(s_tx_mutex);
+        if (((s_tx_remis + s_tx_refuses) % 25) == 0)
+            ESP_LOGW(TAG, "HID->dongle : %u remis, %u sans mutex, %u refuses",
+                     (unsigned)s_tx_remis, (unsigned)s_tx_sans_mutex,
+                     (unsigned)s_tx_refuses);
     }
 }
 
@@ -116,10 +144,30 @@ static void kbd_relay_refresh_cb(void *arg)
     /* Réémission bornée : sans changement récent, on se tait. usb_presence_poll
      * ci-dessus reste appelé à chaque tick — c'est lui qui garde le routage
      * frais, il ne doit pas dépendre de l'activité clavier. */
-    if (!kbd_refresh_step(&s_refresh)) return;
-    uint8_t buf[9];
-    rf_encode_hidreport_kbd(buf, s_last_mod, s_last_kb);
-    kbd_tx_locked(buf, 9);
+    if (kbd_refresh_step(&s_refresh)) {
+        uint8_t buf[9];
+        rf_encode_hidreport_kbd(buf, s_last_mod, s_last_kb);
+        kbd_tx_locked(buf, 9);
+        return;
+    }
+
+    /* Supervision. Le dongle relâche les touches d'un slot muet depuis
+     * RF_LINK_LOST_MS — protection contre un clavier disparu, sans quoi une
+     * touche resterait collée chez l'hôte. Or la réémission ci-dessus est
+     * BORNÉE : une touche simplement MAINTENUE ne produit aucun changement,
+     * donc plus aucun rapport, et le dongle la relâchait au bout de ~2 s.
+     * Backspace remontait toute seule, constaté au banc le 2026-09-08.
+     *
+     * On ne s'annonce que si rien d'autre n'est parti depuis RF_STATUS_PERIOD_MS :
+     * pendant la frappe, les rapports HID suffisent, et le repos reste à une
+     * seule trame par seconde — négligeable pour R1. */
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (!rf_status_doit_emettre(now, s_derniere_emission_ms, RF_STATUS_PERIOD_MS))
+        return;
+    rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = s_status_seq++ };
+    uint8_t buf[4];
+    uint16_t n = rf_encode_status(buf, &st);
+    kbd_tx_locked(buf, (uint8_t)n);
 }
 
 /* ── Radio config helper (mirrors board_nrf_cfg in half_scan_task.c) ─────── */

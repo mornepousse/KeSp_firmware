@@ -68,6 +68,7 @@ add_executable(test_runner
     test_niphar_keymap_span.c
     test_rf_channel_plan.c
     test_half_state.c
+    test_rf_status_cadence.c
     test_keymap_blob_size.c
     test_half_col_map.c
     test_half_tx_cadence.c

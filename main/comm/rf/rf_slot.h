@@ -60,6 +60,34 @@
  * inter-moitiés, qui ne passe pas par le dongle. */
 #define RF_ADDR_HALF_LINK   0x03
 
+/* ── Supervision du lien clavier → dongle ───────────────────────────────────
+ *
+ * Le dongle déclare un slot PERDU après RF_LINK_LOST_MS de silence total et
+ * relâche ses touches — sans quoi un clavier disparu laisserait une touche
+ * collée chez l'hôte. Il attend donc une trame d'état au repos.
+ *
+ * Or PKT_TYPE_STATUS n'était JAMAIS émis : il n'existait qu'en décodage. Tant
+ * qu'on tape, les rapports HID entretiennent le lien par accident ; mais une
+ * touche MAINTENUE ne produit aucun changement, donc plus aucun rapport, et le
+ * dongle relâchait la touche au bout de ~2 s. Constaté au banc le 2026-09-08.
+ *
+ * Les deux constantes sont ici, et non chacune de son côté : c'est un contrat
+ * entre deux firmwares, et la moitié qui émet doit connaître le budget de celle
+ * qui écoute. Verrouillé par test/test_rf_status_cadence.c. */
+#define RF_STATUS_PERIOD_MS  1000u   /* cadence de la trame d'état */
+#define RF_REARM_SILENCE_MS  2000u   /* silence → réécrire la config RX (radio figée) */
+#define RF_LINK_LOST_MS      2500u   /* silence → slot perdu, repli appliqué */
+
+/* Faut-il émettre une trame d'état maintenant ? `dernier_ms` est la date de la
+ * DERNIÈRE émission quelle qu'elle soit — un rapport HID entretient le lien
+ * aussi bien qu'une trame d'état, inutile d'en ajouter pendant la frappe.
+ * Écart en arithmétique non signée : le compteur de ms déborde vers 49 jours. */
+static inline bool rf_status_doit_emettre(uint32_t now_ms, uint32_t dernier_ms,
+                                          uint32_t periode_ms)
+{
+    return (uint32_t)(now_ms - dernier_ms) >= periode_ms;
+}
+
 typedef enum {
     RF_SAFE_NONE = 0,
     RF_SAFE_RELEASE_KEYS,      /* rapport clavier vide */

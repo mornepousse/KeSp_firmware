@@ -171,11 +171,27 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
     /* ── Normal mode ── */
     memcpy(MATRIX_STATE, new_state, sizeof(MATRIX_STATE));
 
+    /* ⚠ NE PAS remettre keycodes[] à zéro ici. Ce tableau appartient au
+     * producteur de rapport : build_keycode_report() parcourt les six
+     * emplacements et écrit 0 dans chacun de ceux qui sont vides
+     * (key_processor.c, « Step 4 »), donc il le détermine entièrement — l'effacer
+     * ici n'apportait rien.
+     *
+     * Mais ce callback tourne dans la tâche du pilote keyboard_button, en
+     * priorité 5, pendant que vTaskKeyboard est peut-être ENTRE
+     * build_keycode_report() et send_hid_key() — une fenêtre qui contient tout
+     * process_matrix_changes(). L'effacement partait alors juste avant l'envoi :
+     * le rapport sortait VIDE, et le cycle suivant reconstruisait à partir d'un
+     * état où la touche était déjà relâchée. L'appui n'était jamais transmis.
+     *
+     * Constaté au banc le 2026-09-08 : en frappe rapide sur la moitié gauche,
+     * une touche sautait. Le mode test matrice (KS_CMD_MATRIX_TEST) a montré
+     * 45 événements sans le moindre trou — le balayage voyait tout, la perte
+     * était ici. */
     for (int i = 0; i < MAX_REPORT_KEYS; i++) {
         current_press_row[i] = INVALID_KEY_POS;
         current_press_col[i] = INVALID_KEY_POS;
         current_press_stat[i] = 0;
-        keycodes[i] = 0;
     }
 
     uint8_t filled = 0;

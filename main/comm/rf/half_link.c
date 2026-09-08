@@ -276,11 +276,81 @@ bool half_link_tx_refresh_start(void)
 #endif /* CONFIG_KASE_HAS_RF_TX */
 
 #if CONFIG_KASE_HALF_LINK_RX
+/* Lit et applique TOUS les paquets en attente. LE MUTEX DOIT ÊTRE TENU.
+ *
+ * Extrait de la tâche d'écoute le 2026-09-08 pour pouvoir être appelé AVANT une
+ * excursion, et c'est tout l'objet du correctif :
+ *
+ * rf_driver_oob_tx() termine son retour en PRX par un CMD_FLUSH_RX. Un paquet
+ * de la moitié droite arrivé juste avant l'excursion — déjà ACQUITTÉ par la
+ * radio, puisque l'acquittement ESB est matériel et n'attend pas le logiciel —
+ * dormait dans la FIFO et se faisait DÉTRUIRE. La droite comptait 100 %
+ * d'acquittements pendant que la gauche comptait 5 % de pertes ; les deux
+ * disaient vrai.
+ *
+ * Conséquence au clavier : un appui bref sur la droite dure moins que les
+ * 100 ms de rafraîchissement, donc le paquet suivant porte déjà le relâchement
+ * et la touche disparaît. Uniquement en mode RF — c'est le seul cas où la
+ * gauche fait des excursions. Constaté au banc le 2026-09-08 : parfait en USB,
+ * frappes perdues dès le débranchement, et toujours du côté droit. */
+static uint32_t s_recus, s_rejetes, s_perdus;
+static bool     s_seq_amorce;
+static uint8_t  s_seq_attendu;
+
+static void half_link_vider_fifo(void)
+{
+    uint8_t buf[32];
+    while (rf_driver_rx_available(&s_radio)) {
+        uint16_t n = rf_driver_read_rx(&s_radio, buf, sizeof(buf));
+        if (!n) break;
+        rf_heartbeat_t h;
+        if (!rf_decode_heartbeat(buf, n, &h)) {
+            s_rejetes++;
+            ESP_LOGW(TAG, "RX trame rejetee (len=%u, total %u)", n, (unsigned)s_rejetes);
+            continue;
+        }
+        s_recus++;
+
+        /* FUSION : l'etat recu devient celui de la moitie distante. Ne lever le
+         * drapeau que si l'ETAT a change — une retransmission ESB peut livrer
+         * deux fois la meme trame. */
+        uint8_t avant[RF_HALF_BITMAP_BYTES];
+        memcpy(avant, s_distant.bitmap, sizeof(avant));
+        half_state_recu(&s_distant, h.bitmap, (uint32_t)(esp_timer_get_time() / 1000));
+        if (memcmp(avant, s_distant.bitmap, sizeof(avant)))
+            s_distant_change = true;
+
+        /* Trous de sequence : le temoin de ce que l'excursion coute. seq est un
+         * octet, l'ecart se calcule donc modulo 256. */
+        if (s_seq_amorce) {
+            uint8_t ecart = (uint8_t)(h.seq - s_seq_attendu);
+            if (ecart) s_perdus += ecart;
+        }
+        s_seq_amorce = true;
+        s_seq_attendu = (uint8_t)(h.seq + 1);
+
+        /* Trace de banc : une ligne par trame, avec les coordonnees pressees.
+         * Coarse a 20 trames on ne peut pas dater une coupure a la seconde. */
+        {
+            char pos[64]; int off = 0;
+            for (int r = 0; r < RF_HALF_ROWS && off < (int)sizeof(pos) - 8; r++)
+                for (int c = 0; c < RF_HALF_COLS && off < (int)sizeof(pos) - 8; c++)
+                    if (rf_bitmap_get(h.bitmap, (uint8_t)r, (uint8_t)c))
+                        off += snprintf(pos + off, sizeof(pos) - off, "(%d,%d)", r, c);
+            ESP_LOGW(TAG, "RX seq=%u : %s", h.seq, off ? pos : "(rien)");
+        }
+        if ((s_recus % 20) == 0)
+            ESP_LOGW(TAG, "lien droite : %u recus, %u perdus (%u%%)",
+                     (unsigned)s_recus, (unsigned)s_perdus,
+                     (unsigned)(s_perdus * 100 / (s_recus + s_perdus)));
+    }
+}
+
 static void half_link_rx_task(void *arg)
 {
     (void)arg;
     uint8_t buf[32];
-    uint32_t recus = 0, rejetes = 0, perdus = 0, excursions = 0;
+    uint32_t excursions = 0; (void)excursions;
     bool seq_amorce = false;
     uint8_t seq_attendu = 0;
 #if CONFIG_KASE_HALF_LINK_R1
@@ -315,56 +385,10 @@ static void half_link_rx_task(void *arg)
         /* Sondage ET lecture sous le même verrou : entre les deux, une
          * excursion basculerait le circuit en PTX et la lecture ne rendrait
          * plus rien de sensé. */
-        uint16_t n = 0;
+        /* Vider la FIFO sous le verrou. Voir half_link_vider_fifo(). */
         if (xSemaphoreTake(s_radio_mux, pdMS_TO_TICKS(50)) == pdTRUE) {
-            if (rf_driver_rx_available(&s_radio))
-                n = rf_driver_read_rx(&s_radio, buf, sizeof(buf));
+            half_link_vider_fifo();
             xSemaphoreGive(s_radio_mux);
-        }
-        if (n) {
-            rf_heartbeat_t h;
-            if (rf_decode_heartbeat(buf, n, &h)) {
-                recus++;
-                /* FUSION : l'etat recu devient celui de la moitie distante. Le
-                 * moteur le lira via half_link_remote_pressed(). */
-                {
-                    uint8_t avant[RF_HALF_BITMAP_BYTES];
-                    memcpy(avant, s_distant.bitmap, sizeof(avant));
-                    half_state_recu(&s_distant, h.bitmap,
-                                    (uint32_t)(esp_timer_get_time() / 1000));
-                    /* Ne lever le drapeau que si l'ETAT a change : la droite
-                     * emet sur changement, mais une retransmission ESB peut
-                     * livrer deux fois la meme trame. */
-                    if (memcmp(avant, s_distant.bitmap, sizeof(avant)))
-                        s_distant_change = true;
-                }
-                /* Trous de séquence : le seul témoin de ce que l'excursion
-                 * coûte. seq est un octet, l'écart se calcule donc modulo 256. */
-                if (seq_amorce) {
-                    uint8_t ecart = (uint8_t)(h.seq - seq_attendu);
-                    if (ecart) perdus += ecart;
-                }
-                seq_amorce = true;
-                seq_attendu = (uint8_t)(h.seq + 1);
-                if ((recus % 20) == 0)
-                    ESP_LOGW(TAG, "R1 : %u recus, %u perdus (%u%%), %u excursions",
-                             (unsigned)recus, (unsigned)perdus,
-                             (unsigned)(perdus * 100 / (recus + perdus)),
-                             (unsigned)excursions);
-                /* Journal de banc : on affiche les coordonnees pressees plutot
-                 * que le bitmap brut, pour pouvoir comparer a ce qu'on presse
-                 * physiquement sur la droite. */
-                char pos[64]; int off = 0;
-                for (int r = 0; r < RF_HALF_ROWS && off < (int)sizeof(pos) - 8; r++)
-                    for (int c = 0; c < RF_HALF_COLS && off < (int)sizeof(pos) - 8; c++)
-                        if (rf_bitmap_get(h.bitmap, (uint8_t)r, (uint8_t)c))
-                            off += snprintf(pos + off, sizeof(pos) - off, "(%d,%d)", r, c);
-                ESP_LOGW(TAG, "RX #%u seq=%u : %s", (unsigned)recus, h.seq,
-                         off ? pos : "(rien enfonce)");
-            } else {
-                rejetes++;
-                ESP_LOGW(TAG, "RX trame rejetee (len=%u, total %u)", n, (unsigned)rejetes);
-            }
         }
         /* Repli sur silence (HALF_LINK_TIMEOUT_MS) : au-dela, une moitie qui
          * s est tue laisse
@@ -412,6 +436,14 @@ bool half_link_excursion_tx(uint8_t canal, const uint8_t addr[5],
         ESP_LOGW(TAG, "excursion abandonnee : radio occupee");
         return false;
     }
+
+    /* ⚠ VIDER LA FIFO AVANT DE PARTIR. rf_driver_oob_tx termine son retour en
+     * PRX par un CMD_FLUSH_RX : tout paquet de la droite arrive avant
+     * l'excursion et pas encore lu serait DETRUIT — et il a pourtant deja ete
+     * acquitte, l'acquittement ESB etant materiel. C'est ce qui faisait perdre
+     * des frappes de la moitie droite en mode RF, et en mode RF seulement. */
+    half_link_vider_fifo();
+
     bool ok = rf_driver_oob_tx(&s_radio, canal, addr, payload, len,
                                RF_CH_HALF_LINK, addr_lien);
     xSemaphoreGive(s_radio_mux);
