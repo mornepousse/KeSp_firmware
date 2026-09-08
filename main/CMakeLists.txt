@@ -239,6 +239,11 @@ if(CONFIG_KASE_KBD_WIRELESS AND CONFIG_KASE_HAS_DISPLAY)
     list(APPEND srcs "comm/rf/v2d_sleep.c")
 endif()
 
+# Veille hybride (B7) — light sleep puis deep sleep.
+if(CONFIG_KASE_VEILLE)
+    list(APPEND srcs "power/veille.c")
+endif()
+
 # Lien radio inter-moities (B3). rf_driver.c est deja tire par les gardes RF
 # ci-dessus quand l'un des deux bouts est actif.
 if(CONFIG_KASE_HALF_LINK_TX OR CONFIG_KASE_HALF_LINK_RX)
@@ -330,6 +335,7 @@ idf_component_register(
         "input"
         "periph"
         "periph/trackpad"
+        "power"
         "${BOARD_DIR}"
     PRIV_REQUIRES ${priv_requires}
 )

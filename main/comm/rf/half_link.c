@@ -5,6 +5,11 @@
 #include "rf_slot.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#if CONFIG_KASE_VEILLE
+#include "veille.h"
+#include "matrix_scan.h"
+#include "tinyusb.h"
+#endif
 #include "esp_attr.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -253,6 +258,17 @@ static void half_link_tx_refresh_task(void *arg)
     (void)arg;
     for (;;) {
         half_link_tx_update(NULL, false);
+#if CONFIG_KASE_VEILLE
+        /* La moitié droite n'a pas de tâche clavier : cette tâche, qui tourne
+         * déjà à 20 ms, porte aussi sa veille. Elle dort indépendamment de la
+         * gauche et se réveille sur SA matrice — la radio étant éteinte, aucune
+         * des deux ne peut réveiller l'autre. */
+        {
+            uint32_t inactif = (uint32_t)(esp_timer_get_time() / 1000)
+                             - get_last_activity_time_ms();
+            veille_pas(inactif, tud_mounted());
+        }
+#endif
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
@@ -514,3 +530,37 @@ bool half_link_rx_start(void)
     return true;
 }
 #endif /* CONFIG_KASE_HALF_LINK_RX */
+
+/* ── Veille : éteindre et rallumer la radio (brick B7) ──────────────────────
+ *
+ * Écouter coûte 13,1 mA (nRF24L01+ PS v1.0, table 4, p. 14) contre 900 nA en
+ * power-down : la radio doit être coupée dès l'étage léger, sans quoi le budget
+ * de veille n'a aucun sens. Les verrous sont PRIS et GARDÉS pendant tout le
+ * sommeil — rien ne doit tenter d'émettre sur une puce éteinte. */
+void half_link_radio_sleep(void)
+{
+    if (!s_radio.present) return;
+#if CONFIG_KASE_HALF_LINK_RX
+    if (s_radio_mux) xSemaphoreTake(s_radio_mux, pdMS_TO_TICKS(50));
+#endif
+#if CONFIG_KASE_HALF_LINK_TX
+    if (s_tx_radio_mux) xSemaphoreTake(s_tx_radio_mux, pdMS_TO_TICKS(50));
+#endif
+    rf_driver_power_down(&s_radio);
+}
+
+void half_link_radio_wake(void)
+{
+    if (!s_radio.present) return;
+    rf_driver_power_up(&s_radio);
+#if CONFIG_KASE_HALF_LINK_RX
+    /* power_up ne touche pas à CE : sans réarmement la moitié gauche
+     * repartirait alimentée mais sourde. */
+    rf_radio_cfg_t cfg = half_link_cfg();
+    rf_driver_rearm_rx(&s_radio, &cfg);
+    if (s_radio_mux) xSemaphoreGive(s_radio_mux);
+#endif
+#if CONFIG_KASE_HALF_LINK_TX
+    if (s_tx_radio_mux) xSemaphoreGive(s_tx_radio_mux);
+#endif
+}

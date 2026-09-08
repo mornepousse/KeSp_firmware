@@ -308,6 +308,13 @@ void matrix_setup(void)
     ESP_LOGI(TAG, "matrix_setup (shim)");
     memset(MATRIX_STATE, 0, sizeof(MATRIX_STATE));
     memset(SLAVE_MATRIX_STATE, 0, sizeof(SLAVE_MATRIX_STATE));
+    /* Le pilote est (re)créé : l'état précédent n'a plus de sens. Sans cet
+     * effacement, le premier balayage après un réveil de sommeil léger se
+     * compare à l'état d'AVANT le sommeil et fabrique des appuis et des
+     * relâchements fantômes. Le repartir de « rien d'enfoncé » fait au contraire
+     * que la touche qui a réveillé la carte est vue comme un appui neuf, ce qui
+     * est exactement ce qu'on veut. */
+    memset(prev_matrix_state, 0, sizeof(prev_matrix_state));
 
     // Build gpio arrays from keyboard_config defines
     static int output_gpios[MATRIX_COLS];

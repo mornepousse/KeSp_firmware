@@ -170,6 +170,11 @@ bool half_link_remote_changed(void);
 bool half_link_excursion_tx(uint8_t canal, const uint8_t addr[5],
                             const uint8_t *payload, uint8_t len);
 
+/* Veille (B7). Éteint la radio et GARDE les verrous jusqu'au réveil, pour que
+ * rien ne tente d'émettre sur une puce sans alimentation. */
+void half_link_radio_sleep(void);
+void half_link_radio_wake(void);
+
 /* Récepteur — moitié gauche. Initialise la radio en PRX et démarre la tâche
  * d'écoute, qui journalise chaque matrice reçue. */
 bool half_link_rx_start(void);

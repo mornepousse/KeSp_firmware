@@ -62,3 +62,14 @@ CONFIG_KASE_HALF_LINK_RX=y
 # A RETIRER une fois l'alimentation batterie reparee : tant que c'est actif, la
 # moitie gauche ne tape plus par son propre USB.
 # CONFIG_KASE_RF_FORCE_ROUTE=y   (sans relais, le forcage n'a plus d'objet)
+
+# B7 — veille hybride. Léger (light sleep, ~240 µA, réveil ~1 ms, état
+# conservé) tenu plusieurs heures parce qu'il ne coûte quasiment rien, puis
+# profond (deep sleep, ~8 µA, réveil EXT1) au-delà, au prix d'un redémarrage.
+# ⚠ Radio éteinte dès l'étage léger : écouter coûte 13,1 mA. Une moitié
+# endormie n'entend pas l'autre, chacune se réveille sur SA matrice.
+CONFIG_KASE_VEILLE=y
+# carte ne repart pas, c'est le light sleep et rien d'autre. À rabaisser à 30 s
+# ensuite pour éprouver EXT1.
+CONFIG_KASE_VEILLE_LEGERE_S=60
+CONFIG_KASE_VEILLE_PROFONDE_S=14400

@@ -1,6 +1,10 @@
 /* Keyboard task: main coordinator loop.
    Waits for matrix ISR notification, delegates to key_processor and hid_report. */
 #include "keyboard_task.h"
+#if CONFIG_KASE_VEILLE
+#include "veille.h"
+#include "tinyusb.h"
+#endif
 #include "key_processor.h"
 #include "hid_report.h"
 #include "keyboard_actions.h"
@@ -159,6 +163,19 @@ void vTaskKeyboard(void *pvParameters)
                 send_hid_key();
             }
         }
+
+#if CONFIG_KASE_VEILLE
+        /* Veille hybride (B7). Le seuil léger est court, le profond se compte
+         * en heures : à 240 µA l'étage léger coûte 1 mAh sur quatre heures,
+         * donc autant le tenir longtemps et éviter le redémarrage de 683 ms.
+         * Bloquée tant que l'USB est énuméré — la carte est alors alimentée et
+         * l'hôte attend un clavier. */
+        {
+            uint32_t inactif = (uint32_t)(esp_timer_get_time() / 1000)
+                             - get_last_activity_time_ms();
+            veille_pas(inactif, tud_mounted());
+        }
+#endif
 
 #if CONFIG_KASE_KBD_WIRELESS && CONFIG_KASE_HAS_DISPLAY
         /* RF-mode idle → light-sleep (USB stays awake). v2d_sleep_enter() blocks

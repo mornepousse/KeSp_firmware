@@ -42,3 +42,10 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
 # B3 : la droite emet sa demi-matrice vers la gauche.
 CONFIG_KASE_HALF_LINK_TX=y
+
+# B7 — veille hybride. Léger (light sleep, ~240 µA, réveil ~1 ms, état
+# conservé) tenu plusieurs heures parce qu'il ne coûte quasiment rien, puis
+# profond (deep sleep, ~8 µA, réveil EXT1) au-delà, au prix d'un redémarrage.
+# ⚠ Radio éteinte dès l'étage léger : écouter coûte 13,1 mA. Une moitié
+# endormie n'entend pas l'autre, chacune se réveille sur SA matrice.
+CONFIG_KASE_VEILLE=y

@@ -5,6 +5,10 @@
 #include "cpu_time.h"
 #include "esp_attr.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
+#if CONFIG_KASE_VEILLE
+#include "veille.h"
+#endif
 #include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -169,6 +173,23 @@ void app_main(void) {
   }
   boot_crash_count++;
   ESP_LOGI(TAG, "Boot count: %lu", (unsigned long)boot_crash_count);
+
+#if CONFIG_KASE_VEILLE
+  /* D'où vient ce démarrage ? Un réveil de sommeil profond est un REDÉMARRAGE :
+   * sans cette ligne, il est indiscernable d'une mise sous tension ou d'un
+   * plantage, et le journal ne permet pas de dire si EXT1 a fonctionné.
+   * Éprouvé au banc le 2026-09-08 : rst:0x5 (DSLEEP), Boot OK à 702 ms. */
+  {
+    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    if (cause == ESP_SLEEP_WAKEUP_EXT1)
+      ESP_LOGW(TAG, "reveil EXT1 : une touche a sorti la carte du sommeil profond");
+    else if (cause != ESP_SLEEP_WAKEUP_UNDEFINED)
+      ESP_LOGW(TAG, "reveil de veille, cause=%d", (int)cause);
+  }
+  /* AVANT toute configuration de matrice : les colonnes peuvent être encore
+   * figées par le maintien RTC posé avant le sommeil profond. */
+  veille_liberer_gpio();
+#endif
 
   if (boot_crash_count > BOOT_CRASH_LIMIT) {
     ESP_LOGW(TAG, "Crash loop detected (%lu boots) — SAFE MODE",
