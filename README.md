@@ -28,18 +28,27 @@ finished HID reports to the dongle on its own channel. A wired TRRS link is the
 planned alternative; its framing and 5 V handshake are written and host-tested,
 but no cable has been received.
 
-**Hardware status — 2026-09-06.** Both halves exist and work together: pin
-tables verified against the netlist on each, matrix scanning, the radio link
-between them, keymap fusion, and HID relayed to the dongle. Typing on either
-half reaches the host.
+**Hardware status — 2026-09-08.** The keyboard works in its nominal mode: both
+halves on battery, no cable anywhere, typing together through the dongle. Pin
+tables were verified against the netlist on each half; the left runs the keymap
+engine over all 14 columns and relays finished HID to the dongle by a
+PRX→PTX→PRX excursion on its single radio.
 
-**Battery power works since 2026-09-07**, after a hardware repair around the
-3.3 V converter. Both halves run untethered and type together over the radio —
-the keyboard's nominal mode.
+Getting there took three bugs that were all the same bug. *Emit on change* and
+*release on silence* are each reasonable, and they do not compose: whoever emits
+only when something changes goes quiet while a key is merely **held**, and
+whoever releases on silence then drops that key. The pattern bit at three links
+in a row — right half to left, and left half to dongle — and each time the cure
+was the same: silent at rest, refreshed while something is held. The constants
+that bind an emitter to a listener's patience now live together in
+`main/comm/rf/rf_slot.h`, because they are a contract between two firmwares
+rather than a number each side picks alone.
 
-Two things are still open. **The trackpad has no driver.** **Sleep (< 50 µA) is
-unwritten** — it needs RTC-domain scanning and EXT1 wake, and nothing of that
-exists yet.
+Two things are still open. **The trackpad has no driver.** **Sleep is
+unwritten** — and the measurement rules out the obvious route: light sleep costs
+240 µA and the ULP coprocessor 170 µA (ESP32-S3 datasheet v2.2, table 5-10,
+p. 68), so a sub-50 µA target admits only deep sleep with EXT1 wake, at the cost
+of a full reboot on the first keypress.
 
 Two decisions shape the whole codebase, and they are worth stating plainly
 because both replaced an earlier design that is still visible in the git history.
@@ -109,9 +118,11 @@ their ESP-NOW side channel, and the dongle's keymap engine.
 - **USB dongle** — presents as a plain keyboard to the host and repeats what it
   receives; two slots (keyboard, mouse) with per-set addressing and pairing, so
   several sets coexist in the same room
-- **Link supervision** — a 4-byte idle status frame (battery, link quality). It
-  exists for one reason: a receiver cannot tell *"not typing"* from *"dead"* if
-  both look like silence
+- **Link supervision** — a 4-byte idle status frame (battery, link quality),
+  sent once a second whenever nothing else has gone out. It exists for one
+  reason: a receiver cannot tell *"not typing"* from *"dead"* if both look like
+  silence. It was specified, decoded by the dongle, and **never emitted** until
+  2026-09-08 — so a held key went quiet and the dongle released it after 2.5 s
 - **Fail-safe on link loss** — release what that slot was holding, and only that
 - **Inter-half wire link** — length-prefixed frames with CRC-8 over TRRS, plus a
   two-sided handshake before either half enables 5 V on the connector

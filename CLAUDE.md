@@ -69,8 +69,26 @@ désormais de le taire (`rf_claim_chip`, revendication par broche CSN), et un
 mutex sérialise la tâche d'écoute et l'excursion — un propriétaire unique ne
 suffit pas s'il a deux bouches.
 
-Restent ouverts : B7 l'énergie (sommeil < 50 µA, scan RTC, réveil EXT1) et le
-driver du trackpad.
+⚠ **« Émettre sur changement » et « relâcher sur silence » ne composent pas.**
+Ce couple a produit trois pannes distinctes le 2026-09-08, à trois maillons de
+la chaîne. Qui n'émet que sur changement se tait pendant qu'une touche est
+simplement TENUE ; qui relâche sur silence la lâche alors. Remède unique : muet
+au repos, entretenu tant que quelque chose est tenu. Les constantes qui lient un
+émetteur à la patience de son auditeur sont dans `comm/rf/rf_slot.h`
+(`RF_STATUS_PERIOD_MS`, `RF_LINK_LOST_MS`) — c'est un contrat entre deux
+firmwares, pas un nombre que chacun choisit dans son coin.
+
+⚠ **Un acquittement ESB ne prouve pas la réception logicielle.** Le nRF24 répond
+de lui-même dès que canal et adresse concordent. Une excursion qui vidait la
+FIFO au retour détruisait des paquets déjà acquittés : la droite lisait 100 % de
+succès pendant que la gauche perdait 5 % des trames. Vider la FIFO AVANT
+d'émettre, jamais après.
+
+Restent ouverts : B7 l'énergie et le driver du trackpad. ⚠ La mesure exclut le
+« scan RTC » annoncé : le light sleep coûte 240 µA et l'ULP 170 µA (ESP32-S3
+datasheet v2.2, table 5-10, p. 68), donc une cible sous 50 µA n'admet que le
+deep sleep avec réveil EXT1 — au prix d'un redémarrage complet à la première
+frappe.
 Brochage : `docs/NIPHARGUS_V2_HARDWARE.md` (source de vérité, vérifié à la netlist).
 
 ## Board variants
