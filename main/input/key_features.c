@@ -75,16 +75,33 @@ void caps_word_process(uint8_t *keycode, uint8_t *modifier)
 /* ── Repeat Key ──────────────────────────────────────────────────── */
 
 static uint8_t last_keycode = 0;
+static uint8_t last_mods    = 0;   /* mod d'un Modified Key, 0 sinon */
 
 void repeat_key_record(uint8_t keycode)
 {
-    if (keycode != 0 && keycode < HID_KEY_CONTROL_LEFT)
+    repeat_key_record_mk(keycode, 0);
+}
+
+/* Enregistre la touche ET le mod qu'un Modified Key lui attachait : après
+ * « ! » (Shift+1), Repeat doit redonner « ! », pas « 1 ». Une touche normale
+ * passe 0 — ses mods physiques ne sont PAS mémorisés, le comportement d'avant
+ * est inchangé. */
+void repeat_key_record_mk(uint8_t keycode, uint8_t mk_mods)
+{
+    if (keycode != 0 && keycode < HID_KEY_CONTROL_LEFT) {
         last_keycode = keycode;
+        last_mods    = mk_mods;
+    }
 }
 
 uint8_t repeat_key_get(void)
 {
     return last_keycode;
+}
+
+uint8_t repeat_key_get_mods(void)
+{
+    return last_mods;
 }
 
 /* ── Grave Escape ───────────────────────────────────────────────── */

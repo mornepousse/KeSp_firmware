@@ -12,6 +12,7 @@
 #include "test_framework.h"
 
 /* ── Inclusions production (stubs et globals définis dans ce TU) ───── */
+#include "key_definitions.h"     /* K_MK, K_EXLM, MOD_* — pour la section Modified Key */
 #include "matrix_scan.h"         /* extern globals : current_press_*, keycodes, etc. */
 #include "keymap.h"              /* extern macro_t macros_list[], keymaps[][][] */
 #include "key_processor.h"       /* build_keycode_report, process_matrix_changes */
@@ -624,4 +625,158 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_macro_delay_sets_pending);
     TEST_RUN(test_kp_macro_delay_no_retrigger_held);
     TEST_RUN(test_kp_macro_legacy_injects_keys);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Modified Key (MK) — 0x8000-0x8FFF : « cette touche envoie Shift+1 ».
+ *
+ * Brief : docs/superpowers/specs/2026-09-11-modified-keycodes-design.md.
+ *
+ * HID ne connaît pas « ! » : 1 et ! sont la même touche (0x1E), c'est l'OS qui
+ * tranche selon Shift. Le firmware doit donc mettre Shift dans l'OCTET
+ * MODIFIER et 0x1E dans keycodes[] DANS LE MÊME RAPPORT. Deux erreurs sont
+ * naturelles ici, et chaque test ci-dessous nomme celle qu'il attrape :
+ *
+ *   (M7)  pousser 0xE1 dans keycodes[] au lieu de l'octet modifier — c'est le
+ *         bug corrigé au commit bffdf4ec, où le mod volait une slot et se
+ *         perdait quand les six étaient pleines ;
+ *   (COL) laisser le mod dans extra_mods après relâchement — mod collant ;
+ *   (TH)  router MK vers tap_hold comme MT — un tap enverrait « 1 » ;
+ *   (BIT) tester `& 0x8000` au lieu de `& 0xF000 == 0x8000` — attrape tout ce
+ *         qui est ≥ 0x8000, y compris les plages futures.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+#define T_KC_1    0x1Eu
+#define T_KC_C    0x06u
+#define T_MOD_LCTL 0x01u
+
+static void test_mk_press_shift_dans_le_modifier_et_1_dans_keycodes(void)
+{
+    /* La sémantique de base. Attrape (M7) et (TH). */
+    reset_kp_state();
+    keymaps[0][0][0] = K_EXLM;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_1), "K_EXLM → 0x1E dans keycodes[]");
+    TEST_ASSERT(key_processor_report_mods() & T_MOD_LSFT,
+                "K_EXLM → Shift dans l'octet modifier");
+    TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT),
+                "et JAMAIS 0xE1 dans keycodes[] — le mod ne vole pas de slot (M7)");
+}
+
+static void test_mk_release_ne_laisse_rien(void)
+{
+    /* Attrape (COL). */
+    reset_kp_state();
+    keymaps[0][0][0] = K_EXLM;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    release_all_keys();
+    build_keycode_report();
+    TEST_ASSERT(!keycode_in_report(T_KC_1), "relâché → 0x1E absent");
+    TEST_ASSERT(!(key_processor_report_mods() & T_MOD_LSFT),
+                "relâché → Shift absent du modifier (pas de mod collant)");
+}
+
+static void test_mk_ne_vole_pas_de_slot_quand_le_rapport_est_plein(void)
+{
+    /* LE test M7 : cinq touches normales + K_EXLM = six slots exactement. Si le
+     * Shift entrait dans keycodes[], l'une des six serait éjectée. */
+    reset_kp_state();
+    keymaps[0][0][0] = K_EXLM;
+    keymaps[0][0][1] = T_KC_A;
+    keymaps[0][0][2] = T_KC_B;
+    keymaps[0][0][3] = T_KC_C;
+    keymaps[0][0][4] = 0x07u;   /* D */
+    keymaps[0][0][5] = 0x08u;   /* E */
+    for (int c = 0; c < 6; c++) press_key(c, 0, (uint8_t)c);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_1) && keycode_in_report(T_KC_A) &&
+                keycode_in_report(T_KC_B) && keycode_in_report(T_KC_C) &&
+                keycode_in_report(0x07u)  && keycode_in_report(0x08u),
+                "les six touches sont TOUTES dans le rapport");
+    TEST_ASSERT(key_processor_report_mods() & T_MOD_LSFT, "et Shift est dans le modifier");
+    TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT), "aucun 0xE1 dans keycodes[] (M7)");
+}
+
+static void test_mk_n_est_pas_que_shift(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = K_MK(MOD_LCTL, T_KC_C);
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_C), "K_MK(LCTL, C) → C dans keycodes[]");
+    TEST_ASSERT(key_processor_report_mods() & T_MOD_LCTL, "et Ctrl dans le modifier");
+    TEST_ASSERT(!(key_processor_report_mods() & T_MOD_LSFT), "et PAS Shift");
+}
+
+static void test_mk_tenu_plus_une_lettre_la_limite_hid(void)
+{
+    /* L'octet modifier est GLOBAL au rapport : tenir K_EXLM et presser A donne
+     * Shift+1+A = « !A ». QMK fait pareil. On le fige comme comportement
+     * documenté, pas comme défaut caché. */
+    reset_kp_state();
+    keymaps[0][0][0] = K_EXLM;
+    keymaps[0][0][1] = T_KC_A;
+    press_key(0, 0, 0);
+    press_key(1, 0, 1);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_1) && keycode_in_report(T_KC_A),
+                "0x1E et 0x04 dans le même rapport");
+    TEST_ASSERT(key_processor_report_mods() & T_MOD_LSFT, "avec Shift global");
+}
+
+static void test_mk_bornes_de_la_plage(void)
+{
+    /* Attrape (BIT). */
+    TEST_ASSERT(!K_IS_MK(0x7FFFu), "0x7FFF n'est pas MK");
+    TEST_ASSERT( K_IS_MK(0x8000u), "0x8000 est MK");
+    TEST_ASSERT( K_IS_MK(0x8FFFu), "0x8FFF est MK");
+    TEST_ASSERT(!K_IS_MK(0x9000u), "0x9000 n'est PAS MK — `& 0x8000` le prendrait");
+    TEST_ASSERT(K_MK_MOD(K_EXLM) == MOD_LSFT && K_MK_KEY(K_EXLM) == T_KC_1,
+                "K_EXLM se décompose en (Shift, 0x1E)");
+}
+
+static void test_mk_repeat_reproduit_le_symbole(void)
+{
+    /* Décision 4 du brief : après « ! », Repeat doit redonner « ! », pas « 1 ». */
+    reset_kp_state();
+    keymaps[0][0][0] = K_EXLM;
+    keymaps[0][0][1] = K_REPEAT;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    release_all_keys();
+    build_keycode_report();
+    press_key(0, 0, 1);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_1), "Repeat → 0x1E");
+    TEST_ASSERT(key_processor_report_mods() & T_MOD_LSFT,
+                "Repeat → et le Shift du MK, sinon on obtient « 1 »");
+}
+
+static void test_mk_sous_caps_word_un_seul_shift(void)
+{
+    /* Décision 2 : caps word ne shifte que les lettres ; 0x1E n'en est pas une.
+     * Résultat attendu : exactement Shift (celui du MK), rien de plus. */
+    reset_kp_state();
+    caps_word_toggle();
+    keymaps[0][0][0] = K_EXLM;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_1), "0x1E présent");
+    TEST_ASSERT((key_processor_report_mods() & 0x0F) == T_MOD_LSFT,
+                "un seul Shift, aucun autre mod ajouté");
+}
+
+void test_modified_key(void)
+{
+    printf("\n-- Modified Key : Shift+touche en une pression --\n");
+    test_mk_press_shift_dans_le_modifier_et_1_dans_keycodes();
+    test_mk_release_ne_laisse_rien();
+    test_mk_ne_vole_pas_de_slot_quand_le_rapport_est_plein();
+    test_mk_n_est_pas_que_shift();
+    test_mk_tenu_plus_une_lettre_la_limite_hid();
+    test_mk_bornes_de_la_plage();
+    test_mk_repeat_reproduit_le_symbole();
+    test_mk_sous_caps_word_un_seul_shift();
 }

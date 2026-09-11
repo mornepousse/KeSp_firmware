@@ -43,9 +43,13 @@ void caps_word_process(uint8_t *keycode, uint8_t *modifier);
 
 /* Record the last non-modifier keypress */
 void repeat_key_record(uint8_t keycode);
+/* Variante qui mémorise le mod d'un Modified Key avec la touche. */
+void repeat_key_record_mk(uint8_t keycode, uint8_t mk_mods);
 
 /* Get the keycode to repeat (0 if nothing recorded) */
 uint8_t repeat_key_get(void);
+/* Le mod mémorisé avec la dernière touche (0 pour une touche normale). */
+uint8_t repeat_key_get_mods(void);
 
 /* ── Grave Escape ───────────────────────────────────────────────── */
 

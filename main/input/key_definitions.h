@@ -424,6 +424,60 @@ static const uint16_t TO_L9 = 0x1400;
 #define K_IS_SEC(kc)                 (((kc) & 0xFF00) == K_SEC_BASE)
 #define K_SEC_TYPE(kc)               ((kc) & 0xFF)
 
+/* ── Modified Key (MK) — 0x8000-0x8FFF : une pression envoie mod + touche ────
+ *
+ * HID ne connaît pas « ! » : 1 et ! sont la même touche (0x1E), c'est l'OS qui
+ * tranche selon Shift. Poser « ! » directement sur une touche — le besoin de
+ * tout clavier sans rangée de chiffres — demande donc d'envoyer Shift et 0x1E
+ * DANS LE MÊME RAPPORT. QMK appelle ça KC_EXLM = LSFT(KC_1).
+ *
+ * Ce n'est PAS un tap-hold : immédiat, sans timer, aucun passage par
+ * tap_hold.c. Un tap sur MT(Shift, 1) donnerait « 1 » ; un tap sur K_EXLM
+ * donne « ! ». Même forme d'encodage que MT, pour qu'un lecteur qui connaît
+ * l'un lise l'autre. Le nibble mod porte les quatre mods GAUCHES seulement
+ * (LCTL/LSFT/LALT/LGUI), même contrainte que MT ; le champ kc fait 8 bits,
+ * donc K_MT(mod, K_MK(...)) est impossible — limite documentée, pas contournée.
+ *
+ * ⚠ Le mod va dans l'OCTET MODIFIER du rapport, jamais dans keycodes[] : y
+ * pousser 0xE1 volerait une slot et se perdrait quand les six sont pleines.
+ * C'est le bug M7 corrigé au commit bffdf4ec, et l'erreur la plus naturelle à
+ * commettre ici. Verrouillé par test/test_keycode_report.c (test_modified_key).
+ *
+ * ⚠ Plage ≥ 0x8000 : detect_internal_function prenait un int16_t, ce qui
+ * rendait ces keycodes négatifs — ils étaient rejetés par accident, pas par
+ * conception. Passé en uint16_t avec cette plage. */
+#define K_MK_BASE                    0x8000
+#define K_MK(mod, kc)               (K_MK_BASE | (((mod) & 0x0F) << 8) | ((kc) & 0xFF))
+#define K_IS_MK(kc)                 (((kc) & 0xF000) == K_MK_BASE)
+#define K_MK_MOD(kc)                (((kc) >> 8) & 0x0F)
+#define K_MK_KEY(kc)                ((kc) & 0xFF)
+
+/* Symboles shiftés, disposition US. Les seize premiers sont ceux qu'une keymap
+ * de mai 2026 utilisait déjà sans qu'ils existent. Une autre disposition se
+ * traite par les mêmes K_MK(MOD_LSFT, kc) avec d'autres kc.
+ * Pas de K_LT / K_GT pour < et > : K_LT(layer, kc) est déjà le Layer-Tap. */
+#define K_EXLM  K_MK(MOD_LSFT, K_1)      /* ! */
+#define K_AT    K_MK(MOD_LSFT, K_2)      /* @ */
+#define K_HASH  K_MK(MOD_LSFT, K_3)      /* # */
+#define K_DLR   K_MK(MOD_LSFT, K_4)      /* $ */
+#define K_PERC  K_MK(MOD_LSFT, K_5)      /* % */
+#define K_CIRC  K_MK(MOD_LSFT, K_6)      /* ^ */
+#define K_AMPR  K_MK(MOD_LSFT, K_7)      /* & */
+#define K_ASTR  K_MK(MOD_LSFT, K_8)      /* * */
+#define K_LPRN  K_MK(MOD_LSFT, K_9)      /* ( */
+#define K_RPRN  K_MK(MOD_LSFT, K_0)      /* ) */
+#define K_UNDS  K_MK(MOD_LSFT, K_MINUS)  /* _ */
+#define K_PLUS  K_MK(MOD_LSFT, K_EQL)    /* + */
+#define K_LCBR  K_MK(MOD_LSFT, K_LBRC)   /* { */
+#define K_RCBR  K_MK(MOD_LSFT, K_RBRC)   /* } */
+#define K_PIPE  K_MK(MOD_LSFT, K_BSLSH)  /* | */
+#define K_TILD  K_MK(MOD_LSFT, K_GRV)    /* ~ */
+#define K_COLN  K_MK(MOD_LSFT, K_SCLN)   /* : */
+#define K_DQUO  K_MK(MOD_LSFT, K_QUOT)   /* " */
+#define K_LABK  K_MK(MOD_LSFT, K_COMM)   /* < */
+#define K_RABK  K_MK(MOD_LSFT, K_DOT)    /* > */
+#define K_QUES  K_MK(MOD_LSFT, K_SLSH)   /* ? */
+
 /* Display: cycle l'écran OLED de repos (HOME→STATS→TAMA) — 0x3F00 (libre) */
 #define K_DISP_NEXT                  0x3F00
 

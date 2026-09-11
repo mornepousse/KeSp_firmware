@@ -32,6 +32,7 @@ extern void test_rf_signal_q255(void);
 extern void test_cdc_monitor(void);
 extern void test_cdc_rx_feed(void);
 extern void test_keycode_report(void);
+extern void test_modified_key(void);
 extern void test_sec_confirm(void);
 extern void test_sec_store(void);
 extern void test_cdc_sec(void);
@@ -90,6 +91,7 @@ int main(void) {
     test_cdc_monitor();
     test_cdc_rx_feed();
     test_keycode_report();
+    test_modified_key();
     test_sec_confirm();
     test_sec_store();
     test_cdc_sec();

@@ -34,6 +34,12 @@ uint8_t current_col_layer_changer = INVALID_KEY_POS;
 static uint8_t lm_active_mods = 0;  /* modifier mask held by LM key */
 uint16_t extra_keycodes[6] = {0};
 
+/* Modified Key : mods à OR-er dans l'octet modifier, et par slot pour que
+ * Repeat sache qu'une slot vient d'un MK. Remis à zéro à chaque rapport, comme
+ * macro_hold_mods — un MK relâché ne laisse rien derrière lui. */
+static uint8_t mk_mods = 0;
+static uint8_t mk_slot_mods[6] = {0};
+
 static uint8_t prev_press_row[6] = {INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS,
                                      INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS};
 static uint8_t prev_press_col[6] = {INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS,
@@ -80,7 +86,9 @@ static bool is_new_press(uint8_t row, uint8_t col);
 
 /* ── Legacy internal function dispatch ───────────────────────────── */
 
-static bool detect_internal_function(int16_t keycode)
+/* uint16_t, pas int16_t : en signé, tout keycode ≥ 0x8000 (Modified Key)
+ * devenait négatif et n'était rejeté que par accident. */
+static bool detect_internal_function(uint16_t keycode)
 {
     /* Only capture keycodes that process_matrix_changes actually handles:
      * TO layers (apply_toggle_layer) and BT actions (dispatch_internal_function).
@@ -216,6 +224,16 @@ static bool is_advanced_keycode(uint16_t kc)
 
 static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
 {
+    /* Modified Key : la touche de base va dans keycodes[] comme une touche
+     * normale, le mod dans l'octet modifier — jamais dans keycodes[], où il
+     * volerait une slot (bug M7, bffdf4ec). Pas de timer : ce n'est pas MT, un
+     * tap donne le symbole tout de suite. Il court-circuite aussi le key
+     * override, qui ne voit que le chemin des touches simples : un MK est une
+     * touche finale, pas une combinaison à réinterpréter (décision 3). */
+    if (K_IS_MK(kc)) {
+        mk_mods |= K_MK_MOD(kc);
+        return K_MK_KEY(kc);
+    }
     if (K_IS_LT(kc) || K_IS_MT(kc) || K_IS_OSM(kc)) {
         tap_hold_on_press(kc, row, col);
         return 0;
@@ -226,7 +244,12 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
     }
     if (K_IS_OSL(kc))      { osl_arm(K_OSL_LAYER(kc)); return 0; }
     if (kc == K_CAPS_WORD) { caps_word_toggle(); return 0; }
-    if (kc == K_REPEAT)    { return repeat_key_get(); }
+    if (kc == K_REPEAT)    {
+        /* Après « ! », Repeat redonne « ! » et non « 1 » : le mod enregistré
+         * avec la dernière touche revient avec elle (décision 4). */
+        mk_mods |= repeat_key_get_mods();
+        return repeat_key_get();
+    }
     if (kc == K_LEADER)    { leader_start(); return 0; }
     if (kc == K_AUTO_SHIFT_TOGGLE) { return 0; } /* deprecated, kept for compat */
     if (kc == K_GESC) {
@@ -286,6 +309,8 @@ void build_keycode_report(void)
 {
     tap_injected_slots = 0;
     macro_hold_mods = 0;
+    mk_mods = 0;
+    memset(mk_slot_mods, 0, sizeof(mk_slot_mods));
 
     /* Step 1: detect releases and resolve pending tap/holds */
     detect_releases();
@@ -348,6 +373,7 @@ void build_keycode_report(void)
             uint8_t hid_kc = process_advanced_key(kc, row, col);
             if (hid_kc != 0) {
                 keycodes[i] = hid_kc;
+                if (K_IS_MK(kc)) mk_slot_mods[i] = K_MK_MOD(kc);
                 has_normal_press = true;
             } else {
                 extra_keycodes[i] = kc;
@@ -427,14 +453,14 @@ void build_keycode_report(void)
      * sans frappe (release/idle) laisse l'OSM armé pour la frappe suivante — même
      * garde que l'OSL (has_normal_press). */
     uint8_t osm_mods = has_normal_press ? osm_consume() : 0;
-    uint8_t extra_mods = th_mods | osm_mods | lm_active_mods | macro_hold_mods;
+    uint8_t extra_mods = th_mods | osm_mods | lm_active_mods | macro_hold_mods | mk_mods;
     extra_mods = (uint8_t)((extra_mods & ~override_suppress_mods) | override_add_mods);
 
     /* Step 6: caps word + repeat key tracking */
     for (uint8_t i = 0; i < 6; i++) {
         if (keycodes[i] != 0) {
             caps_word_process(&keycodes[i], &extra_mods);
-            repeat_key_record(keycodes[i]);
+            repeat_key_record_mk(keycodes[i], mk_slot_mods[i]);
         }
     }
 

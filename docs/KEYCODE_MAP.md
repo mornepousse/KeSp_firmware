@@ -31,6 +31,7 @@ All hex values in CDC commands use **hex format** (e.g. `29` = 0x29 = ESC).
 | `0x5000-0x5FFF` | Mod-Tap (MT) | `0x5000 \| (mod << 8) \| keycode` | `K_MT(Shift, A)` = `0x5204` |
 | `0x6000-0x6FFF` | Tap Dance (TD) | `0x6000 \| (index << 8)` | `K_TD(0)` = `0x6000` |
 | `0x7000-0x7FFF` | Layer-Modifier (LM) | `0x7000 \| (mods << 4) \| layer` | `K_LM(2, Shift)` = `0x7022` |
+| `0x8000-0x8FFF` | Modified Key (MK) | `0x8000 \| (mod << 8) \| keycode` | `K_EXLM` = `K_MK(Shift, 1)` = `0x821E` |
 
 ## Modifier Mask (for OSM, MT, and LM)
 
@@ -70,6 +71,35 @@ Press and release: next keypress uses that layer, then returns to base.
 ### Caps Word
 
 Toggle on/off. While active, letters are shifted. Deactivates on space/punctuation.
+
+### Modified Key (MK)
+
+One press sends **modifier + key together** — `K_EXLM` is Shift+1, which the OS
+renders as `!`. This is the basic need of any keyboard without a number row;
+QMK calls it `KC_EXLM = LSFT(KC_1)`. HID has no code for `!` on its own: `1` and
+`!` are the same key (`0x1E`), the OS picks according to Shift, so the firmware
+must put Shift in the report's **modifier byte** and `0x1E` in `keycodes[]` in
+the same report.
+
+- **Not a tap-hold.** Immediate, no timer, never enters `tap_hold.c`. A tap on
+  `MT(Shift, 1)` gives `1`; a tap on `K_EXLM` gives `!`.
+- **The mod lives in the modifier byte**, never in `keycodes[]` where it would
+  steal a slot and get lost when all six are full (bug M7, commit `bffdf4ec`).
+- **Release drops both.** No sticky modifier.
+- **Repeat Key reproduces the symbol**: after `!`, Repeat sends `!`, not `1`.
+- **Key Override does not see it**: an MK is a final key, not a combination to
+  reinterpret.
+- **Left mods only** (LCTL/LSFT/LALT/LGUI), 4-bit nibble — same limit as MT.
+  `K_MT(mod, K_MK(...))` is impossible: MT's key field is 8 bits.
+- **HID limit, documented rather than hidden**: the modifier byte is global to
+  the report. Holding `K_EXLM` and pressing `a` yields Shift+1+A = `!A`. QMK
+  behaves the same; an MK is not a key to hold for rollover.
+
+Aliases (US layout): `K_EXLM K_AT K_HASH K_DLR K_PERC K_CIRC K_AMPR K_ASTR
+K_LPRN K_RPRN K_UNDS K_PLUS K_LCBR K_RCBR K_PIPE K_TILD K_COLN K_DQUO K_LABK
+K_RABK K_QUES`. `<` and `>` are `K_LABK`/`K_RABK`, not `K_LT`/`K_GT` — `K_LT`
+is already Layer-Tap. Another layout uses the same `K_MK(MOD_LSFT, kc)` with
+other base keys.
 
 ### Repeat Key
 
