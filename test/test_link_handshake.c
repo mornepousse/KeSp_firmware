@@ -358,8 +358,72 @@ static void test_tick_alone_never_closes_the_switch(void)
     }
 }
 
+/* ── Entretien du lien en UP ─────────────────────────────────────────────────
+ *
+ * Constate au banc le 2026-09-11, premiere fermeture du 5 V : le lien montait,
+ * puis retombait 500 ms plus tard. En UP, l'emetteur ne sondait plus, le
+ * recepteur n'avait donc plus rien a acquitter, et LINK_HS_PEER_TIMEOUT_MS
+ * expirait. Le design comptait sur les trames MATRIX du chemin filaire pour
+ * entretenir le lien — chemin qui n'existe pas, les moities parlent radio.
+ *
+ * Meme motif que trois pannes de septembre : « emettre sur evenement » et
+ * « relacher sur silence » ne composent pas. Remede identique : tant qu'on a
+ * du courant a donner, on le dit periodiquement. */
+
+static void test_up_avec_usb_resonde_periodiquement(void)
+{
+    link_hs_t h; link_hs_init(&h);
+    link_hs_step(&h, LINK_HS_EV_USB_PRESENT, 1000);          /* -> PROBING */
+    link_hs_step(&h, LINK_HS_EV_PEER_ACK, 1010);             /* -> UP */
+    TEST_ASSERT(h.state == LINK_HS_UP && h.en_5v, "lien monte");
+    TEST_ASSERT(link_hs_step(&h, LINK_HS_EV_TICK, 1100) == LINK_HS_ACT_NONE,
+                "pas encore : la periode n'est pas ecoulee");
+    TEST_ASSERT(link_hs_step(&h, LINK_HS_EV_TICK, 1010 + LINK_HS_KEEPALIVE_MS)
+                == LINK_HS_ACT_SEND_PROBE, "periode ecoulee : on resonde");
+    TEST_ASSERT(h.state == LINK_HS_UP && h.en_5v, "et on RESTE en UP, 5 V ferme");
+}
+
+static void test_ack_en_up_entretient_le_lien(void)
+{
+    /* LE test de ce fichier cote banc : sonde + ACK toutes les periodes doivent
+     * tenir le lien indefiniment, bien au-dela de PEER_TIMEOUT. */
+    link_hs_t h; link_hs_init(&h);
+    link_hs_step(&h, LINK_HS_EV_USB_PRESENT, 0);
+    link_hs_step(&h, LINK_HS_EV_PEER_ACK, 10);
+    uint32_t t = 10;
+    for (int i = 0; i < 20; i++) {
+        t += LINK_HS_KEEPALIVE_MS;
+        TEST_ASSERT(link_hs_step(&h, LINK_HS_EV_TICK, t) == LINK_HS_ACT_SEND_PROBE, "resonde");
+        TEST_ASSERT(link_hs_step(&h, LINK_HS_EV_PEER_ACK, t + 5) == LINK_HS_ACT_NONE, "ACK recu");
+        TEST_ASSERT(h.state == LINK_HS_UP && h.en_5v, "toujours UP apres des secondes");
+    }
+}
+
+static void test_up_sans_usb_ne_sonde_pas(void)
+{
+    /* Le recepteur (pas d'USB) est monte parce qu'on l'a sonde ; lui ne sonde
+     * jamais — il n'a pas de courant a donner. */
+    link_hs_t h; link_hs_init(&h);
+    link_hs_step(&h, LINK_HS_EV_PROBED, 1000);               /* -> UP, en repondant */
+    TEST_ASSERT(h.state == LINK_HS_UP && !h.usb, "recepteur monte, sans USB");
+    TEST_ASSERT(link_hs_step(&h, LINK_HS_EV_TICK, 1000 + LINK_HS_KEEPALIVE_MS)
+                == LINK_HS_ACT_NONE, "il ne sonde pas");
+    TEST_ASSERT(link_hs_step(&h, LINK_HS_EV_TICK, 1000 + LINK_HS_PEER_TIMEOUT_MS)
+                == LINK_HS_ACT_DISABLE_5V, "et il expire si plus personne ne le sonde");
+}
+
+static void test_la_periode_tient_sous_le_timeout(void)
+{
+    TEST_ASSERT(LINK_HS_KEEPALIVE_MS * 2 < LINK_HS_PEER_TIMEOUT_MS,
+                "deux entretiens tiennent dans le delai d'expiration du pair");
+}
+
 void test_link_handshake(void)
 {
+    test_up_avec_usb_resonde_periodiquement();
+    test_ack_en_up_entretient_le_lien();
+    test_up_sans_usb_ne_sonde_pas();
+    test_la_periode_tient_sous_le_timeout();
     printf("\n-- poignée de main 5 V du lien --\n");
     test_starts_dead();
     test_probed_answers_and_closes_its_own_switch();

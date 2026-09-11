@@ -239,6 +239,11 @@ if(CONFIG_KASE_KBD_WIRELESS AND CONFIG_KASE_HAS_DISPLAY)
     list(APPEND srcs "comm/rf/v2d_sleep.c")
 endif()
 
+# Lien filaire TRRS (B2) — transport UART1 + poignee de main 5 V.
+if(CONFIG_KASE_LINK_WIRE)
+    list(APPEND srcs "comm/link/link_uart.c")
+endif()
+
 # Veille hybride (B7) — light sleep puis deep sleep.
 if(CONFIG_KASE_VEILLE)
     list(APPEND srcs "power/veille.c")
@@ -290,6 +295,10 @@ set(priv_requires
     spi_flash         # esp_flash_get_size / esp_partition_*
     mbedtls           # HMAC-SHA1 for OTP HID (cr_hmac.c, dongle only)
 )
+
+if(CONFIG_KASE_LINK_WIRE)
+    list(APPEND priv_requires esp_driver_uart)
+endif()
 
 if(CONFIG_KASE_HAS_DISPLAY)
     list(APPEND priv_requires esp_lcd)

@@ -6,6 +6,9 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
+#if CONFIG_KASE_LINK_WIRE
+#include "link_uart.h"
+#endif
 #if CONFIG_KASE_VEILLE
 #include "veille.h"
 #endif
@@ -294,6 +297,13 @@ void app_main(void) {
     ESP_LOGW(TAG, "Safe mode: skipping NVS config loading");
 #endif /* !CONFIG_KASE_NO_KEYMAP_ENGINE */
   }
+
+#if CONFIG_KASE_LINK_WIRE
+  /* Lien filaire TRRS. Placé tôt et hors du dispatch de rôles : sa première
+   * action est de mettre LINK_5V_EN à BAS, avant que quoi que ce soit d'autre
+   * ne touche aux GPIO. */
+  link_uart_start();
+#endif
 
 #if CONFIG_KASE_HALF_LINK_RX
   /* Moitié gauche à l'écoute de la droite. Placé hors du dispatch de rôles pour

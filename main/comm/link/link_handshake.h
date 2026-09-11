@@ -27,6 +27,15 @@
  * débranchement/rebranchement du câble. Même ordre de grandeur que
  * LINK_HS_PROBE_TIMEOUT_MS pour ne pas spammer la ligne. */
 #define LINK_HS_REPROBE_INTERVAL_MS  300
+/* Entretien du lien en UP. Constaté au banc le 2026-09-11, à la première
+ * fermeture du 5 V : le lien montait puis retombait 500 ms plus tard. En UP
+ * l'émetteur ne sondait plus, le récepteur n'avait donc plus rien à acquitter,
+ * et LINK_HS_PEER_TIMEOUT_MS expirait. Le design comptait sur les trames
+ * MATRIX du chemin filaire pour entretenir le lien — chemin qui n'existe pas,
+ * les moitiés parlent radio. Tant qu'on a du courant à donner, on le redit :
+ * deux entretiens tiennent dans le délai d'expiration, une sonde perdue ne
+ * rouvre pas le switch. */
+#define LINK_HS_KEEPALIVE_MS         200
 
 typedef enum {
     LINK_HS_IDLE = 0,   /* 5 V mort, rien en cours */
@@ -59,6 +68,7 @@ typedef struct {
     link_hs_state_t state;
     uint32_t        since_ms;    /* entrée dans l'état courant */
     uint32_t        last_peer_ms;/* dernier signe de vie du pair */
+    uint32_t        last_probe_ms;/* dernière sonde émise (entretien en UP) */
     bool            usb;         /* câble hôte présent */
     bool            en_5v;       /* état commandé du load switch */
 } link_hs_t;
@@ -68,6 +78,7 @@ static inline void link_hs_init(link_hs_t *h)
     h->state = LINK_HS_IDLE;
     h->since_ms = 0;
     h->last_peer_ms = 0;
+    h->last_probe_ms = 0;
     h->usb = false;
     h->en_5v = false;
 }
@@ -121,6 +132,7 @@ static inline link_hs_action_t link_hs_step(link_hs_t *h, link_hs_event_t ev,
         if (ev == LINK_HS_EV_USB_PRESENT) {
             h->state = LINK_HS_PROBING;
             h->since_ms = now_ms;
+            h->last_probe_ms = now_ms;
             return LINK_HS_ACT_SEND_PROBE;
         }
         /* USB_PRESENT est un événement de front : si une sonde s'est perdue
@@ -134,6 +146,7 @@ static inline link_hs_action_t link_hs_step(link_hs_t *h, link_hs_event_t ev,
             (uint32_t)(now_ms - h->since_ms) >= LINK_HS_REPROBE_INTERVAL_MS) {
             h->state = LINK_HS_PROBING;
             h->since_ms = now_ms;
+            h->last_probe_ms = now_ms;
             return LINK_HS_ACT_SEND_PROBE;
         }
         return LINK_HS_ACT_NONE;
@@ -157,6 +170,15 @@ static inline link_hs_action_t link_hs_step(link_hs_t *h, link_hs_event_t ev,
             h->state = LINK_HS_IDLE;
             h->since_ms = now_ms;
             return LINK_HS_ACT_DISABLE_5V;
+        }
+        /* Entretien : celui qui a du courant à donner le redit périodiquement.
+         * Le pair répond par un ACK, ce qui rafraîchit last_peer_ms des deux
+         * côtés (PROBED chez lui, PEER_ACK chez nous). Le récepteur, sans USB,
+         * ne sonde jamais — il n'a rien à donner. */
+        if (ev == LINK_HS_EV_TICK && h->usb &&
+            (uint32_t)(now_ms - h->last_probe_ms) >= LINK_HS_KEEPALIVE_MS) {
+            h->last_probe_ms = now_ms;
+            return LINK_HS_ACT_SEND_PROBE;
         }
         return LINK_HS_ACT_NONE;
 

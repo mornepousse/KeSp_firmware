@@ -81,6 +81,16 @@ config KASE_HAS_LOCAL_MATRIX
         seule fonction, la spec la decrit comme "un scanner qui remonte sa
         matrice brute". Elle n'a en revanche ni moteur keymap ni sortie HID.
 
+config KASE_LINK_WIRE
+    bool "Lien filaire TRRS : poignee de main et 5 V (brick B2)"
+    default n
+    help
+        Transport UART1 du lien inter-moities sur le jack TRRS, et pilotage du
+        load switch LINK_5V_EN par la poignee de main de link_handshake.h. Le
+        5 V est mort par defaut et ne se ferme qu'apres un echange verifie
+        (sonde + ACK). Une moitie en charge reste eveillee : le lien bloque la
+        veille tant que son switch est ferme.
+
 config KASE_VEILLE
     bool "Veille hybride : light sleep puis deep sleep (brick B7)"
     default n

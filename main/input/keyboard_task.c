@@ -3,6 +3,9 @@
 #include "keyboard_task.h"
 #if CONFIG_KASE_VEILLE
 #include "veille.h"
+#if CONFIG_KASE_LINK_WIRE
+#include "link_uart.h"
+#endif
 #include "tinyusb.h"
 #endif
 #include "key_processor.h"
@@ -181,7 +184,13 @@ void vTaskKeyboard(void *pvParameters)
              * assumée : un hôte qui s'endort câble branché laisse aussi le
              * clavier dormir ; il se ré-énumère au réveil. Constaté au banc le
              * 2026-09-11 : sept minutes sur batterie sans jamais dormir. */
-            veille_pas(inactif, tud_ready());
+            bool bloque = tud_ready();
+#if CONFIG_KASE_LINK_WIRE
+            /* Une moitié en charge par le TRRS reste éveillée : endormie, elle
+             * cesserait de répondre aux sondes et le pair rouvrirait son 5 V. */
+            bloque = bloque || link_uart_active();
+#endif
+            veille_pas(inactif, bloque);
         }
 #endif
 
