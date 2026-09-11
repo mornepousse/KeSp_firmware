@@ -173,7 +173,15 @@ void vTaskKeyboard(void *pvParameters)
         {
             uint32_t inactif = (uint32_t)(esp_timer_get_time() / 1000)
                              - get_last_activity_time_ms();
-            veille_pas(inactif, tud_mounted());
+            /* tud_ready(), PAS tud_mounted() : sur l'ESP32-S3, mounted reste vrai
+             * après un débranchement à chaud — aucun événement de déconnexion —
+             * et la veille restait bloquée jusqu'au prochain redémarrage. ready
+             * retombe dès que le bus se suspend (~3 ms après le débranchement),
+             * c'est le signal qu'utilise déjà le routage USB/RF. Contrepartie
+             * assumée : un hôte qui s'endort câble branché laisse aussi le
+             * clavier dormir ; il se ré-énumère au réveil. Constaté au banc le
+             * 2026-09-11 : sept minutes sur batterie sans jamais dormir. */
+            veille_pas(inactif, tud_ready());
         }
 #endif
 
