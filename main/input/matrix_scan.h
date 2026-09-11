@@ -75,6 +75,15 @@ void matrix_arm_key_wake(void);
 /* Tamponne l'activité à maintenant — à appeler au réveil, AVANT que la
  * boucle clavier ne réévalue l'inactivité. */
 void matrix_mark_activity(void);
+/* Balaie la matrice une fois à la main et publie ce qu'un callback aurait
+ * publié. À appeler dès le retour de light sleep, AVANT matrix_setup() : la
+ * touche qui a réveillé la carte est enfoncée à cet instant, plus tard elle ne
+ * l'est peut-être plus. */
+void matrix_wake_capture(void);
+/* ~10 ms après matrix_setup() : si le pilote n'a rien signalé alors qu'une
+ * touche avait été capturée, elle a été relâchée entre-temps — publie le
+ * relâchement et retourne true (l'appelant l'émet). */
+bool matrix_wake_reconcile(void);
 void matrix_disarm_key_wake(void);
 
 /* Matrix test mode: when true, scan callback sends key events

@@ -124,6 +124,14 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
 #endif
         if (ok) s_tx_remis++; else s_tx_refuses++;
         s_derniere_emission_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        /* Trace par rapport, en DEBUG : c'est elle qui a montré, le 2026-09-11,
+         * que la gauche émettait correctement la touche de réveil — et qu'un
+         * pouce Super capturé restait collé. Une ligne par envoi est trop pour
+         * l'usage courant ; à réactiver par le niveau de log quand une frappe
+         * se perd sans qu'on sache où. */
+        if (buf[0] == (PKT_TYPE_HIDREPORT << 4) && buf[1] == RF_HID_SUB_KBD)
+            ESP_LOGD(TAG, "TX kbd mod=%02X kc=%02X %02X -> %s", buf[2], buf[3], buf[4],
+                     ok ? "ok" : "REFUSE");
         xSemaphoreGive(s_tx_mutex);
         if (((s_tx_remis + s_tx_refuses) % 25) == 0)
             ESP_LOGW(TAG, "HID->dongle : %u remis, %u sans mutex, %u refuses",

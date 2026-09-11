@@ -3,6 +3,11 @@
 #include "veille.h"
 #include "board.h"
 #include "matrix_scan.h"
+#include "matrix_flag.h"
+#if CONFIG_KASE_HALF_LINK_RX
+#include "key_processor.h"
+#include "hid_report.h"
+#endif
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "driver/gpio.h"
@@ -71,15 +76,41 @@ void veille_legere_entrer(void)
 
     esp_light_sleep_start();      /* bloque ici jusqu'à une touche */
 
-    matrix_disarm_key_wake();
-    /* AVANT tout : un réveil est une activité. Sinon la boucle clavier relit
-     * 60 s d'inactivité au tour suivant et renvoie la carte dormir 10 ms après
-     * son réveil — en boucle, 80 ms par cycle, tant que la touche est tenue. */
-    matrix_mark_activity();
-    matrix_setup();               /* recrée le pilote, relit les touches tenues */
+    /* L'ordre est le cœur du correctif, chaque étape a sa raison :
+     *
+     * 1. Radio d'abord (~7 ms) : tout ce qui suit émet, et une émission sur une
+     *    puce éteinte est un rapport perdu — la droite envoie directement, la
+     *    gauche par excursion.
+     * 2. Capture : la touche qui a réveillé la carte est enfoncée MAINTENANT ;
+     *    recréer le pilote prend des dizaines de ms, une frappe brève serait
+     *    relâchée avant. Elle tamponne aussi l'activité, sans quoi la boucle
+     *    clavier renverrait la carte dormir 10 ms plus tard.
+     * 3. Émettre l'appui TOUT DE SUITE (gauche) : le tampon de rapport est
+     *    unique, un relâchement publié ensuite l'écraserait avant l'envoi.
+     * 4. Recréer le pilote, puis lui laisser 10 ms pour un premier balayage.
+     * 5. Réconcilier : s'il n'a rien dit, la touche a été relâchée entre-temps
+     *    et il ne le dira jamais — publier et émettre le relâchement, sinon
+     *    elle reste collée jusqu'au prochain événement de cette moitié. */
 #if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
     half_link_radio_wake();
 #endif
+    matrix_wake_capture();
+#if CONFIG_KASE_HALF_LINK_RX
+    if (matrix_flag_take(&stat_matrix_changed)) {
+        build_keycode_report();
+        send_hid_key();
+    }
+#endif
+    matrix_disarm_key_wake();
+    matrix_setup();
+    vTaskDelay(1);                /* 1 tick = 10 ms : premier balayage + anti-rebond */
+    if (matrix_wake_reconcile()) {
+#if CONFIG_KASE_HALF_LINK_RX
+        (void)matrix_flag_take(&stat_matrix_changed);
+        build_keycode_report();
+        send_hid_key();
+#endif
+    }
     ESP_LOGI(TAG, "reveil");
 }
 

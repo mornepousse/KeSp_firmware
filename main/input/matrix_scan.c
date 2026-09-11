@@ -14,6 +14,7 @@
 #include <string.h>
 #include "keyboard_button.h"
 #include "esp_timer.h"
+#include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #if CONFIG_KASE_HAS_DISPLAY
@@ -95,10 +96,23 @@ volatile uint32_t last_activity_time_ms = 0;
 
 static keyboard_btn_handle_t s_kbd = NULL;
 static uint8_t prev_matrix_state[MATRIX_ROWS][MATRIX_COLS];  /* For KPM: track new keypresses */
+/* État de la matrice capturé au réveil de veille, par balayage manuel avant
+ * que le pilote ne soit recréé. matrix_setup() en fait le prev_matrix_state
+ * initial du nouveau pilote, puis l'efface : un démarrage ordinaire repart de
+ * « rien d'enfoncé » comme avant. */
+static uint8_t s_wake_state[MATRIX_ROWS][MATRIX_COLS];
+/* Le pilote recréé a-t-il émis un événement ? Il ne signale que les
+ * CHANGEMENTS par rapport à son propre état, qui part de « rien d'enfoncé » :
+ * une touche capturée au réveil puis relâchée avant son premier balayage ne
+ * produit donc AUCUN événement, ni appui ni relâchement. Ce drapeau permet de
+ * le savoir. */
+static volatile bool s_cb_since_setup;
+static bool s_wake_had_keys;
 
 
 static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_report_t kbd_report, void *user_data)
 {
+    s_cb_since_setup = true;
     /* Build current matrix state from report */
     uint8_t new_state[MATRIX_ROWS][MATRIX_COLS];
     memset(new_state, 0, sizeof(new_state));
@@ -252,7 +266,7 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
 
 void rtc_matrix_deinit(void)
 {
-    ESP_LOGI(TAG, "rtc_matrix_deinit (shim)");
+    ESP_LOGD(TAG, "rtc_matrix_deinit");
     if (s_kbd) {
         keyboard_button_delete(s_kbd);
         s_kbd = NULL;
@@ -305,7 +319,16 @@ void matrix_disarm_key_wake(void)
 
 void matrix_setup(void)
 {
-    ESP_LOGI(TAG, "matrix_setup (shim)");
+    /* ⚠ matrix_setup() est sur le CHEMIN DE RÉVEIL. Chaque ligne de journal
+     * coûte ~3,5 ms à 115 200 bauds, et la table de brochage en faisait
+     * quatorze : le premier balayage n'avait lieu que 60 ms après le réveil.
+     * Une frappe brève était déjà relâchée — la touche qui réveillait la
+     * carte était perdue. Constaté au banc le 2026-09-11.
+     *
+     * La table est utile au bring-up, pas à chaque réveil : elle passe en
+     * ESP_LOGD, une seule ligne reste en INFO. Un doute sur le brochage se lève
+     * avec le niveau de log, pas en ralentissant chaque réveil. */
+    ESP_LOGI(TAG, "matrix_setup");
     memset(MATRIX_STATE, 0, sizeof(MATRIX_STATE));
     memset(SLAVE_MATRIX_STATE, 0, sizeof(SLAVE_MATRIX_STATE));
     /* Le pilote est (re)créé : l'état précédent n'a plus de sens. Sans cet
@@ -314,7 +337,15 @@ void matrix_setup(void)
      * relâchements fantômes. Le repartir de « rien d'enfoncé » fait au contraire
      * que la touche qui a réveillé la carte est vue comme un appui neuf, ce qui
      * est exactement ce qu'on veut. */
-    memset(prev_matrix_state, 0, sizeof(prev_matrix_state));
+    s_cb_since_setup = false;
+    memcpy(prev_matrix_state, s_wake_state, sizeof(prev_matrix_state));
+    memset(s_wake_state, 0, sizeof(s_wake_state));
+    /* Si matrix_wake_capture() vient de publier une touche, le premier
+     * balayage du pilote la trouve déjà dans prev : encore tenue → rien de
+     * neuf, pas de doublon ; relâchée → un relâchement, et l'hôte la lâche.
+     * Sans cela, une touche capturée puis relâchée avant ce balayage resterait
+     * COLLÉE chez l'hôte — le pilote n'aurait jamais vu ni l'appui ni le
+     * relâchement. */
 
     // Build gpio arrays from keyboard_config defines
     static int output_gpios[MATRIX_COLS];
@@ -332,15 +363,15 @@ void matrix_setup(void)
     const int cols_map[] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
     const int rows_map[] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
 #endif
-    ESP_LOGI(TAG, "Cols (outputs): ");
+    ESP_LOGD(TAG, "Cols (outputs): ");
     for (int i = 0; i < MATRIX_COLS; i++) {
         output_gpios[i] = cols_map[i];
-        ESP_LOGI(TAG, "  COL%d = GPIO%d", i, output_gpios[i]);
+        ESP_LOGD(TAG, "  COL%d = GPIO%d", i, output_gpios[i]);
     }
-    ESP_LOGI(TAG, "Rows (inputs): ");
+    ESP_LOGD(TAG, "Rows (inputs): ");
     for (int i = 0; i < MATRIX_ROWS; i++) {
         input_gpios[i] = rows_map[i];
-        ESP_LOGI(TAG, "  ROW%d = GPIO%d", i, input_gpios[i]);
+        ESP_LOGD(TAG, "  ROW%d = GPIO%d", i, input_gpios[i]);
     }
 
     keyboard_btn_config_t cfg = {0};
@@ -357,7 +388,7 @@ void matrix_setup(void)
 
     esp_err_t res = keyboard_button_create(&cfg, &s_kbd);
     if (res == ESP_OK && s_kbd != NULL) {
-        ESP_LOGI(TAG, "keyboard_button created: handle=%p", s_kbd);
+        ESP_LOGD(TAG, "keyboard_button created: handle=%p", s_kbd);
         
         // KBD_EVENT_PRESSED is called for all changes (press AND release)
         keyboard_btn_cb_config_t cb_pressed = {0};
@@ -367,7 +398,7 @@ void matrix_setup(void)
         esp_err_t r1 = keyboard_button_register_cb(s_kbd, cb_pressed, NULL);
         
         if (r1 == ESP_OK) {
-            ESP_LOGI(TAG, "keyboard_button callback registered");
+            ESP_LOGD(TAG, "keyboard_button callback registered");
         } else {
             ESP_LOGW(TAG, "keyboard_button_register_cb failed: %d", r1);
         }
@@ -393,6 +424,129 @@ uint32_t get_last_activity_time_ms(void)
  * jusqu'à ce qu'un balayage tombe dans la fenêtre. Constaté au banc le
  * 2026-09-11 : « très lent avant de pouvoir taper », et frappe perdue si on
  * relâche trop tôt. v2d_sleep.c faisait ce geste, il avait été perdu. */
+/* Capturer la touche qui a réveillé la carte — AVANT de recréer le pilote.
+ *
+ * Le réveil GPIO n'a lieu que parce qu'une touche est enfoncée À CET INSTANT :
+ * c'est l'information la plus sûre qu'on aura. Or recréer le pilote, attendre
+ * son premier balayage et son anti-rebond, rallumer la radio, prend ~90 ms —
+ * une frappe brève est relâchée avant, et la touche qui a réveillé le clavier
+ * était PERDUE. Constaté au banc le 2026-09-11, et retirer les journaux du
+ * chemin n'avait pas suffi.
+ *
+ * Ici on balaie une fois à la main, en quelques dizaines de microsecondes, et
+ * on publie exactement ce que le callback aurait publié. La durée du chemin
+ * de réveil cesse d'avoir de l'importance.
+ *
+ * Préconditions : configuration de réveil en place (matrix_arm_key_wake) —
+ * colonnes en sortie, lignes en entrée avec rappel bas. On baisse toutes les
+ * colonnes, on les remonte une à une, on lit les lignes, on restaure. Même
+ * chaîne électrique que le scan : COL → interrupteur → diode → ROW. */
+void matrix_wake_capture(void)
+{
+    const int cols[] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5,
+                         COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
+    const int rows[] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+    uint8_t st[MATRIX_ROWS][MATRIX_COLS];
+    memset(st, 0, sizeof(st));
+
+    for (int c = 0; c < MATRIX_COLS; c++) gpio_set_level(cols[c], 0);
+    for (int c = 0; c < MATRIX_COLS; c++) {
+        gpio_set_level(cols[c], 1);
+        esp_rom_delay_us(20);                 /* RC des 100 Ω série + capacité */
+        for (int r = 0; r < MATRIX_ROWS; r++)
+            st[r][c] = (uint8_t)gpio_get_level(rows[r]);
+        gpio_set_level(cols[c], 0);
+    }
+    for (int c = 0; c < MATRIX_COLS; c++) gpio_set_level(cols[c], 1);
+
+    /* Publier comme le callback : rapport local, frontière, fusion, drapeau. */
+    for (int i = 0; i < MAX_REPORT_KEYS; i++) {
+        current_press_row[i]  = INVALID_KEY_POS;
+        current_press_col[i]  = INVALID_KEY_POS;
+        current_press_stat[i] = 0;
+    }
+    uint8_t filled = 0;
+    for (int r = 0; r < MATRIX_ROWS; r++)
+        for (int c = 0; c < MATRIX_COLS && filled < MAX_REPORT_KEYS; c++)
+            if (st[r][c]) {
+                current_press_row[filled]  = (uint8_t)r;
+                current_press_col[filled]  = (uint8_t)c;
+                current_press_stat[filled] = 1;
+                filled++;
+            }
+    memcpy(MATRIX_STATE, st, sizeof(MATRIX_STATE));
+    memcpy(s_wake_state, st, sizeof(s_wake_state));   /* pour matrix_setup */
+    s_wake_had_keys = (filled != 0);
+    memcpy(prev_matrix_state, st, sizeof(prev_matrix_state));
+#if CONFIG_KASE_HALF_LINK_RX
+    s_filled_local = filled;
+    matrix_apply_remote();
+#endif
+#if CONFIG_KASE_HALF_LINK_TX
+    /* La moitié droite n'a pas de tâche clavier : c'est le callback qui émet.
+     * On émet donc ici ce qu'il aurait émis. */
+    {
+        uint8_t bm[RF_HALF_BITMAP_BYTES];
+        memset(bm, 0, sizeof(bm));
+        for (int r = 0; r < MATRIX_ROWS; r++)
+            for (int c = 0; c < MATRIX_COLS; c++)
+                if (st[r][c]) rf_bitmap_set(bm, (uint8_t)r, (uint8_t)c, true);
+        half_link_tx_update(bm, true);
+    }
+#endif
+    if (filled) {
+        matrix_flag_signal(&stat_matrix_changed);
+        if (keyboard_task_handle != NULL) xTaskNotifyGive(keyboard_task_handle);
+    }
+    last_activity_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    /* Une ligne par réveil : ce que la capture a trouvé. C'est elle qui a
+     * prouvé, le 2026-09-11, que la gauche voyait bien la touche de réveil. */
+    ESP_LOGI(TAG, "reveil : %u touche(s) capturee(s)", filled);
+    for (uint8_t i = 0; i < filled; i++)
+        ESP_LOGI(TAG, "  (%u,%u)", current_press_row[i], current_press_col[i]);
+}
+
+/* À appeler ~10 ms après matrix_setup(), quand le pilote a eu le temps de
+ * faire son premier balayage et son anti-rebond.
+ *
+ * Si la capture au réveil avait trouvé une touche et que le pilote n'a RIEN
+ * signalé depuis, c'est que la touche a été relâchée entre les deux : le
+ * pilote, parti de « rien d'enfoncé », a vu « rien d'enfoncé » et s'est tu.
+ * Sans cette réconciliation la touche restait dans le rapport jusqu'au
+ * prochain événement de CETTE moitié — les frappes de l'autre moitié ne la
+ * délogent pas, la fusion préserve les touches locales. Un pouce Super
+ * capturé au réveil transformait alors toute la frappe de droite en
+ * raccourcis. Constaté au banc le 2026-09-11.
+ *
+ * Retourne true si un relâchement a été publié : l'appelant doit alors
+ * l'émettre. */
+bool matrix_wake_reconcile(void)
+{
+    if (!s_wake_had_keys || s_cb_since_setup) return false;
+    s_wake_had_keys = false;
+    for (int i = 0; i < MAX_REPORT_KEYS; i++) {
+        current_press_row[i]  = INVALID_KEY_POS;
+        current_press_col[i]  = INVALID_KEY_POS;
+        current_press_stat[i] = 0;
+    }
+    memset(MATRIX_STATE, 0, sizeof(MATRIX_STATE));
+    memset(prev_matrix_state, 0, sizeof(prev_matrix_state));
+#if CONFIG_KASE_HALF_LINK_RX
+    s_filled_local = 0;
+    matrix_apply_remote();
+#endif
+#if CONFIG_KASE_HALF_LINK_TX
+    {
+        uint8_t bm[RF_HALF_BITMAP_BYTES];
+        memset(bm, 0, sizeof(bm));
+        half_link_tx_update(bm, true);
+    }
+#endif
+    matrix_flag_signal(&stat_matrix_changed);
+    ESP_LOGW(TAG, "reveil : touche relachee avant le premier balayage, relachement publie");
+    return true;
+}
+
 void matrix_mark_activity(void)
 {
     last_activity_time_ms = (uint32_t)(esp_timer_get_time() / 1000);

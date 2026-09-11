@@ -41,6 +41,8 @@ static const char *TAG_HTX = "HID_TX";
  * sender task and directly from the keyboard task (send_tap for tap-dance /
  * leader / macros), and the TinyUSB device API is not reentrant. */
 #define USB_HID_TX_WAIT_US 2500   /* > 2 full-speed frames (1 ms each) */
+
+static void usb_resume_if_suspended(void);   /* défini plus bas */
 #define USB_HID_TX_POLL_US 100
 
 static SemaphoreHandle_t s_usb_tx_mutex = NULL;
@@ -75,6 +77,7 @@ static bool usb_hid_wait_ready(void)
 static bool send_usb_kb_mouse(uint8_t modifier, const uint8_t kb[6],
                               uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
 {
+    usb_resume_if_suspended();
     if (!usb_tx_lock()) return false;
     bool ok = usb_hid_wait_ready();
     if (ok) {
@@ -87,8 +90,37 @@ static bool send_usb_kb_mouse(uint8_t modifier, const uint8_t kb[6],
     return ok;
 }
 
+/* Réveiller l'hôte si le bus est suspendu, et attendre qu'il reprenne.
+ *
+ * Après une minute sans trafic HID, l'hôte suspend le bus USB. Le rapport
+ * suivant tombait alors sur un point d'accès muet : usb_hid_wait_ready()
+ * expirait au bout de 2,5 ms et le rapport était JETÉ avec un simple
+ * avertissement. La tentative échouée, ou la souris, finissait par réveiller
+ * l'hôte — et les touches suivantes passaient. Constaté au banc le
+ * 2026-09-11 sur le dongle : « la première touche est perdue » après chaque
+ * veille du clavier, quel que soit ce que faisait la moitié gauche.
+ *
+ * usb_try_remote_wakeup() existait, mais n'était appelé que par la tâche
+ * clavier — un clavier USB direct. Le dongle relaie par rf_rx_task et n'y
+ * passait jamais. usb_hid.c raconte qu'un V2D filaire avait déjà perdu cette
+ * fonction de la même façon : la troisième fois, elle vit au seul endroit
+ * que tous les chemins traversent, l'émission elle-même.
+ *
+ * Une reprise USB dure au moins 20 ms (resume signaling, USB 2.0 §7.1.7.7) :
+ * on attend jusqu'à 100 ms que tud_suspended() retombe. tud_remote_wakeup()
+ * ne fait rien si l'hôte n'a pas autorisé le réveil distant — la chaîne
+ * échoue alors comme avant, mais on aura essayé. */
+static void usb_resume_if_suspended(void)
+{
+    if (!tud_mounted() || !tud_suspended()) return;
+    tud_remote_wakeup();
+    for (int i = 0; i < 10 && tud_suspended(); i++)
+        vTaskDelay(1);   /* 1 tick = 10 ms (CONFIG_FREERTOS_HZ=100) */
+}
+
 static bool send_usb_keyboard(uint8_t modifier, const uint8_t kb[6])
 {
+    usb_resume_if_suspended();
     if (!usb_tx_lock()) return false;
     bool ok = usb_hid_wait_ready() &&
               tud_hid_keyboard_report(REPORT_ID_KEYBOARD, modifier, kb);
@@ -99,6 +131,7 @@ static bool send_usb_keyboard(uint8_t modifier, const uint8_t kb[6])
 
 static bool send_usb_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
 {
+    usb_resume_if_suspended();
     if (!usb_tx_lock()) return false;
     bool ok = usb_hid_wait_ready() &&
               tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
