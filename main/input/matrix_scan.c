@@ -386,3 +386,15 @@ uint32_t get_last_activity_time_ms(void)
     return last_activity_time_ms;
 }
 
+/* Un réveil EST une activité. Sans ce coup de tampon, la boucle clavier relit
+ * une inactivité de 60 s dès le tour suivant — le pilote recréé n'a pas encore
+ * balayé — et renvoie la carte dormir 10 ms après son réveil. La touche encore
+ * enfoncée la réveille aussitôt, et le cycle recommence, 80 ms par tour,
+ * jusqu'à ce qu'un balayage tombe dans la fenêtre. Constaté au banc le
+ * 2026-09-11 : « très lent avant de pouvoir taper », et frappe perdue si on
+ * relâche trop tôt. v2d_sleep.c faisait ce geste, il avait été perdu. */
+void matrix_mark_activity(void)
+{
+    last_activity_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
+}
+

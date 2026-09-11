@@ -72,6 +72,10 @@ void veille_legere_entrer(void)
     esp_light_sleep_start();      /* bloque ici jusqu'à une touche */
 
     matrix_disarm_key_wake();
+    /* AVANT tout : un réveil est une activité. Sinon la boucle clavier relit
+     * 60 s d'inactivité au tour suivant et renvoie la carte dormir 10 ms après
+     * son réveil — en boucle, 80 ms par cycle, tant que la touche est tenue. */
+    matrix_mark_activity();
     matrix_setup();               /* recrée le pilote, relit les touches tenues */
 #if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
     half_link_radio_wake();

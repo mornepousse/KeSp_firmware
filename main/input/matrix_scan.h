@@ -72,6 +72,9 @@ void matrix_setup(void);
 /* Light-sleep matrix key-wake (V2D wireless): arm/disarm matrix GPIOs as a
  * keypress wake source around esp_light_sleep_start(). */
 void matrix_arm_key_wake(void);
+/* Tamponne l'activité à maintenant — à appeler au réveil, AVANT que la
+ * boucle clavier ne réévalue l'inactivité. */
+void matrix_mark_activity(void);
 void matrix_disarm_key_wake(void);
 
 /* Matrix test mode: when true, scan callback sends key events
