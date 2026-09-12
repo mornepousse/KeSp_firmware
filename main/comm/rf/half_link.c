@@ -40,6 +40,7 @@ static uint8_t    s_seq;
  * C'est la même faute que les deux `static rf_radio_t` concurrents, d'un cran
  * plus fin : un seul propriétaire ne suffit pas s'il a deux bouches. */
 static SemaphoreHandle_t s_radio_mux;
+static volatile int s_wdbg; static volatile uint32_t s_wake_ms;
 
 /* Réveil de la tâche d'écoute par la broche IRQ du nRF24.
  *
@@ -482,6 +483,8 @@ static void half_link_rx_task(void *arg)
  * du lien. C'est exactement l'excursion que l'épreuve R1 a mesurée le
  * 2026-09-05 (0 perte, 0,4 retransmission/paquet) — à cadence bien plus élevée
  * que ce qu'une frappe produit. */
+void half_link_note_wake(void){ s_wake_ms=(uint32_t)(esp_timer_get_time()/1000); s_wdbg=60; }
+
 bool half_link_excursion_tx(uint8_t canal, const uint8_t addr[5],
                             const uint8_t *payload, uint8_t len)
 {
@@ -505,6 +508,9 @@ bool half_link_excursion_tx(uint8_t canal, const uint8_t addr[5],
     bool ok = rf_driver_oob_tx(&s_radio, canal, addr, payload, len,
                                RF_CH_HALF_LINK, addr_lien);
     xSemaphoreGive(s_radio_mux);
+    if (s_wdbg>0){ s_wdbg--; ESP_LOGW(TAG,"WAKEDBG +%ums %s ok=%u maxrt=%u to=%u",
+        (unsigned)((uint32_t)(esp_timer_get_time()/1000)-s_wake_ms), ok?"OK":"ECHEC",
+        (unsigned)rf_oob_ok,(unsigned)rf_oob_maxrt,(unsigned)rf_oob_timeout); }
 
     /* Bilan périodique. « La liaison n'est pas très bonne » ne se corrige pas
      * sans savoir LAQUELLE des trois issues domine : acquitté, MAX_RT (le

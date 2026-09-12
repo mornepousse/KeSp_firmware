@@ -93,6 +93,10 @@ void veille_legere_entrer(void)
     /* AVANT tout : prouver le réveil ET le nommer. cause=7 est ESP_SLEEP_WAKEUP_GPIO
      * et le masque dit quelle ligne ; toute autre cause est un réveil qu'on n'a
      * pas demandé. */
+    ESP_LOGW(TAG,"WAKEDBG reveil");
+#if CONFIG_KASE_HALF_LINK_RX
+    half_link_note_wake();
+#endif
     ESP_LOGI(TAG, "sorti du sommeil : cause=%d",
              (int)esp_sleep_get_wakeup_cause());
 

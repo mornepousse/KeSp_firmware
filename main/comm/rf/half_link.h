@@ -92,6 +92,39 @@ static inline uint8_t half_col_to_keymap(uint8_t col, uint8_t cols, bool miroir)
                   : (uint8_t)(col + cols);
 }
 
+/* ── Fusion de DEUX demi-matrices au dongle (brick « dongle fusion ») ────────
+ *
+ * Testée host dans test/test_fuse_halves.c. Design :
+ * docs/superpowers/specs/2026-09-12-dongle-fusion-deux-moteurs-design.md.
+ *
+ * En mode sans fil, les deux moitiés émettent leur matrice BRUTE ; le dongle
+ * fusionne et fait tourner le moteur. Aucune moitié n'est « locale » ici,
+ * contrairement à matrix_apply_remote : on reçoit deux bitmaps et on produit les
+ * positions (row, colonne keymap) que le moteur indexe. Gauche = colonnes 0..cols-1
+ * en direct ; droite = colonnes hautes via half_col_to_keymap (miroir du PCB).
+ *
+ * Pure : pas d'I/O, pas d'état global. Écrit dans out_row/out_col, rend le nombre
+ * de touches, borné à max. */
+static inline uint8_t fuse_halves(const uint8_t *left_bm, const uint8_t *right_bm,
+                                  uint8_t cols, bool right_mirror,
+                                  uint8_t *out_row, uint8_t *out_col, uint8_t max)
+{
+    uint8_t n = 0;
+    for (uint8_t r = 0; r < RF_HALF_ROWS && n < max; r++)
+        for (uint8_t c = 0; c < cols && n < max; c++)
+            if (rf_bitmap_get(left_bm, r, c)) {
+                out_row[n] = r; out_col[n] = c; n++;   /* gauche : colonne directe */
+            }
+    for (uint8_t r = 0; r < RF_HALF_ROWS && n < max; r++)
+        for (uint8_t c = 0; c < cols && n < max; c++)
+            if (rf_bitmap_get(right_bm, r, c)) {
+                out_row[n] = r;
+                out_col[n] = half_col_to_keymap(c, cols, right_mirror);
+                n++;
+            }
+    return n;
+}
+
 /* ── Cadence : quand la moitié droite doit-elle émettre ? ───────────────────
  *
  * Testée host dans test/test_half_tx_cadence.c.
@@ -167,6 +200,7 @@ bool half_link_remote_changed(void);
  * RF_CH_HALF_LINK. C'est le seul chemin d'émission autorisé quand HALF_LINK_RX
  * est actif — une moitié n'a qu'une puce, et deux modules qui l'initialisent
  * chacun de leur côté se sont déjà écrasés trois fois. */
+void half_link_note_wake(void);
 bool half_link_excursion_tx(uint8_t canal, const uint8_t addr[5],
                             const uint8_t *payload, uint8_t len);
 

@@ -65,6 +65,20 @@ sleeping half therefore cannot hear the other one, so after a long absence the
 first keypress has to land on the left half — the one that talks to the host.
 That is the chip's constraint, not an implementation shortcut.
 
+**Where this is going — dongle-side fusion (planned, 2026-09-12).** The left
+being sole master means it must *listen* to the right (~13 mA) whenever it is
+awake — that is the ceiling on the left's battery, and the reason a sleeping
+half cannot be woken by the other. A rework is designed: both halves transmit
+their *raw* half-matrix to the dongle, which fuses them and runs the engine, so
+**neither half listens on battery** — the autonomy win, and the end of the
+first-keypress lag. The left keeps working as a standalone USB keyboard, which
+means two engines (dongle + left) kept from diverging by three rules: same code,
+one config replicated and versioned across both NVS, exactly one engine active
+at a time by route. It is staged behind `KASE_DONGLE_FUSION` (off by default) so
+the current firmware keeps working at every step. Design and plan live in
+`docs/superpowers/specs/2026-09-12-dongle-fusion-deux-moteurs-design.md` and
+`docs/superpowers/plans/2026-09-12-dongle-fusion.md`.
+
 **The trackpad still has no hardware driver.** Its pure logic — the IQS5xx
 frame parser, the gesture→HID mapping (cursor accel, taps, scroll,
 press-and-hold), the accel config — exists and is host-tested; what is missing

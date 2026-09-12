@@ -81,6 +81,24 @@ config KASE_HAS_LOCAL_MATRIX
         seule fonction, la spec la decrit comme "un scanner qui remonte sa
         matrice brute". Elle n'a en revanche ni moteur keymap ni sortie HID.
 
+config KASE_DONGLE_FUSION
+    bool "Fusion au dongle : les deux moities emettent du BRUT, moteur au dongle"
+    default n
+    help
+        Rearchitecture (design du 2026-09-12) : au lieu que la gauche fusionne et
+        envoie du HID fini, les deux moities emettent leur matrice BRUTE au
+        dongle, qui fusionne et fait tourner le moteur. Aucune moitie n'ecoute
+        sur batterie -> meilleure autonomie des deux cotes, et le reveil se fait
+        par le dongle (fin du « touche la gauche d'abord »).
+
+        Deux moteurs (dongle + gauche autonome en USB) sans divergence : meme
+        code, config repliquee et versionnee dans les deux NVS, un seul moteur
+        actif a la fois selon le routage.
+
+        Defaut OFF : le chemin actuel (gauche maitre, HID fini) reste en place et
+        fonctionne tant que ce drapeau n'est pas actif. Chantier phase par phase,
+        cf. docs/superpowers/plans/2026-09-12-dongle-fusion.md.
+
 config KASE_LINK_FORCE_SOURCE
     bool "Banc : forcer la moitie a se comporter en SOURCE 5 V (sans USB enumere)"
     default n
