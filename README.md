@@ -24,15 +24,22 @@ Configuration and updates go over USB; there is no WiFi and no BLE on either
 half — the power budget forbids it.
 
 The halves talk over **nRF24 radio** (channel 0x4F), and the left half relays
-finished HID reports to the dongle on its own channel. A wired TRRS link is the
-planned alternative; its framing and 5 V handshake are written and host-tested,
-but no cable has been received.
+finished HID reports to the dongle on its own channel. A wired **TRRS link**
+also works: its UART transport, probe/ACK handshake and 5 V load-switch control
+were brought up on the bench 2026-09-11 — the link comes up, both switches
+close, and it stays up. Charging the far half through it is not yet validated:
+that is an electrical question (the switch is fed something below 5 V), not a
+firmware one, and the software offers 5 V only when a *host* enumerates it —
+a wall charger, which is how you would charge, does not. Detecting VBUS instead
+needs the GPIO33 divider populated.
 
-**Hardware status — 2026-09-08.** The keyboard works in its nominal mode: both
+**Hardware status — 2026-09-12.** The keyboard works in its nominal mode: both
 halves on battery, no cable anywhere, typing together through the dongle. Pin
 tables were verified against the netlist on each half; the left runs the keymap
 engine over all 14 columns and relays finished HID to the dongle by a
-PRX→PTX→PRX excursion on its single radio.
+PRX→PTX→PRX excursion on its single radio. Symbol keys (`!@#$…`) are one press
+each (Modified Keys, 0x8000 range), and the physical layout the remapper draws
+is generated from the PCB.
 
 Getting there took three bugs that were all the same bug. *Emit on change* and
 *release on silence* are each reasonable, and they do not compose: whoever emits
@@ -58,7 +65,19 @@ sleeping half therefore cannot hear the other one, so after a long absence the
 first keypress has to land on the left half — the one that talks to the host.
 That is the chip's constraint, not an implementation shortcut.
 
-**The trackpad still has no driver.**
+**The trackpad still has no hardware driver.** Its pure logic — the IQS5xx
+frame parser, the gesture→HID mapping (cursor accel, taps, scroll,
+press-and-hold), the accel config — exists and is host-tested; what is missing
+is the I2C + RDY bring-up on the *left* half that feeds it, plus wiring its
+output through the mouse-relay path. The mapping was written for the old
+dongle-side approach and carries over unchanged, only it now runs on the master.
+
+**Wake latency and the matrix.** Waking from light sleep captures the key by a
+manual double-scan the instant the chip resumes, so a brief tap is not lost; a
+glitch that clears on the second scan is rejected. A held key that is briefly
+mis-read as released is now handled at the source — the report is rebuilt slot
+by slot each cycle, so a recycled slot never keeps a stale keycode (the bug
+where a digit repeated forever under a held remote layer).
 
 Two decisions shape the whole codebase, and they are worth stating plainly
 because both replaced an earlier design that is still visible in the git history.
@@ -167,7 +186,7 @@ boards/
   kase_v2/              # I2C OLED (SSD1306)
   kase_v2_debug/        # V2 + debug/wireless GPIO overrides (V2D)
   kase_dongle/          # USB receiver — no matrix, no keymap, no engine
-  niphar_left/          # Niphargus master: engine + trackpad (trackpad driver TODO)
+  niphar_left/          # Niphargus master: engine, relay, sleep (trackpad HW driver TODO)
   niphar_right/         # Niphargus scanner: matrix + Sharp LCD (LCD driver TODO)
 main/
   input/                # Matrix scan, key processing, HID reports

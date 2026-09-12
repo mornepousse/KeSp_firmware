@@ -109,7 +109,29 @@ matrice lit n'importe quoi — `gpio_reset_pin()` ne défait pas un maintien RTC
 FreeRTOS, qui s'arrête en light sleep. Le compteur `up` du heartbeat, adossé à
 `esp_timer` et donc au RTC, est le seul témoin fiable de la durée d'un sommeil.
 
-Reste ouvert : le driver du trackpad.
+**B2 lien filaire TRRS le 2026-09-11** : transport UART1 (`comm/link/link_uart.c`),
+poignée de main sonde/ACK et pilotage du load switch 5 V — le lien monte, les
+deux switches ferment, il tient. ⚠ La **charge** de l'autre moitié n'est PAS
+validée, et c'est électrique : le firmware n'offre le 5 V que si un HÔTE énumère
+(`tud_ready`), or on charge sur un chargeur mural qui n'énumère pas. Le vrai
+signal est VBUS, qui suppose le pont GPIO33 peuplé. `KASE_LINK_FORCE_SOURCE` force
+la source pour éprouver l'électrique au banc.
+
+⚠ **Un slot de rapport se recycle : effacer `keycodes[i]` en tête de chaque slot.**
+`build_keycode_report` reconstruit `current_press` à neuf, mais cinq branches
+(touche de couche, tap-hold tenu, combo différé, leader, keycode avancé sans
+sortie HID) posaient `extra_keycodes[i]` sans remettre `keycodes[i]` à zéro. Ça
+tenait tant qu'un slot gardait le même type de touche — mais la fusion distante
+REPACKE les slots (`matrix_apply_remote` tasse le distant après la frontière
+locale), et une touche absorbée héritait alors du keycode du chiffre qu'elle
+remplaçait : la touche se répétait à l'infini sous un MO distant tenu. Verrouillé
+par `test_kp_slot_recycle_ne_gele_pas_le_keycode`.
+
+Reste ouvert : le driver du trackpad (matériel). Sa logique pure — parseur de
+trame IQS5xx, mapping gestes→HID, config d'accel — existe et est testée
+(`periph/trackpad/`) ; manquent le bring-up I2C+RDY côté GAUCHE et le
+branchement sur le relais souris. Le mapping visait l'ancien dongle mais tourne
+tel quel sur le maître.
 Brochage : `docs/NIPHARGUS_V2_HARDWARE.md` (source de vérité, vérifié à la netlist).
 
 ## Board variants
