@@ -112,14 +112,20 @@ Aujourd'hui la gauche envoie du HID fini. Le nouveau transport envoie de la
 - **Le mode USB-autonome de la gauche est préservé** mais devient un chemin
   distinct à tester à part entière (son moteur + son écoute de la droite).
 
-## Questions ouvertes
+## Décisions arrêtées
 
-1. **Comment la droite atteint-elle les deux récepteurs ?** En USB-gauche, le
-   moteur gauche a besoin de la matrice de la droite ; en sans-fil, c'est le
-   dongle. La droite émet-elle vers un seul (selon un état qu'elle ignore) ou
-   diffuse-t-elle ? L'auto-ACK ESB est point à point — un seul récepteur
-   acquitte. Option : la droite émet toujours au dongle ; en USB-gauche, le
-   dongle **réémet** la matrice de la droite à la gauche. À trancher.
+- **Question 1 — routage de la droite : TRANCHÉ le 2026-09-12.** La droite émet
+  **toujours vers le dongle**, jamais vers la gauche. En mode USB-gauche, c'est
+  le **dongle qui réémet** la demi-matrice de la droite vers la gauche. La droite
+  reste ainsi bête et ignorante du mode : un seul émetteur, une seule cible, une
+  seule adresse — pas d'état qu'elle ne peut pas voir (l'USB est branché à
+  l'autre bout). Conséquence : le lien direct droite→gauche (`half_link`,
+  KaSe.03) disparaît au profit de droite→dongle ; c'est le dongle qui gagne le
+  saut supplémentaire vers la gauche quand le moteur tourne à gauche. L'auto-ACK
+  ESB point à point reste satisfait à chaque bond (droite↔dongle, puis
+  dongle↔gauche), aucun récepteur muet.
+
+## Questions ouvertes
 2. **Réveil sans fil** : deux émetteurs purs qui dorment ne s'entendent pas plus
    qu'avant. Le dongle (sur secteur) entend les deux → chaque moitié réveille le
    système via le dongle. Le « touche la gauche d'abord » disparaît. À confirmer.
