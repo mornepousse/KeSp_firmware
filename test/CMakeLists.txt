@@ -69,6 +69,7 @@ add_executable(test_runner
     test_rf_channel_plan.c
     test_half_state.c
     test_fuse_halves.c
+    test_matrix_bitmap.c
     test_veille.c
     test_rf_status_cadence.c
     test_keymap_blob_size.c

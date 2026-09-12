@@ -149,10 +149,7 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
                 if (new_state[r][c] != prev_matrix_state[r][c]) { change = true; break; }
         if (change) {
             uint8_t bm[RF_HALF_BITMAP_BYTES];
-            memset(bm, 0, sizeof(bm));
-            for (int r = 0; r < MATRIX_ROWS; r++)
-                for (int c = 0; c < MATRIX_COLS; c++)
-                    if (new_state[r][c]) rf_bitmap_set(bm, (uint8_t)r, (uint8_t)c, true);
+            rf_matrix_to_bitmap(&new_state[0][0], MATRIX_ROWS, MATRIX_COLS, bm);
             half_link_tx_update(bm, true);
         }
     }
@@ -508,10 +505,7 @@ void matrix_wake_capture(void)
      * On émet donc ici ce qu'il aurait émis. */
     {
         uint8_t bm[RF_HALF_BITMAP_BYTES];
-        memset(bm, 0, sizeof(bm));
-        for (int r = 0; r < MATRIX_ROWS; r++)
-            for (int c = 0; c < MATRIX_COLS; c++)
-                if (st[r][c]) rf_bitmap_set(bm, (uint8_t)r, (uint8_t)c, true);
+        rf_matrix_to_bitmap(&st[0][0], MATRIX_ROWS, MATRIX_COLS, bm);
         half_link_tx_update(bm, true);
     }
 #endif

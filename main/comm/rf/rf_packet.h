@@ -294,4 +294,16 @@ static inline void rf_bitmap_set(uint8_t *bm, uint8_t row, uint8_t col, bool val
     else     bm[idx >> 3] &= ~mask;
 }
 
+/* Empaquette une matrice locale row-major (rows×cols, cols == RF_HALF_COLS) en
+ * bitmap demi-matrice. Une seule implémentation testée (test_matrix_bitmap.c) ;
+ * les deux moitiés l'utilisent pour émettre leur brut. Efface d'abord bm. */
+static inline void rf_matrix_to_bitmap(const uint8_t *state, uint8_t rows,
+                                       uint8_t cols, uint8_t *bm)
+{
+    memset(bm, 0, RF_HALF_BITMAP_BYTES);
+    for (uint8_t r = 0; r < rows; r++)
+        for (uint8_t c = 0; c < cols; c++)
+            if (state[(uint16_t)r * cols + c]) rf_bitmap_set(bm, r, c, true);
+}
+
 #endif /* RF_PACKET_H */
