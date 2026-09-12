@@ -81,6 +81,22 @@ config KASE_HAS_LOCAL_MATRIX
         seule fonction, la spec la decrit comme "un scanner qui remonte sa
         matrice brute". Elle n'a en revanche ni moteur keymap ni sortie HID.
 
+config KASE_LINK_FORCE_SOURCE
+    bool "Banc : forcer la moitie a se comporter en SOURCE 5 V (sans USB enumere)"
+    default n
+    depends on KASE_LINK_WIRE
+    help
+        Diagnostic de charge. Le lien n'offre le 5 V que s'il se croit alimente,
+        et il le deduit de l'enumeration USB (tud_ready). Or on charge la droite
+        en branchant la gauche sur un CHARGEUR mural, qui n'enumere pas : le
+        firmware reste aveugle et ne ferme jamais le switch.
+
+        Cette option force « USB present » en permanence : la moitie sonde et
+        ferme le 5 V sur ACK, quel que soit l'etat USB. Elle permet de valider
+        l'electrique de la charge par TRRS avant que le pont VBUS (GPIO33, pont
+        1M) ne soit peuple. A NE PAS laisser en production : une gauche a
+        batterie faible se mettrait a alimenter la droite.
+
 config KASE_LINK_WIRE
     bool "Lien filaire TRRS : poignee de main et 5 V (brick B2)"
     default n
