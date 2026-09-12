@@ -598,8 +598,44 @@ static void test_kp_mod_survives_full_report(void)
 /* Suite runner                                                          */
 /* ══════════════════════════════════════════════════════════════════════ */
 
+/* ── Slot recyclé : une touche absorbée hérite du keycode précédent ──────────
+ *
+ * Bug constaté au banc le 2026-09-12. En maintenant une couche (MO) sur la
+ * moitié DISTANTE et en tapant un chiffre sur la LOCALE, le chiffre ne se
+ * relâchait jamais — le host le répétait (« 231111114 » pour un seul appui).
+ *
+ * Cause : build_keycode_report ne remettait pas keycodes[i] à zéro dans la
+ * branche « touche changeuse de couche — absorbée » (ni dans is_hold, advanced,
+ * leader, combo). Ça passait tant que chaque slot gardait le même TYPE de
+ * touche d'un cycle à l'autre. Mais la fusion distante REPACKE les slots : au
+ * relâchement de la touche locale, le MO distant glisse du slot 1 au slot 0 —
+ * le slot qui tenait le chiffre — et hérite de son keycode resté là.
+ *
+ * On reproduit le repack : chiffre au slot 0 + MO au slot 1, puis MO seul au
+ * slot 0. Le rapport final ne doit contenir AUCUN chiffre. */
+static void test_kp_slot_recycle_ne_gele_pas_le_keycode(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_KC_A;     /* "A" en (0,0) */
+    keymaps[0][0][1] = T_MO_L1;    /* MO(L1) en (0,1) */
+
+    /* Cycle 1 : A (slot 0) + MO (slot 1). */
+    press_key(0, 0, 0);
+    press_key(1, 0, 1);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_A), "cycle 1 : A present");
+
+    /* Cycle 2 : la locale (A) est relachee, le MO glisse au slot 0 (repack). */
+    release_all_keys();
+    press_key(0, 0, 1);            /* MO seul, au SLOT 0 (là où était A) */
+    build_keycode_report();
+    TEST_ASSERT(!keycode_in_report(T_KC_A),
+                "cycle 2 : A ne doit PLUS etre dans le rapport (slot recycle)");
+}
+
 void test_keycode_report(void)
 {
+    test_kp_slot_recycle_ne_gele_pas_le_keycode();
     TEST_SUITE("Keycode Report Pipeline (build_keycode_report)");
     TEST_RUN(test_kp_simple_press);
     TEST_RUN(test_kp_simple_release);

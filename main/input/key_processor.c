@@ -360,6 +360,17 @@ void build_keycode_report(void)
         uint8_t col = current_press_col[i];
         uint16_t kc = keymaps[active_layer][row][col];
 
+        /* Ce slot est reconstruit à neuf : on efface AVANT de le remplir.
+         * Sans cela, une touche absorbée (changeuse de couche, tap-hold tenu,
+         * combo différé, leader…) laissait keycodes[i] à sa valeur du cycle
+         * précédent. Invisible tant que chaque slot gardait le même type de
+         * touche — mais la fusion distante REPACKE les slots, et au relâchement
+         * d'une touche locale le MO distant glissait sur un slot qui tenait un
+         * caractère, dont il héritait. Bug « la touche ne se relâche pas sous MO
+         * distant », 2026-09-12. Chaque branche qui émet écrase ce zéro. */
+        keycodes[i] = 0;
+        extra_keycodes[i] = 0;
+
         /* Check tap/hold resolved state */
         bool is_hold = false;
         tap_hold_get_resolved(row, col, &is_hold);
