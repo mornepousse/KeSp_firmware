@@ -174,7 +174,12 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
     rf_heartbeat_t h;
     memset(&h, 0, sizeof(h));
     memcpy(h.bitmap, bitmap, RF_HALF_BITMAP_BYTES);
-    h.seq = s_seq++;
+    /* seq n'est consommé qu'une fois le verrou pris : un envoi abandonné
+     * (radio endormie, verrou tenu) l'incrémentait quand même, et la gauche
+     * comptait chaque abandon comme une trame PERDUE — 48 % de « pertes »
+     * lues au banc le 2026-09-11 pendant que la droite s'endormait, sans qu'un
+     * seul paquet ait disparu en l'air. */
+    h.seq = s_seq;
     /* batt_dV et link_q restent a zero : la jauge est la brick B7, et la
      * qualite de lien se calculera quand le compteur de retransmissions aura
      * un sens (il faut un recepteur en face). */
@@ -187,6 +192,7 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
         ESP_LOGW(TAG, "emission abandonnee : radio occupee");
         return false;
     }
+    s_seq++;                       /* la trame part : ce numéro est consommé */
     bool ack = rf_driver_send(&s_radio, buf, (uint8_t)n);
     if (s_tx_radio_mux) xSemaphoreGive(s_tx_radio_mux);
 
@@ -277,13 +283,32 @@ static void half_link_tx_refresh_task(void *arg)
              * assumée : un hôte qui s'endort câble branché laisse aussi le
              * clavier dormir ; il se ré-énumère au réveil. Constaté au banc le
              * 2026-09-11 : sept minutes sur batterie sans jamais dormir. */
-            bool bloque = tud_ready();
+            /* PAS de verrou USB sur la moitié droite, contrairement à la gauche.
+             *
+             * Son USB n'est qu'un port CDC que personne n'ouvre : Linux le met
+             * en autosuspend après deux secondes, et tud_ready() retombe à
+             * faux. La droite se croyait alors sur batterie, s'endormait à 60 s
+             * d'inactivité, coupait sa PHY USB — l'hôte voyait un débranchement
+             * — et sa radio avec : « je perds le clavier droit si je le branche
+             * en USB ». Constaté au banc le 2026-09-11, journal noyau à l'appui
+             * (énumération, puis disconnect 66 s plus tard).
+             *
+             * tud_mounted() ne vaut pas mieux : il reste vrai après un vrai
+             * débranchement. Il n'y a pas de bon signal sans pont VBUS. Mais
+             * ici il n'en faut pas : rien sur ce port ne justifie de rester
+             * éveillé, dormir ne coûte qu'un port CDC dont personne ne se sert,
+             * et le réveil sur la matrice est le même que sur batterie.
+             *
+             * La gauche garde son verrou : elle EST le clavier HID, et un HID
+             * n'est pas autosuspendu. */
+            bool lien = false;
 #if CONFIG_KASE_LINK_WIRE
             /* Une moitié en charge par le TRRS reste éveillée : endormie, elle
              * cesserait de répondre aux sondes et le pair rouvrirait son 5 V. */
-            bloque = bloque || link_uart_active();
+            lien = link_uart_active();
 #endif
-            veille_pas(inactif, bloque);
+            veille_diag(inactif, false, lien);
+            veille_pas(inactif, lien);
         }
 #endif
         vTaskDelay(pdMS_TO_TICKS(20));

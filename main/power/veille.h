@@ -55,6 +55,11 @@ void veille_liberer_gpio(void);   /* au démarrage, AVANT matrix_setup() */
 void veille_legere_entrer(void);
 void veille_profonde_entrer(void);
 void veille_pas(uint32_t inactif_ms, bool bloque);
+/* Diagnostic : quand l'inactivité dépasse le seuil léger mais que la veille
+ * est bloquée, dire PAR QUOI, au plus une fois par 30 s. Une nuit à 20 mA au
+ * lieu de 244 µA (0,2 V perdus sur la gauche, 2026-09-12) n'a laissé aucune
+ * trace parce que rien ne journalisait un sommeil refusé. */
+void veille_diag(uint32_t inactif_ms, bool usb, bool lien);
 #endif
 
 static inline veille_t veille_niveau(uint32_t inactif_ms, bool bloque,

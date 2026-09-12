@@ -10,6 +10,8 @@
 #endif
 #include "esp_log.h"
 #include "esp_sleep.h"
+#include "esp_timer.h"
+#include "tinyusb.h"
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
 #include "freertos/FreeRTOS.h"
@@ -74,7 +76,27 @@ void veille_legere_entrer(void)
     rtc_matrix_deinit();          /* rendre les GPIO au réveil statique */
     matrix_arm_key_wake();
 
+    /* Se retirer du bus USB AVANT de dormir. Le light sleep coupe la PHY : vu
+     * de l'hôte c'est un débranchement brutal, et au réveil TinyUSB retrouve
+     * un contrôleur OTG dans un état indéfini — la moitié droite ne se
+     * réveillait plus tant qu'elle était branchée, seul un reset la ramenait.
+     * Constaté au banc le 2026-09-11 : 65 s de fonctionnement branchée, puis
+     * silence complet au premier sommeil. Sur batterie, le réveil marchait.
+     *
+     * tud_disconnect() relâche le pull-up D+ proprement : l'hôte voit un
+     * appareil qui se retire, pas un qui disparaît. tud_connect() au réveil
+     * ré-énumère en ~1 s. Un appareil qui dort n'a rien à faire sur le bus. */
+    bool etait_connecte = tud_mounted();
+    if (etait_connecte) tud_disconnect();
+
     esp_light_sleep_start();      /* bloque ici jusqu'à une touche */
+    /* AVANT tout : prouver le réveil ET le nommer. cause=7 est ESP_SLEEP_WAKEUP_GPIO
+     * et le masque dit quelle ligne ; toute autre cause est un réveil qu'on n'a
+     * pas demandé. */
+    ESP_LOGI(TAG, "sorti du sommeil : cause=%d",
+             (int)esp_sleep_get_wakeup_cause());
+
+    if (etait_connecte) tud_connect();
 
     /* L'ordre est le cœur du correctif, chaque étape a sa raison :
      *
@@ -152,11 +174,53 @@ void veille_profonde_entrer(void)
     esp_deep_sleep_start();       /* ne revient jamais : le réveil rebootera */
 }
 
+void veille_diag(uint32_t inactif_ms, bool usb, bool lien)
+{
+    static uint32_t dernier_ms;
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (inactif_ms < (uint32_t)CONFIG_KASE_VEILLE_LEGERE_S * 1000u) return;
+    if (!usb && !lien) return;                       /* rien ne bloque : on va dormir */
+    if ((uint32_t)(now - dernier_ms) < 30000u) return;
+    dernier_ms = now;
+    ESP_LOGW(TAG, "veille REFUSEE depuis %lu s : usb=%d lien=%d",
+             (unsigned long)(inactif_ms / 1000), (int)usb, (int)lien);
+}
+
 void veille_pas(uint32_t inactif_ms, bool bloque)
 {
-    switch (veille_niveau(inactif_ms, bloque,
-                          (uint32_t)CONFIG_KASE_VEILLE_LEGERE_S * 1000u,
-                          (uint32_t)CONFIG_KASE_VEILLE_PROFONDE_S * 1000u)) {
+    veille_t niveau = veille_niveau(inactif_ms, bloque,
+                                    (uint32_t)CONFIG_KASE_VEILLE_LEGERE_S * 1000u,
+                                    (uint32_t)CONFIG_KASE_VEILLE_PROFONDE_S * 1000u);
+
+#if CONFIG_KASE_HALF_LINK_TX
+    /* Moitié droite : si l'USB a été monté, PROFOND plutôt que LÉGER.
+     *
+     * En light sleep les horloges de la PHY USB sont gelées ; la doc ESP-IDF
+     * (USB Serial/JTAG Console, « Sleep Mode Considerations ») prévient que
+     * l'hôte peut déclarer l'appareil en erreur, qu'il peut ne pas le
+     * ré-énumérer à la sortie, et qu'ESP-IDF ne refuse pas l'entrée en sommeil
+     * câble branché. Constaté au banc le 2026-09-11 : la droite branchée
+     * s'endormait puis ne se réveillait plus, seul un reset la ramenait.
+     *
+     * Il n'y a pas de bon signal de présence sans pont VBUS : tud_mounted()
+     * reste vrai après un débranchement à chaud, tud_ready() suit l'autosuspend
+     * de l'hôte (un CDC que personne n'ouvre est suspendu en 2 s). Alors on
+     * contourne : le deep sleep éteint la PHY proprement — déconnexion et
+     * reconnexion normales, dit la même doc — et son réveil EXT1 est un
+     * REDÉMARRAGE, qui remet tud_mounted() à faux. Après un débranchement à
+     * chaud, un seul réveil coûte 700 ms, puis la carte revient au light sleep
+     * d'elle-même. Dégradation gracieuse et auto-réparante, plutôt qu'un
+     * clavier mort ou une batterie vidée.
+     *
+     * La gauche n'est pas concernée : clavier HID, l'hôte ne la suspend pas,
+     * elle ne dort jamais branchée. */
+    if (niveau == VEILLE_LEGERE && tud_mounted()) {
+        ESP_LOGW(TAG, "USB monte : sommeil profond plutot que leger (PHY USB)");
+        niveau = VEILLE_PROFONDE;
+    }
+#endif
+
+    switch (niveau) {
     case VEILLE_PROFONDE: veille_profonde_entrer(); break;   /* ne revient pas */
     case VEILLE_LEGERE:   veille_legere_entrer();   break;
     case VEILLE_AUCUNE:   break;

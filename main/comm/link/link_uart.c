@@ -164,15 +164,25 @@ void link_uart_start(void)
     ESP_ERROR_CHECK(uart_driver_install(BOARD_LINK_UART_NUM, 256, 0, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(BOARD_LINK_UART_NUM, &uc));
 #if BOARD_LINK_SWAP_TX_RX
+    const int link_rx_pin = BOARD_LINK_TX;   /* swap : la vraie RX est sur TX */
     ESP_ERROR_CHECK(uart_set_pin(BOARD_LINK_UART_NUM, BOARD_LINK_RX, BOARD_LINK_TX,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_LOGI(TAG, "UART%d TX=GPIO%d RX=GPIO%d (SWAP, cable droit)",
              BOARD_LINK_UART_NUM, BOARD_LINK_RX, BOARD_LINK_TX);
 #else
+    const int link_rx_pin = BOARD_LINK_RX;
     ESP_ERROR_CHECK(uart_set_pin(BOARD_LINK_UART_NUM, BOARD_LINK_TX, BOARD_LINK_RX,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_LOGI(TAG, "UART%d TX=GPIO%d RX=GPIO%d", BOARD_LINK_UART_NUM, BOARD_LINK_TX, BOARD_LINK_RX);
 #endif
+
+    /* Pull-up sur la RX. Quand l'autre moitié dort, sa TX flotte : au repos une
+     * UART est à l'état HAUT, une ligne qui flotte descend et se fait lire comme
+     * un flot de faux octets (91 682 « bruit » comptés sur une capture du
+     * 2026-09-12). Le pull-up interne la tient haute — ligne au repos, pas de
+     * décodage parasite. Piste aussi contre le couplage du câble TRRS vers les
+     * lignes de matrice, soupçonné dans les réveils fantômes. */
+    gpio_set_pull_mode(link_rx_pin, GPIO_PULLUP_ONLY);
 
     link_hs_init(&s_hs);
     memset(&s_usb_db, 0, sizeof(s_usb_db));

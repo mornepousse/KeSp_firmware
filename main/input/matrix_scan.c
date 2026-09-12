@@ -446,18 +446,39 @@ void matrix_wake_capture(void)
     const int cols[] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5,
                          COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
     const int rows[] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+    /* DEUX balayages, on ne garde que ce qui tient sur les deux. Le réveil GPIO
+     * se déclenche sur un simple front : une ligne qui glitche (couplage
+     * capacitif des colonnes voisines tenues hautes, ESD, ligne au seuil)
+     * réveille la carte et se lit « pressée » sur un balayage unique. Elle
+     * ne survit pas à deux lectures espacées de 1 ms ; un vrai appui, si.
+     *
+     * Sans ce filtre, chaque réveil fantôme (cause=7, ~3 par 10 min mesurés le
+     * 2026-09-12) faisait deux dégâts : il tamponnait 60 s d'activité — radio
+     * allumée, 0,2 V perdus sur une nuit — ET la capture PUBLIAIT la touche,
+     * qui partait taper un caractère parasite vers le dongle. */
     uint8_t st[MATRIX_ROWS][MATRIX_COLS];
+    uint8_t st2[MATRIX_ROWS][MATRIX_COLS];
     memset(st, 0, sizeof(st));
+    memset(st2, 0, sizeof(st2));
 
-    for (int c = 0; c < MATRIX_COLS; c++) gpio_set_level(cols[c], 0);
-    for (int c = 0; c < MATRIX_COLS; c++) {
-        gpio_set_level(cols[c], 1);
-        esp_rom_delay_us(20);                 /* RC des 100 Ω série + capacité */
-        for (int r = 0; r < MATRIX_ROWS; r++)
-            st[r][c] = (uint8_t)gpio_get_level(rows[r]);
-        gpio_set_level(cols[c], 0);
+    for (int pass = 0; pass < 2; pass++) {
+        uint8_t (*dst)[MATRIX_COLS] = (pass == 0) ? st : st2;
+        for (int c = 0; c < MATRIX_COLS; c++) gpio_set_level(cols[c], 0);
+        for (int c = 0; c < MATRIX_COLS; c++) {
+            gpio_set_level(cols[c], 1);
+            esp_rom_delay_us(20);             /* RC des 100 Ω série + capacité */
+            for (int r = 0; r < MATRIX_ROWS; r++)
+                dst[r][c] = (uint8_t)gpio_get_level(rows[r]);
+            gpio_set_level(cols[c], 0);
+        }
+        if (pass == 0) esp_rom_delay_us(1000);   /* 1 ms entre les deux passes */
     }
     for (int c = 0; c < MATRIX_COLS; c++) gpio_set_level(cols[c], 1);
+
+    /* ET des deux passes : un fantôme transitoire tombe, un vrai appui reste. */
+    for (int r = 0; r < MATRIX_ROWS; r++)
+        for (int c = 0; c < MATRIX_COLS; c++)
+            st[r][c] = st[r][c] && st2[r][c];
 
     /* Publier comme le callback : rapport local, frontière, fusion, drapeau. */
     for (int i = 0; i < MAX_REPORT_KEYS; i++) {
@@ -497,8 +518,16 @@ void matrix_wake_capture(void)
     if (filled) {
         matrix_flag_signal(&stat_matrix_changed);
         if (keyboard_task_handle != NULL) xTaskNotifyGive(keyboard_task_handle);
+        /* Une TOUCHE est une activité. Un réveil sans touche — glitch sur une
+         * ligne, couplage du câble TRRS, bruit — ne l'est PAS : le tamponner
+         * achetait 60 s de radio allumée à chaque parasite. Une nuit du
+         * 2026-09-12 : 1,2 h d'éveil sur 7 h pour ~70 réveils fantômes, 0,2 V
+         * perdus. Sans tampon, la boucle relit une inactivité ancienne et
+         * renvoie dormir en ~15 ms — exactement ce qu'un glitch mérite. Une
+         * vraie touche que la capture aurait manquée serait vue par le pilote
+         * dans ces 15 ms et tamponnerait par le callback. */
+        last_activity_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
     }
-    last_activity_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
     /* Une ligne par réveil : ce que la capture a trouvé. C'est elle qui a
      * prouvé, le 2026-09-11, que la gauche voyait bien la touche de réveil. */
     ESP_LOGI(TAG, "reveil : %u touche(s) capturee(s)", filled);

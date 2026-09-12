@@ -184,13 +184,15 @@ void vTaskKeyboard(void *pvParameters)
              * assumée : un hôte qui s'endort câble branché laisse aussi le
              * clavier dormir ; il se ré-énumère au réveil. Constaté au banc le
              * 2026-09-11 : sept minutes sur batterie sans jamais dormir. */
-            bool bloque = tud_ready();
+            bool usb  = tud_ready();
+            bool lien = false;
 #if CONFIG_KASE_LINK_WIRE
             /* Une moitié en charge par le TRRS reste éveillée : endormie, elle
              * cesserait de répondre aux sondes et le pair rouvrirait son 5 V. */
-            bloque = bloque || link_uart_active();
+            lien = link_uart_active();
 #endif
-            veille_pas(inactif, bloque);
+            veille_diag(inactif, usb, lien);
+            veille_pas(inactif, usb || lien);
         }
 #endif
 
