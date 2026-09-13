@@ -69,6 +69,13 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
 - [test:test_lost_probe_eventually_reprobes] Après une sonde perdue, la poignée
   de main 5 V re-sonde. Elle ne reste pas bloquée sur un échec.
 
+## Fusion — routage des moteurs
+
+- [test:test_gauche_par_usb] Sans hôte USB, la gauche ne tape pas en local :
+  elle émet son brut, le dongle tape. En route RF, ses émetteurs HID USB
+  (`hid_transport.c`) se taisent — pas d'attente d'EP ni de « report not sent
+  (EP busy) » à chaque frappe vers un USB sans hôte.
+
 ## Fusion — garde-fou de sync config
 
 - [test:test_rf_status_config_fp] L'empreinte CRC-32 de la keymap voyage dans

@@ -13,6 +13,18 @@
 #include "freertos/semphr.h"
 #include "esp_rom_sys.h"   /* esp_rom_delay_us — tick-independent short wait */
 #include <string.h>
+#if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
+#include "usb_presence.h"  /* kbd_active_route — en fusion/RF, le dongle tape, pas nous */
+/* Fusion, moitié gauche en route RF : c'est le DONGLE qui tape (règle 3,
+ * fusion_left_types_local(usb=false) == false, testée). Le moteur local tourne
+ * encore et poussait chaque rapport vers un USB sans hôte : 2,5 ms d'attente
+ * d'EP par rapport dans keyboard_task, et une ligne « report not sent (EP busy) »
+ * par frappe au journal. On rend « envoyé » sans rien faire : il n'y a personne
+ * à qui parler, et la déduplication amont reste cohérente. */
+#define HID_USB_SILENT_IN_RF() (kbd_active_route() == KBD_OUT_RF)
+#else
+#define HID_USB_SILENT_IN_RF() (false)
+#endif
 
 static const char *TAG_HTX = "HID_TX";
 
@@ -147,6 +159,7 @@ static inline bool bt_ready(void)
 bool hid_send_kb_mouse(uint8_t modifier, const uint8_t kb[6],
                        uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
 {
+    if (HID_USB_SILENT_IN_RF()) return true;
     if (usb_bl_state == 0) {
         return send_usb_kb_mouse(modifier, kb, buttons, x, y, wheel);
     } else if (bt_ready()) {
@@ -159,6 +172,7 @@ bool hid_send_kb_mouse(uint8_t modifier, const uint8_t kb[6],
 
 bool hid_send_keyboard(uint8_t modifier, const uint8_t kb[6])
 {
+    if (HID_USB_SILENT_IN_RF()) return true;
     if (usb_bl_state == 0) {
         return send_usb_keyboard(modifier, kb);
     } else if (bt_ready()) {
@@ -170,6 +184,7 @@ bool hid_send_keyboard(uint8_t modifier, const uint8_t kb[6])
 
 bool hid_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
 {
+    if (HID_USB_SILENT_IN_RF()) return true;
     if (usb_bl_state == 0) {
         return send_usb_mouse(buttons, x, y, wheel);
     } else if (bt_ready()) {
