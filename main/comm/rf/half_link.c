@@ -5,6 +5,8 @@
 #include "rf_slot.h"
 #if CONFIG_KASE_DONGLE_FUSION
 #include "rf_pairing.h"   /* fusion : la droite s'adresse au slot clavier du dongle */
+#include "esp_mac.h"      /* esp_read_mac — REQ d'appairage */
+#include "esp_system.h"   /* esp_restart — après appairage */
 #endif
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -116,6 +118,59 @@ static rf_radio_cfg_t half_link_cfg(void)
 }
 
 #if CONFIG_KASE_HAS_RF_TX
+
+#if CONFIG_KASE_DONGLE_FUSION
+/* Appairage actif de la DROITE au dongle (fusion). Réplique le flux prouvé de
+ * kbd_pairing_task (kbd_relay_tx.c) : REQ sur le rendez-vous en déclarant le
+ * SLOT CLAVIER (0x01, la droite partage l'adresse de la gauche), attente de
+ * l'ACK qui porte le set_id, sauvegarde NVS, redémarrage — au reboot,
+ * half_link_tx_init charge le set_id et vise la bonne adresse.
+ *
+ * La droite déclare 0x01 : rf_pairing_resolve_slot honore le slot déclaré, donc
+ * le dongle l'assigne au clavier sans toucher au slot souris (0x02). Les deux
+ * moitiés finissent sur la même adresse, distinguées par l'identité de moitié
+ * dans PKT_TYPE_MATRIX.
+ *
+ * ⚠ Le dongle doit avoir sa fenêtre d'appairage OUVERTE (KS_CMD_RF_PAIR_START).
+ * Utilise s_radio, déjà initialisée en PTX par half_link_tx_init. */
+static void half_fusion_pairing_task(void *arg)
+{
+    (void)arg;
+    uint8_t my_mac[6];
+    esp_read_mac(my_mac, ESP_MAC_WIFI_STA);
+    uint8_t req[8];
+    rf_encode_pair_req(req, my_mac, RF_ADDR_KBD_DONGLE);   /* déclare le slot clavier */
+    static const uint8_t pair_addr[5] = RF_PAIR_ADDR;
+
+    rf_pair_ack_t ack;
+    bool acked = false;
+    /* ~30 s de tentatives : laisse le temps d'ouvrir la fenêtre du dongle. */
+    for (int i = 0; i < 200 && !acked; i++) {
+        rf_driver_set_tx_address(&s_radio, pair_addr);
+        rf_driver_set_channel(&s_radio, RF_PAIR_CHANNEL);
+        rf_driver_send(&s_radio, req, 8);
+        uint8_t rxb[32];
+        uint16_t n = rf_driver_pair_listen(&s_radio, RF_PAIR_CHANNEL, pair_addr,
+                                           rxb, sizeof(rxb), 150);
+        if (n && rf_decode_pair_ack(rxb, n, &ack)) { acked = true; break; }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    if (acked) {
+        /* On sauvegarde TOUJOURS le slot clavier : la droite partage l'adresse de
+         * la gauche, quel que soit le slot renvoyé par le dongle. */
+        ESP_LOGW(TAG, "fusion appairage : ACK set_id=0x%04X — sauvegarde + reboot",
+                 ack.set_id);
+        rf_pairing_save_half(ack.set_id, RF_ADDR_KBD_DONGLE, ack.dongle_wifi_mac);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+    }
+    ESP_LOGE(TAG, "fusion appairage : pas d'ACK — ouvrir la fenêtre du dongle "
+                  "(KS_CMD_RF_PAIR_START) puis redémarrer la droite");
+    vTaskDelete(NULL);
+}
+#endif /* CONFIG_KASE_DONGLE_FUSION */
+
 bool half_link_tx_init(void)
 {
     s_tx_radio_mux = xSemaphoreCreateMutex();
@@ -128,21 +183,18 @@ bool half_link_tx_init(void)
     /* Fusion : la droite ne parle plus à la gauche mais au SLOT CLAVIER DU DONGLE,
      * comme la gauche (même adresse, distinction par l'identité de moitié dans
      * PKT_TYPE_MATRIX). Canal et suffixe du slot clavier, adresse dérivée du
-     * set_id d'appairage.
-     *
-     * ⚠ La droite doit être APPAIRÉE au dongle (set_id en NVS). Elle ne l'a
-     * jamais été — le handshake est la pièce BANC (cf. le plan runtime) : sans
-     * lui, set_id=0 → adresse d'usine, le dongle n'acquitte pas. Le retarget et
-     * le format sont ici ; l'appairage se valide contre des ACK réels. */
+     * set_id d'appairage. Non appairée → on lance l'appairage actif (plus bas). */
+    bool fusion_unpaired = false;
     {
         uint8_t slot = RF_ADDR_KBD_DONGLE;
         uint16_t set_id = rf_pairing_load_set_id_half(RF_ADDR_KBD_DONGLE, &slot);
         cfg.channel     = RF_CH_KBD_DONGLE;
         cfg.addr_suffix = RF_ADDR_KBD_DONGLE;
-        rf_apply_set_id(&cfg, set_id, slot);
+        rf_apply_set_id(&cfg, set_id, RF_ADDR_KBD_DONGLE);
+        fusion_unpaired = (set_id == 0 || set_id == 0xFFFF);
         ESP_LOGW(TAG, "fusion : TX vers le dongle ch=0x%02X suffixe=0x%02X set_id=0x%04X%s",
                  cfg.channel, cfg.addr_suffix, set_id,
-                 (set_id == 0 || set_id == 0xFFFF) ? " (NON APPAIRE — pièce banc)" : "");
+                 fusion_unpaired ? " (NON APPAIRE — appairage actif)" : "");
     }
 #endif
     esp_err_t e = rf_driver_init_tx(&s_radio, &cfg);
@@ -151,6 +203,17 @@ bool half_link_tx_init(void)
         return false;
     }
     ESP_LOGI(TAG, "TX pret : ch=0x%02X addr=KaSe.%02X", cfg.channel, cfg.addr_suffix);
+
+#if CONFIG_KASE_DONGLE_FUSION
+    if (fusion_unpaired) {
+        /* Pas d'épreuve ni d'émission normale tant qu'on n'a pas de set_id : on
+         * viserait l'adresse d'usine et le dongle n'acquitterait pas. On lance
+         * l'appairage actif, qui redémarre la carte une fois l'ACK reçu. */
+        ESP_LOGW(TAG, "fusion : appairage actif au dongle — ouvrir sa fenêtre");
+        xTaskCreate(half_fusion_pairing_task, "half_pair", 4096, NULL, 5, NULL);
+        return true;
+    }
+#endif
 
     /* Rafale d'epreuve au demarrage. Sans elle, savoir si le lien porte
      * dependrait de quelqu'un appuyant sur une touche PENDANT qu'on ecoute la
