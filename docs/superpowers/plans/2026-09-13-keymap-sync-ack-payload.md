@@ -402,14 +402,14 @@ git commit -m "feat(keymap-sync): la gauche tire la keymap par ACK, réassemble 
 **Files:**
 - Modify: `COMPORTEMENTS.md`, `docs/HARDWARE_SMOKE_TEST.md`, `docs/CDC_BINARY_PROTOCOL.md` (note sur 0x17 = accusé de sync), `docs/superpowers/plans/2026-09-13-dongle-fusion-runtime.md` (marquer phase 3 en cours)
 
-- [ ] **Step 1 (banc, étape 5 du spec) :** éprouver : ACK perdus (la gauche redemande le même chunk, pas de corruption) ; sync EN PLEINE FRAPPE (pas de touche perdue/collée) ; **zéro trafic sync une fois `match=1`** (la balise cesse — vérifier à la console dongle qu'aucun ACK payload n'est plus chargé au repos synchronisé).
-- [ ] **Step 2:** Ajouter à `COMPORTEMENTS.md`, section « Fusion — sync auto » :
+- [x] **Step 1 (banc, étape 5 du spec) :** éprouver : ACK perdus (la gauche redemande le même chunk, pas de corruption) ; sync EN PLEINE FRAPPE (pas de touche perdue/collée) ; **zéro trafic sync une fois `match=1`** (la balise cesse — vérifier à la console dongle qu'aucun ACK payload n'est plus chargé au repos synchronisé).
+- [x] **Step 2:** Ajouter à `COMPORTEMENTS.md`, section « Fusion — sync auto » :
   - `[test:test_keymap_sync]` Le réassembleur n'accepte que le prochain chunk attendu ; doublons et hors-séquence sont ignorés (un ACK rejoué ne corrompt pas la keymap).
   - `[test:test_beacon_roundtrip]` (ou le nom retenu) Les trames de sync survivent à l'encode/decode.
   - `[smoke:Sync keymap sans câble]` Une divergence dongle↔gauche se résorbe seule par RF (ACK payload), sans brancher la gauche ; `match` repasse à 1.
   Ajouter l'item smoke correspondant à `docs/HARDWARE_SMOKE_TEST.md` (section Dongle) : « Sync keymap sans câble : éditer la keymap du dongle → en <1 min sans-fil, CDC 0x17 match repasse à 1 ; la gauche en USB tape la nouvelle keymap ».
-- [ ] **Step 3:** `TRIPWIRE_CONTRAT_STRICT=1 ./scripts/check.sh --fast` vert ; build dongle+fusion / niphar_left+fusion / niphar_right+fusion rc=0 ; `./scripts/check.sh` (7 boards) vert.
-- [ ] **Step 4: Commit + push**
+- [x] **Step 3:** `TRIPWIRE_CONTRAT_STRICT=1 ./scripts/check.sh --fast` vert ; build dongle+fusion / niphar_left+fusion / niphar_right+fusion rc=0 ; `./scripts/check.sh` (7 boards) vert.
+- [x] **Step 4: Commit + push**
 
 ```bash
 git add COMPORTEMENTS.md docs/HARDWARE_SMOKE_TEST.md docs/CDC_BINARY_PROTOCOL.md docs/superpowers/plans/2026-09-13-dongle-fusion-runtime.md
