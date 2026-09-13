@@ -197,24 +197,41 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
                 dongle_engine_on_matrix(&m);
 
                 /* Mode USB-gauche : réémettre la demi-matrice de la DROITE vers la
-                 * gauche, sur le lien inter-moitiés réutilisé (RF_CH_HALF_LINK /
-                 * KaSe.03), en heartbeat (le format que l'écoute de la gauche
-                 * décode). Excursion PRX→PTX→PRX sur la radio clavier, restaurée
-                 * sur le slot clavier. Sans effet tant que la gauche n'écoute pas
-                 * (phase 2 étape 4) : oob_tx échoue proprement, sans ACK. */
+                 * gauche (RF_CH_HALF_LINK / KaSe.03), en heartbeat que l'écoute de
+                 * la gauche décode. Excursion PRX→PTX→PRX sur la radio clavier.
+                 *
+                 * ⚠ RÉÉMETTRE SUR CHANGEMENT SEULEMENT — pas chaque trame.
+                 * Réémettre chaque trame (la droite rafraîchit ses maintiens ~10/s
+                 * ET retransmet) monopolisait la radio du dongle en excursions : il
+                 * cessait d'écouter, donc d'ACQUITTER la droite → la droite
+                 * retransmettait en boucle → spirale, ACK effondré (bug banc
+                 * 2026-09-13, « la droite meurt à chaque branchement USB »). On ne
+                 * réémet donc qu'au CHANGEMENT du bitmap, plus un rafraîchissement
+                 * BORNÉ (100 ms) tant qu'une touche est tenue — le dongle reste en
+                 * écoute l'essentiel du temps. Même règle que half_link : muet au
+                 * repos, entretenu sur maintien. */
                 if (m.half == RF_HALF_RIGHT && dongle_engine_left_usb()) {
-                    rf_heartbeat_t h;
-                    memset(&h, 0, sizeof(h));
-                    memcpy(h.bitmap, m.bitmap, RF_HALF_BITMAP_BYTES);
-                    h.seq = m.seq;
-                    uint8_t hb[16];
-                    uint16_t hn = rf_encode_heartbeat(hb, &h);
-                    static const uint8_t left_addr[5] = { 'K','a','S','e', RF_ADDR_HALF_LINK };
-                    uint8_t restore_addr[5] = { s_kbd_cfg.rx_addr[0], s_kbd_cfg.rx_addr[1],
-                                                s_kbd_cfg.rx_addr[2], s_kbd_cfg.rx_addr[3],
-                                                s_kbd_cfg.addr_suffix };
-                    rf_driver_oob_tx(&s_kbd, RF_CH_HALF_LINK, left_addr, hb, (uint8_t)hn,
-                                     s_kbd_cfg.channel, restore_addr);
+                    static uint8_t  s_reemit_last[RF_HALF_BITMAP_BYTES];
+                    static uint32_t s_reemit_ms;
+                    uint32_t now2 = (uint32_t)(esp_timer_get_time() / 1000);
+                    bool change = memcmp(s_reemit_last, m.bitmap, RF_HALF_BITMAP_BYTES) != 0;
+                    bool tenu   = (m.bitmap[0] | m.bitmap[1] | m.bitmap[2] | m.bitmap[3]) != 0;
+                    if (change || (tenu && (uint32_t)(now2 - s_reemit_ms) >= 100u)) {
+                        rf_heartbeat_t h;
+                        memset(&h, 0, sizeof(h));
+                        memcpy(h.bitmap, m.bitmap, RF_HALF_BITMAP_BYTES);
+                        h.seq = m.seq;
+                        uint8_t hb[16];
+                        uint16_t hn = rf_encode_heartbeat(hb, &h);
+                        static const uint8_t left_addr[5] = { 'K','a','S','e', RF_ADDR_HALF_LINK };
+                        uint8_t restore_addr[5] = { s_kbd_cfg.rx_addr[0], s_kbd_cfg.rx_addr[1],
+                                                    s_kbd_cfg.rx_addr[2], s_kbd_cfg.rx_addr[3],
+                                                    s_kbd_cfg.addr_suffix };
+                        rf_driver_oob_tx(&s_kbd, RF_CH_HALF_LINK, left_addr, hb, (uint8_t)hn,
+                                         s_kbd_cfg.channel, restore_addr);
+                        memcpy(s_reemit_last, m.bitmap, RF_HALF_BITMAP_BYTES);
+                        s_reemit_ms = now2;
+                    }
                 }
             }
         }
