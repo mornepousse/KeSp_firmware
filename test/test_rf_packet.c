@@ -305,6 +305,60 @@ static void test_rf_pkt_hidreport_roundtrip(void)
     TEST_ASSERT(!rf_decode_hidreport(buf, 2, &sub, &mod, kbo, &btn, &x, &y, &w), "runt rejected");
 }
 
+/* ── PKT_TYPE_MATRIX — demi-matrice brute pour la fusion au dongle ───────────
+ *
+ * Phase 1 de la fusion : les deux moitiés émettent leur matrice BRUTE au dongle,
+ * qui fusionne et fait tourner le moteur. Le dongle doit savoir de QUELLE moitié
+ * vient chaque bitmap — l'identité était implicite sur l'ancien lien direct
+ * droite→gauche (un seul pair), elle ne l'est plus au dongle (deux pairs sur le
+ * slot clavier). D'où l'octet d'identité dans le nibble bas de l'octet 0. État
+ * pur : ni batterie ni qualité de lien, qui restent sur PKT_TYPE_STATUS. */
+static void test_rf_matrix_roundtrip(void)
+{
+    uint8_t buf[16];
+    rf_matrix_t m; memset(&m, 0, sizeof(m));
+    m.half = RF_HALF_RIGHT;
+    rf_bitmap_set(m.bitmap, 3, 6, true);   /* derniere touche de la moitie (4x7) */
+    rf_bitmap_set(m.bitmap, 0, 0, true);
+    m.seq = 17;
+
+    uint16_t n = rf_encode_matrix(buf, &m);
+    TEST_ASSERT_EQ(n, 6, "matrix encode = 1 + bitmap 4 + seq");
+    TEST_ASSERT_EQ(rf_packet_type(buf, n), PKT_TYPE_MATRIX, "type MATRIX");
+
+    rf_matrix_t d; memset(&d, 0, sizeof(d));
+    TEST_ASSERT(rf_decode_matrix(buf, n, &d), "matrix decode ok");
+    TEST_ASSERT_EQ(d.half, RF_HALF_RIGHT, "half id preservé");
+    TEST_ASSERT(rf_bitmap_get(d.bitmap, 3, 6), "bit 3,6");
+    TEST_ASSERT(rf_bitmap_get(d.bitmap, 0, 0), "bit 0,0");
+    TEST_ASSERT(!rf_bitmap_get(d.bitmap, 2, 3), "bit 2,3 clear");
+    TEST_ASSERT_EQ(d.seq, 17, "seq preservé");
+}
+
+static void test_rf_matrix_left_half(void)
+{
+    uint8_t buf[16];
+    rf_matrix_t m; memset(&m, 0, sizeof(m));
+    m.half = RF_HALF_LEFT; m.seq = 1;
+    uint16_t n = rf_encode_matrix(buf, &m);
+    TEST_ASSERT_EQ(buf[0], (PKT_TYPE_MATRIX << 4) | RF_HALF_LEFT, "left dans le nibble bas");
+    rf_matrix_t d;
+    TEST_ASSERT(rf_decode_matrix(buf, n, &d), "decode ok");
+    TEST_ASSERT_EQ(d.half, RF_HALF_LEFT, "left half preservé");
+}
+
+static void test_rf_matrix_rejects(void)
+{
+    uint8_t buf[16];
+    rf_matrix_t m; memset(&m, 0, sizeof(m)); m.half = RF_HALF_LEFT;
+    uint16_t n = rf_encode_matrix(buf, &m);
+    rf_matrix_t d;
+    for (uint16_t cut = 0; cut < n; cut++)
+        TEST_ASSERT(!rf_decode_matrix(buf, cut, &d), "trame tronquée → rejet");
+    buf[0] = (PKT_TYPE_STATUS << 4);
+    TEST_ASSERT(!rf_decode_matrix(buf, n, &d), "type étranger → rejet");
+}
+
 static void test_rf_pair_devtype(void) {
     uint8_t buf[16]; uint8_t mac[6]={1,2,3,4,5,6};
     uint16_t n = rf_encode_pair_req2(buf, mac, 0x01, RF_DEV_SMART_KBD);
@@ -345,4 +399,9 @@ void test_rf_packet(void)
 
     /* TDD: v2 pairing request with device-type byte */
     test_rf_pair_devtype();
+
+    /* TDD: PKT_TYPE_MATRIX — demi-matrice brute portant l'identité de moitié */
+    test_rf_matrix_roundtrip();
+    test_rf_matrix_left_half();
+    test_rf_matrix_rejects();
 }

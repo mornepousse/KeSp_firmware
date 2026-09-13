@@ -10,6 +10,7 @@
 #define PKT_TYPE_KEY        0x1
 #define PKT_TYPE_HEARTBEAT  0x2
 #define PKT_TYPE_TRACKPAD   0x3
+#define PKT_TYPE_MATRIX     0x4   /* fusion : demi-matrice BRUTE half→dongle (identité de moitié) */
 #define PKT_TYPE_HIDREPORT  0x5   /* keyboard-agnostic relay: final HID report */
 #define PKT_TYPE_STATUS     0x6   /* supervision du lien : batterie + qualité, sans état */
 #define PKT_TYPE_PAIR_ACK   0xE   /* dongle→half pairing ACK (RF-2) */
@@ -39,6 +40,12 @@
 #define RF_HALF_COLS         7
 #define RF_HALF_BITMAP_BYTES 4     /* ceil(4*7 / 8) = 4 */
 
+/* Identité de moitié pour PKT_TYPE_MATRIX (nibble bas de l'octet 0). Le dongle,
+ * hub unique de la fusion, distingue ainsi les deux émetteurs sur le slot
+ * clavier. Cf. docs/superpowers/specs/2026-09-12-dongle-fusion-deux-moteurs-design.md */
+#define RF_HALF_LEFT   0
+#define RF_HALF_RIGHT  1
+
 typedef struct {
     uint8_t row;       /* 0..3 */
     uint8_t col;       /* 0..6 (local to the half) */
@@ -53,6 +60,16 @@ typedef struct {
     uint8_t link_q;    /* cumulative retries since last heartbeat */
     uint8_t seq;
 } rf_heartbeat_t;
+
+/* Demi-matrice brute half→dongle pour la fusion (PKT_TYPE_MATRIX). État PUR :
+ * pas de batterie ni de qualité de lien — la supervision reste sur
+ * PKT_TYPE_STATUS. L'identité de moitié (RF_HALF_LEFT/RIGHT) permet au dongle de
+ * fusionner deux émetteurs sur un même slot clavier. */
+typedef struct {
+    uint8_t half;                          /* RF_HALF_LEFT / RF_HALF_RIGHT */
+    uint8_t bitmap[RF_HALF_BITMAP_BYTES];  /* MSB-first, row*7+col */
+    uint8_t seq;
+} rf_matrix_t;
 
 /* Supervision du lien clavier → dongle.
  *
@@ -224,6 +241,26 @@ static inline bool rf_decode_heartbeat(const uint8_t *buf, uint16_t len, rf_hear
     h->batt_dV = buf[1 + RF_HALF_BITMAP_BYTES];
     h->link_q  = buf[2 + RF_HALF_BITMAP_BYTES];
     h->seq     = buf[3 + RF_HALF_BITMAP_BYTES];
+    return true;
+}
+
+/* Demi-matrice brute half→dongle. 6 octets : type+identité, bitmap (4), seq. */
+static inline uint16_t rf_encode_matrix(uint8_t *buf, const rf_matrix_t *m)
+{
+    if (m->half > 0x0F) return 0;
+    buf[0] = (PKT_TYPE_MATRIX << 4) | (m->half & 0x0F);
+    memcpy(&buf[1], m->bitmap, RF_HALF_BITMAP_BYTES);
+    buf[1 + RF_HALF_BITMAP_BYTES] = m->seq;
+    return 2 + RF_HALF_BITMAP_BYTES;   /* 6 */
+}
+
+static inline bool rf_decode_matrix(const uint8_t *buf, uint16_t len, rf_matrix_t *m)
+{
+    if (len < 2 + RF_HALF_BITMAP_BYTES ||
+        rf_packet_type(buf, len) != PKT_TYPE_MATRIX) return false;
+    m->half = buf[0] & 0x0F;
+    memcpy(m->bitmap, &buf[1], RF_HALF_BITMAP_BYTES);
+    m->seq  = buf[1 + RF_HALF_BITMAP_BYTES];
     return true;
 }
 
