@@ -46,6 +46,7 @@ uint8_t rf_signal_q255(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
 #include "rf_driver.h"
 #include "rf_packet.h"
 #include "rf_slot.h"
+#include "dongle_engine.h"   /* fusion : moteur keymap embarqué (gardé en interne) */
 #include "board_rf.h"
 #include "rf_pairing.h"   /* rf_pairing_load_set_id_dongle, rf_apply_set_id */
 #if CONFIG_KASE_NRF_LINE_TEST
@@ -169,13 +170,26 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
                 cache_battery(slot, h.batt_dV);
             }
         } else if (type == PKT_TYPE_HIDREPORT) {
-            /* Le clavier a déjà fait tourner son moteur : on pousse tel quel. */
+            /* Le clavier a déjà fait tourner son moteur : on pousse tel quel.
+             * En mode fusion le CLAVIER n'émet plus de HID fini (il envoie sa
+             * matrice brute, voir PKT_TYPE_MATRIX) — mais la SOURIS Conchodytes,
+             * elle, continue d'émettre du HID fini sur son slot. Ce chemin reste
+             * donc nécessaire dans les deux modes. */
             uint8_t sub, mod, kb[6], btn; int8_t x, y, w;
             if (rf_decode_hidreport(buf, n, &sub, &mod, kb, &btn, &x, &y, &w)) {
                 if (sub == RF_HID_SUB_KBD)        hid_send_keyboard(mod, kb);
                 else if (sub == RF_HID_SUB_MOUSE) hid_send_mouse(btn, x, y, w);
             }
         }
+#if CONFIG_KASE_DONGLE_FUSION
+        else if (type == PKT_TYPE_MATRIX) {
+            /* Fusion : demi-matrice brute d'une moitié. On la remet au moteur
+             * embarqué, qui fusionne les deux moitiés et sort le HID. */
+            rf_matrix_t m;
+            if (rf_decode_matrix(buf, n, &m))
+                dongle_engine_on_matrix(&m);
+        }
+#endif
     }
 }
 
@@ -457,6 +471,12 @@ bool rf_rx_start(void)
 
     xTaskCreatePinnedToCore(rf_rx_task, "rf_rx", 8192, NULL, 10, NULL, 0);
     ESP_LOGI(TAG, "RF RX démarrée (clavier=%d souris=%d)", s_kbd.present, s_mouse.present);
+
+#if CONFIG_KASE_DONGLE_FUSION
+    /* Fusion : démarrer le moteur keymap embarqué. drain_radio lui remet les
+     * demi-matrices ; il fusionne et sort le HID. */
+    dongle_engine_start();
+#endif
 
     return true;
 }

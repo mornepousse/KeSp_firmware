@@ -181,6 +181,11 @@ if(CONFIG_KASE_HAS_RF_RX)
         # elle-même (elle doit le faire pour fonctionner en USB sans dongle) et
         # envoie du HID souris déjà fini.
     )
+    # Fusion : le moteur keymap embarqué dans le dongle. Gardé en interne par
+    # CONFIG_KASE_DONGLE_FUSION ; hors fusion, TU vide, aucun impact.
+    if(CONFIG_KASE_DONGLE_FUSION)
+        list(APPEND srcs "comm/rf/dongle_engine.c")
+    endif()
 endif()
 
 # comm/rf/heartbeat.c n'est plus compilé nulle part : la réconciliation par
