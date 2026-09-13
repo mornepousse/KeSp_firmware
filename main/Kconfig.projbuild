@@ -46,6 +46,11 @@ config KASE_HAS_MOUSE_SENSOR
 
 config KASE_NO_KEYMAP_ENGINE
     bool
+    # Fusion : le dongle RETROUVE le moteur keymap (il fusionne deux demi-matrices
+    # brutes et sort le HID). Ce `default n` est en TÊTE parce que Kconfig retient
+    # le premier default satisfait — il gagne donc sur le `default y if DONGLE`
+    # ci-dessous quand KASE_DONGLE_FUSION est actif.
+    default n if KASE_DONGLE_FUSION
     default y if KASE_DEVICE_ROLE_DONGLE
     default y if KASE_DEVICE_ROLE_MOUSE
     default n

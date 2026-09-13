@@ -17,15 +17,31 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_timer.h"
+#include "sdkconfig.h"   /* CONFIG_KASE_DONGLE_FUSION : le dongle retrouve le moteur */
 
 /* Mode de sortie HID (0 = USB). Le dongle n'a pas de BLE, mais hid_transport.c
  * lit cette globale sur tous les rôles. */
 uint8_t usb_bl_state = 0;
 
-/* Couche courante — rapportée telle quelle au moniteur CDC. Le dongle n'ayant
- * plus de moteur, elle ne change jamais de son fait ; elle reste exposée pour
- * que le logiciel de contrôle voie un champ cohérent. */
+/* Couche courante — rapportée telle quelle au moniteur CDC. Hors fusion le
+ * dongle n'a pas de moteur, elle ne change jamais de son fait ; sous fusion le
+ * moteur (key_processor) l'écrit, mais sa DÉFINITION vit ici de toute façon :
+ * sur un clavier elle est dans matrix_scan.c, non compilé au dongle (pas de
+ * matrice locale). Inconditionnelle, donc. */
 uint8_t current_layout = 0;
+
+/* ── Symboles d'état moteur, mode FUSION ──────────────────────────────────
+ * Sous KASE_DONGLE_FUSION le dongle fait tourner le moteur keymap. Il compile
+ * donc le bloc CLAVIER du protocole CDC, qui référence des globales que
+ * matrix_scan.c fournit sur un clavier — or il n'a pas de matrice locale.
+ * On les fournit ici, comme cdc_niphar_slave_stubs.c le fait pour la droite.
+ * matrix_test_* : la commande de test de matrice est inerte sans matrice.
+ * layer_changed : pas d'écran à notifier sur ce rôle (pour l'instant). */
+#if CONFIG_KASE_DONGLE_FUSION
+volatile bool     matrix_test_mode = false;
+volatile uint32_t matrix_test_last_activity_ms = 0;
+void layer_changed(void) { /* pas d'écran ni de lien à notifier ici (phase 1) */ }
+#endif
 
 /* ── Cache des batteries des deux slots ───────────────────────────────────
  * Indexé comme les slots RF : 0 = clavier, 1 = souris (comm/rf/rf_slot.h).
@@ -77,7 +93,13 @@ void dongle_cache_get_battery(uint8_t slot,
  * Le dongle ne compte aucune frappe : il relaie du HID déjà fini, sans jamais
  * regarder ce qu'il contient. Ces deux valeurs restent exposées, à zéro, plutôt
  * que d'amputer le format de trame du moniteur — le logiciel de contrôle lit
- * ainsi les mêmes champs quel que soit l'appareil au bout du câble. */
+ * ainsi les mêmes champs quel que soit l'appareil au bout du câble.
+ *
+ * Sous FUSION le moteur est là pour de vrai : key_stats.c définit
+ * key_stats_total et key_features.c définit wpm_get(). On ne les bouchonne donc
+ * qu'en l'absence de moteur, sinon le lien aurait une double définition. */
+#if !CONFIG_KASE_DONGLE_FUSION
 uint32_t key_stats_total = 0;
 
 uint16_t wpm_get(void) { return 0; }
+#endif

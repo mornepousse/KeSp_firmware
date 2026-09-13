@@ -3,6 +3,7 @@
 
 #ifdef ESP_PLATFORM
 #include "driver/gpio.h"
+#include "sdkconfig.h"     /* CONFIG_KASE_DONGLE_FUSION — voir les dims plus bas */
 #endif
 
 /* ── Product info ──────────────────────────────────────────── */
@@ -25,6 +26,27 @@
  * (main/CMakeLists.txt), le bloc CLAVIER du protocole CDC non plus, donc plus
  * rien n'en a besoin.
  */
+
+/* ── Dimensions de fusion (KASE_DONGLE_FUSION uniquement) ────────────────────
+ *
+ * En mode fusion, le dongle RETROUVE le moteur keymap : il reçoit les DEUX
+ * demi-matrices brutes des moitiés, les fusionne et sort le HID. Il partage donc
+ * la géométrie et la keymap par défaut de la moitié GAUCHE (boards/niphar_left) —
+ * mêmes dimensions, un seul fichier de keymap redirigé (board_keymap.c / .c ici
+ * ne font qu'inclure ceux de la gauche). La NVS répliquée reste l'autorité
+ * runtime (phase 3). Design : docs/superpowers/specs/2026-09-12-dongle-fusion-*.
+ *
+ * Ces macros n'existent PAS hors fusion : sans moteur, personne ne les lit, et un
+ * board.h ne doit pas décrire une matrice que la carte n'a pas. C'est aussi
+ * pourquoi elles sont gardées et non déclarées en dur. */
+#if defined(CONFIG_KASE_DONGLE_FUSION)
+#define MATRIX_ROWS  4
+#define MATRIX_COLS  7
+#define KEYMAP_COLS  14
+/* Les deux moitiés sont le même PCB retourné : la droite se range en colonnes
+ * hautes à l'envers. La conversion appartient au moteur (half_col_to_keymap). */
+#define BOARD_REMOTE_COLS_MIRRORED  1
+#endif
 
 /* ── NRF24L01+ pinout (extracted from dongle.kicad_sch netlist) ─ */
 #define BOARD_NRF_SPI_HOST       SPI2_HOST
