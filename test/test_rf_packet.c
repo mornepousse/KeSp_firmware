@@ -102,6 +102,32 @@ static void test_rf_status_roundtrip(void)
     TEST_ASSERT_EQ(out.seq, 200,   "seq conservé");
 }
 
+/* Fusion phase 2 : la gauche annonce son mode (USB vs sans-fil) au dongle via un
+ * flag dans le nibble bas de l'octet 0 de STATUS (libre, rétrocompatible : un
+ * décodeur qui l'ignore lit quand même batt/link_q/seq). */
+static void test_rf_status_mode_usb_flag(void)
+{
+    uint8_t buf[16];
+    rf_status_t in = { .batt_dV = 40, .link_q = 1, .seq = 5, .mode_usb = true };
+    uint16_t n = rf_encode_status(buf, &in);
+    TEST_ASSERT_EQ(n, 4, "STATUS reste 4 octets avec le flag");
+    TEST_ASSERT_EQ(rf_packet_type(buf, n), PKT_TYPE_STATUS, "type STATUS malgré le flag");
+    TEST_ASSERT((buf[0] & 0x0F) != 0, "flag mode dans le nibble bas");
+
+    rf_status_t out = {0};
+    TEST_ASSERT(rf_decode_status(buf, n, &out), "décodée");
+    TEST_ASSERT(out.mode_usb, "mode_usb round-trip");
+    TEST_ASSERT_EQ(out.batt_dV, 40, "batterie conservée avec le flag");
+    TEST_ASSERT_EQ(out.seq, 5, "seq conservé avec le flag");
+
+    /* Sans-fil : flag à zéro. */
+    rf_status_t in2 = { .batt_dV = 40, .link_q = 0, .seq = 6, .mode_usb = false };
+    rf_encode_status(buf, &in2);
+    rf_status_t out2 = {0};
+    rf_decode_status(buf, 4, &out2);
+    TEST_ASSERT(!out2.mode_usb, "sans-fil → mode_usb false");
+}
+
 static void test_rf_status_rejects_short_and_wrong_type(void)
 {
     uint8_t buf[16];
@@ -383,6 +409,7 @@ void test_rf_packet(void)
 
     /* Supervision du lien clavier → dongle (design dongle §5) */
     test_rf_status_roundtrip();
+    test_rf_status_mode_usb_flag();
     test_rf_status_rejects_short_and_wrong_type();
     test_rf_status_is_smaller_than_a_heartbeat();
     test_rf_bitmap_all_positions();

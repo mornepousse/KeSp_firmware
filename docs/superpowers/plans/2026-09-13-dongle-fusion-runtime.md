@@ -119,6 +119,26 @@ reboot appairée. **La fusion complète en RF fonctionne.**
 - Reste ensuite (RF, au banc) : la gauche ré-écoute en mode USB, le dongle
   **réémet la droite → gauche** et se tait, annonce RF du mode USB de la gauche.
 
+### Cas simultané (gauche USB + dongle + droite) — plan RF concret
+Logique de décision : DÉJÀ faite et testée (`fusion_route.h`). Reste le plumbing,
+tout dans la zone à échec silencieux (« une puce, un propriétaire ») → **banc
+dans la boucle, ACK réels à chaque pas**. Étapes :
+1. **Annonce du mode** : en USB, la gauche cesse d'émettre sa matrice et envoie à
+   la place une trame « mode=USB » périodique au dongle (nouvelle trame ou flag
+   sur STATUS). Le dongle la reçoit → `fusion_dongle_types(true)`=false (il se
+   tait) + `fusion_dongle_reemits(true)`=true.
+2. **Réémission droite→gauche** : le dongle, en mode USB-gauche, excursion
+   PRX→PTX→PRX pour renvoyer la demi-matrice de la droite à la gauche (nouveau
+   lien dongle→gauche ; adresse/canal à définir — réutiliser KaSe.03 ?).
+3. **Écoute dynamique de la gauche** : ⚠ ANNULE en partie le
+   `depends on !KASE_DONGLE_FUSION` de `KASE_HALF_LINK_RX` — en USB la gauche est
+   sur secteur et DOIT ré-écouter (la droite réémise). Donc RX n'est plus
+   compile-off sous fusion mais **dynamique par route** (PTX en sans-fil, PRX en
+   USB). Refonte de la propriété radio de la gauche.
+4. Fusion locale gauche : matrice locale + droite réémise → moteur → HID USB.
+Chaque étape se prouve au banc (la 2 et la 3 ne se valident que contre des ACK
+réels). C'est une session banc dédiée, pas du code à l'aveugle.
+
 ## Phase 3 — cohérence de config (démarrée 2026-09-13)
 - ✅ **Empreinte de config** : `config_fp_crc32` (CRC-32 du blob keymap, pur,
   testé host) + CDC `KS_CMD_CONFIG_FINGERPRINT` (0x16) sur gauche ET dongle. Le

@@ -160,6 +160,10 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
             if (rf_decode_status(buf, n, &st)) {
                 s_link_q[slot] = st.link_q;
                 cache_battery(slot, st.batt_dV);
+#if CONFIG_KASE_DONGLE_FUSION
+                /* La gauche annonce son mode par STATUS sur le slot clavier. */
+                if (slot == RF_SLOT_KBD) dongle_engine_set_left_usb(st.mode_usb);
+#endif
             }
         } else if (type == PKT_TYPE_HEARTBEAT) {
             /* Ancien format, conservé le temps que le Niphargus le remplace :
@@ -186,8 +190,33 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
             /* Fusion : demi-matrice brute d'une moitié. On la remet au moteur
              * embarqué, qui fusionne les deux moitiés et sort le HID. */
             rf_matrix_t m;
-            if (rf_decode_matrix(buf, n, &m))
+            if (rf_decode_matrix(buf, n, &m)) {
+                /* La gauche qui émet du BRUT est en mode sans-fil : le dongle tape.
+                 * (En mode USB elle n'émet pas de matrice, elle annonce par STATUS.) */
+                if (m.half == RF_HALF_LEFT) dongle_engine_set_left_usb(false);
                 dongle_engine_on_matrix(&m);
+
+                /* Mode USB-gauche : réémettre la demi-matrice de la DROITE vers la
+                 * gauche, sur le lien inter-moitiés réutilisé (RF_CH_HALF_LINK /
+                 * KaSe.03), en heartbeat (le format que l'écoute de la gauche
+                 * décode). Excursion PRX→PTX→PRX sur la radio clavier, restaurée
+                 * sur le slot clavier. Sans effet tant que la gauche n'écoute pas
+                 * (phase 2 étape 4) : oob_tx échoue proprement, sans ACK. */
+                if (m.half == RF_HALF_RIGHT && dongle_engine_left_usb()) {
+                    rf_heartbeat_t h;
+                    memset(&h, 0, sizeof(h));
+                    memcpy(h.bitmap, m.bitmap, RF_HALF_BITMAP_BYTES);
+                    h.seq = m.seq;
+                    uint8_t hb[16];
+                    uint16_t hn = rf_encode_heartbeat(hb, &h);
+                    static const uint8_t left_addr[5] = { 'K','a','S','e', RF_ADDR_HALF_LINK };
+                    uint8_t restore_addr[5] = { s_kbd_cfg.rx_addr[0], s_kbd_cfg.rx_addr[1],
+                                                s_kbd_cfg.rx_addr[2], s_kbd_cfg.rx_addr[3],
+                                                s_kbd_cfg.addr_suffix };
+                    rf_driver_oob_tx(&s_kbd, RF_CH_HALF_LINK, left_addr, hb, (uint8_t)hn,
+                                     s_kbd_cfg.channel, restore_addr);
+                }
+            }
         }
 #endif
     }

@@ -90,7 +90,13 @@ typedef struct {
     uint8_t batt_dV;   /* 0..83 = 0..8,3 V ; 0 = inconnu */
     uint8_t link_q;    /* retransmissions cumulées depuis la dernière trame */
     uint8_t seq;
+    bool    mode_usb;  /* fusion : la gauche annonce qu'un hôte USB la pilote →
+                        * le dongle se tait et réémet la droite. Porté par le
+                        * nibble bas de l'octet 0, rétrocompatible. */
 } rf_status_t;
+
+/* Flag « mode USB » dans le nibble bas de l'octet 0 de STATUS. */
+#define PKT_STATUS_FLAG_MODE_USB  0x1
 
 typedef struct {
     uint8_t ge0, ge1;
@@ -155,7 +161,7 @@ static inline uint16_t rf_encode_pair_req(uint8_t *buf, const uint8_t mac[6], ui
 static inline uint16_t rf_encode_status(uint8_t *buf, const rf_status_t *s)
 {
     if (buf == NULL || s == NULL) return 0;
-    buf[0] = (PKT_TYPE_STATUS << 4);
+    buf[0] = (PKT_TYPE_STATUS << 4) | (s->mode_usb ? PKT_STATUS_FLAG_MODE_USB : 0);
     buf[1] = s->batt_dV;
     buf[2] = s->link_q;
     buf[3] = s->seq;
@@ -185,9 +191,10 @@ static inline bool rf_decode_status(const uint8_t *buf, uint16_t len, rf_status_
 {
     if (buf == NULL || out == NULL) return false;
     if (len < 4 || rf_packet_type(buf, len) != PKT_TYPE_STATUS) return false;
-    out->batt_dV = buf[1];
-    out->link_q  = buf[2];
-    out->seq     = buf[3];
+    out->batt_dV  = buf[1];
+    out->link_q   = buf[2];
+    out->seq      = buf[3];
+    out->mode_usb = (buf[0] & PKT_STATUS_FLAG_MODE_USB) != 0;
     return true;
 }
 

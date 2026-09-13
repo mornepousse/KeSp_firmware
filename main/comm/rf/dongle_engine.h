@@ -24,4 +24,13 @@ void dongle_engine_start(void);
  * signale un changement si le bitmap a bougé. Sûr à appeler depuis rf_rx_task. */
 void dongle_engine_on_matrix(const rf_matrix_t *m);
 
+/* Phase 2 : la gauche annonce son mode. En USB, le dongle se tait (la gauche
+ * tape en local) et réémet la droite ; sinon il tape. Appelé depuis rf_rx_task
+ * (STATUS+USB → true ; matrice brute de la gauche → false). */
+void dongle_engine_set_left_usb(bool usb);
+
+/* Le dongle est-il en mode « gauche USB » ? Lu par drain_radio pour décider de
+ * réémettre la droite → gauche. */
+bool dongle_engine_left_usb(void);
+
 #endif /* CONFIG_KASE_DONGLE_FUSION */

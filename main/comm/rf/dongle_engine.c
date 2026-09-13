@@ -22,6 +22,7 @@
 #if CONFIG_KASE_DONGLE_FUSION
 
 #include "half_link.h"          /* fusion_state_t, fusion_apply/timeout/collect */
+#include "fusion_route.h"       /* fusion_dongle_types (règle 3) */
 #include "key_processor.h"      /* build_keycode_report, process_matrix_changes, taps */
 #include "hid_report.h"         /* send_hid_key */
 #include "tap_hold.h"
@@ -63,6 +64,22 @@ uint32_t get_last_activity_time_ms(void) { return last_activity_time_ms; }
 static fusion_state_t   s_fusion;
 static bool             s_dirty;     /* une demi-matrice a changé depuis le dernier cycle */
 static SemaphoreHandle_t s_mux;
+
+/* Mode de la gauche (phase 2). true = la gauche est pilotée par un hôte USB : le
+ * dongle se tait (elle tape en local) et réémet la droite → gauche. Drapeau
+ * simple : écrit par rf_rx_task (STATUS/MATRIX), lu par la tâche moteur. */
+static volatile bool s_left_usb = false;
+
+void dongle_engine_set_left_usb(bool usb)
+{
+    if (usb != s_left_usb) {
+        s_left_usb = usb;
+        ESP_LOGW(TAG, "mode gauche : %s", usb ? "USB (dongle se tait, réémet la droite)"
+                                              : "sans-fil (dongle tape)");
+    }
+}
+
+bool dongle_engine_left_usb(void) { return s_left_usb; }
 
 static inline uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -136,6 +153,22 @@ static void dongle_engine_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(10));
         tap_hold_tick();
         tap_dance_tick();
+
+        /* Phase 2 : si la gauche est pilotée par USB, le dongle SE TAIT (c'est le
+         * moteur de la gauche qui tape). On relâche ce qu'on tenait chez l'hôte à
+         * la transition, puis on saute le cycle. drain_radio continue de réémettre
+         * la droite → gauche pendant ce temps. */
+        static bool prev_types = true;
+        bool types = fusion_dongle_types(s_left_usb);
+        if (!types) {
+            if (prev_types) {
+                uint8_t none[6] = {0};
+                hid_send_keyboard(0, none);   /* relâche les touches du dongle */
+            }
+            prev_types = false;
+            continue;
+        }
+        prev_types = true;
 
         /* Section critique minimale : expiration + snapshot du besoin de recalcul. */
         bool do_cycle = false;

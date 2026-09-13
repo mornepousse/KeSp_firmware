@@ -148,6 +148,22 @@ static void kbd_relay_refresh_cb(void *arg)
 {
     (void)arg;
     usb_presence_poll(s_paired);
+#if CONFIG_KASE_DONGLE_FUSION
+    /* Fusion phase 2 : en mode USB, la gauche tape en local ; elle ANNONCE ce
+     * mode au dongle pour qu'il se taise et réémette la droite. Annonce rapide
+     * (mains, coût nul) pour raccourcir la fenêtre de double frappe au branchement. */
+    if (kbd_active_route() == KBD_OUT_USB) {
+        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+        if ((uint32_t)(now - s_derniere_emission_ms) >= 200u) {
+            rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = s_status_seq++,
+                               .mode_usb = true };
+            uint8_t buf[4];
+            uint16_t n = rf_encode_status(buf, &st);
+            kbd_tx_locked(buf, (uint8_t)n);
+        }
+        return;
+    }
+#endif
     if (kbd_active_route() != KBD_OUT_RF) return;
     /* Réémission bornée : sans changement récent, on se tait. usb_presence_poll
      * ci-dessus reste appelé à chaque tick — c'est lui qui garde le routage
