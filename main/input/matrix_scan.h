@@ -28,10 +28,11 @@ extern uint8_t current_press_row[6];
 extern uint8_t current_press_col[6];
 extern uint8_t current_press_stat[6];
 
-#if CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_HALF_LINK_RX || (CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS)
 /* Rejoue la fusion des touches reçues de la moitié distante. Idempotente :
  * la tâche clavier l'appelle à chaque cycle, car le callback de scan ne tourne
- * que sur activité locale. */
+ * que sur activité locale. Source distante : half_link (maître) ou kbd_relay
+ * (fusion, droite réémise par le dongle en mode USB). */
 void matrix_apply_remote(void);
 #endif
 extern volatile uint8_t stat_matrix_changed; /* written in ISR, read in task */

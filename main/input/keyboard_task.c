@@ -15,6 +15,9 @@
 #if CONFIG_KASE_HALF_LINK_RX
 #include "half_link.h"
 #endif
+#if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
+#include "kbd_relay_tx.h"   /* kbd_relay_remote_changed (fusion 4b) */
+#endif
 #include "matrix_flag.h"   /* test-and-clear du drapeau — audit F3 */
 #include "tap_hold.h"
 #include "tap_dance.h"
@@ -75,6 +78,15 @@ void vTaskKeyboard(void *pvParameters)
          * Le callback de scan ne tourne que sur activité locale — un appui sur
          * la seule moitié droite n'en produit aucune — d'où cet appel ici. */
         if (half_link_remote_changed()) {
+            matrix_apply_remote();
+            build_keycode_report();
+            send_hid_key();
+        }
+#elif CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
+        /* Fusion, gauche en USB (phase 2 4b) : la droite est réémise par le
+         * dongle et reçue par kbd_relay en écoute USB. Même logique que le maître
+         * pré-fusion — sur changement distant, refusionner et taper en local. */
+        if (kbd_relay_remote_changed()) {
             matrix_apply_remote();
             build_keycode_report();
             send_hid_key();

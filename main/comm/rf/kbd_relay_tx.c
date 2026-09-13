@@ -11,8 +11,8 @@
 
 #include "kbd_relay_tx.h"
 #include "rf_driver.h"
-#if CONFIG_KASE_HALF_LINK_RX
-#include "half_link.h"
+#if CONFIG_KASE_HALF_LINK_RX || CONFIG_KASE_DONGLE_FUSION
+#include "half_link.h"   /* excursion (RX) ; HALF_LINK_TIMEOUT_MS (fusion) */
 #endif
 #include "rf_packet.h"
 #include "rf_slot.h"
@@ -76,6 +76,12 @@ static rf_radio_t s_radio;
  * radio en PTX après une écoute USB. Fusion phase 2 : bascule dynamique. */
 static rf_radio_cfg_t s_kbd_cfg;
 static bool s_usb_listening = false;   /* la radio est-elle en PRX (mode USB) ? */
+/* Dernière demi-matrice de la DROITE reçue (réémise par le dongle) en mode USB.
+ * Le moteur de la gauche la lit via kbd_relay_remote_pressed() pour la fusionner
+ * dans les colonnes hautes — chemin maître, étape 4b. */
+static uint8_t          s_remote_bm[RF_HALF_BITMAP_BYTES];
+static volatile bool    s_remote_changed;
+static uint32_t         s_remote_ms;
 #endif
 #endif
 static bool s_paired = false;
@@ -174,19 +180,32 @@ static void kbd_relay_refresh_cb(void *arg)
             ESP_LOGW(TAG, "fusion USB : ecoute la droite reemise (PRX ch=0x%02X KaSe.%02X)",
                      RF_CH_HALF_LINK, RF_ADDR_HALF_LINK);
         }
-        /* Réémissions de la droite (heartbeats) — étape 4a : journaliser pour
-         * prouver le lien dongle→gauche avant de brancher le moteur (étape 4b). */
+        /* Réémissions de la droite (heartbeats) : on mémorise sa demi-matrice ;
+         * le moteur de la gauche la lit via kbd_relay_remote_pressed (étape 4b). */
         uint8_t rb[32];
+        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
         while (rf_driver_rx_available(&s_radio)) {
             uint16_t rn = rf_driver_read_rx(&s_radio, rb, sizeof(rb));
             if (rn == 0) break;
             rf_heartbeat_t h;
-            if (rf_decode_heartbeat(rb, rn, &h))
-                ESP_LOGW(TAG, "fusion USB : droite recue seq=%u bm=%02x%02x%02x%02x",
-                         h.seq, h.bitmap[0], h.bitmap[1], h.bitmap[2], h.bitmap[3]);
+            if (rf_decode_heartbeat(rb, rn, &h)) {
+                if (memcmp(s_remote_bm, h.bitmap, RF_HALF_BITMAP_BYTES) != 0) {
+                    memcpy(s_remote_bm, h.bitmap, RF_HALF_BITMAP_BYTES);
+                    s_remote_changed = true;
+                }
+                s_remote_ms = now;
+            }
+        }
+        /* Silence de la droite → relâcher ce qu'elle tenait (même prudence que le
+         * dongle : une moitié muette ne laisse pas une touche collée). */
+        {
+            bool held = (s_remote_bm[0] | s_remote_bm[1] | s_remote_bm[2] | s_remote_bm[3]) != 0;
+            if (held && (uint32_t)(now - s_remote_ms) >= HALF_LINK_TIMEOUT_MS) {
+                memset(s_remote_bm, 0, RF_HALF_BITMAP_BYTES);
+                s_remote_changed = true;
+            }
         }
         /* Annonce du mode au dongle par excursion (retour PRX KaSe.03). */
-        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
         if ((uint32_t)(now - s_derniere_emission_ms) >= 200u) {
             rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = s_status_seq++,
                                .mode_usb = true };
@@ -208,6 +227,10 @@ static void kbd_relay_refresh_cb(void *arg)
         if (s_tx_mutex && xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
             rf_driver_set_ptx(&s_radio, &s_kbd_cfg);
             s_usb_listening = false;
+            /* On quitte l'écoute : relâcher le distant, sinon une touche de la
+             * droite resterait figée dans la fusion locale jusqu'au retour USB. */
+            memset(s_remote_bm, 0, RF_HALF_BITMAP_BYTES);
+            s_remote_changed = true;
             ESP_LOGW(TAG, "fusion : retour emission PTX vers le dongle");
             xSemaphoreGive(s_tx_mutex);
         }
@@ -406,6 +429,24 @@ void kbd_relay_init(void)
     if (esp_timer_create(&ta, &s_refresh_timer) == ESP_OK)
         esp_timer_start_periodic(s_refresh_timer, (uint64_t)KBD_RELAY_REFRESH_MS * 1000);
 }
+
+#if CONFIG_KASE_DONGLE_FUSION && !CONFIG_KASE_HALF_LINK_RX
+/* Fusion phase 2 (4b) : le moteur de la gauche lit la demi-matrice de la droite
+ * réémise par le dongle (reçue en écoute USB) — équivalent de
+ * half_link_remote_pressed sur le maître pré-fusion. */
+bool kbd_relay_remote_pressed(uint8_t row, uint8_t col)
+{
+    return rf_bitmap_get(s_remote_bm, row, col);
+}
+
+/* L'état distant a-t-il changé depuis le dernier appel ? Consomme le drapeau. */
+bool kbd_relay_remote_changed(void)
+{
+    bool ch = s_remote_changed;
+    s_remote_changed = false;
+    return ch;
+}
+#endif
 
 /* ── Light-sleep hooks (V2D wireless) ─────────────────────────────────────── */
 

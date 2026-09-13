@@ -12,8 +12,9 @@
 #if CONFIG_KASE_DONGLE_FUSION
 #include "rf_packet.h"          /* rf_matrix_to_bitmap, RF_HALF_LEFT */
 #include "fusion_route.h"       /* fusion_left_emits_raw (règle 3) */
+#include "half_link.h"          /* half_col_to_keymap (fusion distante 4b) */
 #if CONFIG_KASE_KBD_WIRELESS
-#include "kbd_relay_tx.h"       /* kbd_relay_send_matrix (côté gauche) */
+#include "kbd_relay_tx.h"       /* kbd_relay_send_matrix + remote_pressed/changed */
 #include "usb_presence.h"       /* kbd_active_route / KBD_OUT_USB */
 #endif
 #endif
@@ -49,11 +50,21 @@ uint8_t current_press_row[MAX_REPORT_KEYS];
 uint8_t current_press_col[MAX_REPORT_KEYS];
 uint8_t current_press_stat[MAX_REPORT_KEYS];
 
-#if CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_HALF_LINK_RX || (CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS)
 /* Sens de rangement des colonnes distantes — propriété du câblage, déclarée par
  * le board.h du maître. 0 = simple décalage, 1 = miroir. */
 #ifndef BOARD_REMOTE_COLS_MIRRORED
 #define BOARD_REMOTE_COLS_MIRRORED 0
+#endif
+
+/* Source de la demi-matrice distante selon le mode :
+ *  - lien inter-moitiés (maître pré-fusion) → half_link_remote_pressed ;
+ *  - fusion, gauche en USB → kbd_relay_remote_pressed (droite réémise par le
+ *    dongle et reçue en écoute USB). */
+#if CONFIG_KASE_HALF_LINK_RX
+#define KASE_REMOTE_PRESSED(r, c) half_link_remote_pressed((r), (c))
+#else
+#define KASE_REMOTE_PRESSED(r, c) kbd_relay_remote_pressed((r), (c))
 #endif
 
 /* Frontière entre les entrées du balayage LOCAL et celles reçues par radio.
@@ -87,7 +98,7 @@ void matrix_apply_remote(void)
     }
     for (uint8_t r = 0; r < MATRIX_ROWS && filled < MAX_REPORT_KEYS; r++)
         for (uint8_t c = 0; c < MATRIX_COLS && filled < MAX_REPORT_KEYS; c++)
-            if (half_link_remote_pressed(r, c)) {
+            if (KASE_REMOTE_PRESSED(r, c)) {
                 current_press_row[filled]  = r;
                 current_press_col[filled]  = half_col_to_keymap(
                         c, MATRIX_COLS, BOARD_REMOTE_COLS_MIRRORED);
@@ -274,7 +285,7 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
      * chemin local n'appelait jamais la fusion et effaçait les distantes.
      * Chaque moitié tapait seule, et AUCUNE combinaison entre les deux ne
      * passait — Maj à gauche + lettre à droite, notamment. */
-#if CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_HALF_LINK_RX || (CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS)
     s_filled_local = filled;   /* frontiere local / distant, pour la fusion */
     matrix_apply_remote();
 #endif
@@ -529,7 +540,7 @@ void matrix_wake_capture(void)
     memcpy(s_wake_state, st, sizeof(s_wake_state));   /* pour matrix_setup */
     s_wake_had_keys = (filled != 0);
     memcpy(prev_matrix_state, st, sizeof(prev_matrix_state));
-#if CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_HALF_LINK_RX || (CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS)
     s_filled_local = filled;
     matrix_apply_remote();
 #endif
@@ -587,7 +598,7 @@ bool matrix_wake_reconcile(void)
     }
     memset(MATRIX_STATE, 0, sizeof(MATRIX_STATE));
     memset(prev_matrix_state, 0, sizeof(prev_matrix_state));
-#if CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_HALF_LINK_RX || (CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS)
     s_filled_local = 0;
     matrix_apply_remote();
 #endif

@@ -70,6 +70,13 @@ void kbd_relay_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel);
  * que kbd_relay_send_kbd (excursion si la radio écoute, sinon direct). */
 void kbd_relay_send_matrix(uint8_t half, const uint8_t *bitmap);
 
+/* Fusion phase 2 (4b) : état de la demi-matrice DISTANTE (droite) réémise par le
+ * dongle et reçue en écoute USB. Le moteur de la gauche les lit pour fusionner la
+ * droite dans les colonnes hautes (matrix_apply_remote). Miroir de
+ * half_link_remote_pressed/changed. */
+bool kbd_relay_remote_pressed(uint8_t row, uint8_t col);
+bool kbd_relay_remote_changed(void);
+
 /* Light-sleep hooks: stop the refresh timer + power the NRF down (holding the TX
  * mutex) before sleep; power up + restart the timer on wake. */
 void kbd_relay_sleep_prepare(void);
