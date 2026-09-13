@@ -106,6 +106,19 @@ reboot appairée. **La fusion complète en RF fonctionne.**
   Modèle 2-slots à affiner si on veut un pair-list exact.
 - Phase 2 (gauche autonome USB) et phase 3 (config répliquée + trackpad).
 
+## Phase 2 — gauche autonome en USB (démarrée 2026-09-13)
+- ✅ **Logique de routage** (pure, testée) : `fusion_route.h` — règle 3 encodée,
+  invariant « jamais gauche ET dongle qui tapent » vérifié host.
+- ✅ **Émission brute route-aware** : la gauche n'alimente le dongle que hors USB
+  (`fusion_left_emits_raw`) — en USB elle tapera en local, sans doubler.
+- ⚠ **BLOQUÉ MATÉRIEL** : l'USB natif de la gauche (ESP32-S3, GPIO19/20, derrière
+  le hub CH334R) n'énumère PAS (`cafe:4003` absent ; seuls le hub + CH340
+  console remontent). TinyUSB monte pourtant côté firmware (log de boot). Phase 2
+  (« la gauche tape par son USB ») exige ce chemin data — à élucider au banc
+  (connecteur natif séparé ? câblage GPIO19/20 → hôte ?).
+- Reste ensuite (RF, au banc) : la gauche ré-écoute en mode USB, le dongle
+  **réémet la droite → gauche** et se tait, annonce RF du mode USB de la gauche.
+
 ## Phase 3 — cohérence de config (démarrée 2026-09-13)
 - ✅ **Empreinte de config** : `config_fp_crc32` (CRC-32 du blob keymap, pur,
   testé host) + CDC `KS_CMD_CONFIG_FINGERPRINT` (0x16) sur gauche ET dongle. Le

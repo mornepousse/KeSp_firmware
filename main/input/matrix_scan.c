@@ -11,8 +11,10 @@
 #endif
 #if CONFIG_KASE_DONGLE_FUSION
 #include "rf_packet.h"          /* rf_matrix_to_bitmap, RF_HALF_LEFT */
+#include "fusion_route.h"       /* fusion_left_emits_raw (règle 3) */
 #if CONFIG_KASE_KBD_WIRELESS
 #include "kbd_relay_tx.h"       /* kbd_relay_send_matrix (côté gauche) */
+#include "usb_presence.h"       /* kbd_active_route / KBD_OUT_USB */
 #endif
 #endif
 #include <esp_log.h>
@@ -173,7 +175,12 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
         for (int r = 0; r < MATRIX_ROWS && !change; r++)
             for (int c = 0; c < MATRIX_COLS; c++)
                 if (new_state[r][c] != prev_matrix_state[r][c]) { change = true; break; }
-        if (change) {
+        /* Règle 3 : on n'émet le brut au dongle QUE hors mode USB. Si un hôte USB
+         * est branché à la gauche, c'est SON moteur qui tape en local — alimenter
+         * le dongle en plus ferait taper deux fois. Au repos/batterie
+         * (route ≠ USB), on émet, le dongle fusionne et tape. */
+        bool usb = (kbd_active_route() == KBD_OUT_USB);
+        if (change && fusion_left_emits_raw(usb)) {
             uint8_t bm[RF_HALF_BITMAP_BYTES];
             rf_matrix_to_bitmap(&new_state[0][0], MATRIX_ROWS, MATRIX_COLS, bm);
             kbd_relay_send_matrix(RF_HALF_LEFT, bm);

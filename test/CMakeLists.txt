@@ -71,6 +71,7 @@ add_executable(test_runner
     test_fuse_halves.c
     test_fusion_state.c
     test_config_sync.c
+    test_fusion_route.c
     test_matrix_bitmap.c
     test_veille.c
     test_rf_status_cadence.c
