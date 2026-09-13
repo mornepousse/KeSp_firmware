@@ -82,6 +82,11 @@ static bool s_usb_listening = false;   /* la radio est-elle en PRX (mode USB) ? 
 static uint8_t          s_remote_bm[RF_HALF_BITMAP_BYTES];
 static volatile bool    s_remote_changed;
 static uint32_t         s_remote_ms;
+/* Dernière demi-matrice LOCALE émise au dongle + quand. Le rafraîchissement
+ * réaffirme les maintiens (sinon le dongle relâche la gauche sur silence — même
+ * piège que half_link côté droite). */
+static uint8_t          s_last_left_bm[RF_HALF_BITMAP_BYTES];
+static uint32_t         s_last_left_ms;
 #endif
 #endif
 static bool s_paired = false;
@@ -237,6 +242,25 @@ static void kbd_relay_refresh_cb(void *arg)
     }
 #endif
     if (kbd_active_route() != KBD_OUT_RF) return;
+#if CONFIG_KASE_DONGLE_FUSION
+    /* Fusion, mode sans-fil : RÉAFFIRMER la matrice locale tant qu'une touche est
+     * tenue. matrix_scan n'émet que sur CHANGEMENT ; sans ce rafraîchissement une
+     * touche gauche tenue ne produit plus rien et le dongle relâche la moitié
+     * gauche après HALF_LINK_TIMEOUT_MS (« la touche gauche se relâche seule »,
+     * banc 2026-09-13). Même règle que la droite (half_link_tx_refresh) : muet au
+     * repos (bitmap vide → autonomie), entretenu sur maintien. */
+    {
+        bool tenu = (s_last_left_bm[0] | s_last_left_bm[1] |
+                     s_last_left_bm[2] | s_last_left_bm[3]) != 0;
+        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+        if (tenu && (uint32_t)(now - s_last_left_ms) >= 100u) {
+            uint8_t bm[RF_HALF_BITMAP_BYTES];
+            memcpy(bm, s_last_left_bm, RF_HALF_BITMAP_BYTES);
+            kbd_relay_send_matrix(RF_HALF_LEFT, bm);   /* réaffirme + met à jour l'horodatage */
+            return;
+        }
+    }
+#endif
     /* Réémission bornée : sans changement récent, on se tait. usb_presence_poll
      * ci-dessus reste appelé à chaque tick — c'est lui qui garde le routage
      * frais, il ne doit pas dépendre de l'activité clavier. */
@@ -513,5 +537,8 @@ void kbd_relay_send_matrix(uint8_t half, const uint8_t *bitmap)
     uint8_t buf[8];
     uint16_t n = rf_encode_matrix(buf, &m);
     if (n) kbd_tx_locked(buf, (uint8_t)n);
+    /* Mémorise l'état local pour la réaffirmation des maintiens (refresh_cb). */
+    memcpy(s_last_left_bm, bitmap, RF_HALF_BITMAP_BYTES);
+    s_last_left_ms = (uint32_t)(esp_timer_get_time() / 1000);
 }
 #endif
