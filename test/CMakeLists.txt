@@ -80,6 +80,7 @@ add_executable(test_runner
     test_half_tx_cadence.c
     test_half_tx_target.c
     test_keymap_sync_frames.c
+    test_keymap_sync.c
     test_oled_nav.c
     ../main/display/oled/oled_nav.c
     test_niphar_left_pins.c
