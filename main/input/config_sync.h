@@ -36,3 +36,31 @@ static inline bool config_fp_match(uint32_t a, uint32_t b)
 {
     return a != 0u && a == b;
 }
+
+/* ── État de cohérence côté dongle (fusion) ─────────────────────────────────
+ *
+ * Le dongle retient la dernière empreinte annoncée par la gauche (via le champ
+ * config_fp de PKT_TYPE_STATUS) et l'expose au contrôleur par CDC. Il ne
+ * journalise/agit qu'au CHANGEMENT : la gauche annonce à chaque trame d'état
+ * (~1/s), et réagir à chacune noierait la console — même discipline que
+ * « émettre sur changement » du lien. Le drapeau `vue` distingue « jamais
+ * annoncé » de « annoncé 0 », que left_fp seul ne peut pas séparer.
+ *
+ * Logique pure, testée host (test/test_config_sync.c). */
+typedef struct {
+    uint32_t left_fp;   /* dernière empreinte annoncée par la gauche */
+    uint32_t left_ms;   /* quand (ms), pour l'âge exposé au contrôleur */
+    bool     vue;       /* false = aucune annonce encore reçue */
+} config_coherence_t;
+
+/* La gauche vient d'annoncer `fp` à l'instant `now_ms`. Mémorise, et retourne
+ * true si c'est un CHANGEMENT (nouvelle empreinte, ou première annonce). */
+static inline bool config_coherence_note(config_coherence_t *c, uint32_t fp,
+                                         uint32_t now_ms)
+{
+    bool change = (!c->vue) || (fp != c->left_fp);
+    c->left_fp = fp;
+    c->left_ms = now_ms;
+    c->vue     = true;
+    return change;
+}

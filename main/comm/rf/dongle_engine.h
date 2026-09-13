@@ -33,4 +33,17 @@ void dongle_engine_set_left_usb(bool usb);
  * réémettre la droite → gauche. */
 bool dongle_engine_left_usb(void);
 
+/* Garde-fou de sync : la gauche a annoncé l'empreinte de sa keymap (champ
+ * config_fp de PKT_TYPE_STATUS). Le dongle la mémorise et, au CHANGEMENT,
+ * journalise l'accord ou la divergence avec la sienne. Appelé depuis
+ * rf_rx_task (STATUS du slot clavier). */
+void dongle_engine_note_left_fp(uint32_t fp);
+
+/* Instantané de cohérence pour le contrôleur (CDC). own_fp = empreinte de la
+ * keymap du dongle ; left_fp = dernière annoncée par la gauche (0 = jamais) ;
+ * age_ms = ancienneté de cette annonce (0xFFFFFFFF = jamais) ; match = les deux
+ * concordent (égales et non nulles). Chaque pointeur peut être NULL. */
+void dongle_engine_get_coherence(uint32_t *own_fp, uint32_t *left_fp,
+                                 uint32_t *age_ms, bool *match);
+
 #endif /* CONFIG_KASE_DONGLE_FUSION */

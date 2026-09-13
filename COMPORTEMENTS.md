@@ -51,3 +51,18 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
 
 - [test:test_lost_probe_eventually_reprobes] Après une sonde perdue, la poignée
   de main 5 V re-sonde. Elle ne reste pas bloquée sur un échec.
+
+## Fusion — garde-fou de sync config
+
+- [test:test_rf_status_config_fp] L'empreinte CRC-32 de la keymap voyage dans
+  PKT_TYPE_STATUS (round-trip), et vaut 0 si absente (rétrocompatible avec un
+  firmware pré-empreinte). La gauche l'annonce ; le dongle la lit.
+- [test:test_coherence_once_par_changement] Le dongle ne signale la cohérence
+  (accord ou divergence) qu'au CHANGEMENT d'empreinte, pas à chaque trame d'état
+  (~1/s) — sinon la console serait noyée.
+- [test:test_fp_match] Une empreinte nulle (« pas encore annoncée ») ne vaut
+  jamais un accord : 0 vs 0 reste incohérent.
+- [smoke:Divergence de config signalée] En sans-fil, si la keymap du dongle
+  diverge de celle de la gauche, le dongle le journalise et l'expose par CDC
+  (KS_CMD_CONFIG_COHERENCE : own_fp/left_fp/age/match) — le contrôleur peut
+  avertir. Sinon deux moteurs taperaient différemment en silence.

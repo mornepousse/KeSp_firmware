@@ -548,6 +548,23 @@ sig <   30 → 0 barre / lien casse
 
 ---
 
+#### CONFIG_COHERENCE (0x17)
+Garde-fou de sync fusion. En mode sans-fil, c'est le dongle qui execute le moteur keymap avec SA config ; si elle diverge de celle reglee sur la gauche, il tape autre chose en silence. La gauche annonce l'empreinte CRC-32 de sa keymap par RF (champ `config_fp` de la trame d'etat) ; le dongle la compare a la sienne et expose le resultat ici. Le soft peut poller a 1 Hz et avertir l'utilisateur d'une divergence. Idempotent, sans effet de bord. Hors fusion : tous champs a 0, `match=0`.
+
+- Request: payload vide
+- Response: `13 bytes`
+
+| Offset | Type   | Champ     | Description                                                        |
+|-------:|--------|-----------|-------------------------------------------------------------------|
+| 0..3   | u32 LE | `own_fp`  | empreinte CRC-32 de la keymap du dongle (0 = hors fusion)         |
+| 4..7   | u32 LE | `left_fp` | derniere empreinte annoncee par la gauche (0 = jamais annoncee)   |
+| 8..11  | u32 LE | `age_ms`  | ms depuis cette annonce (0xFFFFFFFF = jamais)                     |
+| 12     | u8     | `match`   | 1 = coherent (empreintes egales et non nulles), 0 sinon           |
+
+**Lecture** : `match=1` → les deux moteurs tapent pareil. `match=0` avec `left_fp != 0` → **divergence** (reprovisionner le dongle). `left_fp = 0` ou `age_ms` eleve → la gauche n'a pas (ou plus) annonce : etat inconnu, pas forcement une divergence. L'empreinte d'un seul appareil se lit aussi par `CONFIG_FINGERPRINT` (0x16) sur chacun.
+
+---
+
 #### RF_PAIR_LIST (0xB4)
 Liste des MACs des moities actuellement couplees (lecture NVS namespace `rf`).
 

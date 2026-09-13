@@ -51,10 +51,39 @@ static void test_fp_match(void)
     TEST_ASSERT(!config_fp_match(0x10, 0), "x vs 0 → incohérent");
 }
 
+/* État de cohérence côté dongle : il retient la dernière empreinte annoncée par
+ * la gauche et ne signale qu'au CHANGEMENT — journaliser à chaque trame (1/s)
+ * noierait la console et l'utilisateur. Même discipline que « émettre sur
+ * changement » du lien radio. */
+static void test_coherence_once_par_changement(void)
+{
+    config_coherence_t c = {0};
+    TEST_ASSERT(config_coherence_note(&c, 0xAAAAAAAAu, 100), "1re annonce = changement");
+    TEST_ASSERT_EQ(c.left_fp, 0xAAAAAAAAu, "empreinte mémorisée");
+    TEST_ASSERT_EQ(c.left_ms, 100u, "horodatage mémorisé");
+    TEST_ASSERT(!config_coherence_note(&c, 0xAAAAAAAAu, 200), "même empreinte = pas un changement");
+    TEST_ASSERT_EQ(c.left_ms, 200u, "horodatage rafraîchi même sans changement");
+    TEST_ASSERT(config_coherence_note(&c, 0xBBBBBBBBu, 300), "empreinte différente = changement");
+    TEST_ASSERT(!config_coherence_note(&c, 0xBBBBBBBBu, 400), "puis stable = pas de changement");
+}
+
+/* Le drapeau « déjà vue » est nécessaire : la toute première annonce est un
+ * changement même si l'empreinte vaut 0 (impossible à distinguer de l'init sans
+ * ce drapeau). Sans lui, une gauche qui annoncerait 0 au premier contact
+ * passerait inaperçue. */
+static void test_coherence_premiere_annonce_meme_a_zero(void)
+{
+    config_coherence_t c = {0};
+    TEST_ASSERT(config_coherence_note(&c, 0u, 50), "1re annonce à 0 = changement (jamais vue)");
+    TEST_ASSERT(!config_coherence_note(&c, 0u, 60), "0 de nouveau = pas un changement");
+}
+
 void test_config_sync(void)
 {
     TEST_SUITE("Cohérence de config (empreinte)");
     test_fp_stable_et_sensible();
     test_fp_vecteur_connu();
     test_fp_match();
+    test_coherence_once_par_changement();
+    test_coherence_premiere_annonce_meme_a_zero();
 }

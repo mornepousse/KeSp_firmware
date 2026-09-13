@@ -17,6 +17,7 @@
 #include "cdc_binary_protocol.h"
 #include "rf_rx_task.h"
 #include "rf_pairing.h"
+#include "dongle_engine.h"   /* fusion : cohérence de config gauche↔dongle */
 
 #include <string.h>
 #include <stdint.h>
@@ -166,13 +167,42 @@ static void bin_cmd_battery(uint8_t cmd, const uint8_t *p, uint16_t l)
     ks_respond(cmd, KS_STATUS_OK, buf, sizeof(buf));
 }
 
+/* ── KS_CMD_CONFIG_COHERENCE ────────────────────────────────────────
+ * Garde-fou de sync (fusion) : en sans-fil, le dongle tape avec SA keymap. Si
+ * elle diverge de celle réglée sur la gauche, il tape autre chose en silence.
+ * La gauche annonce son empreinte par RF (STATUS/config_fp) ; le dongle la
+ * compare et l'expose ici au contrôleur, qui peut avertir l'utilisateur.
+ * Request: no payload.
+ * Response (13 bytes):
+ *   [0..3]   own_fp   u32 LE — empreinte de la keymap du dongle (0 = hors fusion)
+ *   [4..7]   left_fp  u32 LE — dernière empreinte annoncée par la gauche (0 = jamais)
+ *   [8..11]  age_ms   u32 LE — ancienneté de l'annonce (0xFFFFFFFF = jamais)
+ *   [12]     match    u8 — 1 = cohérent (égales et non nulles), 0 sinon
+ */
+static void bin_cmd_config_coherence(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    (void)p; (void)l;
+    uint32_t own = 0, left = 0, age = 0xFFFFFFFFu;
+    bool match = false;
+#if CONFIG_KASE_DONGLE_FUSION
+    dongle_engine_get_coherence(&own, &left, &age, &match);
+#endif
+    uint8_t buf[13];
+    put_u32_le(&buf[0], own);
+    put_u32_le(&buf[4], left);
+    put_u32_le(&buf[8], age);
+    buf[12] = match ? 1 : 0;
+    ks_respond(cmd, KS_STATUS_OK, buf, sizeof(buf));
+}
+
 /* ── Command table + init ──────────────────────────────────────── */
 
 static const ks_bin_cmd_entry_t dongle_cmd_table[] = {
-    { KS_CMD_RF_STATUS,      bin_cmd_rf_status      },
-    { KS_CMD_RF_PAIR_LIST,   bin_cmd_rf_pair_list   },
-    { KS_CMD_RF_PAIR_RESET,  bin_cmd_rf_pair_reset  },
-    { KS_CMD_BATTERY,        bin_cmd_battery        },
+    { KS_CMD_RF_STATUS,        bin_cmd_rf_status        },
+    { KS_CMD_RF_PAIR_LIST,     bin_cmd_rf_pair_list     },
+    { KS_CMD_RF_PAIR_RESET,    bin_cmd_rf_pair_reset    },
+    { KS_CMD_BATTERY,          bin_cmd_battery          },
+    { KS_CMD_CONFIG_COHERENCE, bin_cmd_config_coherence },
 };
 
 void cdc_dongle_cmds_init(void)

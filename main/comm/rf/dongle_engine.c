@@ -30,7 +30,8 @@
 #include "combo.h"
 #include "leader.h"
 #include "key_features.h"       /* key_override_init */
-#include "keymap.h"             /* macros_list, MACRO_* */
+#include "keymap.h"             /* macros_list, MACRO_*, keymaps[], KEYMAP_BLOB_BYTES */
+#include "config_sync.h"        /* garde-fou de sync : empreinte + cohérence */
 #include "matrix_scan.h"        /* extern des globales que l'on définit ici */
 #include "hid_transport.h"      /* hid_send_keyboard (send_tap) */
 #include "esp_timer.h"
@@ -82,6 +83,44 @@ void dongle_engine_set_left_usb(bool usb)
 bool dongle_engine_left_usb(void) { return s_left_usb; }
 
 static inline uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+/* ── Garde-fou de sync config : la gauche annonce son empreinte, le dongle la
+ * compare à la sienne ───────────────────────────────────────────────────────
+ *
+ * En sans-fil c'est le dongle qui tape, avec SA keymap. Si sa keymap diverge de
+ * celle que l'utilisateur a réglée sur la gauche (dongle pas encore
+ * reprovisionné, cf. phase 3), il taperait autre chose EN SILENCE. On expose
+ * donc la cohérence au contrôleur (CDC) et on la journalise au changement.
+ * s_coh : écrit par rf_rx_task (une tâche), lu par le CDC (une autre) — champs
+ * u32 alignés, lecture atomique sur Xtensa, valeurs purement diagnostiques. */
+static config_coherence_t s_coh;
+
+static inline uint32_t dongle_own_fp(void)
+{
+    return config_fp_crc32((const uint8_t *)keymaps, KEYMAP_BLOB_BYTES);
+}
+
+void dongle_engine_note_left_fp(uint32_t fp)
+{
+    if (!config_coherence_note(&s_coh, fp, now_ms())) return;  /* rien de neuf */
+    uint32_t own = dongle_own_fp();
+    if (config_fp_match(own, fp))
+        ESP_LOGI(TAG, "config cohérente gauche↔dongle : empreinte 0x%08X", (unsigned)fp);
+    else
+        ESP_LOGW(TAG, "DIVERGENCE de config : gauche=0x%08X dongle=0x%08X — keymaps "
+                      "désynchronisées, le dongle tape peut-être autre chose", (unsigned)fp,
+                 (unsigned)own);
+}
+
+void dongle_engine_get_coherence(uint32_t *own_fp, uint32_t *left_fp,
+                                 uint32_t *age_ms, bool *match)
+{
+    uint32_t own = dongle_own_fp();
+    if (own_fp)  *own_fp  = own;
+    if (left_fp) *left_fp = s_coh.left_fp;
+    if (age_ms)  *age_ms  = s_coh.vue ? (now_ms() - s_coh.left_ms) : 0xFFFFFFFFu;
+    if (match)   *match   = config_fp_match(own, s_coh.left_fp);
+}
 
 /* Émet une frappe brève (press+release), pour tap-dance / leader / macros. */
 static void send_tap(uint8_t kc, uint8_t mod)

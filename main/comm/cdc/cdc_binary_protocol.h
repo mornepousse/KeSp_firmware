@@ -39,6 +39,7 @@ typedef enum {
     KS_CMD_LAYER_INDEX      = 0x14,
     KS_CMD_LAYER_NAME       = 0x15,
     KS_CMD_CONFIG_FINGERPRINT = 0x16,  /* empreinte CRC-32 de la keymap — sync fusion */
+    KS_CMD_CONFIG_COHERENCE = 0x17,    /* dongle: cohérence empreinte gauche↔dongle (fusion) */
 
     /* Layout names (0x20-0x2F) */
     KS_CMD_SET_LAYOUT_NAME  = 0x20,

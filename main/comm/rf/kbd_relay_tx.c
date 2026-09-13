@@ -18,6 +18,8 @@
 #include "rf_slot.h"
 #include "rf_pairing.h"
 #include "usb_presence.h"   /* route poll + kbd_active_route (USB-first auto-switch) */
+#include "keymap.h"         /* keymaps[], KEYMAP_BLOB_BYTES — empreinte de config */
+#include "config_sync.h"    /* config_fp_crc32 — garde-fou de sync (fusion) */
 #include "board.h"
 #include "esp_log.h"
 #include "esp_err.h"
@@ -212,9 +214,12 @@ static void kbd_relay_refresh_cb(void *arg)
         }
         /* Annonce du mode au dongle par excursion (retour PRX KaSe.03). */
         if ((uint32_t)(now - s_derniere_emission_ms) >= 200u) {
+            /* config_fp reste 0 ici : en USB le dongle se tait, la cohérence
+             * des moteurs est sans objet. Buffer à RF_STATUS_LEN quand même —
+             * rf_encode_status écrit 8 octets dans tous les cas. */
             rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = s_status_seq++,
                                .mode_usb = true };
-            uint8_t sb[4];
+            uint8_t sb[RF_STATUS_LEN];
             uint16_t sn = rf_encode_status(sb, &st);
             static const uint8_t link_addr[5] = { 'K','a','S','e', RF_ADDR_HALF_LINK };
             uint8_t dst[5] = { s_kbd_cfg.rx_addr[0], s_kbd_cfg.rx_addr[1],
@@ -284,8 +289,14 @@ static void kbd_relay_refresh_cb(void *arg)
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
     if (!rf_status_doit_emettre(now, s_derniere_emission_ms, RF_STATUS_PERIOD_MS))
         return;
-    rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = s_status_seq++ };
-    uint8_t buf[4];
+    /* Garde-fou de sync (fusion) : on annonce l'empreinte de NOTRE keymap. Le
+     * dongle, qui tape en sans-fil avec la SIENNE, compare et signale une
+     * divergence — sinon deux moteurs taperaient différemment en silence.
+     * Calculée à la volée (1/s ici) : pas de cache, donc jamais périmée. */
+    rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = s_status_seq++,
+                       .config_fp = config_fp_crc32((const uint8_t *)keymaps,
+                                                    KEYMAP_BLOB_BYTES) };
+    uint8_t buf[RF_STATUS_LEN];
     uint16_t n = rf_encode_status(buf, &st);
     kbd_tx_locked(buf, (uint8_t)n);
 }

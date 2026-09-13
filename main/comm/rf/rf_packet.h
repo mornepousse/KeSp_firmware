@@ -160,7 +160,11 @@ static inline uint16_t rf_encode_pair_req(uint8_t *buf, const uint8_t mac[6], ui
     return 8;
 }
 
-/* PKT_STATUS: 4 octets — type 0x6, batterie, qualité de lien, seq. */
+/* PKT_STATUS: 8 octets — type 0x6 + flags, batterie, qualité de lien, seq, puis
+ * l'empreinte CRC-32 de config en little-endian (buf[4..7]). ⚠ Dimensionner les
+ * buffers d'émission avec RF_STATUS_LEN : la trame est passée de 4 à 8 octets
+ * (empreinte, 4f5e2b09) et des buffers restés à 4 débordaient la pile. */
+#define RF_STATUS_LEN 8u
 static inline uint16_t rf_encode_status(uint8_t *buf, const rf_status_t *s)
 {
     if (buf == NULL || s == NULL) return 0;

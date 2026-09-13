@@ -38,6 +38,9 @@ dans la PR/release.
 - [ ] NRF ne se wedge pas après 5 min (watchdog OK)
 - [ ] Une nuit sur batterie : la moitié droite tient, moins de 0,2 V perdus
 - [ ] set_id survit à un erase_flash
+- [ ] Fusion — Divergence de config signalée : keymap du dongle ≠ celle de la
+      gauche → console dongle logue « DIVERGENCE de config » et
+      KS_CMD_CONFIG_COHERENCE renvoie match=0 ; keymaps identiques → match=1
 
 ## Half (left / right)
 - [ ] e-ink affiche le splash 'PAIRED' au pairing

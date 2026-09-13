@@ -161,8 +161,13 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
                 s_link_q[slot] = st.link_q;
                 cache_battery(slot, st.batt_dV);
 #if CONFIG_KASE_DONGLE_FUSION
-                /* La gauche annonce son mode par STATUS sur le slot clavier. */
-                if (slot == RF_SLOT_KBD) dongle_engine_set_left_usb(st.mode_usb);
+                /* La gauche annonce son mode ET l'empreinte de sa keymap par
+                 * STATUS sur le slot clavier. Garde-fou de sync : le dongle
+                 * compare à la sienne (config_fp=0 = non annoncée, en mode USB). */
+                if (slot == RF_SLOT_KBD) {
+                    dongle_engine_set_left_usb(st.mode_usb);
+                    if (st.config_fp != 0) dongle_engine_note_left_fp(st.config_fp);
+                }
 #endif
             }
         } else if (type == PKT_TYPE_HEARTBEAT) {
