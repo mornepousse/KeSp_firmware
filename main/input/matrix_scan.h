@@ -81,7 +81,13 @@ void matrix_mark_activity(void);
  * touche qui a réveillé la carte est enfoncée à cet instant, plus tard elle ne
  * l'est peut-être plus. */
 void matrix_wake_capture(void);
-/* ~10 ms après matrix_setup() : si le pilote n'a rien signalé alors qu'une
+/* À appeler APRÈS matrix_setup() et AVANT matrix_wake_reconcile() : attend que
+ * le pilote recréé ait parlé (premier événement) ou que la grâce déduite de son
+ * anti-rebond soit écoulée (wake_grace.h). Jamais un tick nu : vTaskDelay(1)
+ * attend jusqu'à la prochaine frontière de tick — entre ~0 et 10 ms — et une
+ * touche TENUE était relâchée à tort quand la phase tombait mal. */
+void matrix_wake_wait_first_scan(void);
+/* Après matrix_wake_wait_first_scan() : si le pilote n'a rien signalé alors qu'une
  * touche avait été capturée, elle a été relâchée entre-temps — publie le
  * relâchement et retourne true (l'appelant l'émet). */
 bool matrix_wake_reconcile(void);

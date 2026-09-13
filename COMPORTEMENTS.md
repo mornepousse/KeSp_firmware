@@ -33,7 +33,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   émet l'appui capturé au réveil (matrix_wake_capture) et son relâchement à la
   réconciliation, avec l'émetteur du callback : le scanner recréé ne voit pas de
   changement, lui seul ne l'aurait jamais émis (première touche avalée, banc
-  2026-09-13).
+  2026-09-13). Une touche de réveil TENUE n'est jamais relâchée à tort :
+  la réconciliation attend le premier événement du pilote, pas un tick nu.
+- [test:test_wake_grace] La grâce laissée au pilote recréé au réveil couvre
+  toujours son anti-rebond (debounce × intervalle + 2 balayages), plancher
+  10 ms, plafond 50 ms. Un `vTaskDelay(1)` (entre ~0 et 10 ms selon la phase)
+  relâchait à tort une touche tenue — tap de Super, Super+F perdu.
 - [smoke:Une nuit sur batterie] La moitié droite tient une nuit sur batterie,
   moins de 0,2 V perdus.
 

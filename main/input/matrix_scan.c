@@ -4,6 +4,7 @@
 #include "keyboard_task.h"
 #include "key_stats.h"
 #include "keyboard_config.h"
+#include "wake_grace.h"         /* wake_grace_ms — grâce du pilote au réveil (tous boards) */
 #include "cdc_binary_protocol.h"
 #if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
 #include "half_link.h"
@@ -603,6 +604,20 @@ void matrix_wake_capture(void)
  *
  * Retourne true si un relâchement a été publié : l'appelant doit alors
  * l'émettre. */
+void matrix_wake_wait_first_scan(void)
+{
+    /* Attente CONDITIONNELLE, pas un délai deviné : on sort dès que le pilote a
+     * rappelé (touche tenue confirmée — la capture l'a déjà émise, rien à faire),
+     * sinon on attend la grâce déduite de son anti-rebond avant de conclure au
+     * relâchement. vTaskDelay(1) dans la boucle rend la main au pilote (tâche
+     * prio 5) sans jamais l'affamer ; le temps, lui, se mesure à esp_timer. */
+    const uint32_t grace = wake_grace_ms(BOARD_DEBOUNCE_TICKS, BOARD_MATRIX_SCAN_INTERVAL_US);
+    const uint32_t t0 = (uint32_t)(esp_timer_get_time() / 1000);
+    while (!s_cb_since_setup &&
+           (uint32_t)((uint32_t)(esp_timer_get_time() / 1000) - t0) < grace)
+        vTaskDelay(1);
+}
+
 bool matrix_wake_reconcile(void)
 {
     if (!s_wake_had_keys || s_cb_since_setup) return false;

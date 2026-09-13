@@ -129,7 +129,14 @@ void veille_legere_entrer(void)
 #endif
     matrix_disarm_key_wake();
     matrix_setup();
-    vTaskDelay(1);                /* 1 tick = 10 ms : premier balayage + anti-rebond */
+    /* ⚠ Pas de vTaskDelay(1) ici : un tick nu attend jusqu'à la PROCHAINE
+     * frontière de tick, entre ~0 et 10 ms — pas « 10 ms ». Quand la phase
+     * tombait mal, le pilote n'avait pas fini son anti-rebond, son silence
+     * passait pour un relâchement, et une touche TENUE était relâchée au dongle
+     * 20 ms après le réveil (Super tenu → tap de Super → lanceur → Super+F
+     * perdu, banc 2026-09-13). On attend son premier événement, ou la grâce
+     * déduite de son anti-rebond (wake_grace.h). */
+    matrix_wake_wait_first_scan();
     if (matrix_wake_reconcile()) {
 #if CONFIG_KASE_HALF_LINK_RX
         (void)matrix_flag_take(&stat_matrix_changed);
