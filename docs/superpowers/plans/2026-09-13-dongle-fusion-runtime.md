@@ -94,9 +94,10 @@ trame `4B 53 B2 01 00 00 00`), la droite a REQ pendant la fenêtre → ACK → N
 reboot appairée. **La fusion complète en RF fonctionne.**
 
 ## Reste (raffinements, pas bloquants)
-- **Autonomie gauche** : passer `HALF_LINK_RX` off sous fusion (la gauche écoute
-  encore la droite pour rien). Bascule le chemin d'émission de kbd_relay
-  (excursion → direct) — à éprouver au banc.
+- ✅ **Autonomie gauche FAITE (2026-09-13)** : `KASE_HALF_LINK_RX depends on
+  !KASE_DONGLE_FUSION` → sous fusion la gauche n'écoute plus (PTX pur via
+  kbd_relay), ~13 mA économisés. Validé au banc (« aoeusnth », les deux côtés
+  tapent, aucune n'écoute). C'est le gain d'autonomie de la réarchitecture.
 - **Réaffirmation des maintiens** : régler la cadence contre RF_LINK_LOST_MS du
   dongle (un maintien long ne doit pas être relâché). La tâche de rafraîchissement
   de half_link (droite) le fait déjà ; vérifier la gauche.
