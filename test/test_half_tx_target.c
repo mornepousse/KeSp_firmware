@@ -71,10 +71,29 @@ static void test_rebascule_auto_cicatrisante(void)
     TEST_ASSERT(half_tx_target_step(&s, false, HALF_TX_SWITCH_FAILS),
                 "seuil sur la gauche : rebascule");
     TEST_ASSERT(s.cible == HALF_TX_TO_DONGLE, "retour au dongle");
+}
 
-    /* Aucune configuration n'a deux cibles : l'enum est binaire, la bascule est
-     * une négation — invariant structurel « une seule cible à la fois ». */
-    TEST_ASSERT(HALF_TX_TO_DONGLE != HALF_TX_TO_LEFT, "les deux cibles sont distinctes");
+/* LE test qui garde l'anti-oscillation : après une bascule, le compteur doit
+ * repartir de zéro, sinon le moindre paquet perdu ferait osciller la droite
+ * entre les deux auditeurs à chaque trame ratée (au lieu de tous les seuil).
+ * On enchaîne SANS réinitialiser la FSM — contrairement aux autres cas, c'est
+ * la continuité qui est éprouvée ici. */
+static void test_le_compteur_repart_apres_bascule(void)
+{
+    half_tx_fsm_t s = { HALF_TX_TO_DONGLE, 0 };
+    for (unsigned i = 0; i < HALF_TX_SWITCH_FAILS - 1u; i++)
+        half_tx_target_step(&s, false, HALF_TX_SWITCH_FAILS);
+    TEST_ASSERT(half_tx_target_step(&s, false, HALF_TX_SWITCH_FAILS), "1re bascule au seuil");
+    TEST_ASSERT(s.cible == HALF_TX_TO_LEFT, "vers la gauche");
+    /* UN seul échec de plus ne doit PAS rebasculer : le compteur est reparti de zéro. */
+    TEST_ASSERT(!half_tx_target_step(&s, false, HALF_TX_SWITCH_FAILS),
+                "un seul échec après la bascule ne rebascule pas");
+    TEST_ASSERT(s.cible == HALF_TX_TO_LEFT, "toujours sur la gauche");
+    for (unsigned i = 1; i < HALF_TX_SWITCH_FAILS - 1u; i++)
+        TEST_ASSERT(!half_tx_target_step(&s, false, HALF_TX_SWITCH_FAILS),
+                    "toujours pas avant le seuil complet");
+    TEST_ASSERT(half_tx_target_step(&s, false, HALF_TX_SWITCH_FAILS), "2e bascule complète");
+    TEST_ASSERT(s.cible == HALF_TX_TO_DONGLE, "retour au dongle");
 }
 
 void test_half_tx_target(void)
@@ -84,4 +103,5 @@ void test_half_tx_target(void)
     test_seuil_avant_bascule();
     test_un_ack_annule_le_compte();
     test_rebascule_auto_cicatrisante();
+    test_le_compteur_repart_apres_bascule();
 }
