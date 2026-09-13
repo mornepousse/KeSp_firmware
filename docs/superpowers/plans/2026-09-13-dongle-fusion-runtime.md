@@ -39,11 +39,30 @@ Globales que `matrix_scan.c` fournit sur un clavier et qui manquent au dongle :
 - **A3** build `kase_dongle`+fusion vert.
 
 ## Étape B — TX : les moitiés émettent leur brut au dongle
+
+**Adressage tranché (2026-09-13)** : les DEUX moitiés visent le même slot clavier
+du dongle (adresse suffixe 0x01), distinguées par l'identité de moitié dans
+PKT_TYPE_MATRIX. La droite réutilise la pile `kbd_relay`/appairage de la gauche.
+Collisions ESB rares au débit clavier, acceptées. (vs. un 2e pipe dédié, écarté.)
+
+**Primitif commun** : `kbd_relay_send_matrix(half, bitmap)` → encode PKT_TYPE_MATRIX
+et passe par `kbd_tx_locked()` (le chemin d'excursion/direct déjà éprouvé).
+
 - **B1** `niphar_right` sous fusion : émet `rf_matrix(RF_HALF_RIGHT)` vers le slot
-  clavier du dongle (au lieu du heartbeat vers la gauche).
+  clavier du dongle (au lieu du heartbeat vers la gauche). Gagne `kbd_relay` +
+  appairage au dongle ; `HALF_LINK_TX` **off**.
 - **B2** `niphar_left` sous fusion (sans fil) : émet `rf_matrix(RF_HALF_LEFT)` au
-  dongle au lieu de fusionner + HID fini. (Le routage USB-gauche est phase 2.)
+  dongle au lieu de fusionner + HID fini ; `HALF_LINK_RX` **off** (elle n'écoute
+  plus la droite — c'est le gain d'autonomie). (Le routage USB-gauche est phase 2.)
 - **B3** build tous boards + fusion vert.
+
+⚠ **B inverse la propriété de la radio sur chaque moitié** (HALF_LINK_RX/TX
+basculent, la droite s'appaire au dongle). C'est la zone que CLAUDE.md signale
+comme ayant échoué **trois fois en silence** (« une puce, un propriétaire » ;
+« émettre/relâcher ne composent pas »). « Compile vert » n'y prouve rien : un
+mauvais canal/adresse/propriétaire est muet. **À écrire avec le banc dans la
+boucle**, chaque changement RF vérifié contre des ACK réels et un flash des trois
+cartes — pas à l'aveugle en fin de session.
 
 ## Étape C — supervision / repli
 - Batterie : les moitiés continuent `PKT_TYPE_STATUS` ; le dongle l'a déjà.
