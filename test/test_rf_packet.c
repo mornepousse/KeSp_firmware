@@ -92,7 +92,7 @@ static void test_rf_status_roundtrip(void)
     rf_status_t in = { .batt_dV = 41, .link_q = 3, .seq = 200 };
 
     uint16_t n = rf_encode_status(buf, &in);
-    TEST_ASSERT_EQ(n, 4, "la trame d'état tient en 4 octets");
+    TEST_ASSERT_EQ(n, 8, "la trame d'état fait 8 octets (empreinte incluse)");
     TEST_ASSERT_EQ(rf_packet_type(buf, n), PKT_TYPE_STATUS, "type STATUS");
 
     rf_status_t out = {0};
@@ -110,7 +110,7 @@ static void test_rf_status_mode_usb_flag(void)
     uint8_t buf[16];
     rf_status_t in = { .batt_dV = 40, .link_q = 1, .seq = 5, .mode_usb = true };
     uint16_t n = rf_encode_status(buf, &in);
-    TEST_ASSERT_EQ(n, 4, "STATUS reste 4 octets avec le flag");
+    TEST_ASSERT_EQ(n, 8, "STATUS = 8 octets avec le flag");
     TEST_ASSERT_EQ(rf_packet_type(buf, n), PKT_TYPE_STATUS, "type STATUS malgré le flag");
     TEST_ASSERT((buf[0] & 0x0F) != 0, "flag mode dans le nibble bas");
 
@@ -128,6 +128,31 @@ static void test_rf_status_mode_usb_flag(void)
     TEST_ASSERT(!out2.mode_usb, "sans-fil → mode_usb false");
 }
 
+/* Fusion phase 3 : la gauche annonce l'empreinte de sa config (CRC-32 keymap) au
+ * dongle sur STATUS, pour détecter une divergence des deux moteurs. Ajout
+ * rétrocompatible : STATUS passe de 4 à 8 octets, mais un décodeur qui n'a que 4
+ * octets (ancien émetteur) rend une empreinte 0 = « inconnue ». */
+static void test_rf_status_config_fp(void)
+{
+    uint8_t buf[16];
+    rf_status_t in = { .batt_dV = 40, .link_q = 0, .seq = 9, .mode_usb = false,
+                       .config_fp = 0x12345678u };
+    uint16_t n = rf_encode_status(buf, &in);
+    TEST_ASSERT_EQ(n, 8, "STATUS = 8 octets avec l'empreinte");
+    TEST_ASSERT_EQ(rf_packet_type(buf, n), PKT_TYPE_STATUS, "type STATUS");
+
+    rf_status_t out = {0};
+    TEST_ASSERT(rf_decode_status(buf, n, &out), "décodée");
+    TEST_ASSERT_EQ(out.config_fp, 0x12345678u, "empreinte round-trip");
+    TEST_ASSERT_EQ(out.batt_dV, 40, "batterie conservée");
+    TEST_ASSERT_EQ(out.seq, 9, "seq conservé");
+
+    /* Rétrocompat : un STATUS de 4 octets (ancien) décode, empreinte = 0. */
+    rf_status_t old = {0};
+    TEST_ASSERT(rf_decode_status(buf, 4, &old), "décode un STATUS 4 octets");
+    TEST_ASSERT_EQ(old.config_fp, 0u, "empreinte 0 si absente (rétrocompat)");
+}
+
 static void test_rf_status_rejects_short_and_wrong_type(void)
 {
     uint8_t buf[16];
@@ -135,23 +160,29 @@ static void test_rf_status_rejects_short_and_wrong_type(void)
     uint16_t n = rf_encode_status(buf, &in);
     rf_status_t out = {0};
 
-    for (uint16_t cut = 0; cut < n; cut++)
-        TEST_ASSERT(!rf_decode_status(buf, cut, &out), "trame tronquée → rejet");
+    /* Sous le minimum (4 octets) → rejet. À partir de 4, c'est valide :
+     * un STATUS de 4 octets reste accepté (rétrocompat), l'empreinte étant
+     * simplement absente (0). */
+    for (uint16_t cut = 0; cut < 4; cut++)
+        TEST_ASSERT(!rf_decode_status(buf, cut, &out), "trame tronquée (<4) → rejet");
+    TEST_ASSERT(rf_decode_status(buf, 4, &out), "4 octets → accepté (rétrocompat)");
 
     buf[0] = (PKT_TYPE_HEARTBEAT << 4);
     TEST_ASSERT(!rf_decode_status(buf, n, &out), "type étranger → rejet");
 }
 
-static void test_rf_status_is_smaller_than_a_heartbeat(void)
+static void test_rf_status_no_bigger_than_a_heartbeat(void)
 {
-    /* Elle part au repos, en continu, sur une moitié à batterie : sa taille est
-     * une contrainte de conception, pas un détail. L'ancien heartbeat traînait un
-     * bitmap de matrice dont le dongle n'a plus l'usage. */
+    /* Elle part au repos, en continu : sa taille reste une contrainte. Depuis
+     * l'ajout de l'empreinte de config (phase 3), STATUS fait 8 octets — autant
+     * que le heartbeat à bitmap, plus jamais davantage. L'empreinte ne change
+     * qu'au remappage, mais elle est portée en continu : coût accepté (8 o, ~1/s
+     * au repos) contre le bénéfice de détecter une divergence de config. */
     uint8_t a[16], b[16];
     rf_status_t st = { .batt_dV = 40, .link_q = 0, .seq = 0 };
     rf_heartbeat_t hb = { .bitmap = {0}, .batt_dV = 40, .link_q = 0, .seq = 0 };
-    TEST_ASSERT(rf_encode_status(a, &st) < rf_encode_heartbeat(b, &hb),
-                "la trame d'état est plus courte que le heartbeat à bitmap");
+    TEST_ASSERT(rf_encode_status(a, &st) <= rf_encode_heartbeat(b, &hb),
+                "la trame d'état ne dépasse pas le heartbeat à bitmap");
 }
 
 static void test_rf_decode_rejects(void)
@@ -410,8 +441,9 @@ void test_rf_packet(void)
     /* Supervision du lien clavier → dongle (design dongle §5) */
     test_rf_status_roundtrip();
     test_rf_status_mode_usb_flag();
+    test_rf_status_config_fp();
     test_rf_status_rejects_short_and_wrong_type();
-    test_rf_status_is_smaller_than_a_heartbeat();
+    test_rf_status_no_bigger_than_a_heartbeat();
     test_rf_bitmap_all_positions();
     test_rf_pair_roundtrip();
 

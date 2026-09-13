@@ -93,6 +93,9 @@ typedef struct {
     bool    mode_usb;  /* fusion : la gauche annonce qu'un hôte USB la pilote →
                         * le dongle se tait et réémet la droite. Porté par le
                         * nibble bas de l'octet 0, rétrocompatible. */
+    uint32_t config_fp;/* fusion phase 3 : empreinte CRC-32 de la keymap de
+                        * l'émetteur, pour que le dongle détecte une divergence de
+                        * config. 0 = absente (ancien émetteur, STATUS 4 octets). */
 } rf_status_t;
 
 /* Flag « mode USB » dans le nibble bas de l'octet 0 de STATUS. */
@@ -165,7 +168,11 @@ static inline uint16_t rf_encode_status(uint8_t *buf, const rf_status_t *s)
     buf[1] = s->batt_dV;
     buf[2] = s->link_q;
     buf[3] = s->seq;
-    return 4;
+    buf[4] = (uint8_t)(s->config_fp);          /* empreinte CRC-32, little-endian */
+    buf[5] = (uint8_t)(s->config_fp >> 8);
+    buf[6] = (uint8_t)(s->config_fp >> 16);
+    buf[7] = (uint8_t)(s->config_fp >> 24);
+    return 8;
 }
 
 /* PKT_PAIR_ACK: 10 bytes — type 0xE, set_id big-endian, dongle MAC, slot. */
@@ -195,6 +202,12 @@ static inline bool rf_decode_status(const uint8_t *buf, uint16_t len, rf_status_
     out->link_q   = buf[2];
     out->seq      = buf[3];
     out->mode_usb = (buf[0] & PKT_STATUS_FLAG_MODE_USB) != 0;
+    /* Empreinte : présente sur 8 octets, absente (0 = inconnue) sur un ancien
+     * STATUS de 4 octets — rétrocompatible. */
+    out->config_fp = (len >= 8)
+        ? ((uint32_t)buf[4] | ((uint32_t)buf[5] << 8) |
+           ((uint32_t)buf[6] << 16) | ((uint32_t)buf[7] << 24))
+        : 0u;
     return true;
 }
 
