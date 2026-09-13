@@ -77,6 +77,15 @@ void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg);
  * Fusion phase 2 : la gauche alterne PRX(USB)↔PTX(sans-fil) selon la route. */
 void rf_driver_set_ptx(rf_radio_t *r, const rf_radio_cfg_t *cfg);
 
+/* PRX : charge la charge utile qui partira dans le PROCHAIN ACK émis sur `pipe`
+ * (W_ACK_PAYLOAD, nRF24L01+ PS §7.4.2). L'ESB garantit l'aller (la trame du
+ * PTX est retransmise jusqu'à ACK) mais PAS le retour : l'ACK — et sa charge —
+ * peut se perdre sans que personne ne le sache. Le protocole au-dessus doit donc
+ * être idempotent (le PTX redemande ce qu'il n'a pas reçu). Requiert EN_ACK_PAY
+ * (FEATURE bit1), activé dans toutes les inits/réarmements. len ≤ 32.
+ * Sync auto keymap : docs/superpowers/specs/2026-09-13-keymap-sync-ack-payload-design.md */
+void rf_driver_load_ack_payload(rf_radio_t *r, uint8_t pipe, const uint8_t *data, uint8_t len);
+
 /* Boot-time sanity check on a freshly init'd PRX radio: read back CONFIG/EN_AA/
  * EN_RXADDR/RF_CH/RF_SETUP/RX_ADDR_P0.lsb and compare to expected init values.
  * Logs "verify OK" with the read-back values, or "verify FAIL" with the per-register
@@ -122,6 +131,14 @@ esp_err_t rf_driver_init_tx(rf_radio_t *radio, const rf_radio_cfg_t *cfg);
  * Timeout ~5 ms (ARC=3 × ARD=500 µs × 2 + margin).
  * Returns true on TX_DS (ACK from dongle). */
 bool rf_driver_send(rf_radio_t *radio, const uint8_t *buf, uint8_t len);
+
+/* Comme rf_driver_send, et récupère en plus la charge utile portée par l'ACK
+ * (EN_ACK_PAY) si le PRX en avait chargé une : copiée dans ack_out (≤ 32 o),
+ * longueur dans *ack_len (0 = ACK nu). ack_out/ack_len peuvent être NULL — la
+ * FIFO RX est alors vidée pour ne pas s'encrasser. Retourne TX_DS comme send.
+ * Sync auto keymap : docs/superpowers/specs/2026-09-13-keymap-sync-ack-payload-design.md */
+bool rf_driver_send_ap(rf_radio_t *radio, const uint8_t *buf, uint8_t len,
+                       uint8_t *ack_out, uint8_t *ack_len);
 
 /* Count of MAX_RT events accumulated since last reset (FIFO-flush logic + debug). */
 extern uint32_t rf_tx_max_rt_count;

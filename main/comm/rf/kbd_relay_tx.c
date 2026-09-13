@@ -139,7 +139,16 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
          * lui-même le canal du lien. */
         bool ok = half_link_excursion_tx(s_dongle_ch, s_dongle_addr, buf, len);
 #else
-        bool ok = rf_driver_send(&s_radio, buf, len);
+        /* Canal retour ACK payload (sync auto keymap) : on récupère ce que le
+         * dongle a glissé dans l'ACK. Loggé au banc pour le go/no-go (Task 3) ;
+         * la Task 5 consommera ces octets (balise / chunk). */
+        uint8_t ack[32];
+        uint8_t ack_n = 0;
+        bool ok = rf_driver_send_ap(&s_radio, buf, len, ack, &ack_n);
+        if (ack_n)
+            ESP_LOGW(TAG, "ACK payload %u o : %02X %02X %02X %02X", (unsigned)ack_n,
+                     ack[0], ack_n > 1 ? ack[1] : 0, ack_n > 2 ? ack[2] : 0,
+                     ack_n > 3 ? ack[3] : 0);
 #endif
         if (ok) s_tx_remis++; else s_tx_refuses++;
         s_derniere_emission_ms = (uint32_t)(esp_timer_get_time() / 1000);

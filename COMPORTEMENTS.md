@@ -66,3 +66,16 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   diverge de celle de la gauche, le dongle le journalise et l'expose par CDC
   (KS_CMD_CONFIG_COHERENCE : own_fp/left_fp/age/match) — le contrôleur peut
   avertir. Sinon deux moteurs taperaient différemment en silence.
+
+## Fusion — sync auto de la keymap (ACK payload)
+
+- [test:test_keymap_sync_frames] Les trames BEACON/CHUNK/REQ survivent à
+  l'encode/decode et tiennent dans un ACK payload nRF24 (≤ 32 o) ; la géométrie
+  40 × 28 = 1120 = keymap est verrouillée, sans chunk partiel.
+- [test:test_keymap_sync] Le réassembleur n'accepte que le prochain chunk
+  attendu ; doublons et hors-séquence sont ignorés sans rien écrire — un ACK
+  payload rejoué ne corrompt jamais la keymap en cours de réception.
+- [smoke:Canal retour ACK payload] Le PTX (gauche) lit la charge utile portée
+  par l'ACK après TX_DS, et sa FIFO RX ne s'encrasse jamais (vidée si non lue ou
+  corrompue). Sans ça, trois ACK chargés suffisent à rendre le canal retour
+  muet en silence.

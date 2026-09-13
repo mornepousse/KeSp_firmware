@@ -16,6 +16,7 @@ static const char *TAG = "rf_drv";
 #define CMD_R_REGISTER(r)  (0x00 | ((r) & 0x1F))
 #define CMD_W_REGISTER(r)  (0x20 | ((r) & 0x1F))
 #define CMD_R_RX_PAYLOAD   0x61
+#define CMD_W_ACK_PAYLOAD(pipe) (0xA8 | ((pipe) & 0x07))   /* charge utile du prochain ACK (PRX) */
 #define CMD_R_RX_PL_WID    0x60
 #define CMD_FLUSH_RX       0xE2
 #define CMD_NOP            0xFF
@@ -180,6 +181,20 @@ static inline void rf_settle_us(uint32_t us) { esp_rom_delay_us(us); }
 
 /* Issues des excursions PRX→PTX→PRX (relais HID de la moitie gauche). */
 uint32_t rf_oob_ok, rf_oob_maxrt, rf_oob_timeout;
+
+/* PRX : charge la charge utile du PROCHAIN ACK sur `pipe` (W_ACK_PAYLOAD, PS
+ * §7.4.2). Autorisé pendant l'écoute — CE reste haut, aucune bascule de mode.
+ * Même séquence CSN/SPI que W_TX_PAYLOAD dans oob_tx. Le nRF24 tient jusqu'à
+ * trois charges en attente ; au-delà, la nouvelle est ignorée — le protocole
+ * au-dessus en recharge une par trame reçue, jamais plus. */
+void rf_driver_load_ack_payload(rf_radio_t *r, uint8_t pipe, const uint8_t *data, uint8_t len)
+{
+    if (len > 32) len = 32;
+    uint8_t tx[33], rxb[33];
+    tx[0] = CMD_W_ACK_PAYLOAD(pipe);
+    memcpy(&tx[1], data, len);
+    csn_low(r); spi_xfer(r, tx, rxb, (size_t)(len + 1)); csn_high(r);
+}
 
 bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
                       const uint8_t *payload, uint8_t len,
@@ -350,7 +365,7 @@ esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_SETUP_RETR, 0x1F);      /* ARD=500us, ARC=15 */
     rf_driver_set_channel(r, cfg->channel);
     rf_driver_write_reg(r, REG_RF_SETUP, 0x06);        /* 1 Mbps, 0 dBm (clones don't support 250kbps) */
-    rf_driver_write_reg(r, REG_FEATURE, 0x04);         /* EN_DPL */
+    rf_driver_write_reg(r, REG_FEATURE, 0x06);         /* EN_DPL|EN_ACK_PAY */
     rf_driver_write_reg(r, REG_DYNPD, 0x01);           /* dynamic payload pipe 0 */
 
     uint8_t addr[5];
@@ -395,7 +410,7 @@ void rf_driver_set_ptx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_SETUP_RETR, 0x1F);
     rf_driver_set_channel(r, cfg->channel);
     rf_driver_write_reg(r, REG_RF_SETUP, 0x06);      /* 1 Mbps, 0 dBm — comme init */
-    rf_driver_write_reg(r, REG_FEATURE, 0x04);
+    rf_driver_write_reg(r, REG_FEATURE, 0x06);   /* EN_DPL|EN_ACK_PAY */
     rf_driver_write_reg(r, REG_DYNPD, 0x01);
     uint8_t addr[5];
     memcpy(addr, cfg->rx_addr, 4);
@@ -427,7 +442,7 @@ void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
                                                         peers. Dormant for halves (heartbeats
                                                         keep the watchdog from firing) but fatal
                                                         for the heartbeat-less HID relay. */
-    rf_driver_write_reg(r, REG_FEATURE, 0x04);
+    rf_driver_write_reg(r, REG_FEATURE, 0x06);   /* EN_DPL|EN_ACK_PAY */
     rf_driver_write_reg(r, REG_DYNPD, 0x01);
     uint8_t addr[5];
     memcpy(addr, cfg->rx_addr, 4);
@@ -590,7 +605,7 @@ esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_SETUP_RETR, 0x1F);   /* ARD=500 µs, ARC=15 — max retransmit */
     rf_driver_set_channel(r, cfg->channel);
     rf_driver_write_reg(r, REG_RF_SETUP,   0x06);   /* 1 Mbps, 0 dBm — ~3dB better than 2Mbps; clones lack 250kbps */
-    rf_driver_write_reg(r, REG_FEATURE,    0x04);   /* EN_DPL (bit2) */
+    rf_driver_write_reg(r, REG_FEATURE,    0x06);   /* EN_DPL (bit2) | EN_ACK_PAY (bit1) */
     rf_driver_write_reg(r, REG_DYNPD,      0x01);   /* DPL on pipe 0 */
 
     /* TX_ADDR and RX_ADDR_P0 must be the same 5-byte address for ESB auto-ACK.
@@ -628,7 +643,8 @@ esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     return ESP_OK;
 }
 
-bool rf_driver_send(rf_radio_t *r, const uint8_t *buf, uint8_t len)
+bool rf_driver_send_ap(rf_radio_t *r, const uint8_t *buf, uint8_t len,
+                       uint8_t *ack_out, uint8_t *ack_len)
 {
     /* Write payload to TX FIFO */
     uint8_t tx[33], rx_buf[33];
@@ -683,11 +699,43 @@ bool rf_driver_send(rf_radio_t *r, const uint8_t *buf, uint8_t len)
     rf_tx_retr_sum += (uint32_t)(rf_driver_read_reg(r, REG_OBSERVE_TX) & 0x0F);
     rf_tx_count++;
 
+    /* ACK payload (EN_ACK_PAY) : si l'ACK portait une charge utile, la puce lève
+     * RX_DR (bit6) en plus de TX_DS. On la lit MAINTENANT, avant d'effacer les
+     * drapeaux — sinon elle reste dans la FIFO RX du PTX (3 emplacements) et les
+     * charges suivantes sont perdues en silence. Largeur nulle ou > 32 = trame
+     * corrompue (PS §7.3.4) : vider au lieu de lire. Sans destinataire (ack_out
+     * NULL) on vide aussi, pour la même raison d'encrassement. */
+    if (ack_len) *ack_len = 0;
+    if (status & 0x40) {
+        uint8_t wc[2] = { CMD_R_RX_PL_WID, CMD_NOP }, wr[2];
+        csn_low(r); spi_xfer(r, wc, wr, 2); csn_high(r);
+        uint8_t n = wr[1];
+        if (n == 0 || n > 32 || ack_out == NULL) {
+            uint8_t f = CMD_FLUSH_RX, fr;
+            csn_low(r); spi_xfer(r, &f, &fr, 1); csn_high(r);
+        } else {
+            uint8_t rd[33], rb[33];
+            rd[0] = CMD_R_RX_PAYLOAD;
+            memset(&rd[1], CMD_NOP, n);
+            csn_low(r); spi_xfer(r, rd, rb, (size_t)(n + 1)); csn_high(r);
+            memcpy(ack_out, &rb[1], n);
+            if (ack_len) *ack_len = n;
+        }
+        rf_driver_write_reg(r, REG_STATUS, 0x40);   /* effacer RX_DR */
+    }
+
     /* Clear TX_DS + MAX_RT flags in STATUS (write 1 to clear) */
     rf_driver_write_reg(r, REG_STATUS, 0x30);
 
     if (success) r->pkt_rx++;   /* reuse pkt_rx as pkt_tx_ok counter */
     return success;
+}
+
+/* Émission simple : même chose, sans récupérer l'ACK payload (la FIFO RX est
+ * vidée si l'ACK en portait une, pour ne pas s'encrasser). */
+bool rf_driver_send(rf_radio_t *r, const uint8_t *buf, uint8_t len)
+{
+    return rf_driver_send_ap(r, buf, len, NULL, NULL);
 }
 
 void rf_driver_set_tx_address(rf_radio_t *r, const uint8_t addr[5])

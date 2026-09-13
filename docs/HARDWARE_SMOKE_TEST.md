@@ -41,6 +41,10 @@ dans la PR/release.
 - [ ] Fusion — Divergence de config signalée : keymap du dongle ≠ celle de la
       gauche → console dongle logue « DIVERGENCE de config » et
       KS_CMD_CONFIG_COHERENCE renvoie match=0 ; keymaps identiques → match=1
+- [ ] Fusion — Canal retour ACK payload : le dongle charge une charge utile
+      connue dans l'ACK (EN_ACK_PAY) ; la gauche, en sans-fil, la lit après
+      chaque émission et la logue. Go/no-go des clones nRF24 : si RX_DR ne se
+      lève jamais côté gauche, la sync auto par ACK est impossible → repli B
 
 ## Half (left / right)
 - [ ] e-ink affiche le splash 'PAIRED' au pairing

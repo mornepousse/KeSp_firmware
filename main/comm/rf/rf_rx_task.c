@@ -149,6 +149,20 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
         /* Tout paquet vaut preuve de vie, pas seulement les battements. */
         rf_slot_link_rx(&s_link[slot], (uint32_t)(esp_timer_get_time() / 1000));
         uint8_t type = rf_packet_type(buf, n);
+#if CONFIG_KASE_DONGLE_FUSION
+        /* BANC — go/no-go des ACK payloads (Task 3 du plan de sync auto) : on
+         * charge une charge utile CONNUE qui partira dans l'ACK de la PROCHAINE
+         * trame de la gauche. Si la gauche la logue, le canal retour existe sur
+         * ce silicium (clones nRF24 : pas garanti). Rechargée à chaque trame :
+         * une excursion oob_tx vide la FIFO TX du PRX, donc toute charge en
+         * attente. Remplacé en Task 4 par la balise / les chunks de sync. */
+        if (slot == RF_SLOT_KBD) {
+            static uint8_t s_hello_seq;
+            uint8_t hello[4] = { 'H', 'I', s_hello_seq, (uint8_t)~s_hello_seq };
+            s_hello_seq++;
+            rf_driver_load_ack_payload(radio, 0, hello, sizeof(hello));
+        }
+#endif
         /* PKT_TYPE_KEY (matrice brute) et PKT_TYPE_TRACKPAD (gestuelle brute) ne
          * sont plus traités : plus personne ne les émet depuis le retrait des
          * anciennes moitiés, et le Niphargus envoie du HID déjà fini. Le dongle
