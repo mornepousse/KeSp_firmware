@@ -104,3 +104,16 @@ reboot appairée. **La fusion complète en RF fonctionne.**
   de la gauche sur ce slot (affichage seulement ; l'adresse reste correcte).
   Modèle 2-slots à affiner si on veut un pair-list exact.
 - Phase 2 (gauche autonome USB) et phase 3 (config répliquée + trackpad).
+
+## Phase 3 — cohérence de config (démarrée 2026-09-13)
+- ✅ **Empreinte de config** : `config_fp_crc32` (CRC-32 du blob keymap, pur,
+  testé host) + CDC `KS_CMD_CONFIG_FINGERPRINT` (0x16) sur gauche ET dongle. Le
+  contrôleur lit les deux → égales = synchronisées. Remplace le « numéro de
+  version » manuel (empreinte de contenu, auto).
+- Reste : (a) le **contrôleur écrit les deux NVS** au remappage (repo
+  KeSp_controller) ; (b) **annonce RF** de l'empreinte par la gauche +
+  **garde-fou** dongle (refuse de tourner sur empreinte ≠) — change une trame RF,
+  donc reflash des deux, à faire au banc ; (c) étendre l'empreinte aux
+  macros/combos/tap-dance si besoin.
+- Provisionnement manuel en attendant : voir la mémoire
+  `fusion-dongle-et-usb-gauche` (dump NVS gauche par FTDI → SETLAYER au dongle).

@@ -53,10 +53,15 @@ contrôleur, **répliquée dans les deux NVS** (gauche ET dongle). C'est le coû
 nouveau principal :
 
 - Le contrôleur écrit les deux au remappage.
-- Un **numéro de version de config** accompagne le blob. Le moteur du dongle
-  refuse de tourner (repli : relayer sans interpréter, ou signaler une erreur)
-  si sa version ≠ celle attendue, plutôt que de produire un comportement
-  différent de la gauche en silence.
+- Une **empreinte de config** (CRC-32 du blob keymap) sert de version — affiné
+  par rapport au « numéro de version » initial : une empreinte de CONTENU se met
+  à jour d'elle-même et détecte toute divergence, sans numéro à tenir à la main.
+  Logique pure `config_fp_crc32` (`main/input/config_sync.h`), testée host ;
+  exposée par CDC `KS_CMD_CONFIG_FINGERPRINT` (0x16) sur la gauche ET le dongle.
+  Le contrôleur lit les deux : égales = synchronisées. Le moteur du dongle
+  refusera de tourner (repli / erreur) si l'empreinte annoncée par la gauche ≠
+  la sienne, plutôt que de produire un comportement différent en silence — ce
+  garde-fou runtime suppose l'annonce par RF (à venir).
 - Le format du blob reste celui de `KEYMAP_BLOB_BYTES` (`keymap.h`), dimensionné
   sur `KEYMAP_COLS` — donc les deux endroits stockent les 14 colonnes complètes.
 

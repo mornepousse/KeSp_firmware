@@ -7,6 +7,7 @@
 #include "keymap.h"
 #include "key_stats.h"
 #include "key_definitions.h"
+#include "config_sync.h"   /* config_fp_crc32 — empreinte de keymap (sync fusion) */
 #include "dfu_manager.h"
 #include "tap_dance.h"
 #include "combo.h"
@@ -135,6 +136,20 @@ static void bin_cmd_keymap_get(uint8_t cmd, const uint8_t *p, uint16_t l)
         }
     }
     ks_respond_end();
+}
+
+/* CONFIG_FINGERPRINT: réponse [crc32:u32 LE] sur le blob keymap vivant.
+ *
+ * Sync fusion (phase 3) : le contrôleur lit l'empreinte de la gauche ET du dongle
+ * ; égales = configs identiques. Calculée sur keymaps[] en RAM (ce que le moteur
+ * exécute réellement), pas sur la NVS. Étendra plus tard aux macros/combos si
+ * besoin ; la keymap est la part qui change le rendu au clavier. */
+static void bin_cmd_config_fp(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    (void)p; (void)l;
+    uint32_t fp = config_fp_crc32((const uint8_t *)keymaps, KEYMAP_BLOB_BYTES);
+    uint8_t b[4] = { (uint8_t)fp, (uint8_t)(fp >> 8), (uint8_t)(fp >> 16), (uint8_t)(fp >> 24) };
+    ks_respond(cmd, KS_STATUS_OK, b, 4);
 }
 
 /* SETKEY: payload [layer:u8][row:u8][col:u8][value:u16 LE] */
@@ -1130,6 +1145,7 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     { KS_CMD_SETKEY,            bin_cmd_setkey },
     { KS_CMD_SETLAYER,          bin_cmd_setlayer },
     { KS_CMD_LAYER_NAME,        bin_cmd_layer_name },
+    { KS_CMD_CONFIG_FINGERPRINT, bin_cmd_config_fp },
     /* Layout */
     { KS_CMD_LIST_LAYOUTS,      bin_cmd_list_layouts },
     { KS_CMD_SET_LAYOUT_NAME,   bin_cmd_set_layout_name },

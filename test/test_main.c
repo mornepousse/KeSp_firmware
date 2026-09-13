@@ -49,6 +49,7 @@ extern void test_rf_channel_plan(void);
 extern void test_half_state(void);
 extern void test_fuse_halves(void);
 extern void test_fusion_state(void);
+extern void test_config_sync(void);
 extern void test_matrix_bitmap(void);
 extern void test_veille(void);
 extern void test_rf_status_cadence(void);
@@ -111,6 +112,7 @@ int main(void) {
     test_half_state();
     test_fuse_halves();
     test_fusion_state();
+    test_config_sync();
     test_matrix_bitmap();
     test_veille();
     test_rf_status_cadence();
