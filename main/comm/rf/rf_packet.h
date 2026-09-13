@@ -367,4 +367,85 @@ static inline void rf_matrix_to_bitmap(const uint8_t *state, uint8_t rows,
             if (state[(uint16_t)r * cols + c]) rf_bitmap_set(bm, r, c, true);
 }
 
+/* ── Sync auto de la keymap dongle→gauche par ACK payload (fusion, phase 3) ─────
+ *
+ * La gauche est sourde en sans-fil (PTX pur, autonomie) : le dongle ne peut pas
+ * lui « pousser » une keymap. Mais chaque trame de la gauche reçoit un ACK
+ * matériel, et le nRF24 sait y glisser une charge utile (EN_ACK_PAY). Le dongle
+ * distille donc la keymap dans les ACK des émissions normales de la gauche.
+ *
+ * Pull piloté par la gauche : elle demande le prochain chunk manquant (REQ, en
+ * uplink) ; le dongle répond BEACON (« j'ai une keymap d'empreinte fp_target en
+ * n_chunks ») ou CHUNK (un morceau) dans l'ACK. Tout tient dans ≤ 32 o.
+ * 40 chunks × 28 o = 1120 o = KEYMAP_BLOB_BYTES, sans chunk partiel.
+ *
+ * Testées host dans test/test_keymap_sync_frames.c. Design :
+ * docs/superpowers/specs/2026-09-13-keymap-sync-ack-payload-design.md */
+#define PKT_TYPE_SYNC_BEACON 0x7   /* dongle→gauche (ACK) : une keymap est disponible */
+#define PKT_TYPE_SYNC_CHUNK  0x8   /* dongle→gauche (ACK) : un morceau de keymap */
+#define PKT_TYPE_SYNC_REQ    0x9   /* gauche→dongle (uplink) : prochain chunk voulu */
+#define SYNC_CHUNK_BYTES     28
+#define SYNC_N_CHUNKS        40    /* 1120 / 28 */
+
+typedef struct { uint32_t fp_target; uint8_t n_chunks; } rf_sync_beacon_t;
+typedef struct { uint8_t idx; uint8_t data[SYNC_CHUNK_BYTES]; } rf_sync_chunk_t;
+typedef struct { uint8_t next; } rf_sync_req_t;
+
+/* BEACON : 6 octets — type, empreinte LE, nombre de chunks. */
+static inline uint16_t rf_encode_sync_beacon(uint8_t *buf, const rf_sync_beacon_t *b)
+{
+    if (buf == NULL || b == NULL) return 0;
+    buf[0] = (PKT_TYPE_SYNC_BEACON << 4);
+    buf[1] = (uint8_t)(b->fp_target);
+    buf[2] = (uint8_t)(b->fp_target >> 8);
+    buf[3] = (uint8_t)(b->fp_target >> 16);
+    buf[4] = (uint8_t)(b->fp_target >> 24);
+    buf[5] = b->n_chunks;
+    return 6;
+}
+static inline bool rf_decode_sync_beacon(const uint8_t *buf, uint16_t len, rf_sync_beacon_t *o)
+{
+    if (buf == NULL || o == NULL) return false;
+    if (len < 6 || rf_packet_type(buf, len) != PKT_TYPE_SYNC_BEACON) return false;
+    o->fp_target = (uint32_t)buf[1] | ((uint32_t)buf[2] << 8) |
+                   ((uint32_t)buf[3] << 16) | ((uint32_t)buf[4] << 24);
+    o->n_chunks = buf[5];
+    return true;
+}
+
+/* CHUNK : 30 octets — type, index, 28 octets de données. */
+static inline uint16_t rf_encode_sync_chunk(uint8_t *buf, const rf_sync_chunk_t *c)
+{
+    if (buf == NULL || c == NULL) return 0;
+    buf[0] = (PKT_TYPE_SYNC_CHUNK << 4);
+    buf[1] = c->idx;
+    memcpy(&buf[2], c->data, SYNC_CHUNK_BYTES);
+    return 2 + SYNC_CHUNK_BYTES;
+}
+static inline bool rf_decode_sync_chunk(const uint8_t *buf, uint16_t len, rf_sync_chunk_t *o)
+{
+    if (buf == NULL || o == NULL) return false;
+    if (len < 2 + SYNC_CHUNK_BYTES || rf_packet_type(buf, len) != PKT_TYPE_SYNC_CHUNK)
+        return false;
+    o->idx = buf[1];
+    memcpy(o->data, &buf[2], SYNC_CHUNK_BYTES);
+    return true;
+}
+
+/* REQ : 2 octets — type, prochain chunk voulu. */
+static inline uint16_t rf_encode_sync_req(uint8_t *buf, const rf_sync_req_t *q)
+{
+    if (buf == NULL || q == NULL) return 0;
+    buf[0] = (PKT_TYPE_SYNC_REQ << 4);
+    buf[1] = q->next;
+    return 2;
+}
+static inline bool rf_decode_sync_req(const uint8_t *buf, uint16_t len, rf_sync_req_t *o)
+{
+    if (buf == NULL || o == NULL) return false;
+    if (len < 2 || rf_packet_type(buf, len) != PKT_TYPE_SYNC_REQ) return false;
+    o->next = buf[1];
+    return true;
+}
+
 #endif /* RF_PACKET_H */
