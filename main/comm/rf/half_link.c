@@ -93,6 +93,8 @@ static portMUX_TYPE s_etat_mux = portMUX_INITIALIZER_UNLOCKED;
  * dans le mauvais état — écriture de registre perdue en silence, ou impulsion CE
  * tronquée. La moitié gauche a reçu son verrou, la droite avait été oubliee. */
 static SemaphoreHandle_t s_tx_radio_mux;
+/* Config TX vivante, pour le chien de garde radio (réarmer une puce figée). */
+static rf_radio_cfg_t s_tx_cfg;
 #endif
 
 /* Config commune aux deux bouts : même canal, même adresse, sinon rien ne
@@ -197,6 +199,7 @@ bool half_link_tx_init(void)
                  fusion_unpaired ? " (NON APPAIRE — appairage actif)" : "");
     }
 #endif
+    s_tx_cfg = cfg;   /* mémorisé pour le chien de garde radio */
     esp_err_t e = rf_driver_init_tx(&s_radio, &cfg);
     if (e != ESP_OK || !s_radio.present) {
         ESP_LOGE(TAG, "TX init echouee (%d) — la moitie droite restera muette", (int)e);
@@ -295,6 +298,26 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
     s_seq++;                       /* la trame part : ce numéro est consommé */
     bool ack = rf_driver_send(&s_radio, buf, (uint8_t)n);
     if (s_tx_radio_mux) xSemaphoreGive(s_tx_radio_mux);
+
+    /* Chien de garde radio. Un nRF24 (clone) se FIGE — sous un orage de
+     * retransmissions ou un glitch (constaté au banc 2026-09-13 : à l'activation
+     * du lien TRRS en mode USB, la radio de la droite gelait et n'acquittait plus
+     * RIEN, même une fois l'USB retiré, jusqu'au reset). Le dongle a un chien de
+     * garde ; la droite n'en avait pas → mort permanente. Après 30 envois
+     * consécutifs sans ACK (~0,4 s de silence total, pas une simple perte ESB),
+     * on RÉARME la puce (réécriture de la config PTX), sans redémarrage. */
+    static uint16_t s_sans_ack;
+    if (ack) {
+        s_sans_ack = 0;
+    } else if (++s_sans_ack >= 30) {
+        s_sans_ack = 0;
+        if (s_tx_radio_mux &&
+            xSemaphoreTake(s_tx_radio_mux, pdMS_TO_TICKS(50)) == pdTRUE) {
+            rf_driver_set_ptx(&s_radio, &s_tx_cfg);
+            xSemaphoreGive(s_tx_radio_mux);
+            ESP_LOGW(TAG, "chien de garde : radio TX rearmee (30 envois sans ACK)");
+        }
+    }
 
     /* Instrument de banc : sans lui, on ne distingue pas « les paquets partent
      * et sont acquittes » de « ils partent dans le vide ». Resume tous les dix
