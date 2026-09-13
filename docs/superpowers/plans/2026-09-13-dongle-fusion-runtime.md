@@ -119,7 +119,15 @@ reboot appairée. **La fusion complète en RF fonctionne.**
 - Reste ensuite (RF, au banc) : la gauche ré-écoute en mode USB, le dongle
   **réémet la droite → gauche** et se tait, annonce RF du mode USB de la gauche.
 
-### Cas simultané (gauche USB + dongle + droite) — plan RF concret
+### Cas simultané — ✅ FAIT et validé au banc le 2026-09-13
+Les deux moitiés tapent par l'USB de la gauche (la droite réémise par le dongle,
+fusionnée par la gauche), le dongle se tait, pas de double frappe, et les
+transitions USB↔sans-fil basculent proprement dans les deux sens (radio gauche
+PTX↔PRX dynamique, `rf_driver_set_ptx`/`rearm_rx`). **Phase 2 complète.**
+Implémenté aux étapes 1-3 (dongle : annonce, silence, réémission) + 4a (bascule
+radio dynamique + écoute) + 4b (fusion locale + HID). Commits jusqu'à 5f26c779.
+
+### Cas simultané (gauche USB + dongle + droite) — plan RF (réalisé)
 Logique de décision : DÉJÀ faite et testée (`fusion_route.h`). Reste le plumbing,
 tout dans la zone à échec silencieux (« une puce, un propriétaire ») → **banc
 dans la boucle, ACK réels à chaque pas**. Étapes :
