@@ -121,6 +121,18 @@ void veille_legere_entrer(void)
     half_link_radio_wake();
 #endif
     matrix_wake_capture();
+    /* Premier front dans le REBOND du contact : la capture 2 passes (1 ms) lit
+     * alors 0 touche, la carte conclut « fantôme », se rendort 10-50 ms et se
+     * re-réveille sur la touche encore tenue — vu deux fois au banc le
+     * 2026-09-13. Un tap bref relâché pendant ce rendormissement est PERDU (un
+     * relâchement ne réveille pas). Si le réveil vient bien d'un GPIO et que la
+     * capture est vide, on relit UNE fois 5 ms plus tard avant de trancher : un
+     * vrai glitch donne deux captures vides (filtre intact), un vrai appui est
+     * rattrapé sans double réveil. */
+    if (!matrix_wake_had_keys() && esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) {
+        esp_rom_delay_us(5000);
+        matrix_wake_capture();
+    }
 #if CONFIG_KASE_HALF_LINK_RX
     if (matrix_flag_take(&stat_matrix_changed)) {
         build_keycode_report();

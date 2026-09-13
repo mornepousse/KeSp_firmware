@@ -81,6 +81,9 @@ void matrix_mark_activity(void);
  * touche qui a réveillé la carte est enfoncée à cet instant, plus tard elle ne
  * l'est peut-être plus. */
 void matrix_wake_capture(void);
+/* La dernière capture a-t-elle trouvé au moins une touche ? Sert à veille.c
+ * pour distinguer un vrai fantôme d'un premier front lu pendant le rebond. */
+bool matrix_wake_had_keys(void);
 /* À appeler APRÈS matrix_setup() et AVANT matrix_wake_reconcile() : attend que
  * le pilote recréé ait parlé (premier événement) ou que la grâce déduite de son
  * anti-rebond soit écoulée (wake_grace.h). Jamais un tick nu : vTaskDelay(1)

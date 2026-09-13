@@ -43,6 +43,9 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   changement, lui seul ne l'aurait jamais émis (première touche avalée, banc
   2026-09-13). Une touche de réveil TENUE n'est jamais relâchée à tort :
   la réconciliation attend le premier événement du pilote, pas un tick nu.
+  Un premier front lu pendant le rebond (capture vide sur réveil GPIO) est
+  relu 5 ms plus tard avant d'être déclaré fantôme — pas de rendormissement
+  qui avalerait un tap bref ; un vrai glitch (deux captures vides) reste rejeté.
 - [test:test_wake_grace] La grâce laissée au pilote recréé au réveil couvre
   toujours son anti-rebond (debounce × intervalle + 2 balayages), plancher
   10 ms, plafond 50 ms. Un `vTaskDelay(1)` (entre ~0 et 10 ms selon la phase)

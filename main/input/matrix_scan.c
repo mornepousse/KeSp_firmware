@@ -604,6 +604,8 @@ void matrix_wake_capture(void)
  *
  * Retourne true si un relâchement a été publié : l'appelant doit alors
  * l'émettre. */
+bool matrix_wake_had_keys(void) { return s_wake_had_keys; }
+
 void matrix_wake_wait_first_scan(void)
 {
     /* Attente CONDITIONNELLE, pas un délai deviné : on sort dès que le pilote a
