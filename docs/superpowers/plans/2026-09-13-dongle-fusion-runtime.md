@@ -82,6 +82,25 @@ cartes — pas à l'aveugle en fin de session.
 - Batterie : les moitiés continuent `PKT_TYPE_STATUS` ; le dongle l'a déjà.
 - Perte de lien : `fusion_timeout` relâche par moitié (déjà testé host).
 
-## Étape D — banc (Mae)
-Flasher les 3 cartes en fusion, prouver que les deux moitiés tapent via le moteur
-du dongle. Puis phase 2 (gauche autonome USB) et phase 3 (config répliquée).
+## Étape D — banc (Mae)  ✅ FAIT le 2026-09-13
+Les 3 cartes flashées en fusion (app-only, appairages préservés). Résultat :
+- Gauche : tape via le moteur du dongle (« qwertasdfg »).
+- Droite : appairée au dongle (set_id 0x9044, épreuve 10/10 ACK), tape via le
+  moteur du dongle. Miroir correct (pas de touches inversées).
+- Les deux ensemble : fusionnées par le dongle (« ;lk;lsdfk…uuu »).
+
+Appairage de la droite : `KS_CMD_RF_PAIR_START` envoyé au dongle (CDC, ttyACM0,
+trame `4B 53 B2 01 00 00 00`), la droite a REQ pendant la fenêtre → ACK → NVS →
+reboot appairée. **La fusion complète en RF fonctionne.**
+
+## Reste (raffinements, pas bloquants)
+- **Autonomie gauche** : passer `HALF_LINK_RX` off sous fusion (la gauche écoute
+  encore la droite pour rien). Bascule le chemin d'émission de kbd_relay
+  (excursion → direct) — à éprouver au banc.
+- **Réaffirmation des maintiens** : régler la cadence contre RF_LINK_LOST_MS du
+  dongle (un maintien long ne doit pas être relâché). La tâche de rafraîchissement
+  de half_link (droite) le fait déjà ; vérifier la gauche.
+- **Comptabilité d'appairage du dongle** : la droite déclarant 0x01 écrase le MAC
+  de la gauche sur ce slot (affichage seulement ; l'adresse reste correcte).
+  Modèle 2-slots à affiner si on veut un pair-list exact.
+- Phase 2 (gauche autonome USB) et phase 3 (config répliquée + trackpad).
