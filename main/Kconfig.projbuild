@@ -174,6 +174,7 @@ config KASE_HALF_LINK_TX
 config KASE_HALF_LINK_RX
     bool "Lien inter-moities : ecouter la demi-matrice (moitie gauche)"
     default n
+    depends on !KASE_DONGLE_FUSION
     help
         Brick B3, autre bout. La moitie gauche ecoute en PRX et journalise ce
         qu'elle recoit.
@@ -182,6 +183,15 @@ config KASE_HALF_LINK_RX
         gauche ECOUTE, elle n'emet donc pas vers le dongle. La bascule PRX/PTX
         est l'etape suivante. On prouve d'abord que le lien porte — sinon un
         echec de bascule serait indiscernable d'un lien qui ne marche pas.
+
+        ⚠ INCOMPATIBLE AVEC LA FUSION (depends !KASE_DONGLE_FUSION). En fusion la
+        droite emet au DONGLE, plus a la gauche : la gauche n'a donc rien a
+        ecouter, et l'ecouter gaspille ~13 mA en continu (le nRF24 n'a pas
+        d'ecoute basse conso). La couper est le GAIN D'AUTONOMIE de la
+        rearchitecture — les deux moities deviennent des emetteurs purs vers le
+        dongle. Valide au banc le 2026-09-13 (les deux cotes tapent, aucune
+        n'ecoute). La dependance force donc RX off des que la fusion est active,
+        meme si un sdkconfig.defaults tente de l'allumer.
 
 config KASE_HALF_LINK_R1
     bool "Epreuve R1 : la gauche emet-elle sans devenir sourde ?"
