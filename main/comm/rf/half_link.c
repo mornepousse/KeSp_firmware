@@ -3,6 +3,9 @@
 #include "rf_driver.h"
 #include "rf_packet.h"
 #include "rf_slot.h"
+#if CONFIG_KASE_DONGLE_FUSION
+#include "rf_pairing.h"   /* fusion : la droite s'adresse au slot clavier du dongle */
+#endif
 #include "driver/gpio.h"
 #include "esp_log.h"
 #if CONFIG_KASE_VEILLE
@@ -121,6 +124,27 @@ bool half_link_tx_init(void)
         return false;
     }
     rf_radio_cfg_t cfg = half_link_cfg();
+#if CONFIG_KASE_DONGLE_FUSION
+    /* Fusion : la droite ne parle plus à la gauche mais au SLOT CLAVIER DU DONGLE,
+     * comme la gauche (même adresse, distinction par l'identité de moitié dans
+     * PKT_TYPE_MATRIX). Canal et suffixe du slot clavier, adresse dérivée du
+     * set_id d'appairage.
+     *
+     * ⚠ La droite doit être APPAIRÉE au dongle (set_id en NVS). Elle ne l'a
+     * jamais été — le handshake est la pièce BANC (cf. le plan runtime) : sans
+     * lui, set_id=0 → adresse d'usine, le dongle n'acquitte pas. Le retarget et
+     * le format sont ici ; l'appairage se valide contre des ACK réels. */
+    {
+        uint8_t slot = RF_ADDR_KBD_DONGLE;
+        uint16_t set_id = rf_pairing_load_set_id_half(RF_ADDR_KBD_DONGLE, &slot);
+        cfg.channel     = RF_CH_KBD_DONGLE;
+        cfg.addr_suffix = RF_ADDR_KBD_DONGLE;
+        rf_apply_set_id(&cfg, set_id, slot);
+        ESP_LOGW(TAG, "fusion : TX vers le dongle ch=0x%02X suffixe=0x%02X set_id=0x%04X%s",
+                 cfg.channel, cfg.addr_suffix, set_id,
+                 (set_id == 0 || set_id == 0xFFFF) ? " (NON APPAIRE — pièce banc)" : "");
+    }
+#endif
     esp_err_t e = rf_driver_init_tx(&s_radio, &cfg);
     if (e != ESP_OK || !s_radio.present) {
         ESP_LOGE(TAG, "TX init echouee (%d) — la moitie droite restera muette", (int)e);
@@ -172,6 +196,18 @@ bool half_link_tx_init(void)
 bool half_link_tx_matrix(const uint8_t *bitmap)
 {
     if (!s_radio.present) return false;
+    uint8_t buf[16];
+    uint16_t n;
+#if CONFIG_KASE_DONGLE_FUSION
+    /* Fusion : la droite émet sa demi-matrice BRUTE au dongle, portant son
+     * identité de moitié. Le dongle fusionne les deux et fait tourner le moteur.
+     * Même chemin d'émission (rf_driver_send sous verrou) ; seul le format change. */
+    rf_matrix_t m;
+    m.half = RF_HALF_RIGHT;
+    memcpy(m.bitmap, bitmap, RF_HALF_BITMAP_BYTES);
+    m.seq = s_seq;
+    n = rf_encode_matrix(buf, &m);
+#else
     rf_heartbeat_t h;
     memset(&h, 0, sizeof(h));
     memcpy(h.bitmap, bitmap, RF_HALF_BITMAP_BYTES);
@@ -184,8 +220,8 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
     /* batt_dV et link_q restent a zero : la jauge est la brick B7, et la
      * qualite de lien se calculera quand le compteur de retransmissions aura
      * un sens (il faut un recepteur en face). */
-    uint8_t buf[16];
-    uint16_t n = rf_encode_heartbeat(buf, &h);
+    n = rf_encode_heartbeat(buf, &h);
+#endif
     /* Le verrou couvre TOUTE la transaction, CSN compris. 50 ms : une émission
      * ESB au pire cas (ARC=15, ARD=500 µs) tient en ~13 ms. */
     if (s_tx_radio_mux &&

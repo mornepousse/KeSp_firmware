@@ -58,6 +58,7 @@
 /* Suffixes d'adresse, 5e octet après la base "KaSe". 0x01 clavier et 0x02
  * souris sont ceux des slots du dongle (voir plus haut) ; 0x03 désigne le lien
  * inter-moitiés, qui ne passe pas par le dongle. */
+#define RF_ADDR_KBD_DONGLE  0x01   /* slot clavier du dongle (les DEUX moitiés en fusion) */
 #define RF_ADDR_HALF_LINK   0x03
 
 /* ── Supervision du lien clavier → dongle ───────────────────────────────────

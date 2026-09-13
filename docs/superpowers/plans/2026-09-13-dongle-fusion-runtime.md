@@ -56,12 +56,19 @@ et passe par `kbd_tx_locked()` (le chemin d'excursion/direct déjà éprouvé).
   par son `kbd_tx_locked`). RESTE AU BANC : `HALF_LINK_RX` off (cesser d'écouter
   la droite — gain d'autonomie), la réaffirmation périodique des maintiens (contre
   le timeout du dongle), et le routage USB-gauche (phase 2).
-- **B1** `niphar_right` sous fusion — **pièce banc** : doit émettre
-  `rf_matrix(RF_HALF_RIGHT)` au slot clavier du dongle. Nouveauté RF : la droite
-  n'a AUCUNE relation d'appairage avec le dongle aujourd'hui (elle émet en dur
-  vers la gauche, KaSe.03). Lui en créer une (canal/adresse dérivés du set_id,
-  handshake, ACK réels) est la zone à échec silencieux — à écrire au banc.
-- **B3** build tous boards + fusion vert (gauche+dongle faits ; droite au banc).
+- **B1** `niphar_right` sous fusion ✅ **compile-only fait** : `half_link_tx`
+  retargeté vers le SLOT CLAVIER DU DONGLE (canal RF_CH_KBD_DONGLE, suffixe
+  RF_ADDR_KBD_DONGLE, adresse dérivée du set_id d'appairage NVS), et le payload
+  passe en `rf_matrix(RF_HALF_RIGHT)`. La tâche de rafraîchissement existante
+  donne gratuitement la réaffirmation des maintiens. Vérifié au lien
+  (niphar_right+fusion) : `rf_encode_matrix` lié, `rf_encode_heartbeat` éliminé.
+  RESTE AU BANC : **le handshake d'appairage droite↔dongle**. La droite n'a
+  jamais été appairée au dongle ; sans set_id en NVS l'adresse reste d'usine et
+  le dongle n'acquitte pas. Le handshake (REQ/ACK sur le rendez-vous, comme
+  kbd_pairing_task) se valide contre des ACK réels — c'est LA seule pièce
+  runtime restante de la topologie B.
+- **B3** build tous boards + fusion vert : dongle ✅, gauche ✅, droite ✅
+  (les trois compilent et lient en fusion).
 
 ⚠ **B inverse la propriété de la radio sur chaque moitié** (HALF_LINK_RX/TX
 basculent, la droite s'appaire au dongle). C'est la zone que CLAUDE.md signale
