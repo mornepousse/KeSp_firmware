@@ -48,13 +48,20 @@ Collisions ESB rares au débit clavier, acceptées. (vs. un 2e pipe dédié, éc
 **Primitif commun** : `kbd_relay_send_matrix(half, bitmap)` → encode PKT_TYPE_MATRIX
 et passe par `kbd_tx_locked()` (le chemin d'excursion/direct déjà éprouvé).
 
-- **B1** `niphar_right` sous fusion : émet `rf_matrix(RF_HALF_RIGHT)` vers le slot
-  clavier du dongle (au lieu du heartbeat vers la gauche). Gagne `kbd_relay` +
-  appairage au dongle ; `HALF_LINK_TX` **off**.
-- **B2** `niphar_left` sous fusion (sans fil) : émet `rf_matrix(RF_HALF_LEFT)` au
-  dongle au lieu de fusionner + HID fini ; `HALF_LINK_RX` **off** (elle n'écoute
-  plus la droite — c'est le gain d'autonomie). (Le routage USB-gauche est phase 2.)
-- **B3** build tous boards + fusion vert.
+- **B2** `niphar_left` sous fusion ✅ **compile-only fait** : émet
+  `rf_matrix(RF_HALF_LEFT)` au dongle sur changement (bloc fusion dans
+  matrix_scan.c) et ne relaie PLUS le HID fini (les sites kbd_relay_send_kbd de
+  hid_report.c gardés `!FUSION`). Vérifié au lien : `kbd_relay_send_matrix` lié,
+  `kbd_relay_send_kbd` éliminé. `kbd_relay` reste initialisé (send_matrix passe
+  par son `kbd_tx_locked`). RESTE AU BANC : `HALF_LINK_RX` off (cesser d'écouter
+  la droite — gain d'autonomie), la réaffirmation périodique des maintiens (contre
+  le timeout du dongle), et le routage USB-gauche (phase 2).
+- **B1** `niphar_right` sous fusion — **pièce banc** : doit émettre
+  `rf_matrix(RF_HALF_RIGHT)` au slot clavier du dongle. Nouveauté RF : la droite
+  n'a AUCUNE relation d'appairage avec le dongle aujourd'hui (elle émet en dur
+  vers la gauche, KaSe.03). Lui en créer une (canal/adresse dérivés du set_id,
+  handshake, ACK réels) est la zone à échec silencieux — à écrire au banc.
+- **B3** build tous boards + fusion vert (gauche+dongle faits ; droite au banc).
 
 ⚠ **B inverse la propriété de la radio sur chaque moitié** (HALF_LINK_RX/TX
 basculent, la droite s'appaire au dongle). C'est la zone que CLAUDE.md signale

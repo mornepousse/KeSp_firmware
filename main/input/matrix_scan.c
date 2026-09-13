@@ -9,6 +9,12 @@
 #include "half_link.h"
 #include "rf_packet.h"
 #endif
+#if CONFIG_KASE_DONGLE_FUSION
+#include "rf_packet.h"          /* rf_matrix_to_bitmap, RF_HALF_LEFT */
+#if CONFIG_KASE_KBD_WIRELESS
+#include "kbd_relay_tx.h"       /* kbd_relay_send_matrix (côté gauche) */
+#endif
+#endif
 #include <esp_log.h>
 #include <stdint.h>
 #include <string.h>
@@ -151,6 +157,26 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
             uint8_t bm[RF_HALF_BITMAP_BYTES];
             rf_matrix_to_bitmap(&new_state[0][0], MATRIX_ROWS, MATRIX_COLS, bm);
             half_link_tx_update(bm, true);
+        }
+    }
+#endif
+
+#if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
+    /* Fusion, côté GAUCHE : cette moitié ne fait plus tourner le moteur ni
+     * n'envoie de HID fini (le dongle s'en charge) — elle émet sa demi-matrice
+     * BRUTE au dongle, sur changement, comme la droite le fait vers le dongle.
+     * KBD_WIRELESS identifie la gauche (la droite est NIPHAR_SLAVE et gagnera son
+     * propre chemin au banc). Le miroir n'est PAS appliqué ici : chaque moitié
+     * émet ses coordonnées physiques, le dongle range (half_col_to_keymap). */
+    {
+        bool change = false;
+        for (int r = 0; r < MATRIX_ROWS && !change; r++)
+            for (int c = 0; c < MATRIX_COLS; c++)
+                if (new_state[r][c] != prev_matrix_state[r][c]) { change = true; break; }
+        if (change) {
+            uint8_t bm[RF_HALF_BITMAP_BYTES];
+            rf_matrix_to_bitmap(&new_state[0][0], MATRIX_ROWS, MATRIX_COLS, bm);
+            kbd_relay_send_matrix(RF_HALF_LEFT, bm);
         }
     }
 #endif

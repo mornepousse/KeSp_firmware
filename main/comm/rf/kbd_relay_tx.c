@@ -383,3 +383,26 @@ void kbd_relay_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
     rf_encode_hidreport_mouse(buf, buttons, x, y, wheel);
     kbd_tx_locked(buf, 6);   /* relative — never refreshed */
 }
+
+#if CONFIG_KASE_DONGLE_FUSION
+/* Fusion : la moitié n'envoie plus de HID fini, elle émet sa demi-matrice BRUTE
+ * au dongle, qui fusionne les deux moitiés et fait tourner le moteur. Même
+ * chemin d'émission que send_kbd (kbd_tx_locked : excursion ou direct).
+ *
+ * ⚠ Réaffirmation des maintiens : comme partout dans cette chaîne, « émettre sur
+ * changement » ne compose pas avec « relâcher sur silence » (cf. CLAUDE.md et
+ * half_link). Le dongle relâche une moitié muette après HALF_LINK_TIMEOUT_MS, donc
+ * un maintien doit être ré-émis périodiquement. La cadence de rafraîchissement de
+ * la matrice est une pièce du BANC (elle se règle contre le timeout réel du
+ * dongle) — voir docs/superpowers/plans/2026-09-13-dongle-fusion-runtime.md. */
+void kbd_relay_send_matrix(uint8_t half, const uint8_t *bitmap)
+{
+    rf_matrix_t m;
+    m.half = half;
+    memcpy(m.bitmap, bitmap, RF_HALF_BITMAP_BYTES);
+    m.seq = s_status_seq++;   /* réutilise le compteur de séquence du relais */
+    uint8_t buf[8];
+    uint16_t n = rf_encode_matrix(buf, &m);
+    if (n) kbd_tx_locked(buf, (uint8_t)n);
+}
+#endif

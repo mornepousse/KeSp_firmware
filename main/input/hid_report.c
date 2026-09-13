@@ -111,7 +111,7 @@ static void hid_sender_task(void *pvParameters)
             break;
         }
 
-#if CONFIG_KASE_KBD_WIRELESS
+#if CONFIG_KASE_KBD_WIRELESS && !CONFIG_KASE_DONGLE_FUSION
         if (kbd_active_route() == KBD_OUT_RF) {
             kbd_relay_send_kbd(kb_mod, kb_buf);
             if (m_buttons || m_x || m_y || m_wheel)
@@ -187,7 +187,7 @@ void send_hid_key(void)
         return;
     }
 
-#if CONFIG_KASE_KBD_WIRELESS
+#if CONFIG_KASE_KBD_WIRELESS && !CONFIG_KASE_DONGLE_FUSION
     if (kbd_active_route() == KBD_OUT_RF) {
         kbd_relay_send_kbd(modifier, keycodes);
         hid_dedup_commit(&dedup, keycodes, modifier, now_ms);
@@ -235,7 +235,7 @@ void send_hid_kb_mouse(uint8_t modifier, const uint8_t kc[6],
                 ESP_LOGW(TAG, "KB+Mouse report dropped (queue full)");
         }
     } else {
-#if CONFIG_KASE_KBD_WIRELESS
+#if CONFIG_KASE_KBD_WIRELESS && !CONFIG_KASE_DONGLE_FUSION
         if (kbd_active_route() == KBD_OUT_RF) {
             kbd_relay_send_kbd(modifier, msg.payload.kb_mouse.keycodes);
             if (buttons || x || y || wheel)

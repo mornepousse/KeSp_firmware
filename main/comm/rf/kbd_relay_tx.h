@@ -64,6 +64,12 @@ void kbd_relay_send_kbd(uint8_t modifier, const uint8_t kb[6]);
 /* Encode + transmit a mouse HID report (PKT_TYPE_HIDREPORT / RF_HID_SUB_MOUSE). */
 void kbd_relay_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel);
 
+/* Fusion (KASE_DONGLE_FUSION) : émettre la demi-matrice BRUTE au dongle
+ * (PKT_TYPE_MATRIX), au lieu du HID fini. `half` = RF_HALF_LEFT/RIGHT ;
+ * `bitmap` = RF_HALF_BITMAP_BYTES octets. Passe par le même chemin d'émission
+ * que kbd_relay_send_kbd (excursion si la radio écoute, sinon direct). */
+void kbd_relay_send_matrix(uint8_t half, const uint8_t *bitmap);
+
 /* Light-sleep hooks: stop the refresh timer + power the NRF down (holding the TX
  * mutex) before sleep; power up + restart the timer on wake. */
 void kbd_relay_sleep_prepare(void);
