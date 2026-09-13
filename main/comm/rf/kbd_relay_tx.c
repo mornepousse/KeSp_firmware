@@ -133,6 +133,8 @@ static keymap_rx_t   s_krx;
 static bool          s_syncing;
 static uint32_t      s_sync_target_fp;
 static volatile bool s_sync_done;   /* 40/40 reçus : à enregistrer (refresh_cb) */
+/* Émission brute d'une demi-matrice SANS armer la réémission — voir plus bas. */
+static void send_matrix_frame(uint8_t half, const uint8_t *bitmap);
 #endif
 
 static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
@@ -361,9 +363,16 @@ static void kbd_relay_refresh_cb(void *arg)
      * ci-dessus reste appelé à chaque tick — c'est lui qui garde le routage
      * frais, il ne doit pas dépendre de l'activité clavier. */
     if (kbd_refresh_step(&s_refresh)) {
+#if CONFIG_KASE_DONGLE_FUSION
+        /* Fusion : ce qui se répète, c'est le DERNIER BITMAP — même vide, un
+         * relâchement perdu se répare ainsi aussi, sans violer « muet au repos »
+         * puisque c'est borné. Jamais un rapport HID ici. */
+        send_matrix_frame(RF_HALF_LEFT, s_last_left_bm);
+#else
         uint8_t buf[9];
         rf_encode_hidreport_kbd(buf, s_last_mod, s_last_kb);
         kbd_tx_locked(buf, 9);
+#endif
         return;
     }
 
@@ -630,7 +639,7 @@ void kbd_relay_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
  * un maintien doit être ré-émis périodiquement. La cadence de rafraîchissement de
  * la matrice est une pièce du BANC (elle se règle contre le timeout réel du
  * dongle) — voir docs/superpowers/plans/2026-09-13-dongle-fusion-runtime.md. */
-void kbd_relay_send_matrix(uint8_t half, const uint8_t *bitmap)
+static void send_matrix_frame(uint8_t half, const uint8_t *bitmap)
 {
     rf_matrix_t m;
     m.half = half;
@@ -638,9 +647,30 @@ void kbd_relay_send_matrix(uint8_t half, const uint8_t *bitmap)
     m.seq = __atomic_fetch_add(&s_status_seq, 1, __ATOMIC_RELAXED);   /* réutilise le compteur de séquence du relais */
     uint8_t buf[8];
     uint16_t n = rf_encode_matrix(buf, &m);
+    uint32_t refus_avant = s_tx_refuses;
     if (n) kbd_tx_locked(buf, (uint8_t)n);
+    /* Diagnostic permanent (rare, ~1 % au banc) : QUELLE trame l'ESB a refusée
+     * après ses 15 retransmissions. C'est cette trame-là que la réémission
+     * bornée ci-dessous répète — sans elle, un appui bref était perdu. */
+    if (s_tx_refuses != refus_avant)
+        ESP_LOGW(TAG, "MATRIX refusee bm=%02X%02X%02X%02X — repetee par la reemission bornee",
+                 bitmap[0], bitmap[1], bitmap[2], bitmap[3]);
     /* Mémorise l'état local pour la réaffirmation des maintiens (refresh_cb). */
     memcpy(s_last_left_bm, bitmap, RF_HALF_BITMAP_BYTES);
     s_last_left_ms = (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+void kbd_relay_send_matrix(uint8_t half, const uint8_t *bitmap)
+{
+    send_matrix_frame(half, bitmap);
+    /* Réémission BORNÉE armée au changement — KBD_RELAY_REPEATS × 10 ms, puis
+     * silence. Une trame de CHANGEMENT refusée par l'ESB n'avait qu'une seule
+     * chance : la réaffirmation à 100 ms ne couvre que les maintiens, donc un
+     * appui bref perdu n'était jamais réparé (Super tenu + Q : Q jamais arrivé
+     * à l'hôte, une trame refusée sur le créneau — banc 2026-09-13). Même
+     * mécanisme que le chemin HID pré-fusion (test_repos_ne_reemet_pas) ; le
+     * dongle déduplique par contenu, les répétitions sont gratuites pour lui.
+     * Les répétitions passent par send_matrix_frame : elles ne se réarment pas. */
+    kbd_refresh_arm(&s_refresh, KBD_RELAY_REPEATS);
 }
 #endif

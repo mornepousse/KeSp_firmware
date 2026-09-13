@@ -13,7 +13,11 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
 
 - [test:test_repos_ne_reemet_pas] Au repos, le rapport HID n'est pas réémis.
   La réémission est bornée (100 paquets/s), s'arme au changement et se tait
-  ensuite. Sans ça, la spirale de réémission saturait le lien.
+  ensuite. Sans ça, la spirale de réémission saturait le lien. En fusion, la
+  même réémission bornée est armée à chaque changement de MATRICE de la gauche
+  (dernier bitmap, même vide) : une trame de changement refusée par l'ESB
+  (~1 %) est répétée 5 × à 10 ms puis silence — un appui bref n'a plus une
+  seule chance de passer (Super+Q avalé, banc 2026-09-13).
 - [test:test_rf_status_cadence] Le status RF respecte sa période : rien avant,
   une émission à la période. Trois maillons perdaient des frappes pour la même
   raison — une cadence qui n'attendait pas.
