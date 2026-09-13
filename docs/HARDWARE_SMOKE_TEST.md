@@ -52,6 +52,10 @@ dans la PR/release.
       empreinte ; ensuite plus aucun ACK payload au repos (balise coupée)
 
 ## Half (left / right)
+- [ ] Première touche après veille : laisser la moitié s'endormir (60 s sans
+      toucher), taper UNE touche brève → le caractère sort (pas avalé) et rien
+      ne reste collé ; console : « reveil : 1 touche(s) capturee(s) ». À faire
+      sur la gauche ET la droite, en sans-fil (fusion)
 - [ ] e-ink affiche le splash 'PAIRED' au pairing
 - [ ] Dashboard e-ink : L/R/USB + batterie, sans corruption
 - [ ] Trackpad (si présent) : curseur, clic G/D/M, scroll

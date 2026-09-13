@@ -28,8 +28,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   10 ms qui suivent. Candidat n°1 pour un test hôte avec `host_clock`.
 - [NON GARDÉ] Au réveil, la réception RF est réarmée (`rf_driver_power_up` ne
   touche pas à CE). Sinon la gauche repart alimentée mais sourde.
-- [NON GARDÉ] La touche qui réveille la carte est capturée, émise et
-  réconciliée — jamais perdue.
+- [smoke:Première touche après veille] La touche qui réveille la carte est
+  capturée, émise et réconciliée — jamais perdue. Sous fusion, la gauche
+  émet l'appui capturé au réveil (matrix_wake_capture) et son relâchement à la
+  réconciliation, avec l'émetteur du callback : le scanner recréé ne voit pas de
+  changement, lui seul ne l'aurait jamais émis (première touche avalée, banc
+  2026-09-13).
 - [smoke:Une nuit sur batterie] La moitié droite tient une nuit sur batterie,
   moins de 0,2 V perdus.
 

@@ -553,6 +553,22 @@ void matrix_wake_capture(void)
         half_link_tx_update(bm, true);
     }
 #endif
+#if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
+    /* Fusion, côté GAUCHE : le même trou que la droite comble juste au-dessus.
+     * Le seul émetteur brut de la gauche est le callback sur CHANGEMENT — or la
+     * capture pose prev_matrix_state = st, donc le scanner recréé voit la touche
+     * tenue SANS changement et n'émet rien ; seul le relâchement partait. La
+     * première touche après le light sleep était avalée (banc 2026-09-13 ; la
+     * séquence de veille.c émettait sous HALF_LINK_RX, le chemin pré-fusion,
+     * compilé out ici). On émet donc l'appui capturé tout de suite, hors USB
+     * (règle 3), avec le même émetteur que le callback — la réaffirmation à
+     * 100 ms prend ensuite le relais tant que la touche est tenue. */
+    if (fusion_left_emits_raw(kbd_active_route() == KBD_OUT_USB)) {
+        uint8_t bm[RF_HALF_BITMAP_BYTES];
+        rf_matrix_to_bitmap(&st[0][0], MATRIX_ROWS, MATRIX_COLS, bm);
+        kbd_relay_send_matrix(RF_HALF_LEFT, bm);
+    }
+#endif
     if (filled) {
         matrix_flag_signal(&stat_matrix_changed);
         if (keyboard_task_handle != NULL) xTaskNotifyGive(keyboard_task_handle);
@@ -607,6 +623,16 @@ bool matrix_wake_reconcile(void)
         uint8_t bm[RF_HALF_BITMAP_BYTES];
         memset(bm, 0, sizeof(bm));
         half_link_tx_update(bm, true);
+    }
+#endif
+#if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
+    /* Fusion, gauche : la touche de réveil a été émise à la capture ; relâchée
+     * avant le premier balayage, le callback ne le dira jamais — on émet le
+     * relâchement, sinon elle reste collée au dongle. */
+    if (fusion_left_emits_raw(kbd_active_route() == KBD_OUT_USB)) {
+        uint8_t bm[RF_HALF_BITMAP_BYTES];
+        memset(bm, 0, sizeof(bm));
+        kbd_relay_send_matrix(RF_HALF_LEFT, bm);
     }
 #endif
     matrix_flag_signal(&stat_matrix_changed);
