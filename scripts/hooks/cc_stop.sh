@@ -10,6 +10,7 @@ command -v python3 >/dev/null 2>&1 || { echo "tripwire: python3 absent, hook Sto
 # Anti-boucle : si on est déjà dans une continuation de Stop hook, ne pas re-bloquer.
 IN="$(cat 2>/dev/null || true)"
 printf '%s' "$IN" | python3 -c 'import sys,json; sys.exit(0 if json.load(sys.stdin).get("stop_hook_active") else 1)' 2>/dev/null && exit 0
+export TRIPWIRE_CONTRAT_STRICT=1   # la question du contrat doit avoir une reponse avant de conclure
 OUT="$("$REPO/scripts/check.sh" --fast 2>&1)"
 rc=$?
 if [ "$rc" -ne 0 ]; then

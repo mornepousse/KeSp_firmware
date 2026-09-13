@@ -40,5 +40,13 @@ case "$FP" in
         "tripwire: $((NOLD-NNEW)) assertion(s) en moins dans $REL vs HEAD — refactor légitime ou affaiblissement ? Rétablir ou justifier."
     fi
     ;;
+  *)
+    # La question forcée. Elle remplace l'avis TDD de check.sh, qui n'arrivait
+    # jamais jusqu'ici : le hook ne relaie la sortie du check que sur rouge.
+    if [ -f "$REPO/COMPORTEMENTS.md" ]; then
+      python3 -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":sys.argv[1]}}, ensure_ascii=False))' \
+        "tripwire: source modifiée — quel comportement de COMPORTEMENTS.md ce changement touche-t-il, et quel test le garde ? Si aucun : l'ajouter au contrat (gardé, ou [NON GARDÉ] assumé) avant de conclure. Le Stop bloquera sinon."
+    fi
+    ;;
 esac
 exit 0

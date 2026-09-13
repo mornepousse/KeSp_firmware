@@ -381,6 +381,15 @@ skip-si-déjà-vert, donc sa perte peut passer sous un « déjà vert — skip �
 re-scaffold l'effacera — toute divergence délibérée se déclare au moment où on
 l'introduit.
 
+**Contrat de comportements** : `COMPORTEMENTS.md` (committé) liste ce que le
+firmware doit faire, chaque comportement tagué par ce qui le garde — `[test:X]`,
+`[smoke:X]` (item de `docs/HARDWARE_SMOKE_TEST.md`, vérifié à la main avant
+chaque release), ou `[NON GARDÉ]` (compté dans `.tripwire-nongardes`, ratchet
+strict au push). **Le lire avant de toucher une source.** Une source modifiée
+sans test ni contrat touché est une question sans réponse : le hook par
+édition la pose, le Stop bloque. Y répondre = un test, ou une ligne au contrat.
+Un `[NON GARDÉ]` est une réponse honnête, pas une échappatoire gratuite.
+
 **Jamais** builder deux boards dans le même `build/` avec le `sdkconfig` racine
 (fuite de config). Toujours `-B build_<board> -DSDKCONFIG=build_<board>/sdkconfig`.
 

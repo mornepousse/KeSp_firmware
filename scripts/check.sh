@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tripwire-template: v0.13.0
+# tripwire-template: v0.14.0
 # Tripwire anti-régression KaSe — source unique de vérité du "quoi vérifier".
 # Généré par /tripwire:init. Adapter ICI ; les hooks ne font qu'appeler ce script.
 # Modes:
@@ -44,6 +44,9 @@ TEST_COUNT_CMD="grep -rho 'TEST_ASSERT' test/ | wc -l"
 # Avis TDD (optionnel) : formes grep -E des chemins source et test. Vides -> inerte.
 SRC_GREP="^main/|^boards/"
 TEST_GREP="^test/"
+# Contrat de comportements : document du smoke test materiel, ou doivent
+# apparaitre les gardes [smoke:X] de COMPORTEMENTS.md.
+SMOKE_DOC="docs/HARDWARE_SMOKE_TEST.md"
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YEL=$'\033[1;33m'; NC=$'\033[0m'
 fail() { echo "${RED}✗ $*${NC}" >&2; }
@@ -108,6 +111,7 @@ fingerprint() {
 }
 KEY="$MODE${SINGLE_VARIANT:+-$SINGLE_VARIANT}$SCOPE_KEY"
 [ "${TRIPWIRE_RATCHET_STRICT:-0}" = "1" ] && KEY="$KEY-strict"   # un run strict ne skippe que contre un vert strict
+[ "${TRIPWIRE_CONTRAT_STRICT:-0}" = "1" ] && KEY="$KEY-contrat"  # idem pour la question du contrat (Stop, pre-push)
 STAMP="$GITDIR/tripwire/green-$KEY"
 FP="$(fingerprint)"
 if [ "$FORCE" != "1" ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP" 2>/dev/null)" = "$FP" ]; then
@@ -135,8 +139,7 @@ check_divergences() {
   # `IFS=$'	' read` fusionnerait les tabs consécutives et décalerait les champs.
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
-    line="${line%$'
-'}"                                     # fiche en CRLF
+    line="${line%$'\r'}"                                     # fiche en CRLF
     case "$line" in ''|'#'*) continue ;; esac
     f="${line%%$'	'*}"
     rest="${line#*$'	'}"; [ "$rest" = "$line" ] && rest=""  # aucune tabulation
@@ -161,6 +164,64 @@ check_divergences() {
       rc=1
     fi
   done < .tripwire-divergences
+  return "$rc"
+}
+
+# ---- Contrat de comportements : une garde ne disparaît pas en silence ----
+# COMPORTEMENTS.md (committé) : puces taguées [test:X] (X doit apparaître dans un
+# fichier de test), [smoke:X] (X doit apparaître dans SMOKE_DOC) ou [NON GARDÉ]
+# (l'aveu, compté et ratcheté dans .tripwire-nongardes comme le ratchet de
+# tests). Toute autre ligne est de la prose. Absent -> inerte.
+check_comportements() {
+  [ -f COMPORTEMENTS.md ] || return 0
+  local rc=0 n=0 ng=0 line tag arg testfiles
+  testfiles="$( { git ls-files; git ls-files -o --exclude-standard; } 2>/dev/null | grep -E "${TEST_GREP:-^\$}" | sort -u )"
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1)); line="${line%$'\r'}"
+    case "$line" in *'- ['*']'*) ;; *) continue ;; esac
+    tag="${line#*- [}"; tag="${tag%%]*}"
+    case "$tag" in
+      'NON GARDÉ') ng=$((ng + 1)) ;;
+      test:*)
+        arg="${tag#test:}"
+        if [ -z "$TEST_GREP" ]; then
+          fail "comportement ligne $n : garde [test:$arg] invérifiable — TEST_GREP est vide dans check.sh"; rc=1
+        elif ! printf '%s\n' "$testfiles" | xargs -d '\n' grep -qF -- "$arg" 2>/dev/null; then
+          fail "comportement ligne $n a perdu sa garde : « $arg » n'apparaît dans aucun fichier de test"
+          echo "  → rétablir le test, ou passer la ligne en [NON GARDÉ] si l'aveu est assumé (il est compté)." >&2
+          rc=1
+        fi ;;
+      smoke:*)
+        arg="${tag#smoke:}"
+        if [ -z "$SMOKE_DOC" ] || [ ! -f "$SMOKE_DOC" ]; then
+          fail "comportement ligne $n : garde [smoke:$arg] invérifiable — SMOKE_DOC ${SMOKE_DOC:+introuvable ($SMOKE_DOC)}${SMOKE_DOC:-non défini dans check.sh}"; rc=1
+        elif ! grep -qF -- "$arg" "$SMOKE_DOC"; then
+          fail "comportement ligne $n a perdu sa garde : « $arg » n'apparaît pas dans $SMOKE_DOC"
+          echo "  → l'ajouter au smoke test, ou passer la ligne en [NON GARDÉ] si l'aveu est assumé (il est compté)." >&2
+          rc=1
+        fi ;;
+      NON*|*:*)
+        fail "comportement ligne $n : tag inconnu [$tag] — attendu [test:X], [smoke:X] ou [NON GARDÉ]"; rc=1 ;;
+      *) ;;   # lien markdown ou prose entre crochets : pas un tag
+    esac
+  done < COMPORTEMENTS.md
+  # Ratchet des NON GARDÉ : même mécanique que .tripwire-testcount.
+  local REF; REF="$(cat .tripwire-nongardes 2>/dev/null | tr -d '[:space:]')"
+  case "$REF" in ''|*[!0-9]*) REF="" ;; esac
+  if [ -z "$REF" ]; then
+    printf '%s\n' "$ng" > .tripwire-nongardes 2>/dev/null \
+      && info "contrat: $ng comportement(s) NON GARDÉ — référence initialisée (.tripwire-nongardes, à committer)"
+  elif [ "$ng" -lt "$REF" ]; then
+    printf '%s\n' "$ng" > .tripwire-nongardes 2>/dev/null \
+      && info "contrat: NON GARDÉ $REF -> $ng (.tripwire-nongardes mis à jour — à committer)"
+  elif [ "$ng" -gt "$REF" ]; then
+    if [ "${TRIPWIRE_RATCHET_STRICT:-0}" = "1" ]; then
+      fail "contrat: $ng comportements NON GARDÉ, référence $REF — le non-gardé a augmenté (assumé ? monter .tripwire-nongardes dans un commit)"
+      rc=1
+    else
+      info "⚠ contrat: $ng comportements NON GARDÉ vs $REF — un de plus sans garde"
+    fi
+  fi
   return "$rc"
 }
 
@@ -209,6 +270,7 @@ build_variant() {
 
 rc=0
 check_divergences || rc=1
+check_comportements || rc=1
 run_fast || rc=1
 
 if [ "$MODE" = "single" ]; then
@@ -247,6 +309,26 @@ if [ -n "$TEST_COUNT_CMD" ]; then
   fi
 fi
 
+# ---- Source modifiée sans test : avis TDD, ou question forcée du contrat ----
+# Sans COMPORTEMENTS.md : avis, jamais bloquant. Avec : la question doit avoir
+# une réponse — un test, ou une ligne au contrat (gardée ou [NON GARDÉ]). Sans
+# réponse, avis en mode normal, rouge si TRIPWIRE_CONTRAT_STRICT=1 (Stop, pre-push).
+if [ -n "$SRC_GREP" ] && [ -n "$TEST_GREP" ]; then
+  CH="$( { git diff --name-only HEAD; git ls-files -o --exclude-standard; } 2>/dev/null | sort -u)"
+  if [ -n "$CH" ]; then
+    NSRC="$(printf '%s\n' "$CH" | grep -cE "$SRC_GREP" || true)"
+    NTST="$(printf '%s\n' "$CH" | grep -cE "$TEST_GREP" || true)"
+    if [ "$NSRC" -gt 0 ] 2>/dev/null && [ "$NTST" -eq 0 ] 2>/dev/null; then
+      if [ -f COMPORTEMENTS.md ] && ! printf '%s\n' "$CH" | grep -qx 'COMPORTEMENTS.md'; then
+        MSG="contrat: $NSRC source(s) modifiée(s), ni test ni COMPORTEMENTS.md touché — quel comportement ce changement touche-t-il, et quel test le garde ? L'ajouter au contrat (gardé, ou [NON GARDÉ] assumé) avant de conclure."
+        if [ "${TRIPWIRE_CONTRAT_STRICT:-0}" = "1" ]; then fail "$MSG"; rc=1; else info "⚠ $MSG"; fi
+      elif [ ! -f COMPORTEMENTS.md ]; then
+        info "⚠ TDD: $NSRC fichier(s) source modifié(s) sans test modifié — test d'abord ?"
+      fi
+    fi
+  fi
+fi
+
 echo "========================================"
 if [ "$rc" -eq 0 ]; then
   printf '%s\n' "$FP" > "$STAMP" 2>/dev/null || true
@@ -262,18 +344,6 @@ fi
     { tail -500 "$HIST" > "$HIST.$$" && mv "$HIST.$$" "$HIST"; } || rm -f "$HIST.$$"
   fi
 } 2>/dev/null || true
-
-# Avis TDD : du source modifié sans test modifié ? (informatif, jamais bloquant)
-if [ -n "$SRC_GREP" ] && [ -n "$TEST_GREP" ]; then
-  CH="$(git diff --name-only HEAD 2>/dev/null)"
-  if [ -n "$CH" ]; then
-    NSRC="$(printf '%s\n' "$CH" | grep -cE "$SRC_GREP" || true)"
-    NTST="$(printf '%s\n' "$CH" | grep -cE "$TEST_GREP" || true)"
-    if [ "$NSRC" -gt 0 ] 2>/dev/null && [ "$NTST" -eq 0 ] 2>/dev/null; then
-      info "⚠ TDD: $NSRC fichier(s) source modifié(s) sans test modifié — test d'abord ?"
-    fi
-  fi
-fi
 
 echo "========================================"
 exit "$rc"

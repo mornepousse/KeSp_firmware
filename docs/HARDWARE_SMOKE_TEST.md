@@ -36,6 +36,7 @@ dans la PR/release.
 ## Dongle
 - [ ] Lien RF s'établit avec une half (pairing < 120s)
 - [ ] NRF ne se wedge pas après 5 min (watchdog OK)
+- [ ] Une nuit sur batterie : la moitié droite tient, moins de 0,2 V perdus
 - [ ] set_id survit à un erase_flash
 
 ## Half (left / right)
