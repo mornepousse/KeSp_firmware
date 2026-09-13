@@ -212,6 +212,57 @@ static inline bool half_tx_doit_emettre(bool change, bool tenu,
     return (uint32_t)(now_ms - dernier_ms) >= periode_ms;
 }
 
+/* ── Cible d'émission de la droite : dongle ↔ gauche directe (fusion) ────────
+ *
+ * En fusion, la droite parle au SLOT CLAVIER DU DONGLE (KaSe.01), qui fait
+ * tourner le moteur. Mais si l'utilisateur DÉBRANCHE le dongle et tape sur la
+ * gauche en USB, la droite n'a plus personne : ses trames au dongle ne sont plus
+ * acquittées, et la gauche-USB — qui écoute pourtant déjà KaSe.03 pour la
+ * réémission du dongle — n'entend plus rien. Repli : sur N envois consécutifs
+ * SANS ACK, la droite RÉARME sa puce et BASCULE vers l'autre auditeur. La
+ * gauche-USB écoute déjà KaSe.03 ; la droite y émet alors le HEARTBEAT
+ * pré-fusion que kbd_relay décode (le MATRIX de fusion, lui, n'est décodé que
+ * par le dongle). Si le dongle revient — ou si l'USB gauche part et la gauche
+ * cesse d'écouter — la cible courante cesse d'acquitter et on rebascule :
+ * auto-cicatrisant, jamais deux cibles à la fois, donc jamais de double frappe.
+ *
+ * ⚠ Muet au repos : la droite n'émet que sur changement/maintien (cf.
+ * half_tx_doit_emettre), donc le compteur n'avance QUE quand il y a quelque
+ * chose à router. La bascule réarme aussi une puce figée (clone nRF24) en
+ * réécrivant la config PTX — elle subsume l'ancien chien de garde « réarmer sur
+ * place ».
+ *
+ * Testée host dans test/test_half_tx_target.c. */
+typedef enum {
+    HALF_TX_TO_DONGLE = 0,   /* MATRIX vers KaSe.01 — le dongle fusionne et tape */
+    HALF_TX_TO_LEFT   = 1,   /* HEARTBEAT vers KaSe.03 — la gauche-USB tape */
+} half_tx_target_t;
+
+typedef struct {
+    half_tx_target_t cible;    /* auditeur courant */
+    uint16_t         sans_ack; /* envois consécutifs non acquittés */
+} half_tx_fsm_t;
+
+/* 8 envois : chacun retransmis jusqu'à 15 fois en matériel (ESB), donc ~120
+ * tentatives HW perdues avant de conclure « cet auditeur a disparu » — assez
+ * confiant pour ne pas basculer sur un glitch, assez court pour que la bascule
+ * se sente en <1 s sur un maintien (rafraîchi ~10/s). */
+#define HALF_TX_SWITCH_FAILS 8u
+
+/* Un envoi vient d'avoir lieu (ack = acquitté). Met à jour l'état et renvoie
+ * true s'il faut RÉARMER la puce PTX sur la (nouvelle) cible `s->cible`. */
+static inline bool half_tx_target_step(half_tx_fsm_t *s, bool ack, uint16_t seuil)
+{
+    if (ack) { s->sans_ack = 0; return false; }
+    if (++s->sans_ack >= seuil) {
+        s->sans_ack = 0;
+        s->cible = (s->cible == HALF_TX_TO_DONGLE) ? HALF_TX_TO_LEFT
+                                                   : HALF_TX_TO_DONGLE;
+        return true;
+    }
+    return false;
+}
+
 /* Émetteur — moitié droite. Initialise la radio en PTX sur le canal du lien.
  * Retourne false si la radio ne répond pas. */
 bool half_link_tx_init(void);

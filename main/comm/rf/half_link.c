@@ -95,6 +95,15 @@ static portMUX_TYPE s_etat_mux = portMUX_INITIALIZER_UNLOCKED;
 static SemaphoreHandle_t s_tx_radio_mux;
 /* Config TX vivante, pour le chien de garde radio (réarmer une puce figée). */
 static rf_radio_cfg_t s_tx_cfg;
+#if CONFIG_KASE_DONGLE_FUSION
+/* Repli sans dongle : deux cibles d'émission. La droite vise le dongle par
+ * défaut (s_cfg_dongle, MATRIX sur KaSe.01) ; si le dongle disparaît, elle
+ * bascule vers la gauche-USB (s_cfg_left, HEARTBEAT sur KaSe.03, protocole
+ * pré-fusion que kbd_relay décode). half_link.h porte la FSM pure. */
+static rf_radio_cfg_t s_cfg_dongle;   /* KaSe.01, set_id — le dongle tape */
+static rf_radio_cfg_t s_cfg_left;     /* KaSe.03 fixe — la gauche-USB tape */
+static half_tx_fsm_t  s_tx_fsm = { HALF_TX_TO_DONGLE, 0 };
+#endif
 #endif
 
 /* Config commune aux deux bouts : même canal, même adresse, sinon rien ne
@@ -182,6 +191,10 @@ bool half_link_tx_init(void)
     }
     rf_radio_cfg_t cfg = half_link_cfg();
 #if CONFIG_KASE_DONGLE_FUSION
+    /* La config de base (KaSe.03 fixe, canal du lien) EST la cible « gauche
+     * directe » : c'est exactement ce que la gauche-USB écoute. On la mémorise
+     * AVANT de retargeter vers le dongle, pour le repli sans dongle. */
+    s_cfg_left = cfg;
     /* Fusion : la droite ne parle plus à la gauche mais au SLOT CLAVIER DU DONGLE,
      * comme la gauche (même adresse, distinction par l'identité de moitié dans
      * PKT_TYPE_MATRIX). Canal et suffixe du slot clavier, adresse dérivée du
@@ -200,6 +213,11 @@ bool half_link_tx_init(void)
     }
 #endif
     s_tx_cfg = cfg;   /* mémorisé pour le chien de garde radio */
+#if CONFIG_KASE_DONGLE_FUSION
+    s_cfg_dongle    = cfg;                 /* cible par défaut : le dongle */
+    s_tx_fsm.cible  = HALF_TX_TO_DONGLE;   /* au boot, on vise le dongle */
+    s_tx_fsm.sans_ack = 0;
+#endif
     esp_err_t e = rf_driver_init_tx(&s_radio, &cfg);
     if (e != ESP_OK || !s_radio.present) {
         ESP_LOGE(TAG, "TX init echouee (%d) — la moitie droite restera muette", (int)e);
@@ -265,14 +283,24 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
     uint8_t buf[16];
     uint16_t n;
 #if CONFIG_KASE_DONGLE_FUSION
-    /* Fusion : la droite émet sa demi-matrice BRUTE au dongle, portant son
-     * identité de moitié. Le dongle fusionne les deux et fait tourner le moteur.
-     * Même chemin d'émission (rf_driver_send sous verrou) ; seul le format change. */
-    rf_matrix_t m;
-    m.half = RF_HALF_RIGHT;
-    memcpy(m.bitmap, bitmap, RF_HALF_BITMAP_BYTES);
-    m.seq = s_seq;
-    n = rf_encode_matrix(buf, &m);
+    /* Le FORMAT dépend de la cible courante (repli sans dongle) :
+     *  - cible dongle : demi-matrice BRUTE (PKT_TYPE_MATRIX + identité de moitié).
+     *    Le dongle fusionne les deux moitiés et fait tourner le moteur.
+     *  - cible gauche : HEARTBEAT pré-fusion (KaSe.03), le SEUL format que
+     *    kbd_relay décode côté gauche-USB. Chaque auditeur parle son protocole. */
+    if (s_tx_fsm.cible == HALF_TX_TO_LEFT) {
+        rf_heartbeat_t h;
+        memset(&h, 0, sizeof(h));
+        memcpy(h.bitmap, bitmap, RF_HALF_BITMAP_BYTES);
+        h.seq = s_seq;
+        n = rf_encode_heartbeat(buf, &h);
+    } else {
+        rf_matrix_t m;
+        m.half = RF_HALF_RIGHT;
+        memcpy(m.bitmap, bitmap, RF_HALF_BITMAP_BYTES);
+        m.seq = s_seq;
+        n = rf_encode_matrix(buf, &m);
+    }
 #else
     rf_heartbeat_t h;
     memset(&h, 0, sizeof(h));
@@ -303,9 +331,29 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
      * retransmissions ou un glitch (constaté au banc 2026-09-13 : à l'activation
      * du lien TRRS en mode USB, la radio de la droite gelait et n'acquittait plus
      * RIEN, même une fois l'USB retiré, jusqu'au reset). Le dongle a un chien de
-     * garde ; la droite n'en avait pas → mort permanente. Après 30 envois
-     * consécutifs sans ACK (~0,4 s de silence total, pas une simple perte ESB),
-     * on RÉARME la puce (réécriture de la config PTX), sans redémarrage. */
+     * garde ; la droite n'en avait pas → mort permanente. Après N envois
+     * consécutifs sans ACK (pas une simple perte ESB), on RÉARME la puce
+     * (réécriture de la config PTX), sans redémarrage. */
+#if CONFIG_KASE_DONGLE_FUSION
+    /* En fusion, le réarmement DOUBLE comme repli : il bascule vers l'autre
+     * auditeur (dongle ↔ gauche-USB directe). Décision pure et testée
+     * (half_tx_target_step, test/test_half_tx_target.c). La bascule réécrit la
+     * config PTX de la nouvelle cible — elle réarme donc aussi une puce figée. */
+    if (half_tx_target_step(&s_tx_fsm, ack, HALF_TX_SWITCH_FAILS)) {
+        const rf_radio_cfg_t *tgt = (s_tx_fsm.cible == HALF_TX_TO_LEFT)
+                                        ? &s_cfg_left : &s_cfg_dongle;
+        if (s_tx_radio_mux &&
+            xSemaphoreTake(s_tx_radio_mux, pdMS_TO_TICKS(50)) == pdTRUE) {
+            rf_driver_set_ptx(&s_radio, tgt);
+            s_tx_cfg = *tgt;   /* la config vivante suit la cible */
+            xSemaphoreGive(s_tx_radio_mux);
+            ESP_LOGW(TAG, "repli : bascule TX -> %s (rearme, %u sans ACK)",
+                     s_tx_fsm.cible == HALF_TX_TO_LEFT ? "GAUCHE KaSe.03 (heartbeat)"
+                                                       : "DONGLE KaSe.01 (matrix)",
+                     (unsigned)HALF_TX_SWITCH_FAILS);
+        }
+    }
+#else
     static uint16_t s_sans_ack;
     if (ack) {
         s_sans_ack = 0;
@@ -318,6 +366,7 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
             ESP_LOGW(TAG, "chien de garde : radio TX rearmee (30 envois sans ACK)");
         }
     }
+#endif
 
     /* Instrument de banc : sans lui, on ne distingue pas « les paquets partent
      * et sont acquittes » de « ils partent dans le vide ». Resume tous les dix

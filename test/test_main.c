@@ -57,6 +57,7 @@ extern void test_rf_status_cadence(void);
 extern void test_keymap_blob_size(void);
 extern void test_half_col_map(void);
 extern void test_half_tx_cadence(void);
+extern void test_half_tx_target(void);
 extern void test_niphar_left_pins(void);
 extern void test_niphar_right_pins(void);
 extern void test_conchodytes_pins(void);
@@ -121,6 +122,7 @@ int main(void) {
     test_keymap_blob_size();
     test_half_col_map();
     test_half_tx_cadence();
+    test_half_tx_target();
     test_niphar_left_pins();
     test_niphar_right_pins();
     test_conchodytes_pins();
