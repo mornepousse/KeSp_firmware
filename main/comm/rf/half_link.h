@@ -125,6 +125,57 @@ static inline uint8_t fuse_halves(const uint8_t *left_bm, const uint8_t *right_b
     return n;
 }
 
+/* ── État de fusion au dongle : DEUX demi-matrices routées par identité ──────
+ *
+ * Testée host dans test/test_fusion_state.c.
+ *
+ * Sur le maître, une seule moitié était distante (half_state_t unique) : l'autre
+ * était sa propre matrice locale. Au dongle il n'y a AUCUNE matrice locale — les
+ * deux moitiés sont distantes et arrivent sur le même slot clavier, distinguées
+ * par l'octet d'identité de PKT_TYPE_MATRIX. On tient donc deux demi-états, on
+ * route chaque trame vers le bon, et on expire chacun indépendamment : une
+ * moitié muette ne doit pas relâcher ce que l'autre tient (même prudence que
+ * rf_slot.h côté supervision).
+ *
+ * Pure : pas d'I/O, pas d'état global. Réutilise half_state_* et fuse_halves. */
+typedef struct {
+    half_state_t left;
+    half_state_t right;
+} fusion_state_t;
+
+/* Range une trame décodée dans le demi-état de sa moitié. Retourne false si
+ * l'identité n'est ni gauche ni droite — une trame corrompue ne doit rien
+ * écrire. */
+static inline bool fusion_apply(fusion_state_t *fs, const rf_matrix_t *m,
+                                uint32_t now_ms)
+{
+    if (m->half == RF_HALF_LEFT)  { half_state_recu(&fs->left,  m->bitmap, now_ms); return true; }
+    if (m->half == RF_HALF_RIGHT) { half_state_recu(&fs->right, m->bitmap, now_ms); return true; }
+    return false;
+}
+
+/* Expire les deux demi-états. Retourne true si au moins un vient de tomber en
+ * silence (signal « recalcule le rapport »). Les DEUX sont évalués — pas de
+ * court-circuit —, sinon une moitié ne serait jamais expirée quand l'autre
+ * l'est déjà. Comme half_state_timeout, ne signale qu'une fois par silence. */
+static inline bool fusion_timeout(fusion_state_t *fs, uint32_t now_ms,
+                                  uint32_t delai_ms)
+{
+    bool l = half_state_timeout(&fs->left,  now_ms, delai_ms);
+    bool r = half_state_timeout(&fs->right, now_ms, delai_ms);
+    return l || r;
+}
+
+/* Produit la liste fusionnée (row, colonne keymap) que le moteur indexera.
+ * Gauche en colonnes directes, droite en colonnes hautes via le miroir du PCB. */
+static inline uint8_t fusion_collect(const fusion_state_t *fs, uint8_t cols,
+                                     bool right_mirror, uint8_t *out_row,
+                                     uint8_t *out_col, uint8_t max)
+{
+    return fuse_halves(fs->left.bitmap, fs->right.bitmap, cols, right_mirror,
+                       out_row, out_col, max);
+}
+
 /* ── Cadence : quand la moitié droite doit-elle émettre ? ───────────────────
  *
  * Testée host dans test/test_half_tx_cadence.c.
