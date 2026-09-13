@@ -258,7 +258,7 @@ static void kbd_relay_refresh_cb(void *arg)
             /* config_fp reste 0 ici : en USB le dongle se tait, la cohérence
              * des moteurs est sans objet. Buffer à RF_STATUS_LEN quand même —
              * rf_encode_status écrit 8 octets dans tous les cas. */
-            rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = s_status_seq++,
+            rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = __atomic_fetch_add(&s_status_seq, 1, __ATOMIC_RELAXED),
                                .mode_usb = true };
             uint8_t sb[RF_STATUS_LEN];
             uint16_t sn = rf_encode_status(sb, &st);
@@ -311,25 +311,49 @@ static void kbd_relay_refresh_cb(void *arg)
     /* Sync auto (phase 3), APRÈS la réaffirmation des maintiens : un maintien
      * garde la priorité, le pull se met en pause pendant et reprend après —
      * jamais une touche relâchée à tort pour une keymap (la panne du 2026-09-13). */
-    if (s_sync_done) {
-        /* 40/40 reçus : la keymap complète est dans s_krx.buf. Enregistrée ICI,
-         * hors du chemin TX et de son mutex (NVS = ms). Le STATUS suivant
-         * annoncera la nouvelle empreinte → le dongle coupera la balise. */
-        memcpy((uint8_t *)keymaps, s_krx.buf, KEYMAP_BLOB_BYTES);
-        bool saved = save_keymaps((uint16_t *)keymaps, KEYMAP_BLOB_BYTES);
-        uint32_t fp = config_fp_crc32((const uint8_t *)keymaps, KEYMAP_BLOB_BYTES);
-        ESP_LOGW(TAG, "sync keymap : 40/40 recus, fp=0x%08X %s (cible 0x%08X) — %s",
-                 (unsigned)fp, fp == s_sync_target_fp ? "= cible" : "!= CIBLE",
-                 (unsigned)s_sync_target_fp, saved ? "enregistree en NVS" : "ECHEC NVS");
-        s_sync_done = false;
+    {
+        /* 40/40 reçus : la keymap complète est dans s_krx.buf. Le drapeau et le
+         * buffer sont ÉCRITS sous s_tx_mutex (kbd_tx_locked, depuis la tâche de
+         * scan) : on les CONSOMME sous le même mutex, sinon la copie pourrait
+         * lire un buffer pas encore entièrement visible (revue 2026-09-13). La
+         * NVS (ms) se fait ensuite HORS mutex — kbd_tx_locked le reprend plus
+         * bas et il n'est pas récursif. Le STATUS suivant annoncera la nouvelle
+         * empreinte → le dongle coupera la balise. */
+        bool a_enregistrer = false;
+        uint32_t cible = 0;
+        if (s_sync_done && s_tx_mutex &&
+            xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+            if (s_sync_done) {
+                memcpy((uint8_t *)keymaps, s_krx.buf, KEYMAP_BLOB_BYTES);
+                cible = s_sync_target_fp;
+                s_sync_done = false;
+                a_enregistrer = true;
+            }
+            xSemaphoreGive(s_tx_mutex);
+        }
+        if (a_enregistrer) {
+            bool saved = save_keymaps((uint16_t *)keymaps, KEYMAP_BLOB_BYTES);
+            uint32_t fp = config_fp_crc32((const uint8_t *)keymaps, KEYMAP_BLOB_BYTES);
+            ESP_LOGW(TAG, "sync keymap : 40/40 recus, fp=0x%08X %s (cible 0x%08X) — %s",
+                     (unsigned)fp, fp == cible ? "= cible" : "!= CIBLE", (unsigned)cible,
+                     saved ? "enregistree en NVS" : "ECHEC NVS");
+        }
     }
     if (s_syncing) {
-        /* Un REQ par tick (100 ms) : chaque ACK rapporte le chunk demandé →
-         * ~10 chunks/s, 40 en ~4 s. Trafic borné, seulement tant qu'on diverge. */
-        rf_sync_req_t q = { .next = keymap_rx_next(&s_krx) };
-        uint8_t rb[4];
-        uint16_t rn = rf_encode_sync_req(rb, &q);
-        kbd_tx_locked(rb, (uint8_t)rn);
+        /* Un REQ toutes les 100 ms (gate par horodatage : le timer tourne à
+         * KBD_RELAY_REFRESH_MS = 10 ms, il ne faut PAS un REQ par tick — la
+         * revue du 2026-09-13 a relevé 100 REQ/s réels contre 10 documentés).
+         * Chaque ACK rapporte le chunk demandé → ~10 chunks/s, 40 en ~4 s.
+         * Trafic borné, seulement tant qu'on diverge. */
+        static uint32_t s_dernier_req_ms;
+        uint32_t maintenant = (uint32_t)(esp_timer_get_time() / 1000);
+        if ((uint32_t)(maintenant - s_dernier_req_ms) >= 100u) {
+            s_dernier_req_ms = maintenant;
+            rf_sync_req_t q = { .next = keymap_rx_next(&s_krx) };
+            uint8_t rb[4];
+            uint16_t rn = rf_encode_sync_req(rb, &q);
+            kbd_tx_locked(rb, (uint8_t)rn);
+        }
         return;
     }
 #endif
@@ -360,7 +384,7 @@ static void kbd_relay_refresh_cb(void *arg)
      * dongle, qui tape en sans-fil avec la SIENNE, compare et signale une
      * divergence — sinon deux moteurs taperaient différemment en silence.
      * Calculée à la volée (1/s ici) : pas de cache, donc jamais périmée. */
-    rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = s_status_seq++,
+    rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = __atomic_fetch_add(&s_status_seq, 1, __ATOMIC_RELAXED),
                        .config_fp = config_fp_crc32((const uint8_t *)keymaps,
                                                     KEYMAP_BLOB_BYTES) };
     uint8_t buf[RF_STATUS_LEN];
@@ -611,7 +635,7 @@ void kbd_relay_send_matrix(uint8_t half, const uint8_t *bitmap)
     rf_matrix_t m;
     m.half = half;
     memcpy(m.bitmap, bitmap, RF_HALF_BITMAP_BYTES);
-    m.seq = s_status_seq++;   /* réutilise le compteur de séquence du relais */
+    m.seq = __atomic_fetch_add(&s_status_seq, 1, __ATOMIC_RELAXED);   /* réutilise le compteur de séquence du relais */
     uint8_t buf[8];
     uint16_t n = rf_encode_matrix(buf, &m);
     if (n) kbd_tx_locked(buf, (uint8_t)n);

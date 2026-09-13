@@ -325,7 +325,13 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
     }
     s_seq++;                       /* la trame part : ce numéro est consommé */
     bool ack = rf_driver_send(&s_radio, buf, (uint8_t)n);
-    if (s_tx_radio_mux) xSemaphoreGive(s_tx_radio_mux);
+    /* Le verrou reste TENU jusqu'après le chien de garde : la décision de
+     * bascule (s_tx_fsm) et le réarmement doivent être sérialisés avec l'envoi.
+     * Cette fonction est appelée par DEUX tâches (callback de scan sur
+     * changement, tâche de rafraîchissement des maintiens) — un compteur
+     * read-modify-write hors verrou perdait des incréments ou basculait deux
+     * fois (revue 2026-09-13 : « un seul propriétaire ne suffit pas s'il a deux
+     * bouches »). */
 
     /* Chien de garde radio. Un nRF24 (clone) se FIGE — sous un orage de
      * retransmissions ou un glitch (constaté au banc 2026-09-13 : à l'activation
@@ -342,16 +348,12 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
     if (half_tx_target_step(&s_tx_fsm, ack, HALF_TX_SWITCH_FAILS)) {
         const rf_radio_cfg_t *tgt = (s_tx_fsm.cible == HALF_TX_TO_LEFT)
                                         ? &s_cfg_left : &s_cfg_dongle;
-        if (s_tx_radio_mux &&
-            xSemaphoreTake(s_tx_radio_mux, pdMS_TO_TICKS(50)) == pdTRUE) {
-            rf_driver_set_ptx(&s_radio, tgt);
-            s_tx_cfg = *tgt;   /* la config vivante suit la cible */
-            xSemaphoreGive(s_tx_radio_mux);
-            ESP_LOGW(TAG, "repli : bascule TX -> %s (rearme, %u sans ACK)",
-                     s_tx_fsm.cible == HALF_TX_TO_LEFT ? "GAUCHE KaSe.03 (heartbeat)"
-                                                       : "DONGLE KaSe.01 (matrix)",
-                     (unsigned)HALF_TX_SWITCH_FAILS);
-        }
+        rf_driver_set_ptx(&s_radio, tgt);   /* verrou déjà tenu */
+        s_tx_cfg = *tgt;                    /* la config vivante suit la cible */
+        ESP_LOGW(TAG, "repli : bascule TX -> %s (rearme, %u sans ACK)",
+                 s_tx_fsm.cible == HALF_TX_TO_LEFT ? "GAUCHE KaSe.03 (heartbeat)"
+                                                   : "DONGLE KaSe.01 (matrix)",
+                 (unsigned)HALF_TX_SWITCH_FAILS);
     }
 #else
     static uint16_t s_sans_ack;
@@ -359,14 +361,11 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
         s_sans_ack = 0;
     } else if (++s_sans_ack >= 30) {
         s_sans_ack = 0;
-        if (s_tx_radio_mux &&
-            xSemaphoreTake(s_tx_radio_mux, pdMS_TO_TICKS(50)) == pdTRUE) {
-            rf_driver_set_ptx(&s_radio, &s_tx_cfg);
-            xSemaphoreGive(s_tx_radio_mux);
-            ESP_LOGW(TAG, "chien de garde : radio TX rearmee (30 envois sans ACK)");
-        }
+        rf_driver_set_ptx(&s_radio, &s_tx_cfg);   /* verrou déjà tenu */
+        ESP_LOGW(TAG, "chien de garde : radio TX rearmee (30 envois sans ACK)");
     }
 #endif
+    if (s_tx_radio_mux) xSemaphoreGive(s_tx_radio_mux);
 
     /* Instrument de banc : sans lui, on ne distingue pas « les paquets partent
      * et sont acquittes » de « ils partent dans le vide ». Resume tous les dix

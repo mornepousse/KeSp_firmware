@@ -646,6 +646,7 @@ esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
 bool rf_driver_send_ap(rf_radio_t *r, const uint8_t *buf, uint8_t len,
                        uint8_t *ack_out, uint8_t *ack_len)
 {
+    if (len > 32) len = 32;   /* charge ESB max ; tx[33] ci-dessous, jamais au-delà */
     /* Write payload to TX FIFO */
     uint8_t tx[33], rx_buf[33];
     tx[0] = CMD_W_TX_PAYLOAD;

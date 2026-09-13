@@ -547,7 +547,7 @@ void matrix_wake_capture(void)
 #if CONFIG_KASE_HALF_LINK_TX
     /* La moitié droite n'a pas de tâche clavier : c'est le callback qui émet.
      * On émet donc ici ce qu'il aurait émis. */
-    {
+    if (filled) {   /* réveil fantôme (rien d'enfoncé) : muet, rien à annoncer */
         uint8_t bm[RF_HALF_BITMAP_BYTES];
         rf_matrix_to_bitmap(&st[0][0], MATRIX_ROWS, MATRIX_COLS, bm);
         half_link_tx_update(bm, true);
@@ -563,7 +563,7 @@ void matrix_wake_capture(void)
      * compilé out ici). On émet donc l'appui capturé tout de suite, hors USB
      * (règle 3), avec le même émetteur que le callback — la réaffirmation à
      * 100 ms prend ensuite le relais tant que la touche est tenue. */
-    if (fusion_left_emits_raw(kbd_active_route() == KBD_OUT_USB)) {
+    if (filled && fusion_left_emits_raw(kbd_active_route() == KBD_OUT_USB)) {
         uint8_t bm[RF_HALF_BITMAP_BYTES];
         rf_matrix_to_bitmap(&st[0][0], MATRIX_ROWS, MATRIX_COLS, bm);
         kbd_relay_send_matrix(RF_HALF_LEFT, bm);

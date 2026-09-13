@@ -158,7 +158,17 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
          * charge en attente ; et le nRF24 n'en garde que trois. Synchronisé →
          * rien n'est chargé : l'ACK repart nu, coût nul.
          * Go/no-go prouvé au banc le 2026-09-13 (canal retour vivant, 11/11). */
-        if (slot == RF_SLOT_KBD && dongle_sync_active()) {
+        /* ⚠ Seulement après une trame DE LA GAUCHE. La droite partage le slot
+         * clavier (même adresse KaSe.01) : une charge chargée après SA trame
+         * partirait dans SON ACK, jetée par elle — un chunk perdu par trame
+         * droite, et le pull de la gauche stagne sous frappe bilatérale (revue
+         * 2026-09-13). STATUS et SYNC_REQ ne viennent que de la gauche ; MATRIX
+         * porte l'identité de moitié. */
+        rf_matrix_t lm;
+        bool de_la_gauche = (type == PKT_TYPE_STATUS) || (type == PKT_TYPE_SYNC_REQ) ||
+                            (type == PKT_TYPE_MATRIX && rf_decode_matrix(buf, n, &lm) &&
+                             lm.half == RF_HALF_LEFT);
+        if (slot == RF_SLOT_KBD && de_la_gauche && dongle_sync_active()) {
             uint8_t req_next = SYNC_N_CHUNKS;   /* défaut : balise */
             rf_sync_req_t q;
             if (type == PKT_TYPE_SYNC_REQ && rf_decode_sync_req(buf, n, &q)) req_next = q.next;
