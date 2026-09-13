@@ -43,7 +43,7 @@
   - `uint16_t rf_encode_sync_req(uint8_t *buf, const rf_sync_req_t *q);` → 2 o : `[type<<4][next]`
   - `bool rf_decode_sync_req(const uint8_t *buf, uint16_t len, rf_sync_req_t *o);`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `test/test_keymap_sync_frames.c` :
 ```c
@@ -105,12 +105,12 @@ void test_keymap_sync_frames(void)
 ```
 Ajouter `test_keymap_sync_frames.c` à `test/CMakeLists.txt` (près de `test_rf_packet.c`), et dans `test/test_main.c` : `extern void test_keymap_sync_frames(void);` + `test_keymap_sync_frames();`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd test && cmake --build build -j && ./build/test_runner 2>&1 | grep -iE "sync|FAIL|Results"`
 Expected: FAIL (fonctions/constantes non définies) ou erreur de link.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Dans `rf_packet.h`, près des autres `PKT_TYPE_*` et encoders :
 ```c
@@ -173,12 +173,12 @@ static inline bool rf_decode_sync_req(const uint8_t *buf, uint16_t len, rf_sync_
 ```
 (`rf_packet.h` inclut déjà `<string.h>` pour `memcpy` — vérifier ; sinon l'ajouter.)
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd test && cmake --build build -j && ./build/test_runner 2>&1 | grep -iE "Results"`
 Expected: PASS, compteur augmenté.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add main/comm/rf/rf_packet.h test/test_keymap_sync_frames.c test/CMakeLists.txt test/test_main.c .tripwire-testcount
@@ -202,7 +202,7 @@ git commit -m "feat(keymap-sync): trames BEACON/CHUNK/REQ (encode/decode, testé
   - `uint8_t keymap_rx_next(const keymap_rx_t *s);` — prochain chunk voulu (0..SYNC_N_CHUNKS).
   - `bool keymap_rx_complete(const keymap_rx_t *s);` — true quand `next == SYNC_N_CHUNKS`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `test/test_keymap_sync.c` :
 ```c
@@ -259,12 +259,12 @@ void test_keymap_sync(void)
 ```
 Enregistrer dans `test/CMakeLists.txt` + `test/test_main.c`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd test && cmake --build build -j && ./build/test_runner 2>&1 | grep -iE "Réassembleur|FAIL|Results"`
 Expected: FAIL / erreur de compilation (header absent).
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 `main/comm/rf/keymap_sync.h` :
 ```c
@@ -297,12 +297,12 @@ static inline uint8_t keymap_rx_next(const keymap_rx_t *s) { return s->next; }
 static inline bool keymap_rx_complete(const keymap_rx_t *s) { return s->next >= SYNC_N_CHUNKS; }
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — puis prouver qu'il mord : muter `idx != s->next` en `false` (accepte tout), rebuild, vérifier des FAIL, revenir (⚠ `keymap_sync.h` est neuf/non commité — sauvegarder en scratchpad avant mutation, PAS `git checkout`).
+- [x] **Step 4: Run test to verify it passes** — puis prouver qu'il mord : muter `idx != s->next` en `false` (accepte tout), rebuild, vérifier des FAIL, revenir (⚠ `keymap_sync.h` est neuf/non commité — sauvegarder en scratchpad avant mutation, PAS `git checkout`).
 
 Run: `cd test && cmake --build build -j && ./build/test_runner 2>&1 | grep Results`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add main/comm/rf/keymap_sync.h test/test_keymap_sync.c test/CMakeLists.txt test/test_main.c .tripwire-testcount
@@ -323,20 +323,20 @@ git commit -m "feat(keymap-sync): réassembleur séquentiel (pur, testé, mordan
 
 **Note RF (pas de test host — vérification au banc) :** activer `EN_ACK_PAY` impose `FEATURE = 0x06` (EN_DPL|EN_ACK_PAY), avec EN_AA et DPL déjà présents. Le PTX détecte l'ACK-avec-charge par `RX_DR` (STATUS bit6, 0x40) après `TX_DS`, puis lit par `R_RX_PAYLOAD` (0x61) et vide (`FLUSH_RX` si besoin).
 
-- [ ] **Step 1:** Passer les trois écritures `REG_FEATURE, 0x04` à `0x06` dans `rf_driver.c` (init PRX ligne ~353, ré-armements ~398/430, et la config partagée ~593). Ajouter en tête les commandes manquantes :
+- [x] **Step 1:** Passer les trois écritures `REG_FEATURE, 0x04` à `0x06` dans `rf_driver.c` (init PRX ligne ~353, ré-armements ~398/430, et la config partagée ~593). Ajouter en tête les commandes manquantes :
 ```c
 #ifndef CMD_W_ACK_PAYLOAD
 #define CMD_W_ACK_PAYLOAD(pipe) (0xA8 | ((pipe) & 0x07))
 #endif
 ```
 
-- [ ] **Step 2:** Implémenter `rf_driver_load_ack_payload` (modèle : la séquence CSN + `spi_xfer` de `rf_driver_send`, mais commande `CMD_W_ACK_PAYLOAD(pipe)` suivie des `len` octets ; aucun pulse CE). Sous le mutex du propriétaire (l'appelant le tient).
+- [x] **Step 2:** Implémenter `rf_driver_load_ack_payload` (modèle : la séquence CSN + `spi_xfer` de `rf_driver_send`, mais commande `CMD_W_ACK_PAYLOAD(pipe)` suivie des `len` octets ; aucun pulse CE). Sous le mutex du propriétaire (l'appelant le tient).
 
-- [ ] **Step 3:** Ajouter `rf_driver_send_ap` : corps identique à `rf_driver_send` (flush TX AVANT, W_TX_PAYLOAD, pulse CE, poll TX_DS/MAX_RT), puis APRÈS `TX_DS` : si `status & 0x40` (RX_DR), lire la largeur (`R_RX_PL_WID` 0x60), `R_RX_PAYLOAD` dans `ack_out`, poser `*ack_len`, effacer RX_DR (`REG_STATUS`, 0x40). Sinon `*ack_len = 0`. `rf_driver_send` devient `rf_driver_send_ap(r,buf,len,NULL,NULL)`.
+- [x] **Step 3:** Ajouter `rf_driver_send_ap` : corps identique à `rf_driver_send` (flush TX AVANT, W_TX_PAYLOAD, pulse CE, poll TX_DS/MAX_RT), puis APRÈS `TX_DS` : si `status & 0x40` (RX_DR), lire la largeur (`R_RX_PL_WID` 0x60), `R_RX_PAYLOAD` dans `ack_out`, poser `*ack_len`, effacer RX_DR (`REG_STATUS`, 0x40). Sinon `*ack_len = 0`. `rf_driver_send` devient `rf_driver_send_ap(r,buf,len,NULL,NULL)`.
 
-- [ ] **Step 4 (banc, étape 1 du spec) :** build dongle+fusion et niphar_left+fusion, flasher (dongle CH340 `ttyUSB0`, gauche FTDI `ttyUSB2`, app-only `0x20000`, MAC vérifié). Test « hello » : câbler temporairement le dongle pour charger un ACK payload connu (ex. 4 octets `0xA5A5A5A5`) sur réception d'une trame du slot clavier ; côté gauche, loguer `ack_len`/`ack_out` après émission RF. **Critère : la gauche logue les octets connus.** Si les clones nRF24 ne suivent pas (RX_DR jamais levé) → consigner, et déclencher le repli (approche B) noté au spec.
+- [x] **Step 4 (banc, étape 1 du spec) :** build dongle+fusion et niphar_left+fusion, flasher (dongle CH340 `ttyUSB0`, gauche FTDI `ttyUSB2`, app-only `0x20000`, MAC vérifié). Test « hello » : câbler temporairement le dongle pour charger un ACK payload connu (ex. 4 octets `0xA5A5A5A5`) sur réception d'une trame du slot clavier ; côté gauche, loguer `ack_len`/`ack_out` après émission RF. **Critère : la gauche logue les octets connus.** Si les clones nRF24 ne suivent pas (RX_DR jamais levé) → consigner, et déclencher le repli (approche B) noté au spec.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add main/comm/rf/rf_driver.c main/comm/rf/rf_driver.h
@@ -356,13 +356,13 @@ git commit -m "feat(rf): ACK payload nRF24 (EN_ACK_PAY, load/send_ap) — canal 
   - `bool dongle_sync_active(void);` — true tant qu'une divergence est connue (`match=0` et `left_fp != 0`).
   - `uint16_t dongle_sync_ack_for(uint8_t req_next, uint8_t *out);` — construit la charge d'ACK à charger : si `req_next < SYNC_N_CHUNKS`, un CHUNK `req_next` (tranché dans `keymaps`), sinon une BEACON `{own_fp, SYNC_N_CHUNKS}`. Renvoie la longueur.
 
-- [ ] **Step 1:** Dans `dongle_engine.c`, ajouter `dongle_sync_active()` (à partir de `dongle_engine_get_coherence`) et `dongle_sync_ack_for()` : tranche `((const uint8_t*)keymaps)[req_next*SYNC_CHUNK_BYTES ...]` dans un `rf_sync_chunk_t` puis `rf_encode_sync_chunk`, ou `rf_encode_sync_beacon` si `req_next >= SYNC_N_CHUNKS`. Déclarer les deux dans `dongle_engine.h` (sous le `#if CONFIG_KASE_DONGLE_FUSION`).
+- [x] **Step 1:** Dans `dongle_engine.c`, ajouter `dongle_sync_active()` (à partir de `dongle_engine_get_coherence`) et `dongle_sync_ack_for()` : tranche `((const uint8_t*)keymaps)[req_next*SYNC_CHUNK_BYTES ...]` dans un `rf_sync_chunk_t` puis `rf_encode_sync_chunk`, ou `rf_encode_sync_beacon` si `req_next >= SYNC_N_CHUNKS`. Déclarer les deux dans `dongle_engine.h` (sous le `#if CONFIG_KASE_DONGLE_FUSION`).
 
-- [ ] **Step 2:** Dans `rf_rx_task.c` `drain_radio`, slot clavier : après avoir traité une trame et TANT QUE `dongle_sync_active()`, précharger l'ACK payload pour la PROCHAINE trame de la gauche. Défaut `req_next = SYNC_N_CHUNKS` (⇒ balise) ; si la trame reçue est un `PKT_TYPE_SYNC_REQ`, décoder `.next` et charger le CHUNK correspondant. `rf_driver_load_ack_payload(&s_kbd, 0, buf, len)` sous le propriétaire unique (rf_rx_task). Quand `!dongle_sync_active()` : ne rien charger (silence, coût nul).
+- [x] **Step 2:** Dans `rf_rx_task.c` `drain_radio`, slot clavier : après avoir traité une trame et TANT QUE `dongle_sync_active()`, précharger l'ACK payload pour la PROCHAINE trame de la gauche. Défaut `req_next = SYNC_N_CHUNKS` (⇒ balise) ; si la trame reçue est un `PKT_TYPE_SYNC_REQ`, décoder `.next` et charger le CHUNK correspondant. `rf_driver_load_ack_payload(&s_kbd, 0, buf, len)` sous le propriétaire unique (rf_rx_task). Quand `!dongle_sync_active()` : ne rien charger (silence, coût nul).
 
-- [ ] **Step 3 (banc, étapes 2-3 du spec) :** flasher le dongle. Provoquer une divergence (garde-fou `match=0`, déjà le cas si les keymaps diffèrent). Avec la gauche en sans-fil (FTDI = alim, USB natif débranché), observer via un log dongle temporaire : à réception d'une trame gauche, l'ACK préchargé = BEACON `{own_fp, 40}` ; puis, si la gauche demande le chunk 0 (Task 5), l'ACK = CHUNK 0. **Critère : balise chargée sur mismatch ; chunk demandé servi.**
+- [x] **Step 3 (banc, étapes 2-3 du spec) :** flasher le dongle. Provoquer une divergence (garde-fou `match=0`, déjà le cas si les keymaps diffèrent). Avec la gauche en sans-fil (FTDI = alim, USB natif débranché), observer via un log dongle temporaire : à réception d'une trame gauche, l'ACK préchargé = BEACON `{own_fp, 40}` ; puis, si la gauche demande le chunk 0 (Task 5), l'ACK = CHUNK 0. **Critère : balise chargée sur mismatch ; chunk demandé servi.**
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add main/comm/rf/rf_rx_task.c main/comm/rf/dongle_engine.c main/comm/rf/dongle_engine.h
@@ -380,15 +380,15 @@ git commit -m "feat(keymap-sync): le dongle sert balise + chunks dans l'ACK sur 
 - Consumes: `rf_driver_send_ap` (Task 3), `keymap_rx_*` (Task 2), `rf_decode_sync_beacon/chunk`, `rf_encode_sync_req` (Task 1), `keymaps`, `KEYMAP_BLOB_BYTES`, `save_keymaps`, `config_fp_crc32`.
 - État interne : `static keymap_rx_t s_krx; static bool s_syncing; static uint32_t s_sync_target_fp;`
 
-- [ ] **Step 1:** Faire passer les émissions du chemin sans-fil de la gauche par `rf_driver_send_ap` (au lieu de `rf_driver_send`) pour récupérer l'ACK payload — dans `kbd_tx_locked` (relais/refresh RF). Après chaque envoi, si `ack_len > 0`, décoder :
+- [x] **Step 1:** Faire passer les émissions du chemin sans-fil de la gauche par `rf_driver_send_ap` (au lieu de `rf_driver_send`) pour récupérer l'ACK payload — dans `kbd_tx_locked` (relais/refresh RF). Après chaque envoi, si `ack_len > 0`, décoder :
   - `rf_decode_sync_beacon` → si `fp_target != config_fp_crc32(keymaps, KEYMAP_BLOB_BYTES)` et `!s_syncing` : `keymap_rx_reset(&s_krx)`, `s_syncing = true`, `s_sync_target_fp = fp_target`.
   - `rf_decode_sync_chunk` → `keymap_rx_chunk(&s_krx, idx, data)`.
-- [ ] **Step 2:** Tant que `s_syncing`, la gauche émet périodiquement un `PKT_TYPE_SYNC_REQ{ .next = keymap_rx_next(&s_krx) }` (via `kbd_tx_locked`, cadence ~ celle du STATUS) pour piloter le pull. À `keymap_rx_complete(&s_krx)` : `memcpy((uint8_t*)keymaps, s_krx.buf, KEYMAP_BLOB_BYTES)`, `save_keymaps((uint16_t*)keymaps, KEYMAP_BLOB_BYTES)`, `s_syncing = false`. Le STATUS suivant annoncera la nouvelle empreinte (le champ `config_fp` est déjà calculé à la volée) → le dongle verra `match=1` et cessera la balise.
-- [ ] **Step 3:** Garde-fous : borne le débit des SYNC_REQ (ne pas noyer le lien pendant la frappe) ; ne synchroniser qu'en route RF (jamais en USB — en USB la gauche a déjà la main sur sa keymap). Respecter le propriétaire unique (kbd_relay) et le mutex `s_tx_mutex`.
+- [x] **Step 2:** Tant que `s_syncing`, la gauche émet périodiquement un `PKT_TYPE_SYNC_REQ{ .next = keymap_rx_next(&s_krx) }` (via `kbd_tx_locked`, cadence ~ celle du STATUS) pour piloter le pull. À `keymap_rx_complete(&s_krx)` : `memcpy((uint8_t*)keymaps, s_krx.buf, KEYMAP_BLOB_BYTES)`, `save_keymaps((uint16_t*)keymaps, KEYMAP_BLOB_BYTES)`, `s_syncing = false`. Le STATUS suivant annoncera la nouvelle empreinte (le champ `config_fp` est déjà calculé à la volée) → le dongle verra `match=1` et cessera la balise.
+- [x] **Step 3:** Garde-fous : borne le débit des SYNC_REQ (ne pas noyer le lien pendant la frappe) ; ne synchroniser qu'en route RF (jamais en USB — en USB la gauche a déjà la main sur sa keymap). Respecter le propriétaire unique (kbd_relay) et le mutex `s_tx_mutex`.
 
-- [ ] **Step 4 (banc, étape 4 du spec) :** flasher gauche + dongle. Divergence provoquée (éditer la keymap du dongle par CDC SETLAYER). **Sans rien brancher d'autre**, gauche en sans-fil : attendre < 1 min, puis interroger le dongle par CDC 0x17 → **`match=1`**. Vérifier aussi qu'en branchant ensuite la gauche seule en USB, elle tape bien la keymap synchronisée. **Critère : `match` repasse à 1 sans câble, et la gauche tape juste en standalone.**
+- [x] **Step 4 (banc, étape 4 du spec) :** flasher gauche + dongle. Divergence provoquée (éditer la keymap du dongle par CDC SETLAYER). **Sans rien brancher d'autre**, gauche en sans-fil : attendre < 1 min, puis interroger le dongle par CDC 0x17 → **`match=1`**. Vérifier aussi qu'en branchant ensuite la gauche seule en USB, elle tape bien la keymap synchronisée. **Critère : `match` repasse à 1 sans câble, et la gauche tape juste en standalone.**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add main/comm/rf/kbd_relay_tx.c

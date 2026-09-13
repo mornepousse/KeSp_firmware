@@ -122,6 +122,33 @@ void dongle_engine_get_coherence(uint32_t *own_fp, uint32_t *left_fp,
     if (match)   *match   = config_fp_match(own, s_coh.left_fp);
 }
 
+/* ── Sync auto par ACK payload : ce que le dongle glisse dans l'ACK ─────────
+ *
+ * Le dongle ne distille QUE sur divergence connue (la gauche a annoncé une
+ * empreinte ≠ 0 et ≠ la nôtre). Il ne garde aucun état de transfert : la gauche
+ * pilote (REQ next-chunk), lui sert ce qu'on lui demande, et c'est l'empreinte
+ * qu'elle annoncera à la fin qui coupe la balise. Une charge d'ACK peut se
+ * perdre (l'ACK n'est pas acquitté) : la gauche redemande, on resert — idempotent. */
+bool dongle_sync_active(void)
+{
+    if (!s_coh.vue || s_coh.left_fp == 0u) return false;   /* rien d'annoncé : on ne sait pas */
+    return !config_fp_match(dongle_own_fp(), s_coh.left_fp);
+}
+
+uint16_t dongle_sync_ack_for(uint8_t req_next, uint8_t *out)
+{
+    if (out == NULL) return 0;
+    if (req_next < SYNC_N_CHUNKS) {
+        rf_sync_chunk_t c;
+        c.idx = req_next;
+        memcpy(c.data, (const uint8_t *)keymaps + (size_t)req_next * SYNC_CHUNK_BYTES,
+               SYNC_CHUNK_BYTES);
+        return rf_encode_sync_chunk(out, &c);
+    }
+    rf_sync_beacon_t b = { .fp_target = dongle_own_fp(), .n_chunks = SYNC_N_CHUNKS };
+    return rf_encode_sync_beacon(out, &b);
+}
+
 /* Émet une frappe brève (press+release), pour tap-dance / leader / macros. */
 static void send_tap(uint8_t kc, uint8_t mod)
 {

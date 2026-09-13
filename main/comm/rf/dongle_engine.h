@@ -46,4 +46,17 @@ void dongle_engine_note_left_fp(uint32_t fp);
 void dongle_engine_get_coherence(uint32_t *own_fp, uint32_t *left_fp,
                                  uint32_t *age_ms, bool *match);
 
+/* Sync auto de la keymap par ACK payload (phase 3). Une divergence est CONNUE
+ * quand la gauche a annoncé une empreinte (≠ 0) différente de la nôtre : c'est
+ * le seul moment où le dongle glisse quelque chose dans les ACK. Dès que la
+ * gauche annonce notre empreinte (match=1), silence — coût nul en régime
+ * synchronisé. */
+bool dongle_sync_active(void);
+
+/* Construit la charge d'ACK à charger pour la PROCHAINE trame de la gauche, à
+ * partir de ce qu'elle a demandé : req_next < SYNC_N_CHUNKS → le CHUNK
+ * req_next (tranché dans keymaps[]) ; sinon → la BEACON {empreinte, 40}.
+ * Écrit dans out (≤ 32 o), rend la longueur (0 = rien). */
+uint16_t dongle_sync_ack_for(uint8_t req_next, uint8_t *out);
+
 #endif /* CONFIG_KASE_DONGLE_FUSION */

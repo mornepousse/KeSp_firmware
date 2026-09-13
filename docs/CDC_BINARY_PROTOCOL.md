@@ -561,7 +561,7 @@ Garde-fou de sync fusion. En mode sans-fil, c'est le dongle qui execute le moteu
 | 8..11  | u32 LE | `age_ms`  | ms depuis cette annonce (0xFFFFFFFF = jamais)                     |
 | 12     | u8     | `match`   | 1 = coherent (empreintes egales et non nulles), 0 sinon           |
 
-**Lecture** : `match=1` → les deux moteurs tapent pareil. `match=0` avec `left_fp != 0` → **divergence** (reprovisionner le dongle). `left_fp = 0` ou `age_ms` eleve → la gauche n'a pas (ou plus) annonce : etat inconnu, pas forcement une divergence. L'empreinte d'un seul appareil se lit aussi par `CONFIG_FINGERPRINT` (0x16) sur chacun.
+**Lecture** : `match=1` → les deux moteurs tapent pareil. `match=0` avec `left_fp != 0` → **divergence** — elle se resorbe SEULE : le dongle glisse sa keymap dans les ACK payloads des emissions normales de la gauche (sync auto, phase 3), et `match` repasse a 1 en quelques secondes sans brancher la gauche. Le soft n'a donc rien a faire d'autre que poller : `match` revenu a 1 EST l'accuse de reception de bout en bout de la sync. Une divergence qui PERSISTE (> ~1 min avec la gauche allumee en sans-fil) signale un vrai probleme (gauche hors de portee, ou en mode USB — elle ne synchronise qu'en route RF). `left_fp = 0` ou `age_ms` eleve → la gauche n'a pas (ou plus) annonce : etat inconnu, pas forcement une divergence. L'empreinte d'un seul appareil se lit aussi par `CONFIG_FINGERPRINT` (0x16) sur chacun.
 
 ---
 

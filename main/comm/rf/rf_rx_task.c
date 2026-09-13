@@ -150,17 +150,21 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
         rf_slot_link_rx(&s_link[slot], (uint32_t)(esp_timer_get_time() / 1000));
         uint8_t type = rf_packet_type(buf, n);
 #if CONFIG_KASE_DONGLE_FUSION
-        /* BANC — go/no-go des ACK payloads (Task 3 du plan de sync auto) : on
-         * charge une charge utile CONNUE qui partira dans l'ACK de la PROCHAINE
-         * trame de la gauche. Si la gauche la logue, le canal retour existe sur
-         * ce silicium (clones nRF24 : pas garanti). Rechargée à chaque trame :
-         * une excursion oob_tx vide la FIFO TX du PRX, donc toute charge en
-         * attente. Remplacé en Task 4 par la balise / les chunks de sync. */
-        if (slot == RF_SLOT_KBD) {
-            static uint8_t s_hello_seq;
-            uint8_t hello[4] = { 'H', 'I', s_hello_seq, (uint8_t)~s_hello_seq };
-            s_hello_seq++;
-            rf_driver_load_ack_payload(radio, 0, hello, sizeof(hello));
+        /* Sync auto de la keymap par ACK payload (phase 3). Sur divergence
+         * connue, on charge la charge qui partira dans l'ACK de la PROCHAINE
+         * trame de la gauche : le CHUNK qu'elle vient de demander (SYNC_REQ),
+         * sinon la BEACON qui lui apprend qu'une keymap l'attend. Rechargée à
+         * CHAQUE trame — une excursion oob_tx vide la FIFO TX du PRX, donc toute
+         * charge en attente ; et le nRF24 n'en garde que trois. Synchronisé →
+         * rien n'est chargé : l'ACK repart nu, coût nul.
+         * Go/no-go prouvé au banc le 2026-09-13 (canal retour vivant, 11/11). */
+        if (slot == RF_SLOT_KBD && dongle_sync_active()) {
+            uint8_t req_next = SYNC_N_CHUNKS;   /* défaut : balise */
+            rf_sync_req_t q;
+            if (type == PKT_TYPE_SYNC_REQ && rf_decode_sync_req(buf, n, &q)) req_next = q.next;
+            uint8_t ap[32];
+            uint16_t apl = dongle_sync_ack_for(req_next, ap);
+            if (apl) rf_driver_load_ack_payload(radio, 0, ap, (uint8_t)apl);
         }
 #endif
         /* PKT_TYPE_KEY (matrice brute) et PKT_TYPE_TRACKPAD (gestuelle brute) ne

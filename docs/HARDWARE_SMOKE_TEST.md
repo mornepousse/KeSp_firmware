@@ -45,6 +45,11 @@ dans la PR/release.
       connue dans l'ACK (EN_ACK_PAY) ; la gauche, en sans-fil, la lit après
       chaque émission et la logue. Go/no-go des clones nRF24 : si RX_DR ne se
       lève jamais côté gauche, la sync auto par ACK est impossible → repli B
+- [ ] Fusion — Sync keymap sans câble : modifier une couche du dongle (SETLAYER)
+      → gauche en sans-fil, RIEN branché d'autre : en < 15 s la console gauche
+      logue « sync keymap : balise » puis « 40/40 recus … enregistree en NVS »,
+      et KS_CMD_CONFIG_COHERENCE (0x17) repasse à match=1 sur la NOUVELLE
+      empreinte ; ensuite plus aucun ACK payload au repos (balise coupée)
 
 ## Half (left / right)
 - [ ] e-ink affiche le splash 'PAIRED' au pairing

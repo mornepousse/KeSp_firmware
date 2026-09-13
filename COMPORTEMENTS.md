@@ -79,3 +79,10 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   par l'ACK après TX_DS, et sa FIFO RX ne s'encrasse jamais (vidée si non lue ou
   corrompue). Sans ça, trois ACK chargés suffisent à rendre le canal retour
   muet en silence.
+- [smoke:Sync keymap sans câble] Une divergence dongle↔gauche se résorbe SEULE
+  par radio : le dongle glisse la keymap dans les ACK des émissions normales de
+  la gauche (balise, puis chunks à la demande), la gauche réassemble, enregistre
+  en NVS et annonce la nouvelle empreinte ; `match` repasse à 1 sans brancher la
+  gauche, et la balise se tait aussitôt (coût nul une fois synchronisé). Un
+  maintien de touche garde la priorité sur le pull (jamais de touche relâchée à
+  tort pour une keymap).
