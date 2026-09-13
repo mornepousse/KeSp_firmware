@@ -58,6 +58,7 @@ extern void test_keymap_blob_size(void);
 extern void test_half_col_map(void);
 extern void test_half_tx_cadence(void);
 extern void test_half_tx_target(void);
+extern void test_half_tx_repeat(void);
 extern void test_keymap_sync_frames(void);
 extern void test_keymap_sync(void);
 extern void test_wake_grace(void);
@@ -126,6 +127,7 @@ int main(void) {
     test_half_col_map();
     test_half_tx_cadence();
     test_half_tx_target();
+    test_half_tx_repeat();
     test_keymap_sync_frames();
     test_keymap_sync();
     test_wake_grace();

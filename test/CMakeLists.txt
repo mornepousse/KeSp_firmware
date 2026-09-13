@@ -79,6 +79,7 @@ add_executable(test_runner
     test_half_col_map.c
     test_half_tx_cadence.c
     test_half_tx_target.c
+    test_half_tx_repeat.c
     test_keymap_sync_frames.c
     test_keymap_sync.c
     test_wake_grace.c

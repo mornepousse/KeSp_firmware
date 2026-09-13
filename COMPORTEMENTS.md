@@ -21,6 +21,10 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
 - [test:test_rf_status_cadence] Le status RF respecte sa période : rien avant,
   une émission à la période. Trois maillons perdaient des frappes pour la même
   raison — une cadence qui n'attendait pas.
+- [test:test_half_tx_repeat] La droite répète chaque changement de matrice un
+  nombre BORNÉ de fois (HALF_TX_REPEATS ticks) puis se tait : une trame de
+  changement refusée par l'ESB n'est plus perdue, et le repos reste muet (R1).
+  La règle de maintien (réaffirmation à 100 ms) reste intacte derrière.
 - [smoke:NRF ne se wedge pas après 5 min] La droite a un chien de garde radio.
   Un nRF24 figé est relancé ; il n'y a plus de mort permanente du lien.
 

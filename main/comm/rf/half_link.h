@@ -212,6 +212,31 @@ static inline bool half_tx_doit_emettre(bool change, bool tenu,
     return (uint32_t)(now_ms - dernier_ms) >= periode_ms;
 }
 
+/* ── Réparation bornée après changement ─────────────────────────────────────
+ *
+ * Testée host dans test/test_half_tx_repeat.c.
+ *
+ * half_tx_doit_emettre ne rejoue l'état que pour un MAINTIEN. Une trame de
+ * changement refusée par l'ESB (15 retransmissions épuisées, ~1 % au banc)
+ * n'avait donc qu'une chance : un appui bref perdu n'était jamais réparé (banc
+ * 2026-09-13, même cause que la gauche). Ici un changement ARME un nombre borné
+ * de répétitions, consommées une par tick de la tâche de rafraîchissement
+ * (20 ms) même si rien n'est tenu ; puis retour à la règle de maintien. Le
+ * repos jamais armé reste muet — la prémisse §2.3 (R1) tient. Le dongle
+ * déduplique par contenu : les répétitions lui sont gratuites. */
+#define HALF_TX_REPEATS 3u   /* 3 × 20 ms ≈ la fenêtre 5 × 10 ms de la gauche */
+
+typedef struct { uint8_t restantes; } half_tx_repeat_t;
+
+static inline bool half_tx_doit_emettre_repare(half_tx_repeat_t *rep, bool change,
+                                               bool tenu, uint32_t now_ms,
+                                               uint32_t dernier_ms, uint32_t periode_ms)
+{
+    if (change) { rep->restantes = HALF_TX_REPEATS; return true; }
+    if (rep->restantes) { rep->restantes--; return true; }
+    return half_tx_doit_emettre(false, tenu, now_ms, dernier_ms, periode_ms);
+}
+
 /* ── Cible d'émission de la droite : dongle ↔ gauche directe (fusion) ────────
  *
  * En fusion, la droite parle au SLOT CLAVIER DU DONGLE (KaSe.01), qui fait

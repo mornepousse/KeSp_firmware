@@ -401,23 +401,25 @@ void half_link_tx_update(const uint8_t *bitmap, bool change)
      * ici, et un relâchement publié entre-temps par le callback de scan serait
      * ressuscité — la touche resterait enfoncée jusqu'au prochain changement.
      * Un seul écrivain, donc : le callback. */
+    /* Réparation bornée : un changement arme HALF_TX_REPEATS répétitions
+     * (half_tx_doit_emettre_repare, testée). Le compteur vit sous le même
+     * spinlock que l'état : callback de scan et tâche de rafraîchissement y
+     * accèdent tous deux. La décision est prise DANS la section critique (pure,
+     * sans blocage) pour que l'horodatage et le compteur bougent d'un bloc. */
+    static half_tx_repeat_t s_rep;
+    bool emettre;
     taskENTER_CRITICAL(&s_etat_mux);
     if (change && bitmap) memcpy(s_etat_local, bitmap, RF_HALF_BITMAP_BYTES);
     memcpy(etat, s_etat_local, RF_HALF_BITMAP_BYTES);
     dernier = s_dernier_tx_ms;
-    taskEXIT_CRITICAL(&s_etat_mux);
-
     bool tenu = false;
     for (int i = 0; i < RF_HALF_BITMAP_BYTES; i++)
         if (etat[i]) { tenu = true; break; }
-
-    if (!half_tx_doit_emettre(change, tenu, now, dernier, HALF_TX_REFRESH_MS))
-        return;
-
-    taskENTER_CRITICAL(&s_etat_mux);
-    s_dernier_tx_ms = now;
+    emettre = half_tx_doit_emettre_repare(&s_rep, change, tenu, now, dernier, HALF_TX_REFRESH_MS);
+    if (emettre) s_dernier_tx_ms = now;
     taskEXIT_CRITICAL(&s_etat_mux);
 
+    if (!emettre) return;
     half_link_tx_matrix(etat);
 }
 
