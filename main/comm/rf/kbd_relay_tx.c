@@ -71,6 +71,12 @@ static const char *TAG = "kbd_relay";
 /* La radio de CE module. Sous HALF_LINK_RX elle n'existe pas : la puce
  * appartient à half_link, qui nous prête une excursion. */
 static rf_radio_t s_radio;
+#if CONFIG_KASE_DONGLE_FUSION
+/* Cible dongle mémorisée (canal/adresse dérivés du set_id), pour rebasculer la
+ * radio en PTX après une écoute USB. Fusion phase 2 : bascule dynamique. */
+static rf_radio_cfg_t s_kbd_cfg;
+static bool s_usb_listening = false;   /* la radio est-elle en PRX (mode USB) ? */
+#endif
 #endif
 static bool s_paired = false;
 
@@ -148,20 +154,63 @@ static void kbd_relay_refresh_cb(void *arg)
 {
     (void)arg;
     usb_presence_poll(s_paired);
-#if CONFIG_KASE_DONGLE_FUSION
-    /* Fusion phase 2 : en mode USB, la gauche tape en local ; elle ANNONCE ce
-     * mode au dongle pour qu'il se taise et réémette la droite. Annonce rapide
-     * (mains, coût nul) pour raccourcir la fenêtre de double frappe au branchement. */
+#if CONFIG_KASE_DONGLE_FUSION && !CONFIG_KASE_HALF_LINK_RX
+    /* Fusion phase 2 : bascule dynamique de la radio selon la route.
+     *  - USB : la gauche tape en local. Elle passe sa radio en PRX sur le lien
+     *    (KaSe.03) pour ÉCOUTER la droite réémise par le dongle, et ANNONCE son
+     *    mode au dongle par excursion. (Sur secteur : écouter est gratuit.)
+     *  - sans-fil : radio en PTX vers le dongle (autonomie : elle n'écoute pas).
+     * Un seul propriétaire (kbd_relay), pas de handoff : on écrit REG_CONFIG via
+     * rearm_rx / set_ptx. Tout sous s_tx_mutex (le callback de scan n'émet qu'en
+     * mode sans-fil, route-gated). */
     if (kbd_active_route() == KBD_OUT_USB) {
+        if (!s_tx_mutex || xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(20)) != pdTRUE) return;
+        if (!s_usb_listening) {
+            rf_radio_cfg_t link = s_kbd_cfg;
+            link.channel     = RF_CH_HALF_LINK;
+            link.addr_suffix = RF_ADDR_HALF_LINK;
+            rf_driver_rearm_rx(&s_radio, &link);
+            s_usb_listening = true;
+            ESP_LOGW(TAG, "fusion USB : ecoute la droite reemise (PRX ch=0x%02X KaSe.%02X)",
+                     RF_CH_HALF_LINK, RF_ADDR_HALF_LINK);
+        }
+        /* Réémissions de la droite (heartbeats) — étape 4a : journaliser pour
+         * prouver le lien dongle→gauche avant de brancher le moteur (étape 4b). */
+        uint8_t rb[32];
+        while (rf_driver_rx_available(&s_radio)) {
+            uint16_t rn = rf_driver_read_rx(&s_radio, rb, sizeof(rb));
+            if (rn == 0) break;
+            rf_heartbeat_t h;
+            if (rf_decode_heartbeat(rb, rn, &h))
+                ESP_LOGW(TAG, "fusion USB : droite recue seq=%u bm=%02x%02x%02x%02x",
+                         h.seq, h.bitmap[0], h.bitmap[1], h.bitmap[2], h.bitmap[3]);
+        }
+        /* Annonce du mode au dongle par excursion (retour PRX KaSe.03). */
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
         if ((uint32_t)(now - s_derniere_emission_ms) >= 200u) {
             rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = s_status_seq++,
                                .mode_usb = true };
-            uint8_t buf[4];
-            uint16_t n = rf_encode_status(buf, &st);
-            kbd_tx_locked(buf, (uint8_t)n);
+            uint8_t sb[4];
+            uint16_t sn = rf_encode_status(sb, &st);
+            static const uint8_t link_addr[5] = { 'K','a','S','e', RF_ADDR_HALF_LINK };
+            uint8_t dst[5] = { s_kbd_cfg.rx_addr[0], s_kbd_cfg.rx_addr[1],
+                               s_kbd_cfg.rx_addr[2], s_kbd_cfg.rx_addr[3],
+                               s_kbd_cfg.addr_suffix };
+            rf_driver_oob_tx(&s_radio, s_kbd_cfg.channel, dst, sb, (uint8_t)sn,
+                             RF_CH_HALF_LINK, link_addr);
+            s_derniere_emission_ms = now;
         }
+        xSemaphoreGive(s_tx_mutex);
         return;
+    }
+    /* Retour au mode sans-fil : rebasculer la radio en PTX vers le dongle. */
+    if (s_usb_listening) {
+        if (s_tx_mutex && xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+            rf_driver_set_ptx(&s_radio, &s_kbd_cfg);
+            s_usb_listening = false;
+            ESP_LOGW(TAG, "fusion : retour emission PTX vers le dongle");
+            xSemaphoreGive(s_tx_mutex);
+        }
     }
 #endif
     if (kbd_active_route() != KBD_OUT_RF) return;
@@ -326,6 +375,9 @@ void kbd_relay_init(void)
         ESP_LOGE(TAG, "NRF PTX init failed (%d) — wireless relay disabled", err);
         return;   /* s_paired stays false */
     }
+#if CONFIG_KASE_DONGLE_FUSION
+    s_kbd_cfg = nrf_cfg;   /* cible dongle mémorisée pour rebasculer en PTX (fusion phase 2) */
+#endif
 #endif
 
 #if !CONFIG_KASE_HALF_LINK_RX

@@ -380,6 +380,34 @@ esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
  * clear flags + FLUSH_RX → CONFIG=0x3F (PRX, powered) → CE-high. No power-down
  * cycle, so ~200 µs settle is enough. Called by the dongle radio watchdog.
  * (Mirrors the register block in rf_driver_init; keep them in sync.) */
+/* Bascule PERSISTANTE vers PTX sur cfg->channel/adresse, SANS re-claim ni
+ * ré-init SPI (contrairement à rf_driver_init_tx, qui referait spi_bus_add_device
+ * et journaliserait un CONFLIT). Pendant de rf_driver_rearm_rx pour l'autre sens.
+ * Fusion phase 2 : la gauche bascule PRX(USB)↔PTX(sans-fil) selon la route sur
+ * une puce déjà initialisée. CE reste bas ; rf_driver_send pulse CE par paquet. */
+void rf_driver_set_ptx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
+{
+    if (!r->present) return;
+    ce_low(r);
+    rf_driver_write_reg(r, REG_EN_AA, 0x01);
+    rf_driver_write_reg(r, REG_EN_RXADDR, 0x01);
+    rf_driver_write_reg(r, REG_SETUP_AW, 0x03);
+    rf_driver_write_reg(r, REG_SETUP_RETR, 0x1F);
+    rf_driver_set_channel(r, cfg->channel);
+    rf_driver_write_reg(r, REG_RF_SETUP, 0x06);      /* 1 Mbps, 0 dBm — comme init */
+    rf_driver_write_reg(r, REG_FEATURE, 0x04);
+    rf_driver_write_reg(r, REG_DYNPD, 0x01);
+    uint8_t addr[5];
+    memcpy(addr, cfg->rx_addr, 4);
+    addr[4] = cfg->addr_suffix;
+    write_reg_buf(r, REG_TX_ADDR_OOB, addr, 5);
+    write_reg_buf(r, REG_RX_ADDR_P0,  addr, 5);      /* match TX_ADDR pour l'ACK ESB */
+    rf_driver_write_reg(r, REG_STATUS, 0x70);
+    { uint8_t c = CMD_FLUSH_TX, rx; csn_low(r); spi_xfer(r, &c, &rx, 1); csn_high(r); }
+    rf_driver_write_reg(r, REG_CONFIG, 0x3E);        /* PTX, alimenté */
+    rf_settle_us(RF_TSTBY2A_US);
+}
+
 void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
 {
     if (!r->present) return;

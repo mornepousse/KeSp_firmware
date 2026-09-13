@@ -72,6 +72,11 @@ void rf_driver_set_rx_address(rf_radio_t *r, const uint8_t addr[5]);
  * NRF that stopped ACKing/receiving over time. Used by the dongle radio watchdog. */
 void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg);
 
+/* Bascule persistante vers PTX (canal/adresse du cfg) sur une puce déjà
+ * initialisée, sans re-claim ni ré-init SPI. Pendant de rf_driver_rearm_rx.
+ * Fusion phase 2 : la gauche alterne PRX(USB)↔PTX(sans-fil) selon la route. */
+void rf_driver_set_ptx(rf_radio_t *r, const rf_radio_cfg_t *cfg);
+
 /* Boot-time sanity check on a freshly init'd PRX radio: read back CONFIG/EN_AA/
  * EN_RXADDR/RF_CH/RF_SETUP/RX_ADDR_P0.lsb and compare to expected init values.
  * Logs "verify OK" with the read-back values, or "verify FAIL" with the per-register
