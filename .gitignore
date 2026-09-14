@@ -19,3 +19,6 @@ __pycache__/
 
 # Secure Boot V2 signing key — NEVER commit (back up offline; losing it = no more dongle updates)
 secure_boot_signing_key.pem
+
+# Maquettes du compagnon visuel (brainstorming), pas du code
+.superpowers/
