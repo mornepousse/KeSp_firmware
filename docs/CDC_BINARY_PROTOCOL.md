@@ -603,8 +603,8 @@ Format d'un enregistrement (slot 0 = LEFT, slot 1 = RIGHT) :
 | Offset | Type   | Champ      | Description                                      |
 |-------:|--------|------------|--------------------------------------------------|
 | 0      | u8     | `batt_dV`  | Tension × 10 (volts × 10). `0xFF` = jamais vu    |
-| 1      | u8     | `soc_pct`  | State of charge 0..100. `0xFF` = inconnu         |
-| 2      | u8     | `charging` | 0 = decharge, 1 = en charge. `0xFF` = inconnu    |
+| 1      | u8     | `soc_pct`  | State of charge 0..100, DERIVE de la tension par le dongle (table Li-ion 16340 : 3,3 V→0, 3,5→15, 3,7→40, 3,9→70, 4,15→100). `0xFF` = inconnu |
+| 2      | u8     | `charging` | Etat DEDUIT (pas de VBUS sur les moities) : 0 = decharge/inconnu, 1 = en charge probable (tension qui monte de >= 0,1 V), 2 = pleine (plateau >= 4,15 V tenu >= 2 min). `0xFF` = tension inconnue |
 | 3..6   | u32 LE | `age_ms`   | ms depuis la derniere mise a jour. `0xFFFFFFFF` = jamais recu |
 
 **Regles d'affichage coter soft :**

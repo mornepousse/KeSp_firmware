@@ -47,6 +47,7 @@ uint8_t rf_signal_q255(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
 #include "rf_packet.h"
 #include "rf_slot.h"
 #include "dongle_engine.h"   /* fusion : moteur keymap embarqué (gardé en interne) */
+#include "batt_calc.h"      /* batt_soc_pct — SoC dérivé de la tension, côté dongle */
 #include "board_rf.h"
 #include "rf_pairing.h"   /* rf_pairing_load_set_id_dongle, rf_apply_set_id */
 #if CONFIG_KASE_NRF_LINE_TEST
@@ -134,9 +135,17 @@ static void apply_safe_action(rf_safe_action_t action)
 extern void dongle_cache_set_battery(uint8_t slot, uint8_t batt_dV,
                                      uint8_t soc_pct, uint8_t charging);
 
-static void cache_battery(uint8_t slot, uint8_t batt_dV)
+/* Cache batterie indexé par MOITIÉ (0 = gauche, 1 = droite), PAS par slot : en
+ * fusion les deux moitiés partagent le slot clavier et se distinguent par le
+ * drapeau d'identité de STATUS. Deux conventions se rencontrent ici : la radio
+ * dit « 0 = inconnu » (batt_dV), le cache et la CDC disent « 0xFF = inconnu » —
+ * la traduction se fait à cette frontière et nulle part ailleurs. Le SoC est
+ * DÉRIVÉ de la tension côté dongle (batt_soc_pct, pur), pas transporté. */
+static void cache_battery_half(uint8_t half, uint8_t batt_dV, uint8_t charging)
 {
-    dongle_cache_set_battery(slot, batt_dV, 0xFF, 0xFF);
+    uint8_t idx = (half == RF_HALF_RIGHT) ? 1 : 0;
+    if (batt_dV == 0) { dongle_cache_set_battery(idx, 0xFF, 0xFF, 0xFF); return; }
+    dongle_cache_set_battery(idx, batt_dV, batt_soc_pct(batt_dV), charging);
 }
 
 /* ── Vider les paquets en attente sur une radio ── */
@@ -187,7 +196,7 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
             rf_status_t st;
             if (rf_decode_status(buf, n, &st)) {
                 s_link_q[slot] = st.link_q;
-                cache_battery(slot, st.batt_dV);
+                cache_battery_half(st.half, st.batt_dV, st.charging);
 #if CONFIG_KASE_DONGLE_FUSION
                 /* La gauche annonce son mode ET l'empreinte de sa keymap par
                  * STATUS sur le slot clavier. Garde-fou de sync : le dongle
@@ -204,7 +213,7 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
             rf_heartbeat_t h;
             if (rf_decode_heartbeat(buf, n, &h)) {
                 s_link_q[slot] = h.link_q;
-                cache_battery(slot, h.batt_dV);
+                cache_battery_half(RF_HALF_LEFT, h.batt_dV, 0);   /* ancien format : gauche seule */
             }
         } else if (type == PKT_TYPE_HIDREPORT) {
             /* Le clavier a déjà fait tourner son moteur : on pousse tel quel.

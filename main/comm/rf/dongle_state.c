@@ -58,6 +58,7 @@ typedef struct {
     uint32_t last_ms;     /* 0 = jamais vu */
 } dongle_batt_t;
 
+/* Index = MOITIÉ (0 gauche, 1 droite) — cf. cache_battery_half (rf_rx_task.c). */
 static dongle_batt_t s_batt[2] = {
     { 0xFF, 0xFF, 0xFF, 0 },
     { 0xFF, 0xFF, 0xFF, 0 },
