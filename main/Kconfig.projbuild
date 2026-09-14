@@ -173,6 +173,16 @@ config KASE_BATT_SENSE
         « En charge » n'est pas mesurable (pas de VBUS) : deduit d'un plateau
         >= 4,15 V (pleine) ou d'une hausse de tension (en charge probable).
 
+config KASE_DISPLAY_MEMLCD
+    bool "Ecran Sharp memory-LCD LS011B7DH03 (moities Niphargus, portrait 68x160)"
+    default n
+    help
+        Pilote + backend LVGL de l'ecran nice!view des moities. Le SPI est
+        PARTAGE avec le nRF24 : toute transaction ecran passe sous le verrou du
+        proprietaire de la radio (rf_bus_lock). CS actif haut, tenu bas des le
+        boot. Image gelee en light sleep, aucun reveil pour l'ecran. Rend
+        KASE_HAS_DISPLAY vrai (premier default satisfait).
+
 config KASE_HALF_LINK_TX
     bool "Lien inter-moities : emettre la demi-matrice (moitie droite)"
     default n
@@ -255,6 +265,7 @@ config KASE_MATRIX_LOG_CONSOLE
 
 config KASE_HAS_DISPLAY
     bool
+    default y if KASE_DISPLAY_MEMLCD
     default n if KASE_NIPHAR_MASTER
     default y if KASE_DEVICE_ROLE_KEYBOARD
     default n

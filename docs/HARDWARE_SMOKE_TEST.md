@@ -58,6 +58,11 @@ dans la PR/release.
       droite s'endort toujours à 60 s malgré son STATUS lent ; une moitié éteinte
       repasse « inconnue » ; batterie en charge → après ≥ 2 min à ≥ 4,15 V,
       charging = 2 (PLEINE)
+- [ ] Écrans memory-LCD (gauche ET droite) : au boot, console « panneau attache
+      (bus radio pret), damier ecrit » APRÈS « radio PTX … init OK » ; damier
+      8×8 net sur tout le panneau, sans pixel parasite ; taper pendant un
+      rafraîchissement ne perd aucune frappe ; en light sleep l'image reste
+      figée et lisible, la carte dort toujours à 60 s ; au réveil l'écran revit
 - [ ] Première touche après veille : laisser la moitié s'endormir (60 s sans
       toucher), taper UNE touche brève → le caractère sort (pas avalé) et rien
       ne reste collé ; console : « reveil : 1 touche(s) capturee(s) ». À faire

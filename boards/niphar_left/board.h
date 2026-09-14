@@ -138,14 +138,19 @@
 #define BOARD_TRACK_SCL_GPIO      GPIO_NUM_48
 #define BOARD_TRACK_RDY_GPIO      GPIO_NUM_42
 
-/* ── Pas d'écran sur la gauche (connecteur J12 non peuplé) ──────
- * docs/NIPHARGUS_V2_HARDWARE.md : l'écran Sharp memory-LCD (J4, SPI,
- * write-only, CS=GPIO14) n'est peuplé que côté DROITE ; le connecteur miroir
- * J12 côté gauche est vide. CONFIG_KASE_HAS_DISPLAY est mis à `n` pour
- * KASE_NIPHAR_MASTER dans main/Kconfig.projbuild (le premier `default`
- * satisfait gagne, avant le `default y if KASE_DEVICE_ROLE_KEYBOARD`) — donc
- * aucune macro BOARD_DISPLAY_* fantôme ici : ce serait décrire un écran qui
- * n'existe pas. */
+/* ── Écran Sharp LS011B7DH03 (module type nice!view, J12) ──────
+ * Soudé le 2026-09-14 (l'utilisateur : « les écrans sont soudés sur les 2 »).
+ * Même module que la droite, même bus : partage le SPI du nRF24 (write-only,
+ * pas de MISO), CS ACTIF HAUT sur GPIO14, monté en PORTRAIT (68 de large × 160
+ * de haut). Pilote : display/memlcd. Le CS est tenu BAS dès le boot pour que
+ * l'écran n'écoute jamais le trafic radio du bus partagé. */
+#define BOARD_DISPLAY_BACKEND_MEMLCD
+#define BOARD_LCD_CS_GPIO         GPIO_NUM_14
+#define BOARD_LCD_CS_ACTIVE_HIGH  1
+#define BOARD_LCD_ROTATE_180      0
+#define BOARD_DISPLAY_WIDTH       68
+#define BOARD_DISPLAY_HEIGHT      160
+#define BOARD_DISPLAY_SLEEP_MS    60000
 #define BOARD_HAS_LED_STRIP  0
 
 /* ── Scan matrice ──────────────────────────────────────────────

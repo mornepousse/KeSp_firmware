@@ -120,8 +120,13 @@
  * ni dans une fiche produit vérifiée — pas de BOARD_LCD_WIDTH/HEIGHT ici tant
  * qu'elles ne sont pas figées. À poser en brique B6, quand le driver écran
  * les utilisera réellement. */
+#define BOARD_DISPLAY_BACKEND_MEMLCD
 #define BOARD_LCD_CS_GPIO         GPIO_NUM_14
 #define BOARD_LCD_CS_ACTIVE_HIGH  1
+#define BOARD_LCD_ROTATE_180      0
+#define BOARD_DISPLAY_WIDTH       68    /* PORTRAIT : 68 de large × 160 de haut */
+#define BOARD_DISPLAY_HEIGHT      160
+#define BOARD_DISPLAY_SLEEP_MS    60000
 
 #define BOARD_HAS_LED_STRIP  0
 

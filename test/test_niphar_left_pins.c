@@ -44,26 +44,21 @@
 #include "../boards/niphar_left/board.h"
 #include "../main/comm/rf/rf_slot.h"
 
-/* Garde de compilation : la gauche n'a AUCUN écran (connecteur J12 non
- * peuplé, cf. docs/NIPHARGUS_V2_HARDWARE.md). main/CMakeLists.txt:30-35 lit
- * le TEXTE de board.h pour choisir le backend d'affichage (round/OLED) — une
- * macro BOARD_DISPLAY_* égarée ici changerait le build sans qu'aucun test
- * bronche. On fait planter la compilation plutôt que de laisser une macro
- * fantôme décrire un écran qui n'existe pas. */
-#ifdef BOARD_LCD_CS_GPIO
-#error "la gauche n'a pas d'écran (J12 non peuplé) : BOARD_LCD_CS_GPIO n'a rien à faire dans boards/niphar_left/board.h"
+/* Garde de compilation : la gauche a LE MÊME écran que la droite depuis le
+ * 2026-09-14 (Sharp LS011B7DH03 soudé sur J12, portrait 68×160, CS actif haut
+ * sur GPIO14, SPI partagé avec le nRF24). CMakeLists.txt lit le TEXTE de board.h
+ * pour choisir le backend : un BOARD_DISPLAY_BACKEND_ROUND/OLED égaré ici
+ * changerait le build sans qu'aucun test bronche — on fait planter la
+ * compilation. (Jusqu'au 2026-09-14 ce test interdisait TOUTE macro écran :
+ * J12 était déclaré vide ; le matériel a changé, le contrat le suit.) */
+#ifndef BOARD_DISPLAY_BACKEND_MEMLCD
+#error "la gauche a un écran Sharp memory-LCD (J12 soudé) : BOARD_DISPLAY_BACKEND_MEMLCD manque dans boards/niphar_left/board.h"
 #endif
 #ifdef BOARD_DISPLAY_BACKEND_ROUND
-#error "la gauche n'a pas d'écran : BOARD_DISPLAY_BACKEND_ROUND changerait le backend choisi par CMakeLists.txt"
+#error "la gauche n'a pas d'écran rond : BOARD_DISPLAY_BACKEND_ROUND changerait le backend choisi par CMakeLists.txt"
 #endif
 #ifdef BOARD_DISPLAY_BACKEND_OLED
-#error "la gauche n'a pas d'écran : BOARD_DISPLAY_BACKEND_OLED changerait le backend choisi par CMakeLists.txt"
-#endif
-#ifdef BOARD_DISPLAY_WIDTH
-#error "la gauche n'a pas d'écran : BOARD_DISPLAY_WIDTH n'a rien à faire dans boards/niphar_left/board.h"
-#endif
-#ifdef BOARD_DISPLAY_HEIGHT
-#error "la gauche n'a pas d'écran : BOARD_DISPLAY_HEIGHT n'a rien à faire dans boards/niphar_left/board.h"
+#error "la gauche n'a pas d'OLED : BOARD_DISPLAY_BACKEND_OLED changerait le backend choisi par CMakeLists.txt"
 #endif
 
 /* GPIO non câblés : strapping et PSRAM octale. Aucun pin du board ne doit
@@ -233,6 +228,19 @@ static void test_left_radio_pin_aliases(void)
     TEST_ASSERT_EQ(BOARD_NRF_SPI_CLOCK_HZ, BOARD_NRF_CLOCK_HZ, "alias horloge SPI");
 }
 
+/* L'écran de la gauche est le MÊME module que celui de la droite, au même CS :
+ * test_niphar_right_pins.c vérifie 14 / actif haut de son côté ; les deux
+ * moitiés doivent rester alignées (même pilote, même bus partagé). */
+static void test_ecran_memlcd_gauche(void)
+{
+    TEST_ASSERT_EQ(BOARD_LCD_CS_GPIO, 14, "CS de l'écran Sharp (comme la droite)");
+    TEST_ASSERT_EQ(BOARD_LCD_CS_ACTIVE_HIGH, 1, "CS actif HAUT, pas bas");
+    TEST_ASSERT_EQ(BOARD_DISPLAY_WIDTH, 68, "portrait : 68 px de large");
+    TEST_ASSERT_EQ(BOARD_DISPLAY_HEIGHT, 160, "portrait : 160 px de haut");
+    TEST_ASSERT(BOARD_LCD_CS_GPIO != BOARD_NRF_CSN && BOARD_LCD_CS_GPIO != BOARD_NRF_CE,
+                "le CS écran n'est ni le CSN ni le CE de la radio (bus partagé)");
+}
+
 void test_niphar_left_pins(void)
 {
     printf("\n-- brochage Niphargus GAUCHE (contrat netlist 2026-08-06) --\n");
@@ -244,4 +252,5 @@ void test_niphar_left_pins(void)
     test_left_no_pin_used_twice();
     test_left_swaps_the_link_uart();
     test_left_radio_pin_aliases();
+    test_ecran_memlcd_gauche();
 }

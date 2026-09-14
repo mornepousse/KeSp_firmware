@@ -12,6 +12,9 @@
 #if CONFIG_KASE_BATT_SENSE
 #include "batt_sense.h"
 #endif
+#if CONFIG_KASE_DISPLAY_MEMLCD
+#include "memlcd_panel.h"   /* memlcd_cs_idle : CS écran bas dès le boot (bus partagé nRF24) */
+#endif
 #if CONFIG_KASE_VEILLE
 #include "veille.h"
 #endif
@@ -29,10 +32,10 @@
 #endif
 #include <stdint.h>
 
-#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 #if CONFIG_KASE_HAS_DISPLAY
-#include "display_backend.h"
+#include "display_backend.h"   /* tout rôle avec un écran (clavier, moitié droite) */
 #endif
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 #include "hid_bluetooth_manager.h"   /* real API, or no-op stubs when HAS_BLE off */
 #include "keyboard_task.h"
 #include "led_strip_anim.h"
@@ -104,6 +107,17 @@ static void cpu_time_logger_task(void *arg) {
 #endif
 
 #if CONFIG_KASE_HAS_DISPLAY
+#if CONFIG_KASE_DEVICE_ROLE_NIPHAR_SLAVE && CONFIG_KASE_DISPLAY_MEMLCD
+/* Écran de la DROITE : tâche minimale, voir l'appel dans app_main (rôle
+ * esclave). La tâche clavier ci-dessous tire le moteur et les stats, absents. */
+static void memlcd_slave_display_task(void *arg) {
+  (void)arg;
+  const display_backend_t *be = display_get_backend();
+  if (!be || !be->init()) { ESP_LOGW(TAG, "ecran droite : init KO"); vTaskDelete(NULL); return; }
+  for (;;) { be->update(); vTaskDelay(pdMS_TO_TICKS(100)); }
+}
+#endif
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 // Task handling status display updates, sleep/wake and layer change handling.
 static uint8_t last_displayed_layer =
     255; // Track what layer is currently shown
@@ -158,6 +172,7 @@ static void status_display_task(void *arg) {
         100)); // 100ms polling — fast enough for UI, no keyboard lag
   }
 }
+#endif /* CONFIG_KASE_DEVICE_ROLE_KEYBOARD */
 #endif /* CONFIG_KASE_HAS_DISPLAY */
 
 /* Boot crash detection: RTC memory survives soft reboot but not power cycle */
@@ -195,6 +210,11 @@ void app_main(void) {
   /* AVANT toute configuration de matrice : les colonnes peuvent être encore
    * figées par le maintien RTC posé avant le sommeil profond. */
   veille_liberer_gpio();
+#endif
+#if CONFIG_KASE_DISPLAY_MEMLCD
+  /* Écran sur le SPI PARTAGÉ avec la radio : son CS (actif haut) est tenu BAS
+   * dès maintenant, AVANT toute init radio, pour qu'il n'écoute jamais le bus. */
+  memlcd_cs_idle();
 #endif
 #if CONFIG_KASE_BATT_SENSE
   /* Jauge : premiere mesure au boot, puis toutes les 10 s et a chaque reveil. */
@@ -335,7 +355,10 @@ void app_main(void) {
 #if !SKIP_STATUS_DISPLAY
     {
       extern const display_backend_t
-#ifdef BOARD_DISPLAY_BACKEND_ROUND
+#if defined(BOARD_DISPLAY_BACKEND_MEMLCD)
+          memlcd_display_backend;
+      display_set_backend(&memlcd_display_backend);
+#elif defined(BOARD_DISPLAY_BACKEND_ROUND)
           round_display_backend;
       display_set_backend(&round_display_backend);
 #else
@@ -443,6 +466,17 @@ void app_main(void) {
 #endif
   rtc_matrix_deinit();
   matrix_setup();
+#if CONFIG_KASE_DISPLAY_MEMLCD
+  /* Écran de la DROITE : la status_display_task du rôle clavier tire le moteur
+   * et les stats, absents ici. Une tâche minimale suffit : init du backend,
+   * update() toutes les 100 ms (redessin à la demande + entretien VCOM), et la
+   * veille lui est signalée par veille.c (image gelée). */
+  {
+    extern const display_backend_t memlcd_display_backend;
+    display_set_backend(&memlcd_display_backend);
+    xTaskCreatePinnedToCore(memlcd_slave_display_task, "memlcd_disp", 4096, NULL, 2, NULL, 1);
+  }
+#endif
 #endif /* device role */
 
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD

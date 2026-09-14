@@ -80,3 +80,6 @@ CONFIG_KASE_LINK_WIRE=y
 
 # Jauge batterie : ADC2 sur VBAT_SENSE (GPIO13), remontee au dongle par STATUS.
 CONFIG_KASE_BATT_SENSE=y
+
+# Ecran Sharp memory-LCD (portrait 68x160) sur le SPI partage avec le nRF24.
+CONFIG_KASE_DISPLAY_MEMLCD=y

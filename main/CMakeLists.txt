@@ -74,7 +74,14 @@ endif()
 
 # Display backend + status display — keyboard role only
 if(CONFIG_KASE_HAS_DISPLAY)
-    if(DISPLAY_BACKEND STREQUAL "round")
+    if(DISPLAY_BACKEND STREQUAL "memlcd")
+        # Sharp memory-LCD des moities Niphargus (portrait 68x160, SPI partage nRF24).
+        list(APPEND srcs
+            "display/memlcd/memlcd_panel.c"
+            "display/memlcd/memlcd_backend.c"
+            "display/assets/img_niphargus_60.c"
+        )
+    elseif(DISPLAY_BACKEND STREQUAL "round")
         list(APPEND srcs
             "display/round/spi_round_display.c"
             "display/round/round_ui.c"
@@ -344,6 +351,7 @@ idf_component_register(
         "display/oled"
         "display/oled/screens"
         "display/round"
+        "display/memlcd"
         "led"
         "display/assets"
         "comm"

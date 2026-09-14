@@ -131,3 +131,23 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   dongle (CDC BATTERY, slots gauche/droite), la droite par un STATUS toutes les
   30 s sans s'empêcher de dormir ; une tension inconnue s'affiche « inconnue »
   (0xFF), jamais 0 V ; en charge, PLEINE apparaît après le plateau.
+
+## Écrans — Sharp memory-LCD des moitiés
+
+- [test:test_memlcd_model] rev8 est une involution (le panneau lit LSB-first,
+  l'ESP32 émet MSB-first : une inversion fausse = écran muet sans erreur) ; le
+  nom de couche se coupe en 4 caractères × 3 lignes puis « … », jamais zéro
+  ligne, NULL sûr ; le modèle ne déclenche un redessin que si un champ AFFICHÉ
+  change — chaque redessin est une transaction sur le bus partagé avec la radio.
+- [test:test_rf_display_roundtrip] La trame DISPLAY (couche statique, batterie
+  de l'autre moitié, dongle vu, destinataire) tient en 4 octets dans un ACK
+  payload et survit à l'encode/decode.
+- [test:test_ecran_memlcd_gauche] La gauche a LE MÊME écran que la droite
+  (J12 soudé le 2026-09-14) : CS 14 actif haut, portrait 68×160, et aucun autre
+  backend (ROUND/OLED) ne peut être choisi par CMake pour cette moitié.
+- [smoke:Écrans memory-LCD] Le CS de l'écran (actif haut) est tenu BAS dès le
+  boot des deux moitiés ; l'attachement du panneau attend que la radio ait créé
+  le bus SPI (init différée) ; toute transaction écran passe sous le verrou du
+  propriétaire de la radio et cède si elle est occupée ; le damier de bring-up
+  est net sur tout le panneau ; l'image reste gelée en light sleep et aucun
+  réveil n'est dû à l'écran.
