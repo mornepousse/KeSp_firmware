@@ -162,6 +162,17 @@ config KASE_VEILLE_PROFONDE_S
         carte. Abaisser temporairement (30 s) pour eprouver le reveil EXT1 au
         banc, sans quoi il faudrait attendre quatre heures.
 
+config KASE_BATT_SENSE
+    bool "Jauge batterie : lecture ADC de VBAT_SENSE (moities Niphargus)"
+    default n
+    help
+        Mesure la tension batterie toutes les 10 s et au reveil sur
+        BOARD_VBAT_SENSE_GPIO (pont 1M/1M + 100 nF, ADC2). Remontee au dongle
+        dans PKT_TYPE_STATUS avec l'identite de moitie ; exposee par la CDC
+        BATTERY. ADC2 exige l'absence de WiFi — vrai sur le Niphargus.
+        « En charge » n'est pas mesurable (pas de VBUS) : deduit d'un plateau
+        >= 4,15 V (pleine) ou d'une hausse de tension (en charge probable).
+
 config KASE_HALF_LINK_TX
     bool "Lien inter-moities : emettre la demi-matrice (moitie droite)"
     default n

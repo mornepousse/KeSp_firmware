@@ -254,6 +254,11 @@ if(CONFIG_KASE_VEILLE)
     list(APPEND srcs "power/veille.c")
 endif()
 
+# Jauge batterie (ADC de VBAT_SENSE) — moities Niphargus.
+if(CONFIG_KASE_BATT_SENSE)
+    list(APPEND srcs "power/batt_sense.c")
+endif()
+
 # Lien radio inter-moities (B3). rf_driver.c est deja tire par les gardes RF
 # ci-dessus quand l'un des deux bouts est actif.
 if(CONFIG_KASE_HALF_LINK_TX OR CONFIG_KASE_HALF_LINK_RX)
@@ -284,6 +289,7 @@ endif()
 set(priv_requires
     esp_driver_gpio
     esp_timer
+    esp_adc           # jauge batterie (batt_sense) — inconditionnel, ~rien sans KASE_BATT_SENSE
     nvs_flash
     nvs_sec_provider  # NVS encryption HMAC scheme (CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC).
                       # Unconditional like esp_wifi/bt above: a conditional require fails on

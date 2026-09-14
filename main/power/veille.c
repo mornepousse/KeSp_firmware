@@ -10,6 +10,9 @@
 #endif
 #include "esp_log.h"
 #include "esp_sleep.h"
+#if CONFIG_KASE_BATT_SENSE
+#include "batt_sense.h"
+#endif
 #include "esp_timer.h"
 #include "tinyusb.h"
 #include "driver/gpio.h"
@@ -133,6 +136,9 @@ void veille_legere_entrer(void)
         esp_rom_delay_us(5000);
         matrix_wake_capture();
     }
+#if CONFIG_KASE_BATT_SENSE
+    batt_sense_sample_now();   /* une mesure au réveil : le timer était gelé */
+#endif
 #if CONFIG_KASE_HALF_LINK_RX
     if (matrix_flag_take(&stat_matrix_changed)) {
         build_keycode_report();

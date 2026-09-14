@@ -9,6 +9,9 @@
 #if CONFIG_KASE_LINK_WIRE
 #include "link_uart.h"
 #endif
+#if CONFIG_KASE_BATT_SENSE
+#include "batt_sense.h"
+#endif
 #if CONFIG_KASE_VEILLE
 #include "veille.h"
 #endif
@@ -192,6 +195,10 @@ void app_main(void) {
   /* AVANT toute configuration de matrice : les colonnes peuvent être encore
    * figées par le maintien RTC posé avant le sommeil profond. */
   veille_liberer_gpio();
+#endif
+#if CONFIG_KASE_BATT_SENSE
+  /* Jauge : premiere mesure au boot, puis toutes les 10 s et a chaque reveil. */
+  batt_sense_init();
 #endif
 
   if (boot_crash_count > BOOT_CRASH_LIMIT) {

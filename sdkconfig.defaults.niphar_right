@@ -53,3 +53,6 @@ CONFIG_KASE_VEILLE=y
 # B2 — lien filaire TRRS. Le 5 V est mort par défaut et ne se ferme qu'après
 # sonde + ACK sur l'UART1. Une moitié en charge reste éveillée.
 CONFIG_KASE_LINK_WIRE=y
+
+# Jauge batterie : ADC2 sur VBAT_SENSE (GPIO13), remontee au dongle par STATUS.
+CONFIG_KASE_BATT_SENSE=y
