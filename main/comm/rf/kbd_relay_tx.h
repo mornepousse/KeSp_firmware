@@ -55,6 +55,8 @@ void kbd_relay_init(void);
 /* Returns true when wireless mode is active AND the radio is paired to a dongle.
  * False ⇒ hid_report.c falls through to the local USB/BLE path. */
 bool kbd_relay_active(void);
+/* Écran : le dongle a acquitté une trame il y a moins de RF_LINK_LOST_MS. */
+bool kbd_relay_dongle_vu(void);
 
 /* Encode + transmit a keyboard HID report (PKT_TYPE_HIDREPORT / RF_HID_SUB_KBD).
  * modifier: standard HID modifier byte. kb[6]: keycodes (modifiers already

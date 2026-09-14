@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Génère main/display/assets/img_niphargus_60.c depuis le SVG du dépôt Niphargus.
+# Reproductible : Inkscape → PNG 60 px (fond blanc) → seuil 128 → LV_IMG_CF_ALPHA_1BIT.
+set -euo pipefail
+SVG="${1:-$HOME/Documents/GitHub/Niphargus/images/niphargus_logo.svg}"
+OUT="$(dirname "$0")/../main/display/assets/img_niphargus_60.c"
+TMP="$(mktemp -d)"
+inkscape "$SVG" --export-type=png --export-width=60 --export-background=white \
+         --export-background-opacity=1 --export-filename="$TMP/logo.png" >/dev/null 2>&1
+python3 - "$TMP/logo.png" "$OUT" <<'PY'
+import sys, struct, zlib
+png, out = sys.argv[1], sys.argv[2]
+# décodeur PNG minimal (pas de PIL sur la machine) : RGBA/RGB/L 8 bits, non entrelacé
+d = open(png, "rb").read(); assert d[:8] == b"\x89PNG\r\n\x1a\n"
+pos = 8; idat = b""; w = h = ct = 0
+while pos < len(d):
+    ln = struct.unpack(">I", d[pos:pos+4])[0]; typ = d[pos+4:pos+8]; body = d[pos+8:pos+8+ln]; pos += 12 + ln
+    if typ == b"IHDR": w, h, bd, ct = struct.unpack(">IIBB", body[:10])
+    elif typ == b"IDAT": idat += body
+raw = zlib.decompress(idat); bpp = {0:1, 2:3, 4:2, 6:4}[ct]; stride = w * bpp
+rows = []; prev = bytearray(stride); p = 0
+def paeth(a,b,c):
+    pa, pb, pc = abs(b-c), abs(a-c), abs(a+b-2*c)
+    return a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+for y in range(h):
+    f = raw[p]; line = bytearray(raw[p+1:p+1+stride]); p += 1 + stride
+    for i in range(stride):
+        a = line[i-bpp] if i >= bpp else 0; b = prev[i]; c = prev[i-bpp] if i >= bpp else 0
+        if f == 1: line[i] = (line[i] + a) & 255
+        elif f == 2: line[i] = (line[i] + b) & 255
+        elif f == 3: line[i] = (line[i] + (a + b) // 2) & 255
+        elif f == 4: line[i] = (line[i] + paeth(a,b,c)) & 255
+    rows.append(bytes(line)); prev = line
+bits = bytearray(); rowbytes = (w + 7) // 8
+for y in range(h):
+    rb = bytearray(rowbytes)
+    for x in range(w):
+        px = rows[y][x*bpp:(x+1)*bpp]; lum = px[0] if bpp in (1,2) else int(0.299*px[0]+0.587*px[1]+0.114*px[2])
+        if lum < 128: rb[x >> 3] |= 0x80 >> (x & 7)     # 1 = pixel dessiné (alpha)
+    bits += rb
+with open(out, "w") as f:
+    f.write("/* GÉNÉRÉ par scripts/gen_logo_memlcd.sh — ne pas éditer à la main. */\n")
+    f.write('#include "lvgl.h"\n')
+    f.write(f"static const uint8_t img_niphargus_60_map[] = {{\n  0x00,0x00,0x00,0x00, 0xff,0xff,0xff,0xff,\n")  # palette alpha-1bit: transparent, opaque
+    for i in range(0, len(bits), 16): f.write("  " + ",".join(f"0x{b:02x}" for b in bits[i:i+16]) + ",\n")
+    f.write("};\n")
+    f.write(f"const lv_img_dsc_t img_niphargus_60 = {{ .header.cf = LV_IMG_CF_ALPHA_1BIT, .header.always_zero = 0, .header.w = {w}, .header.h = {h}, .data_size = {len(bits)+8}, .data = img_niphargus_60_map }};\n")
+print(f"{out}: {w}x{h}, {len(bits)} octets de bits")
+PY

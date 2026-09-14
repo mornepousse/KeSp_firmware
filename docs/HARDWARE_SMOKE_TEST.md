@@ -64,6 +64,11 @@ dans la PR/release.
       du portrait, damier 8×8 ailleurs), sans pixel parasite ; taper pendant un
       rafraîchissement ne perd aucune frappe ; en light sleep l'image reste
       figée et lisible, la carte dort toujours à 60 s ; au réveil l'écran revit
+- [ ] Écrans memory-LCD UI : gauche → bandeau « RF ▲ » (ou « USB ») + jauge +
+      tension, nom de couche en lignes de 4 (ex. « DVO / RAK »), « L0 », pied
+      « DROITE » + « ? » (tant que la trame DISPLAY n'existe pas) ; droite →
+      même bandeau/pied, logo Niphargus net et centré ; changer de couche
+      (MO tenu) met le nom à jour en < 200 ms sans perdre de frappe
 - [ ] Première touche après veille : laisser la moitié s'endormir (60 s sans
       toucher), taper UNE touche brève → le caractère sort (pas avalé) et rien
       ne reste collé ; console : « reveil : 1 touche(s) capturee(s) ». À faire

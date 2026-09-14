@@ -157,3 +157,10 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   la radio et cède si elle est occupée ; la mire de bring-up (cadre, pavé plein
   en HAUT-GAUCHE, damier 8 px) est nette et bien orientée ; l'image reste gelée
   en light sleep et aucun réveil n'est dû à l'écran.
+- [smoke:Écrans memory-LCD UI] Les deux moitiés affichent en portrait : bandeau
+  (route RF/USB, ▲ si la cible radio a acquitté depuis moins de
+  RF_LINK_LOST_MS, jauge et tension locales), centre (GAUCHE : nom de couche en
+  lignes de 4 + « Ln » ; DROITE : logo Niphargus 60 px centré, généré par
+  scripts/gen_logo_memlcd.sh), pied (l'AUTRE moitié : tension, « ? » tant
+  qu'inconnue) ; l'écran ne se réécrit que si un champ affiché change ; une
+  image refusée par le bus occupé est repoussée au tick suivant, jamais perdue.

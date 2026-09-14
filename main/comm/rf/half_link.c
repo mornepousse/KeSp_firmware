@@ -95,6 +95,7 @@ static portMUX_TYPE s_etat_mux = portMUX_INITIALIZER_UNLOCKED;
 static SemaphoreHandle_t s_tx_radio_mux;
 /* Config TX vivante, pour le chien de garde radio (réarmer une puce figée). */
 static rf_radio_cfg_t s_tx_cfg;
+static uint32_t       s_dernier_ack_ms;   /* dernier ACK de la cible : « dongle vu » pour l'écran */
 #if CONFIG_KASE_DONGLE_FUSION
 /* Repli sans dongle : deux cibles d'émission. La droite vise le dongle par
  * défaut (s_cfg_dongle, MATRIX sur KaSe.01) ; si le dongle disparaît, elle
@@ -338,6 +339,18 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
  * la matrice (half_link_tx_matrix) et le STATUS lent de la jauge
  * (half_link_tx_status) — un seul chemin d'émission, donc un seul propriétaire
  * de la puce et une seule FSM. */
+#if CONFIG_KASE_HALF_LINK_TX
+bool half_link_tx_dongle_vu(void)
+{
+    if (!s_dernier_ack_ms) return false;
+#if CONFIG_KASE_DONGLE_FUSION
+    if (s_tx_fsm.cible != HALF_TX_TO_DONGLE) return false;   /* repli sur la gauche : pas de dongle */
+#endif
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    return (now - s_dernier_ack_ms) <= RF_LINK_LOST_MS;
+}
+#endif
+
 static bool half_link_tx_frame(const uint8_t *buf, uint8_t n)
 {
     if (!s_radio.present) return false;
@@ -350,6 +363,7 @@ static bool half_link_tx_frame(const uint8_t *buf, uint8_t n)
     }
     s_seq++;                       /* la trame part : ce numéro est consommé */
     bool ack = rf_driver_send(&s_radio, buf, n);
+    if (ack) s_dernier_ack_ms = (uint32_t)(esp_timer_get_time() / 1000);
     /* Le verrou reste TENU jusqu'après le chien de garde : la décision de
      * bascule (s_tx_fsm) et le réarmement doivent être sérialisés avec l'envoi.
      * Cette fonction est appelée par DEUX tâches (callback de scan sur
