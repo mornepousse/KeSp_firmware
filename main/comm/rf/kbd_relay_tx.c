@@ -145,6 +145,17 @@ static volatile bool s_sync_done;   /* 40/40 reçus : à enregistrer (refresh_cb
 static void send_matrix_frame(uint8_t half, const uint8_t *bitmap);
 #endif
 
+#if !CONFIG_KASE_HALF_LINK_RX
+/* Prêt du bus SPI à l'écran (rf_bus.h) : le même mutex que kbd_tx_locked. */
+#include "rf_bus.h"
+bool rf_bus_lock(uint32_t timeout_ms)
+{
+    return s_tx_mutex && xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+}
+void rf_bus_unlock(void) { if (s_tx_mutex) xSemaphoreGive(s_tx_mutex); }
+spi_host_device_t rf_bus_host(void) { return BOARD_NRF_SPI_HOST; }
+#endif
+
 static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
 {
     if (!s_tx_mutex) return;

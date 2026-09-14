@@ -279,6 +279,18 @@ bool half_link_tx_init(void)
 
 static bool half_link_tx_frame(const uint8_t *buf, uint8_t n);
 
+#if CONFIG_KASE_HALF_LINK_TX && !CONFIG_KASE_HALF_LINK_RX
+/* Prêt du bus SPI à l'écran (rf_bus.h), moitié DROITE : le même mutex que
+ * half_link_tx_frame. La gauche non-fusion (RX) a le sien plus bas. */
+#include "rf_bus.h"
+bool rf_bus_lock(uint32_t timeout_ms)
+{
+    return s_tx_radio_mux && xSemaphoreTake(s_tx_radio_mux, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+}
+void rf_bus_unlock(void) { if (s_tx_radio_mux) xSemaphoreGive(s_tx_radio_mux); }
+spi_host_device_t rf_bus_host(void) { return BOARD_NRF_SPI_HOST; }
+#endif
+
 bool half_link_tx_matrix(const uint8_t *bitmap)
 {
     if (!s_radio.present) return false;
@@ -703,6 +715,19 @@ static void half_link_rx_task(void *arg)
  * 2026-09-05 (0 perte, 0,4 retransmission/paquet) — à cadence bien plus élevée
  * que ce qu'une frappe produit. */
 void half_link_note_wake(void){ s_wake_ms=(uint32_t)(esp_timer_get_time()/1000); s_wdbg=60; }
+
+#if CONFIG_KASE_HALF_LINK_RX
+/* Prêt du bus SPI à l'écran (rf_bus.h), moitié GAUCHE pré-fusion : la puce est
+ * à half_link en PRX, et s_radio_mux sérialise déjà l'écoute et les excursions
+ * — l'écran est un troisième client du même verrou, jamais pendant une trame. */
+#include "rf_bus.h"
+bool rf_bus_lock(uint32_t timeout_ms)
+{
+    return s_radio_mux && xSemaphoreTake(s_radio_mux, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+}
+void rf_bus_unlock(void) { if (s_radio_mux) xSemaphoreGive(s_radio_mux); }
+spi_host_device_t rf_bus_host(void) { return BOARD_NRF_SPI_HOST; }
+#endif
 
 bool half_link_excursion_tx(uint8_t canal, const uint8_t addr[5],
                             const uint8_t *payload, uint8_t len)
