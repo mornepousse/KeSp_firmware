@@ -165,4 +165,7 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   utilisateur du 2026-09-14, et le canal ACK qui l'aurait portée (trame
   DISPLAY) a été retiré avec — l'ACK reste nu hors sync. L'écran ne se réécrit
   que si un champ affiché change ; une image refusée par le bus occupé est
-  repoussée au tick suivant, jamais perdue.
+  repoussée au tick suivant, jamais perdue ; seuil et envoi sont sous un même
+  mutex (flush LVGL et relance ne transposent jamais le même tampon en même
+  temps — sinon des lignes partent blanches : « une partie de l'écran
+  s'efface », droite, 2026-09-14).

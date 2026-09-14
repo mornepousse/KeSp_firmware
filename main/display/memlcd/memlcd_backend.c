@@ -23,6 +23,8 @@
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <string.h>
 #if CONFIG_KASE_BATT_SENSE
 #include "batt_sense.h"
@@ -49,6 +51,13 @@ static bool s_attached;                 /* panneau sur le bus */
 static bool s_built;                    /* objets LVGL construits */
 static volatile bool s_sleeping;        /* image gelée : ni flush ni VCOM */
 static volatile bool s_dirty;           /* image seuillée pas encore poussée */
+/* ⚠ s_fb est écrit par la tâche LVGL (flush) et poussé au panneau par ELLE ou
+ * par la tâche d'affichage (relance quand le bus était pris). Deux tâches dans
+ * memlcd_panel_show en même temps = la transposition de l'une (qui commence par
+ * BLANCHIR le tampon panneau) sous les pieds de l'envoi de l'autre : des lignes
+ * partaient blanches (« une partie de l'écran s'efface », droite, 2026-09-14).
+ * Un mutex couvre seuil + envoi. */
+static SemaphoreHandle_t s_fb_mux;
 static uint8_t s_fb[MEMLCD_H * MEMLCD_LINE_BYTES];            /* portrait, 1 = encre */
 static lv_color_t s_draw[MEMLCD_W * MEMLCD_H];                 /* rendu LVGL plein écran */
 static lv_disp_draw_buf_t s_draw_buf;
@@ -184,6 +193,7 @@ static void dessiner(const memlcd_model_t *m)
 /* ── LVGL → panneau ───────────────────────────────────────────────── */
 static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *px)
 {
+    if (s_fb_mux) xSemaphoreTake(s_fb_mux, portMAX_DELAY);   /* détenu ≤ ~15 ms par l'autre tâche */
     /* full_refresh : l'aire est tout l'écran, px est ligne par ligne 68 large */
     for (lv_coord_t y = area->y1; y <= area->y2; y++) {
         uint8_t *row = &s_fb[y * MEMLCD_LINE_BYTES];
@@ -196,12 +206,14 @@ static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *px)
         bool ok = !s_sleeping && s_attached && memlcd_panel_show(s_fb);
         s_dirty = !ok;                                   /* repoussé par update() */
     }
+    if (s_fb_mux) xSemaphoreGive(s_fb_mux);
     lv_disp_flush_ready(drv);
 }
 
 static bool lvgl_pret(void)
 {
     if (s_disp) return true;
+    if (!s_fb_mux) s_fb_mux = xSemaphoreCreateMutex();
     if (!lv_is_initialized()) {
         const lvgl_port_cfg_t cfg = { .task_priority = 2, .task_stack = 6144, .task_affinity = 0,
                                       .task_max_sleep_ms = 100, .timer_period_ms = 20 };
@@ -262,8 +274,11 @@ static void memlcd_update(void)
     }
     if (s_dirty && s_attached) {
         static uint16_t s_refus;
+        if (s_fb_mux && xSemaphoreTake(s_fb_mux, pdMS_TO_TICKS(20)) != pdTRUE) return;   /* le flush s'en charge */
+        if (!s_dirty) { xSemaphoreGive(s_fb_mux); return; }                             /* poussé entre-temps */
         if (memlcd_panel_show(s_fb)) { if (s_refus >= 5) ESP_LOGW(TAG, "image poussee apres %u refus (bus occupe)", (unsigned)s_refus); s_refus = 0; s_dirty = false; }
         else if (++s_refus == 20) ESP_LOGW(TAG, "20 refus de suite : le bus radio ne se libere pas pour l'ecran");
+        xSemaphoreGive(s_fb_mux);
         return;
     }
     /* Entretien VCOM ~1 Hz quand rien ne s'écrit (update() toutes les ~100 ms). */
