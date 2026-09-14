@@ -295,6 +295,12 @@ bool half_link_tx_init(void);
 /* Émet l'état courant de la demi-matrice. Le numéro de séquence est géré en
  * interne. Retourne true si le paquet a été acquitté par la gauche. */
 bool half_link_tx_matrix(const uint8_t *bitmap);
+#if CONFIG_KASE_BATT_SENSE
+/* Jauge : un STATUS (tension, état de charge, identité DROITE) vers la cible
+ * courante. Appelé par la tâche de rafraîchissement toutes les RF_BATT_PERIOD_MS
+ * et au réveil. Retourne l'ACK. */
+bool half_link_tx_status(void);
+#endif
 
 /* Applique la règle de cadence puis émet s'il y a lieu.
  *

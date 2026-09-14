@@ -21,6 +21,14 @@
 #include "keymap.h"         /* keymaps[], KEYMAP_BLOB_BYTES — empreinte de config */
 #include "config_sync.h"    /* config_fp_crc32 — garde-fou de sync (fusion) */
 #include "keymap_sync.h"    /* keymap_rx_* — réassemblage de la keymap reçue par ACK */
+#if CONFIG_KASE_BATT_SENSE
+#include "batt_sense.h"     /* jauge : tension + état de charge dans STATUS */
+#define KBD_BATT_DV()  batt_sense_dv()
+#define KBD_BATT_CHG() batt_sense_charging()
+#else
+#define KBD_BATT_DV()  0
+#define KBD_BATT_CHG() 0
+#endif
 #include "board.h"
 #include "esp_log.h"
 #include "esp_err.h"
@@ -260,7 +268,7 @@ static void kbd_relay_refresh_cb(void *arg)
             /* config_fp reste 0 ici : en USB le dongle se tait, la cohérence
              * des moteurs est sans objet. Buffer à RF_STATUS_LEN quand même —
              * rf_encode_status écrit 8 octets dans tous les cas. */
-            rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = __atomic_fetch_add(&s_status_seq, 1, __ATOMIC_RELAXED),
+            rf_status_t st = { .batt_dV = KBD_BATT_DV(), .half = RF_HALF_LEFT, .charging = KBD_BATT_CHG(), .link_q = 0, .seq = __atomic_fetch_add(&s_status_seq, 1, __ATOMIC_RELAXED),
                                .mode_usb = true };
             uint8_t sb[RF_STATUS_LEN];
             uint16_t sn = rf_encode_status(sb, &st);
@@ -393,7 +401,7 @@ static void kbd_relay_refresh_cb(void *arg)
      * dongle, qui tape en sans-fil avec la SIENNE, compare et signale une
      * divergence — sinon deux moteurs taperaient différemment en silence.
      * Calculée à la volée (1/s ici) : pas de cache, donc jamais périmée. */
-    rf_status_t st = { .batt_dV = 0, .link_q = 0, .seq = __atomic_fetch_add(&s_status_seq, 1, __ATOMIC_RELAXED),
+    rf_status_t st = { .batt_dV = KBD_BATT_DV(), .half = RF_HALF_LEFT, .charging = KBD_BATT_CHG(), .link_q = 0, .seq = __atomic_fetch_add(&s_status_seq, 1, __ATOMIC_RELAXED),
                        .config_fp = config_fp_crc32((const uint8_t *)keymaps,
                                                     KEYMAP_BLOB_BYTES) };
     uint8_t buf[RF_STATUS_LEN];

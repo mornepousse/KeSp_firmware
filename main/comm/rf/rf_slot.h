@@ -76,6 +76,8 @@
  * entre deux firmwares, et la moitié qui émet doit connaître le budget de celle
  * qui écoute. Verrouillé par test/test_rf_status_cadence.c. */
 #define RF_STATUS_PERIOD_MS  1000u   /* cadence de la trame d'état */
+#define RF_BATT_PERIOD_MS    30000u  /* STATUS lent de la DROITE au repos (jauge) — la tension
+                                      * d'une 16340 ne bouge pas en 30 s ; contrat avec le dongle */
 #define RF_REARM_SILENCE_MS  2000u   /* silence → réécrire la config RX (radio figée) */
 #define RF_LINK_LOST_MS      2500u   /* silence → slot perdu, repli appliqué */
 

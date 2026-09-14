@@ -277,6 +277,8 @@ bool half_link_tx_init(void)
     return true;
 }
 
+static bool half_link_tx_frame(const uint8_t *buf, uint8_t n);
+
 bool half_link_tx_matrix(const uint8_t *bitmap)
 {
     if (!s_radio.present) return false;
@@ -316,6 +318,17 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
      * un sens (il faut un recepteur en face). */
     n = rf_encode_heartbeat(buf, &h);
 #endif
+    return half_link_tx_frame(buf, (uint8_t)n);
+}
+
+/* Émission d'UNE trame vers la cible courante, sous le verrou radio : envoi,
+ * chien de garde / bascule de cible (fusion), instrument de banc. Partagée par
+ * la matrice (half_link_tx_matrix) et le STATUS lent de la jauge
+ * (half_link_tx_status) — un seul chemin d'émission, donc un seul propriétaire
+ * de la puce et une seule FSM. */
+static bool half_link_tx_frame(const uint8_t *buf, uint8_t n)
+{
+    if (!s_radio.present) return false;
     /* Le verrou couvre TOUTE la transaction, CSN compris. 50 ms : une émission
      * ESB au pire cas (ARC=15, ARD=500 µs) tient en ~13 ms. */
     if (s_tx_radio_mux &&
@@ -324,7 +337,7 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
         return false;
     }
     s_seq++;                       /* la trame part : ce numéro est consommé */
-    bool ack = rf_driver_send(&s_radio, buf, (uint8_t)n);
+    bool ack = rf_driver_send(&s_radio, buf, n);
     /* Le verrou reste TENU jusqu'après le chien de garde : la décision de
      * bascule (s_tx_fsm) et le réarmement doivent être sérialisés avec l'envoi.
      * Cette fonction est appelée par DEUX tâches (callback de scan sur
@@ -435,11 +448,45 @@ void half_link_tx_update(const uint8_t *bitmap, bool change)
  * Il ne réveille la radio que si quelque chose est enfoncé. Au repos la tâche
  * tourne à vide pour le prix d'un memcmp toutes les 20 ms — le lien reste
  * gratuit, ce qui est la prémisse de R1. */
+#if CONFIG_KASE_BATT_SENSE
+#include "batt_sense.h"
+/* Jauge : la droite est muette au repos, donc sa tension doit partir de sa
+ * propre initiative — un STATUS toutes les RF_BATT_PERIOD_MS (contrat dans
+ * rf_slot.h), plus un au réveil. Il porte l'identité de moitié : les deux
+ * moitiés partagent le slot clavier du dongle en fusion. Il part vers la cible
+ * COURANTE de la FSM ; replié sur la gauche, celle-ci l'ignore — acceptable, le
+ * dongle est alors absent de toute façon. Ce n'est PAS une activité clavier :
+ * il ne tamponne pas la veille, la droite s'endort comme avant. */
+static uint32_t s_dernier_status_ms;   /* 0 = forcer au prochain tick (boot, réveil) */
+
+bool half_link_tx_status(void)
+{
+    rf_status_t st = { .batt_dV = batt_sense_dv(), .link_q = 0, .seq = s_seq,
+                       .mode_usb = false, .half = RF_HALF_RIGHT,
+                       .charging = batt_sense_charging(), .config_fp = 0 };
+    uint8_t buf[RF_STATUS_LEN];
+    uint16_t n = rf_encode_status(buf, &st);
+    return half_link_tx_frame(buf, (uint8_t)n);
+}
+
+static void half_link_batt_tick(void)
+{
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (s_dernier_status_ms == 0 || (uint32_t)(now - s_dernier_status_ms) >= RF_BATT_PERIOD_MS) {
+        s_dernier_status_ms = now ? now : 1;
+        half_link_tx_status();
+    }
+}
+#endif
+
 static void half_link_tx_refresh_task(void *arg)
 {
     (void)arg;
     for (;;) {
         half_link_tx_update(NULL, false);
+#if CONFIG_KASE_BATT_SENSE
+        half_link_batt_tick();   /* STATUS lent de la jauge ; pas une activité */
+#endif
 #if CONFIG_KASE_VEILLE
         /* La moitié droite n'a pas de tâche clavier : cette tâche, qui tourne
          * déjà à 20 ms, porte aussi sa veille. Elle dort indépendamment de la
@@ -773,6 +820,9 @@ void half_link_radio_wake(void)
 {
     if (!s_radio.present) return;
     rf_driver_power_up(&s_radio);
+#if CONFIG_KASE_BATT_SENSE && CONFIG_KASE_HALF_LINK_TX
+    s_dernier_status_ms = 0;   /* un STATUS au réveil : la tension a pu bouger (droite) */
+#endif
 #if CONFIG_KASE_HALF_LINK_RX
     /* power_up ne touche pas à CE : sans réarmement la moitié gauche
      * repartirait alimentée mais sourde. */
