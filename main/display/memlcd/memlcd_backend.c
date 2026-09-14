@@ -252,6 +252,11 @@ static void memlcd_update(void)
     if (s_sleeping) return;
     if (!s_built) { memlcd_refresh_all(); return; }
     memlcd_model_t m; lire_modele(&m);
+    /* Hystérésis d'un dixième de volt : l'ADC oscille entre deux dV voisins et
+     * chaque changement est une réécriture complète du panneau. */
+    if (m.batt_local_dv != 0xFF && s_shown.batt_local_dv != 0xFF &&
+        (m.batt_local_dv == s_shown.batt_local_dv + 1 || m.batt_local_dv + 1 == s_shown.batt_local_dv))
+        m.batt_local_dv = s_shown.batt_local_dv;
     if (memlcd_model_diff(&s_shown, &m)) {
         if (lvgl_port_lock(50)) { s_shown = m; dessiner(&m); lvgl_port_unlock(); }
     }

@@ -300,8 +300,9 @@ bool half_link_tx_matrix(const uint8_t *bitmap);
  * courante. Appelé par la tâche de rafraîchissement toutes les RF_BATT_PERIOD_MS
  * et au réveil. Retourne l'ACK. */
 bool half_link_tx_status(void);
-/* Écran : la cible courante est le dongle et il a acquitté il y a moins de
- * RF_LINK_LOST_MS (en repli vers la gauche, faux). */
+/* Écran : la cible courante est le dongle et la DERNIÈRE émission a été
+ * acquittée (collant : une moitié est muette au repos ; en repli vers la
+ * gauche, faux). */
 bool half_link_tx_dongle_vu(void);
 #endif
 

@@ -129,7 +129,7 @@ static uint32_t s_tx_remis, s_tx_sans_mutex, s_tx_refuses;
  * d'état. Un rapport HID entretient le lien aussi bien qu'une trame de
  * supervision : inutile d'en ajouter pendant la frappe. */
 static uint32_t s_derniere_emission_ms;
-static uint32_t s_dernier_ack_ms;       /* dernier ACK du dongle : « dongle vu » pour l'écran */
+static uint8_t  s_sans_ack_ecran = 3;   /* émissions consécutives sans ACK : « dongle vu » pour l'écran (3 = pas encore vu) */
 static uint8_t  s_status_seq;
 
 #if CONFIG_KASE_DONGLE_FUSION
@@ -206,7 +206,7 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
 #endif
         if (ok) s_tx_remis++; else s_tx_refuses++;
         s_derniere_emission_ms = (uint32_t)(esp_timer_get_time() / 1000);
-        if (ok) s_dernier_ack_ms = s_derniere_emission_ms;
+        if (ok) s_sans_ack_ecran = 0; else if (s_sans_ack_ecran < 255) s_sans_ack_ecran++;
         /* Trace par rapport, en DEBUG : c'est elle qui a montré, le 2026-09-11,
          * que la gauche émettait correctement la touche de réveil — et qu'un
          * pouce Super capturé restait collé. Une ligne par envoi est trop pour
@@ -291,7 +291,7 @@ static void kbd_relay_refresh_cb(void *arg)
                                s_kbd_cfg.addr_suffix };
             bool ok = rf_driver_oob_tx(&s_radio, s_kbd_cfg.channel, dst, sb, (uint8_t)sn,
                                        RF_CH_HALF_LINK, link_addr);
-            if (ok) s_dernier_ack_ms = now;         /* « dongle vu » aussi en mode USB */
+            if (ok) s_sans_ack_ecran = 0; else if (s_sans_ack_ecran < 255) s_sans_ack_ecran++;                  /* « dongle vu » aussi en mode USB */
             s_derniere_emission_ms = now;
         }
         xSemaphoreGive(s_tx_mutex);
@@ -635,9 +635,9 @@ bool kbd_relay_active(void)
 
 bool kbd_relay_dongle_vu(void)
 {
-    if (!s_dernier_ack_ms) return false;
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-    return (now - s_dernier_ack_ms) <= RF_LINK_LOST_MS;
+    /* Collant (muette au repos), tolérant aux ~1 % de refus ESB : tombe après
+     * 3 émissions consécutives sans ACK, jamais sur un refus isolé. */
+    return s_sans_ack_ecran < 3;
 }
 
 void kbd_relay_send_kbd(uint8_t modifier, const uint8_t kb[6])

@@ -155,8 +155,11 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   en HAUT-GAUCHE, damier 8 px) est nette et bien orientée ; l'image reste gelée
   en light sleep et aucun réveil n'est dû à l'écran.
 - [smoke:Écrans memory-LCD UI] Les deux moitiés affichent en portrait : bandeau
-  (route RF/USB, ▲ si la cible radio a acquitté depuis moins de
-  RF_LINK_LOST_MS, jauge et tension locales), centre (GAUCHE : nom de couche en
+  (route RF/USB, ▲ « dongle vu » COLLANT — une moitié est muette au repos, un
+  indicateur daté clignoterait à chaque STATUS — qui ne tombe qu'après 3
+  émissions consécutives sans ACK, jamais sur un refus ESB isolé, et jamais
+  allumé avant le premier ACK ; jauge et tension locales avec une hystérésis
+  d'un dixième de volt, l'ADC oscillant entre deux dV voisins), centre (GAUCHE : nom de couche en
   lignes de 4 + « Ln » ; DROITE : logo Niphargus 60 px centré, généré par
   scripts/gen_logo_memlcd.sh). PAS de batterie de l'autre moitié : décision
   utilisateur du 2026-09-14, et le canal ACK qui l'aurait portée (trame
