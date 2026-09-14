@@ -96,10 +96,19 @@ typedef struct {
     uint32_t config_fp;/* fusion phase 3 : empreinte CRC-32 de la keymap de
                         * l'émetteur, pour que le dongle détecte une divergence de
                         * config. 0 = absente (ancien émetteur, STATUS 4 octets). */
+    uint8_t half;      /* jauge : RF_HALF_LEFT/RF_HALF_RIGHT — bit1 du nibble de
+                        * flags. 0 = gauche, donc une trame ancienne reste « gauche »
+                        * (les deux moitiés partagent le slot clavier en fusion). */
+    uint8_t charging;  /* jauge : 0 inconnu, 1 en charge probable, 2 pleine — bits
+                        * 2-3 du nibble. Déduit de la tension (pas de VBUS). */
 } rf_status_t;
 
-/* Flag « mode USB » dans le nibble bas de l'octet 0 de STATUS. */
-#define PKT_STATUS_FLAG_MODE_USB  0x1
+/* Nibble bas de l'octet 0 de STATUS : bit0 mode USB, bit1 identité de moitié,
+ * bits 2-3 état de charge. Tous à 0 = trame historique (gauche, inconnu). */
+#define PKT_STATUS_FLAG_MODE_USB    0x1
+#define PKT_STATUS_FLAG_HALF_RIGHT  0x2
+#define PKT_STATUS_CHG_SHIFT        2
+#define PKT_STATUS_CHG_MASK         0x3
 
 typedef struct {
     uint8_t ge0, ge1;
@@ -168,7 +177,10 @@ static inline uint16_t rf_encode_pair_req(uint8_t *buf, const uint8_t mac[6], ui
 static inline uint16_t rf_encode_status(uint8_t *buf, const rf_status_t *s)
 {
     if (buf == NULL || s == NULL) return 0;
-    buf[0] = (PKT_TYPE_STATUS << 4) | (s->mode_usb ? PKT_STATUS_FLAG_MODE_USB : 0);
+    buf[0] = (uint8_t)((PKT_TYPE_STATUS << 4) |
+                       (s->mode_usb ? PKT_STATUS_FLAG_MODE_USB : 0) |
+                       (s->half == RF_HALF_RIGHT ? PKT_STATUS_FLAG_HALF_RIGHT : 0) |
+                       ((s->charging & PKT_STATUS_CHG_MASK) << PKT_STATUS_CHG_SHIFT));
     buf[1] = s->batt_dV;
     buf[2] = s->link_q;
     buf[3] = s->seq;
@@ -206,6 +218,8 @@ static inline bool rf_decode_status(const uint8_t *buf, uint16_t len, rf_status_
     out->link_q   = buf[2];
     out->seq      = buf[3];
     out->mode_usb = (buf[0] & PKT_STATUS_FLAG_MODE_USB) != 0;
+    out->half     = (buf[0] & PKT_STATUS_FLAG_HALF_RIGHT) ? RF_HALF_RIGHT : RF_HALF_LEFT;
+    out->charging = (uint8_t)((buf[0] >> PKT_STATUS_CHG_SHIFT) & PKT_STATUS_CHG_MASK);
     /* Empreinte : présente sur 8 octets, absente (0 = inconnue) sur un ancien
      * STATUS de 4 octets — rétrocompatible. */
     out->config_fp = (len >= 8)

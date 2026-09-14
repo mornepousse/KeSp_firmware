@@ -153,6 +153,38 @@ static void test_rf_status_config_fp(void)
     TEST_ASSERT_EQ(old.config_fp, 0u, "empreinte 0 si absente (rétrocompat)");
 }
 
+/* Jauge batterie : STATUS porte l'identité de moitié (bit1) et l'état de charge
+ * (bits 2-3) dans son nibble de flags. Taille inchangée (8 o) et RÉTROCOMPATIBLE :
+ * une trame ancienne (nibble = mode_usb seul) se lit gauche / inconnu. */
+static void test_rf_status_half_et_charge(void)
+{
+    rf_status_t in = { .batt_dV = 41, .link_q = 0, .seq = 3, .mode_usb = false,
+                       .half = RF_HALF_RIGHT, .charging = 2 };
+    uint8_t buf[RF_STATUS_LEN];
+    uint16_t n = rf_encode_status(buf, &in);
+    TEST_ASSERT_EQ(n, RF_STATUS_LEN, "toujours 8 octets");
+    rf_status_t out = {0};
+    TEST_ASSERT(rf_decode_status(buf, n, &out), "decode");
+    TEST_ASSERT_EQ(out.half, RF_HALF_RIGHT, "identité droite round-trip");
+    TEST_ASSERT_EQ(out.charging, 2, "état de charge round-trip");
+    TEST_ASSERT_EQ(out.batt_dV, 41, "tension intacte");
+    TEST_ASSERT(!out.mode_usb, "mode_usb intact (faux)");
+    /* Les trois champs cohabitent dans le même nibble sans se marcher dessus. */
+    rf_status_t all = { .batt_dV = 40, .seq = 4, .mode_usb = true,
+                        .half = RF_HALF_RIGHT, .charging = 1 };
+    rf_encode_status(buf, &all);
+    TEST_ASSERT(rf_decode_status(buf, RF_STATUS_LEN, &out), "decode (tous flags)");
+    TEST_ASSERT(out.mode_usb && out.half == RF_HALF_RIGHT && out.charging == 1,
+                "mode_usb + droite + en charge coexistent");
+    /* Rétrocompatibilité : une trame ancienne = gauche, inconnu. */
+    rf_status_t old_in = { .batt_dV = 37, .seq = 1, .mode_usb = true };
+    rf_encode_status(buf, &old_in);
+    TEST_ASSERT(rf_decode_status(buf, RF_STATUS_LEN, &out), "decode ancienne");
+    TEST_ASSERT_EQ(out.half, RF_HALF_LEFT, "bit1 à 0 → gauche");
+    TEST_ASSERT_EQ(out.charging, 0, "bits 2-3 à 0 → inconnu");
+    TEST_ASSERT(out.mode_usb, "mode_usb préservé");
+}
+
 static void test_rf_status_rejects_short_and_wrong_type(void)
 {
     uint8_t buf[16];
@@ -442,6 +474,7 @@ void test_rf_packet(void)
     test_rf_status_roundtrip();
     test_rf_status_mode_usb_flag();
     test_rf_status_config_fp();
+    test_rf_status_half_et_charge();
     test_rf_status_rejects_short_and_wrong_type();
     test_rf_status_no_bigger_than_a_heartbeat();
     test_rf_bitmap_all_positions();
