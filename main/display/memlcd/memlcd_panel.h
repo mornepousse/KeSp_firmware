@@ -25,3 +25,4 @@ bool memlcd_panel_clear(void);                       /* M2 : tout blanc */
 bool memlcd_panel_write_lines(uint16_t first, uint16_t count, const uint8_t *bits);
 bool memlcd_panel_vcom_tick(void);                   /* M1 seul : entretien VCOM */
 void memlcd_panel_test_pattern(void);                /* damier 8 px : bring-up */
+void memlcd_panel_sweep(void);                       /* BANC : 4 hypothèses de protocole, 4 s chacune */

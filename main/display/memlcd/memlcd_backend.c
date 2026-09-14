@@ -23,6 +23,7 @@ static bool try_attach(void)
     memlcd_panel_clear();
     memlcd_panel_test_pattern();
     ESP_LOGI(TAG, "panneau attache (bus radio pret), damier ecrit");
+    memlcd_panel_sweep();   /* BANC : balayage des hypothèses de protocole */
     return true;
 }
 

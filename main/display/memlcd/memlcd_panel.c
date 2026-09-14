@@ -15,6 +15,8 @@
 #include "esp_rom_sys.h"
 #include "esp_log.h"
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "memlcd";
 
@@ -24,6 +26,8 @@ static const char *TAG = "memlcd";
 #define LINES_PER_XFER 16
 #define SPI_HZ 1000000   /* 1 MHz : marge sous les 2 MHz du panneau, câble breakout */
 
+static uint8_t s_no_rev8;   /* 1 = commandes/adresses envoyées brutes */
+static inline uint8_t cmd8(uint8_t v) { return s_no_rev8 ? v : memlcd_rev8(v); }
 static spi_device_handle_t s_dev;
 static uint8_t s_vcom;                       /* 0 ou CMD_VCOM, basculé à chaque trame */
 static uint8_t s_buf[2 + (MEMLCD_LINE_BYTES + 2) * LINES_PER_XFER];
@@ -70,7 +74,7 @@ bool memlcd_panel_clear(void)
 {
     if (!s_dev || !rf_bus_lock(5)) return false;
     s_vcom ^= CMD_VCOM;
-    uint8_t b[2] = { memlcd_rev8((uint8_t)(CMD_CLEAR | s_vcom)), 0x00 };
+    uint8_t b[2] = { cmd8((uint8_t)(CMD_CLEAR | s_vcom)), 0x00 };
     bool ok = xfer(b, 2);
     rf_bus_unlock();
     return ok;
@@ -80,7 +84,7 @@ bool memlcd_panel_vcom_tick(void)
 {
     if (!s_dev || !rf_bus_lock(5)) return false;
     s_vcom ^= CMD_VCOM;
-    uint8_t b[2] = { memlcd_rev8(s_vcom), 0x00 };
+    uint8_t b[2] = { cmd8(s_vcom), 0x00 };
     bool ok = xfer(b, 2);
     rf_bus_unlock();
     return ok;
@@ -95,13 +99,13 @@ bool memlcd_panel_write_lines(uint16_t first, uint16_t count, const uint8_t *bit
     for (uint16_t done = 0; done < count && ok; done += LINES_PER_XFER) {
         uint16_t n = (uint16_t)((count - done > LINES_PER_XFER) ? LINES_PER_XFER : (count - done));
         size_t p = 0;
-        s_buf[p++] = memlcd_rev8((uint8_t)(CMD_WRITE | s_vcom));
+        s_buf[p++] = cmd8((uint8_t)(CMD_WRITE | s_vcom));
         for (uint16_t i = 0; i < n; i++) {
             uint16_t ligne = (uint16_t)(first + done + i);
 #if BOARD_LCD_ROTATE_180
             ligne = (uint16_t)(MEMLCD_H - 1 - ligne);
 #endif
-            s_buf[p++] = memlcd_rev8((uint8_t)(ligne + 1));           /* adresses 1..160 */
+            s_buf[p++] = cmd8((uint8_t)(ligne + 1));                  /* adresses 1..160 */
             memcpy(&s_buf[p], bits + (size_t)(done + i) * MEMLCD_LINE_BYTES, MEMLCD_LINE_BYTES);
             p += MEMLCD_LINE_BYTES;
             s_buf[p++] = 0x00;                                         /* dummy fin de ligne */
@@ -111,6 +115,39 @@ bool memlcd_panel_write_lines(uint16_t first, uint16_t count, const uint8_t *bit
     }
     rf_bus_unlock();
     return ok;
+}
+
+/* BANC — balayage d'hypothèses. Le panneau ne répond à rien : avant de
+ * conclure au matériel, on lui parle de 4 façons, 4 s chacune, en annonçant le
+ * numéro au journal. L'utilisateur dit à quel numéro l'écran réagit.
+ *   1 : rev8 (LSB-first émulé), pixels 0xAA/0x55         (l'hypothèse actuelle)
+ *   2 : SANS rev8 (MSB-first brut), pixels 0xAA/0x55
+ *   3 : rev8, tout NOIR (0x00) puis tout BLANC (0xFF) — polarité
+ *   4 : SANS rev8, tout NOIR puis tout BLANC
+ * Un cadre ou une teinte qui change = le protocole parle ; rien nulle part =
+ * physique (alim/câblage J12). */
+
+void memlcd_panel_sweep(void)
+{
+    static uint8_t bits[MEMLCD_H * MEMLCD_LINE_BYTES];
+    for (int hyp = 1; hyp <= 4; hyp++) {
+        s_no_rev8 = (hyp == 2 || hyp == 4);
+        if (hyp <= 2) {
+            for (int y = 0; y < MEMLCD_H; y++)
+                memset(&bits[y * MEMLCD_LINE_BYTES], ((y / 8) & 1) ? 0x55 : 0xAA, MEMLCD_LINE_BYTES);
+            ESP_LOGW(TAG, "SWEEP %d : %s, damier", hyp, s_no_rev8 ? "MSB brut" : "rev8");
+            memlcd_panel_clear(); memlcd_panel_write_lines(0, MEMLCD_H, bits);
+            vTaskDelay(pdMS_TO_TICKS(4000));
+        } else {
+            ESP_LOGW(TAG, "SWEEP %d : %s, tout 0x00 (2 s) puis tout 0xFF (2 s)", hyp, s_no_rev8 ? "MSB brut" : "rev8");
+            memset(bits, 0x00, sizeof bits); memlcd_panel_write_lines(0, MEMLCD_H, bits);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            memset(bits, 0xFF, sizeof bits); memlcd_panel_write_lines(0, MEMLCD_H, bits);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        }
+    }
+    s_no_rev8 = 0;
+    ESP_LOGW(TAG, "SWEEP fini — retour hypothèse 1");
 }
 
 void memlcd_panel_test_pattern(void)

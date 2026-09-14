@@ -147,7 +147,9 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   backend (ROUND/OLED) ne peut être choisi par CMake pour cette moitié.
 - [smoke:Écrans memory-LCD] Le CS de l'écran (actif haut) est tenu BAS dès le
   boot des deux moitiés et sa mobilité est PROUVÉE au bring-up (relu 1/0 au
-  journal : « CS GPIO14 relu : haut=1 bas=0 ») ; l'attachement du panneau attend que la radio ait créé
+  journal : « CS GPIO14 relu : haut=1 bas=0 ») ; tant que le protocole n'est pas prouvé, le boot balaie 4
+  hypothèses (rev8 / MSB brut × damier / noir-blanc, 4 s chacune, numérotées
+  au journal « SWEEP n ») pour que l'observation tranche au lieu de deviner ; l'attachement du panneau attend que la radio ait créé
   le bus SPI (init différée) ; toute transaction écran passe sous le verrou du
   propriétaire de la radio et cède si elle est occupée ; le damier de bring-up
   est net sur tout le panneau ; l'image reste gelée en light sleep et aucun
