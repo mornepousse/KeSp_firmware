@@ -52,6 +52,12 @@ dans la PR/release.
       empreinte ; ensuite plus aucun ACK payload au repos (balise coupée)
 
 ## Half (left / right)
+- [ ] Jauge batterie : console au boot « batt: jauge : NN dV » avec NN plausible
+      (36-42) et à ±0,1 V d'un voltmètre sur la batterie ; CDC BATTERY (dongle)
+      donne les DEUX moitiés avec age frais (gauche ~1 s, droite ≤ 30 s) ; la
+      droite s'endort toujours à 60 s malgré son STATUS lent ; une moitié éteinte
+      repasse « inconnue » ; batterie en charge → après ≥ 2 min à ≥ 4,15 V,
+      charging = 2 (PLEINE)
 - [ ] Première touche après veille : laisser la moitié s'endormir (60 s sans
       toucher), taper UNE touche brève → le caractère sort (pas avalé) et rien
       ne reste collé ; console : « reveil : 1 touche(s) capturee(s) ». À faire

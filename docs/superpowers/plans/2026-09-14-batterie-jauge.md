@@ -43,7 +43,7 @@
   - Constantes : `BATT_FULL_DV 41` (≥ 4,15 V arrondi : on compare en dixièmes → seuil 41 signifie ≥ 4,1 ; pour 4,15 exact on travaille en **centivolts** dans la FSM : `BATT_FULL_CV 415`, `BATT_RISE_CV 10`, `BATT_HYST_CV 5`, `BATT_FULL_HOLD_MS 120000`, `BATT_RISE_WINDOW_MS 300000`). La FSM prend `dv` mais convertit en cV (`dv × 10`) — un dV = 0,1 V ne distingue pas 4,15 de 4,1 : la FSM reçoit donc plutôt les **mV** : signature finale `batt_state_step(batt_state_t *s, uint32_t mv_batt, uint32_t now_ms)` avec `BATT_FULL_MV 4150`, `BATT_RISE_MV 100`, `BATT_HYST_MV 50`.
   - Et donc aussi `uint32_t batt_mv_from_samples(const uint32_t *mv_adc, unsigned n);` (mV batterie moyennés, 0 si rejet) — `batt_dv_from_samples` = `batt_mv_from_samples / 100` arrondi.
 
-- [ ] **Step 1: Write the failing test** — `test/test_batt_calc.c` :
+- [x] **Step 1: Write the failing test** — `test/test_batt_calc.c` :
 
 ```c
 #include "test_framework.h"
@@ -124,12 +124,12 @@ void test_batt_calc(void)
 ```
 Enregistrer `test_batt_calc.c` dans `test/CMakeLists.txt` (après `test_wake_grace.c`) et dans `test/test_main.c` (`extern void test_batt_calc(void);` + appel).
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd test && cmake --build build -j 2>&1 | grep -iE "error" | head; ./build/test_runner | grep -iE "Jauge|FAIL|Results"`
 Expected : erreur de compilation (header absent).
 
-- [ ] **Step 3: Write minimal implementation** — `main/power/batt_calc.h` :
+- [x] **Step 3: Write minimal implementation** — `main/power/batt_calc.h` :
 
 ```c
 #pragma once
@@ -226,12 +226,12 @@ static inline batt_chg_t batt_state_step(batt_state_t *s, uint32_t mv, uint32_t 
 ```
 ⚠ Dans le test `test_en_charge_probable_si_ca_monte`, la séquence 3700 → 3750 → 3810 doit donner PROBABLE au 3e pas (référence 3700 gardée car la fenêtre n'a pas expiré et ça ne baisse pas). Si le test rouge révèle une différence, ajuster **le code**, pas le test.
 
-- [ ] **Step 4: Run test to verify it passes** ; puis **mutation** : mettre `BATT_FULL_HOLD_MS` à `0` (pleine immédiate) → `test_pleine_apres_plateau` rouge ; restaurer depuis une copie scratchpad (fichier neuf, **pas** `git checkout`).
+- [x] **Step 4: Run test to verify it passes** ; puis **mutation** : mettre `BATT_FULL_HOLD_MS` à `0` (pleine immédiate) → `test_pleine_apres_plateau` rouge ; restaurer depuis une copie scratchpad (fichier neuf, **pas** `git checkout`).
 
 Run: `cd test && cmake --build build -j && ./build/test_runner | grep Results`
 Expected : PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add main/power/batt_calc.h test/test_batt_calc.c test/CMakeLists.txt test/test_main.c .tripwire-testcount
@@ -254,7 +254,7 @@ git commit -m "feat(batt): logique pure de la jauge — conversion, moyenne/reje
   - decode : `half = (buf[0]&0x2) ? RF_HALF_RIGHT : RF_HALF_LEFT ; charging = (buf[0]>>2)&0x3`
   - Taille inchangée : 8 octets.
 
-- [ ] **Step 1: Write the failing test** — ajouter dans `test/test_rf_packet.c` (près de `test_rf_status_config_fp`) et l'appeler dans la suite :
+- [x] **Step 1: Write the failing test** — ajouter dans `test/test_rf_packet.c` (près de `test_rf_status_config_fp`) et l'appeler dans la suite :
 
 ```c
 static void test_rf_status_half_et_charge(void)
@@ -279,9 +279,9 @@ static void test_rf_status_half_et_charge(void)
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — `.half`/`.charging` inexistants → erreur de compilation.
+- [x] **Step 2: Run test to verify it fails** — `.half`/`.charging` inexistants → erreur de compilation.
 
-- [ ] **Step 3: Write minimal implementation** — dans `rf_packet.h` : ajouter à `rf_status_t` (après `mode_usb`) :
+- [x] **Step 3: Write minimal implementation** — dans `rf_packet.h` : ajouter à `rf_status_t` (après `mode_usb`) :
 ```c
     uint8_t half;      /* RF_HALF_LEFT/RF_HALF_RIGHT — bit1 du nibble, 0 = gauche (rétrocompat) */
     uint8_t charging;  /* 0 inconnu, 1 en charge probable, 2 pleine — bits 2-3 du nibble */
@@ -306,9 +306,9 @@ Decode, après `out->mode_usb = ...` :
 ```
 (`RF_HALF_LEFT/RIGHT` sont définis plus haut dans le même header.)
 
-- [ ] **Step 4: Run test to verify it passes** — toute la suite doit rester verte (les autres tests STATUS initialisent `half=0` = gauche par défaut).
+- [x] **Step 4: Run test to verify it passes** — toute la suite doit rester verte (les autres tests STATUS initialisent `half=0` = gauche par défaut).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 ```bash
 git add main/comm/rf/rf_packet.h test/test_rf_packet.c .tripwire-testcount
 git commit -m "feat(rf): STATUS porte l'identité de moitié et l'état de charge (nibble, rétrocompatible)"
@@ -331,7 +331,7 @@ git commit -m "feat(rf): STATUS porte l'identité de moitié et l'état de charg
   - `uint8_t batt_sense_charging(void);` — `batt_chg_t` courant (0/1/2).
   - `uint32_t batt_sense_age_ms(void);` — ancienneté de la dernière mesure valide.
 
-- [ ] **Step 1: Kconfig + CMake + defaults**
+- [x] **Step 1: Kconfig + CMake + defaults**
 
 `main/Kconfig.projbuild`, après le bloc `KASE_VEILLE_PROFONDE_S` :
 ```
@@ -353,7 +353,7 @@ endif()
 
 `sdkconfig.defaults.niphar_left` et `sdkconfig.defaults.niphar_right` : ajouter `CONFIG_KASE_BATT_SENSE=y` (les dossiers `build_niphar_*` existants ont un sdkconfig généré : y ajouter la même ligne, ou `idf.py reconfigure` après suppression du sdkconfig du build).
 
-- [ ] **Step 2: `batt_sense.h`**
+- [x] **Step 2: `batt_sense.h`**
 ```c
 #pragma once
 #include <stdint.h>
@@ -368,7 +368,7 @@ uint8_t  batt_sense_charging(void);   /* batt_chg_t : 0 inconnu, 1 en charge pro
 uint32_t batt_sense_age_ms(void);
 ```
 
-- [ ] **Step 3: `batt_sense.c`**
+- [x] **Step 3: `batt_sense.c`**
 ```c
 #include "batt_sense.h"
 #include "batt_calc.h"
@@ -448,7 +448,7 @@ uint32_t batt_sense_age_ms(void)   { return s_last_ms ? (uint32_t)(now_ms() - s_
 ```
 Si `ADC_ATTEN_DB_12` n'existe pas dans cette version d'IDF, utiliser `ADC_ATTEN_DB_11` (même plage, ancien nom).
 
-- [ ] **Step 4: Init + réveil**
+- [x] **Step 4: Init + réveil**
 
 `main/main.c` : après `veille_liberer_gpio();` (ligne ~194) ajouter :
 ```c
@@ -466,11 +466,11 @@ avec `#include "batt_sense.h"` sous la même garde en tête de fichier.
 ```
 avec l'include gardé.
 
-- [ ] **Step 5: Build + flash + preuve console**
+- [x] **Step 5: Build + flash + preuve console**
 
 Build gauche fusion + droite fusion (+ défauts) : `rc=0`. Flasher la moitié qui porte le FTDI, capturer le boot : la ligne `batt: jauge : NN dV` doit afficher une tension **plausible (36–42)** ; sinon investiguer avant d'aller plus loin (rejet → 0 = pont ou canal faux).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 ```bash
 git add main/power/batt_sense.c main/power/batt_sense.h main/CMakeLists.txt main/Kconfig.projbuild sdkconfig.defaults.niphar_left sdkconfig.defaults.niphar_right main/main.c main/power/veille.c
 git commit -m "feat(batt): module batt_sense — ADC2 sur VBAT_SENSE, 8 échantillons, 10 s + réveil"
@@ -486,7 +486,7 @@ git commit -m "feat(batt): module batt_sense — ADC2 sur VBAT_SENSE, 8 échanti
 **Interfaces:**
 - Consumes: `batt_sense_dv()`, `batt_sense_charging()` (Task 3), champs `half/charging` (Task 2).
 
-- [ ] **Step 1:** En tête de `kbd_relay_tx.c`, sous garde :
+- [x] **Step 1:** En tête de `kbd_relay_tx.c`, sous garde :
 ```c
 #if CONFIG_KASE_BATT_SENSE
 #include "batt_sense.h"
@@ -497,9 +497,9 @@ git commit -m "feat(batt): module batt_sense — ADC2 sur VBAT_SENSE, 8 échanti
 #define KBD_BATT_CHG() 0
 #endif
 ```
-- [ ] **Step 2:** Dans les deux initialisations de `rf_status_t st`, remplacer `.batt_dV = 0` par `.batt_dV = KBD_BATT_DV()` et ajouter `.half = RF_HALF_LEFT, .charging = KBD_BATT_CHG()`.
-- [ ] **Step 3:** Build gauche fusion + défaut `rc=0`. Flash (si FTDI sur la gauche) ; sinon la preuve viendra du dongle (Task 6).
-- [ ] **Step 4: Commit**
+- [x] **Step 2:** Dans les deux initialisations de `rf_status_t st`, remplacer `.batt_dV = 0` par `.batt_dV = KBD_BATT_DV()` et ajouter `.half = RF_HALF_LEFT, .charging = KBD_BATT_CHG()`.
+- [x] **Step 3:** Build gauche fusion + défaut `rc=0`. Flash (si FTDI sur la gauche) ; sinon la preuve viendra du dongle (Task 6).
+- [x] **Step 4: Commit**
 ```bash
 git add main/comm/rf/kbd_relay_tx.c
 git commit -m "feat(batt): la gauche annonce sa tension et son état de charge dans STATUS"
@@ -516,12 +516,12 @@ git commit -m "feat(batt): la gauche annonce sa tension et son état de charge d
 - Consumes: `batt_sense_*` (Task 3), `rf_encode_status` avec `half/charging` (Task 2), `RF_STATUS_LEN`.
 - Produces: `#define RF_BATT_PERIOD_MS 30000u` (rf_slot.h) ; `bool half_link_tx_status(void);` ; interne `static bool half_link_tx_frame(const uint8_t *buf, uint8_t n);`.
 
-- [ ] **Step 1:** `rf_slot.h`, après `RF_STATUS_PERIOD_MS` :
+- [x] **Step 1:** `rf_slot.h`, après `RF_STATUS_PERIOD_MS` :
 ```c
 #define RF_BATT_PERIOD_MS    30000u  /* STATUS lent de la droite au repos (jauge) — contrat avec le dongle */
 ```
-- [ ] **Step 2:** Factoriser dans `half_link.c` : extraire de `half_link_tx_matrix()` la partie « prise du mutex → `rf_driver_send` → chien de garde/bascule → rendu du mutex → instrument » en `static bool half_link_tx_frame(const uint8_t *buf, uint8_t n)` ; `half_link_tx_matrix` ne garde que l'encodage (MATRIX ou HEARTBEAT selon la cible) puis appelle `half_link_tx_frame`. Comportement strictement identique (mêmes compteurs, même FSM).
-- [ ] **Step 3:** Ajouter :
+- [x] **Step 2:** Factoriser dans `half_link.c` : extraire de `half_link_tx_matrix()` la partie « prise du mutex → `rf_driver_send` → chien de garde/bascule → rendu du mutex → instrument » en `static bool half_link_tx_frame(const uint8_t *buf, uint8_t n)` ; `half_link_tx_matrix` ne garde que l'encodage (MATRIX ou HEARTBEAT selon la cible) puis appelle `half_link_tx_frame`. Comportement strictement identique (mêmes compteurs, même FSM).
+- [x] **Step 3:** Ajouter :
 ```c
 #if CONFIG_KASE_BATT_SENSE
 #include "batt_sense.h"
@@ -553,8 +553,8 @@ et dans `half_link_tx_refresh_task`, juste après `half_link_tx_update(NULL, fal
 et dans `half_link_radio_wake()` : `#if CONFIG_KASE_BATT_SENSE s_dernier_status_ms = 0; #endif` (un STATUS au réveil).
 Déclarer `bool half_link_tx_status(void);` dans `half_link.h` sous `#if CONFIG_KASE_BATT_SENSE`.
 ⚠ Le STATUS de la droite part vers sa **cible courante** (FSM) : vers le dongle normalement ; s'il part vers la gauche (repli), la gauche l'ignore — acceptable (spec §2).
-- [ ] **Step 4:** Build droite fusion + défaut `rc=0`. Flash droite (FTDI dessus) : console → toutes les 30 s une trame de plus dans `TX N envois` au repos, et **le compteur d'activité ne bouge pas** (la droite doit toujours s'endormir à 60 s).
-- [ ] **Step 5: Commit**
+- [x] **Step 4:** Build droite fusion + défaut `rc=0`. Flash droite (FTDI dessus) : console → toutes les 30 s une trame de plus dans `TX N envois` au repos, et **le compteur d'activité ne bouge pas** (la droite doit toujours s'endormir à 60 s).
+- [x] **Step 5: Commit**
 ```bash
 git add main/comm/rf/rf_slot.h main/comm/rf/half_link.c main/comm/rf/half_link.h
 git commit -m "feat(batt): la droite émet un STATUS lent (30 s) avec sa tension, et un au réveil"
@@ -570,7 +570,7 @@ git commit -m "feat(batt): la droite émet un STATUS lent (30 s) avec sa tension
 **Interfaces:**
 - Consumes: `rf_status_t.half/.charging` (Task 2), `batt_soc_pct` (Task 1, pur — le dongle l'inclut : `#include "batt_calc.h"`).
 
-- [ ] **Step 1:** Dans `rf_rx_task.c`, remplacer `cache_battery` :
+- [x] **Step 1:** Dans `rf_rx_task.c`, remplacer `cache_battery` :
 ```c
 #include "batt_calc.h"   /* batt_soc_pct — SoC calculé côté dongle, pas transporté */
 /* Indexé par MOITIÉ (0 = gauche, 1 = droite), pas par slot : en fusion les deux
@@ -583,10 +583,10 @@ static void cache_battery_half(uint8_t half, uint8_t batt_dV, uint8_t charging)
 ```
 Appel STATUS (ligne ~190) : `cache_battery_half(st.half, st.batt_dV, st.charging);`.
 Appel HEARTBEAT (ligne ~207, ancien format) : `cache_battery_half(RF_HALF_LEFT, h.batt_dV, 0);` — le heartbeat ne porte pas d'identité ; hors fusion il ne vient que de la gauche.
-- [ ] **Step 2:** `dongle_state.c` : commentaire de `s_batt[2]` → « index = moitié (0 gauche, 1 droite) ».
-- [ ] **Step 3:** `docs/CDC_BINARY_PROTOCOL.md`, ligne `charging` de BATTERY : `0xFF = inconnu (pas de VBUS : l'état est DÉDUIT), 1 = en charge probable (tension qui monte), 2 = pleine (plateau ≥ 4,15 V ≥ 2 min), 0 = décharge/inconnu`. Et `soc_pct` : « dérivé de la tension par le dongle (table Li-ion 16340), 0xFF si tension inconnue ».
-- [ ] **Step 4:** Build dongle fusion + dongle défaut `rc=0`. Flash dongle (CH340 ttyUSB0). **Preuve banc** : script CDC `KS_CMD_BATTERY` (même patron que `coh.py`, id dans `cdc_binary_protocol.h`) → slot 0 (gauche) et slot 1 (droite) affichent des dV plausibles (36–42), `soc` cohérent, `age` frais (gauche ~1 s, droite ≤ 30 s).
-- [ ] **Step 5: Commit**
+- [x] **Step 2:** `dongle_state.c` : commentaire de `s_batt[2]` → « index = moitié (0 gauche, 1 droite) ».
+- [x] **Step 3:** `docs/CDC_BINARY_PROTOCOL.md`, ligne `charging` de BATTERY : `0xFF = inconnu (pas de VBUS : l'état est DÉDUIT), 1 = en charge probable (tension qui monte), 2 = pleine (plateau ≥ 4,15 V ≥ 2 min), 0 = décharge/inconnu`. Et `soc_pct` : « dérivé de la tension par le dongle (table Li-ion 16340), 0xFF si tension inconnue ».
+- [x] **Step 4:** Build dongle fusion + dongle défaut `rc=0`. Flash dongle (CH340 ttyUSB0). **Preuve banc** : script CDC `KS_CMD_BATTERY` (même patron que `coh.py`, id dans `cdc_binary_protocol.h`) → slot 0 (gauche) et slot 1 (droite) affichent des dV plausibles (36–42), `soc` cohérent, `age` frais (gauche ~1 s, droite ≤ 30 s).
+- [x] **Step 5: Commit**
 ```bash
 git add main/comm/rf/rf_rx_task.c main/comm/rf/dongle_state.c docs/CDC_BINARY_PROTOCOL.md
 git commit -m "feat(batt): le dongle indexe la batterie par moitié et dérive le SoC ; CDC BATTERY documentée"
@@ -599,14 +599,14 @@ git commit -m "feat(batt): le dongle indexe la batterie par moitié et dérive l
 **Files:**
 - Modify: `COMPORTEMENTS.md`, `docs/HARDWARE_SMOKE_TEST.md`, `docs/NIPHARGUS_V2_HARDWARE.md` (note : jauge implémentée), mémoire de session.
 
-- [ ] **Step 1:** `COMPORTEMENTS.md`, nouvelle section « Batterie » :
+- [x] **Step 1:** `COMPORTEMENTS.md`, nouvelle section « Batterie » :
   - `[test:test_batt_calc] La tension batterie est convertie depuis le pont 1M/1M, moyennée, et rejetée hors [2,5 V ; 4,5 V] (0 = inconnu) ; le SoC est une table Li-ion bornée ; « pleine » exige un plateau ≥ 4,15 V tenu 2 min avec hystérésis, « en charge probable » une hausse ≥ 0,1 V — une décharge ne l'est jamais.`
   - `[test:test_rf_status_half_et_charge] STATUS porte l'identité de moitié et l'état de charge dans son nibble de flags ; une trame ancienne se lit gauche/inconnu (rétrocompatible).`
   - `[smoke:Jauge batterie] Les deux moitiés remontent une tension plausible au dongle (CDC BATTERY, slots gauche/droite), la droite toutes les 30 s sans s'empêcher de dormir ; une moitié éteinte repasse « inconnu » ; en charge, PLEINE apparaît après le plateau.`
-- [ ] **Step 2:** `docs/HARDWARE_SMOKE_TEST.md`, section Half : item « Jauge batterie : CDC BATTERY donne 36–42 dV pour chaque moitié avec age frais ; la droite s'endort toujours à 60 s malgré son STATUS lent ; brancher la charge → après ≥ 2 min à ≥ 4,15 V, charging = 2 ».
-- [ ] **Step 3:** `TRIPWIRE_CONTRAT_STRICT=1 ./scripts/check.sh --fast` vert ; builds : gauche/droite fusion + défaut, dongle fusion + défaut, `kase_v2` `rc=0`.
-- [ ] **Step 4 (banc) :** dérouler le smoke ; noter les tensions lues et l'écart éventuel avec un voltmètre (±0,1 V acceptable).
-- [ ] **Step 5: Commit + push**
+- [x] **Step 2:** `docs/HARDWARE_SMOKE_TEST.md`, section Half : item « Jauge batterie : CDC BATTERY donne 36–42 dV pour chaque moitié avec age frais ; la droite s'endort toujours à 60 s malgré son STATUS lent ; brancher la charge → après ≥ 2 min à ≥ 4,15 V, charging = 2 ».
+- [x] **Step 3:** `TRIPWIRE_CONTRAT_STRICT=1 ./scripts/check.sh --fast` vert ; builds : gauche/droite fusion + défaut, dongle fusion + défaut, `kase_v2` `rc=0`.
+- [x] **Step 4 (banc) :** dérouler le smoke ; noter les tensions lues et l'écart éventuel avec un voltmètre (±0,1 V acceptable).
+- [x] **Step 5: Commit + push**
 ```bash
 git add COMPORTEMENTS.md docs/HARDWARE_SMOKE_TEST.md docs/NIPHARGUS_V2_HARDWARE.md
 git commit -m "feat(batt): contrat, smoke et doc — jauge batterie livrée (v1)"

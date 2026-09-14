@@ -115,3 +115,19 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   tort pour une keymap). Le dongle ne charge une charge d'ACK qu'après une trame
   de la GAUCHE (STATUS, SYNC_REQ, MATRIX gauche) — la droite partage le slot et
   la consommerait à vide : la sync converge aussi sous frappe bilatérale.
+
+## Batterie — jauge des moitiés
+
+- [test:test_batt_calc] La tension batterie est convertie depuis le pont 1M/1M
+  (V_batt = 2 × V_adc), moyennée, et rejetée hors [2,5 V ; 4,5 V] (0 = inconnu,
+  jamais un chiffre faux) ; le SoC est une table Li-ion 16340 bornée et
+  monotone ; « pleine » exige un plateau ≥ 4,15 V tenu 2 min avec hystérésis,
+  « en charge probable » une hausse ≥ 0,1 V dans une fenêtre de 5 min — une
+  décharge ou une dérive lente ne l'est jamais ; une mesure inconnue oublie tout.
+- [test:test_rf_status_half_et_charge] STATUS porte l'identité de moitié et
+  l'état de charge dans son nibble de flags, sans changer de taille ; une trame
+  ancienne se lit gauche / inconnu (rétrocompatible).
+- [smoke:Jauge batterie] Les deux moitiés remontent une tension plausible au
+  dongle (CDC BATTERY, slots gauche/droite), la droite par un STATUS toutes les
+  30 s sans s'empêcher de dormir ; une tension inconnue s'affiche « inconnue »
+  (0xFF), jamais 0 V ; en charge, PLEINE apparaît après le plateau.

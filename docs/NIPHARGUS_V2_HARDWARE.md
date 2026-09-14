@@ -108,6 +108,9 @@ Conséquences de conception, non traitées à ce jour :
 - Li-ion 16340 → DW01A+FS8205 → interrupteur (chemin batterie seul) → **HT7833** (500 mA,
   4 µA IQ) → 3,3 V. USB 5 V → SS14 → même nœud (l'USB contourne l'interrupteur).
 - Charge TP4056 ~500 mA ; CHRG = LED ; STDBY non câblé → fin de charge par ADC.
+  **Jauge implémentée le 2026-09-14** (`power/batt_sense`) : ADC2_CH2 calibré,
+  8 lectures / 10 s + au réveil, 4,10 V lus contre 4,08 V au voltmètre. « Fin de
+  charge par ADC » = plateau ≥ 4,15 V tenu 2 min (déduit, faute de STDBY/VBUS).
 - Load-sharing AO3407 : USB présent = batterie isolée.
 - Hub CH334R (gauche) : mode sans quartz, alimenté par le 5 V USB uniquement —
   **il n'existe pas sur batterie** (et le port 4 est non câblé).
