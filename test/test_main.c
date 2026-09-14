@@ -62,6 +62,7 @@ extern void test_half_tx_repeat(void);
 extern void test_keymap_sync_frames(void);
 extern void test_keymap_sync(void);
 extern void test_wake_grace(void);
+extern void test_batt_calc(void);
 extern void test_niphar_left_pins(void);
 extern void test_niphar_right_pins(void);
 extern void test_conchodytes_pins(void);
@@ -131,6 +132,7 @@ int main(void) {
     test_keymap_sync_frames();
     test_keymap_sync();
     test_wake_grace();
+    test_batt_calc();
     test_niphar_left_pins();
     test_niphar_right_pins();
     test_conchodytes_pins();
