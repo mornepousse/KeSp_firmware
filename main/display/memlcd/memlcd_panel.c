@@ -43,7 +43,7 @@ static bool xfer(const uint8_t *tx, size_t n)
 void memlcd_cs_idle(void)
 {
     gpio_reset_pin(BOARD_LCD_CS_GPIO);
-    gpio_set_direction(BOARD_LCD_CS_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_direction(BOARD_LCD_CS_GPIO, GPIO_MODE_INPUT_OUTPUT);   /* relisible au banc */
     gpio_set_level(BOARD_LCD_CS_GPIO, 0);
 }
 
@@ -115,6 +115,15 @@ bool memlcd_panel_write_lines(uint16_t first, uint16_t count, const uint8_t *bit
 
 void memlcd_panel_test_pattern(void)
 {
+    /* BANC : le CS bouge-t-il vraiment ? On le lève, on le relit, on le baisse.
+     * Si la relecture ne suit pas, GPIO14 est mal configuré ou pris ailleurs —
+     * et l'écran n'est jamais sélectionné, quoi qu'on envoie. */
+    gpio_set_level(BOARD_LCD_CS_GPIO, 1); esp_rom_delay_us(5);
+    int haut = gpio_get_level(BOARD_LCD_CS_GPIO);
+    gpio_set_level(BOARD_LCD_CS_GPIO, 0); esp_rom_delay_us(5);
+    int bas = gpio_get_level(BOARD_LCD_CS_GPIO);
+    ESP_LOGW(TAG, "CS GPIO%d relu : haut=%d bas=%d (attendu 1/0)", BOARD_LCD_CS_GPIO, haut, bas);
+
     /* Damier 8 px : blocs de 8 lignes alternant 0xAA/0x55 par octet → cases de
      * 8×8. Net = géométrie et LSB/MSB corrects ; décalé/brouillé = un paramètre
      * à revoir (un seul à la fois : MEMLCD_LINE_BYTES, polarité, rotation). */
