@@ -65,16 +65,9 @@ dans la PR/release.
       rafraîchissement ne perd aucune frappe ; en light sleep l'image reste
       figée et lisible, la carte dort toujours à 60 s ; au réveil l'écran revit
 - [ ] Écrans memory-LCD UI : gauche → bandeau « RF ▲ » (ou « USB ») + jauge +
-      tension, nom de couche en lignes de 4 (ex. « DVO / RAK »), « L0 », pied
-      « DROITE » + « ? » (tant que la trame DISPLAY n'existe pas) ; droite →
-      même bandeau/pied, logo Niphargus net et centré ; changer de couche
+      tension, nom de couche en lignes de 4 (ex. « DVO / RAK »), « L0 » ;
+      droite → même bandeau, logo Niphargus net et centré ; changer de couche
       (MO tenu) met le nom à jour en < 200 ms sans perdre de frappe
-- [ ] Écrans memory-LCD UI, trame DISPLAY : dongle branché, les deux moitiés
-      allumées → console de chaque moitié « trame DISPLAY recue » dans les 2 s,
-      le pied affiche la tension de l'autre (≤ 30 s de retard côté droite) ;
-      un TO change la couche affichée à droite, un MO tenu ne la change pas ;
-      dongle éteint → le pied repasse « ? » n'est PAS attendu (dernière valeur
-      gardée), mais « ▲ » disparaît du bandeau après 2,5 s
 - [ ] Première touche après veille : laisser la moitié s'endormir (60 s sans
       toucher), taper UNE touche brève → le caractère sort (pas avalé) et rien
       ne reste collé ; console : « reveil : 1 touche(s) capturee(s) ». À faire

@@ -430,6 +430,8 @@ git commit -m "feat(memlcd): logo Niphargus 60 px généré depuis le SVG, centr
 
 ### Task 6 : Trame DISPLAY dans l'ACK — couche et batterie de l'autre moitié
 
+> **Faite puis RETIRÉE le 2026-09-14** (commits 04531a3e, 5e805e41, puis retrait) : l'utilisateur ne veut pas de la batterie de l'autre moitié. Voir la spec §4 pour ce que le banc a appris (pipe partagé, FIFO vidée par l'excursion). Le reste de cette section est conservé comme archive.
+
 **Files:**
 - Modify: `main/comm/rf/rf_rx_task.c` (dongle : charger DISPLAY quand pas de sync), `main/comm/rf/dongle_engine.c/.h` (`dongle_display_ack_for(half, out)`), `main/comm/rf/half_link.c` (droite : `send_ap` + décodage), `main/comm/rf/kbd_relay_tx.c` (gauche : décodage), `main/display/memlcd/memlcd_backend.c` (`set_remote`)
 

@@ -43,11 +43,11 @@ static void test_couper_nom(void)
 static void test_model_diff(void)
 {
     memlcd_model_t a = { .route_rf = 1, .dongle_vu = 1, .batt_local_dv = 40,
-                         .batt_autre_dv = 42, .couche = 1, .nom = "DVORAK", .is_left = 1 };
+                         .couche = 1, .nom = "DVORAK", .is_left = 1 };
     memlcd_model_t b = a;
     TEST_ASSERT(!memlcd_model_diff(&a, &b), "identiques → pas de redessin");
     b.batt_local_dv = 39;  TEST_ASSERT(memlcd_model_diff(&a, &b), "tension locale change → redessin");
-    b = a; b.batt_autre_chg = 2; TEST_ASSERT(memlcd_model_diff(&a, &b), "charge de l'autre change → redessin");
+    b = a; b.batt_local_chg = 2; TEST_ASSERT(memlcd_model_diff(&a, &b), "état de charge change → redessin");
     b = a; b.couche = 2;   TEST_ASSERT(memlcd_model_diff(&a, &b), "couche change → redessin");
     b = a; strcpy(b.nom, "NAV"); TEST_ASSERT(memlcd_model_diff(&a, &b), "nom change → redessin");
     b = a; b.dongle_vu = 0; TEST_ASSERT(memlcd_model_diff(&a, &b), "dongle perdu → redessin");

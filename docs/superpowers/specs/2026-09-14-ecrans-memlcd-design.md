@@ -1,7 +1,8 @@
 # Écrans Sharp memory-LCD des moitiés Niphargus — design
 
 Date : 2026-09-14
-Statut : design validé (approche A + maquettes), spec à relire avant plan.
+Statut : livré le 2026-09-14 (Tasks 1-6) ; **§4 retiré** le même jour sur
+décision utilisateur (« connaître la tension de l'autre, on s'en fout »).
 
 ## Contexte et problème
 
@@ -99,31 +100,30 @@ sa commande de génération — reproductible, jamais tapé à la main.
 ## 3. Modèle d'affichage (`display/memlcd/memlcd_model.h`, pur)
 
 Un `memlcd_model_t` : `route`, `dongle_vu`, `batt_local_dv/chg`,
-`batt_autre_dv/chg`, `couche_statique`, `nom_couche[16]`, `is_left`. Deux
+`couche`, `nom[16]`, `is_left`. Deux
 fonctions pures testées :
 - `memlcd_couper_nom(const char *nom, char lignes[3][5])` — 4 caractères par
   ligne, 3 lignes max, `…` si tronqué, jamais de ligne vide au milieu ;
 - `memlcd_model_diff(a, b)` — true si un champ **affiché** a changé (pilote le
   « ne redessine que si nécessaire »).
 
-## 4. Données descendantes : `PKT_TYPE_DISPLAY` (0xA) dans l'ACK
+## 4. Données descendantes : RETIRÉ (2026-09-14)
 
-- Trame (≤ 6 o) : `[type<<4 | flags][couche_statique][batt_autre_dv][chg_autre |
-  dongle_flags]`. `flags` : bit0 = destinataire droite (le dongle prépare une
-  trame **par moitié**, avec la batterie de l'*autre*).
-- **Dongle** : après chaque trame reçue d'une moitié sur le slot clavier, s'il
-  n'a **pas** de sync keymap en cours (`dongle_sync_active()` prioritaire), il
-  charge la trame DISPLAY de cette moitié dans l'ACK payload. Coût nul : le
-  slot d'ACK existe déjà. La couche statique vient du moteur du dongle
-  (`current_layout` / couche de base, pas les MO tenus).
-- **Moitiés** : la gauche lit déjà ses ACK (`rf_driver_send_ap`) ; la droite
-  passe de `rf_driver_send` à `send_ap` dans `half_link_tx_frame` et décode
-  DISPLAY (en plus des trames de sync qu'elle ignore). Fraîcheur : gauche 1/s,
-  droite ≤ 30 s au repos (STATUS lent) et immédiate dès qu'elle tape — acceptable
-  pour une couche statique et une batterie.
-- **Mode USB-gauche** (dongle muet) : la gauche a la couche localement (son
-  moteur) ; le dongle continue de servir la trame à la droite dans ses ACK.
-- Rétrocompatible : une moitié sans le décodeur jette la charge (déjà le cas).
+Une trame `PKT_TYPE_DISPLAY` dans l'ACK payload a été implémentée et prouvée
+au banc sur les deux moitiés, puis **retirée le jour même** : l'utilisateur ne
+veut pas de la batterie de l'autre moitié à l'écran, et la couche statique
+n'est affichée que sur la gauche, qui la connaît localement. Sans consommateur,
+le canal disparaît (pas de code mort dans une trame radio) et l'ACK reste nu
+hors sync keymap. Ce que l'exercice a appris, gardé dans `rf_rx_task.c` :
+- les deux moitiés partagent le pipe 0 du dongle, donc une charge d'ACK part
+  avec le **prochain** ACK quel qu'en soit l'émetteur — une trame « pour la
+  droite » se fait manger par la gauche en USB (5 annonces/s) ;
+- une excursion `rf_driver_oob_tx` (réémission droite→gauche) vide la FIFO TX
+  du PRX : la charge d'ACK se charge désormais **en fin de tour**, après
+  l'excursion (`drain_radio`), ce qui vaut aussi pour la sync keymap.
+`rf_driver_oob_tx_ap` (excursion qui rend la charge de l'ACK) reste dans le
+pilote, sans appelant : c'est le seul canal descendant vers une moitié en PRX
+sur un autre canal, si un besoin revient.
 
 ## Périmètre v1, dans l'ordre de preuve
 

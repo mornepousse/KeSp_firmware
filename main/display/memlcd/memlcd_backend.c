@@ -2,7 +2,8 @@
  *   bandeau  : route (RF/USB) + ▲ si le dongle acquitte, jauge + tension locale
  *   centre   : GAUCHE = nom de couche en lignes de 4 (memlcd_couper_nom) + « Ln »
  *              DROITE = logo Niphargus 60 px centré
- *   pied     : l'AUTRE moitié : « DROITE »/« GAUCHE », sa tension, ■ pleine, ? inconnue
+ * (Pas de « batterie de l'autre moitié » : l'utilisateur n'en veut pas, et le
+ * canal ACK qui l'aurait portée a été retiré avec — 2026-09-14.)
  * LVGL rend en 16 bits dans un tampon plein écran (full_refresh) ; le flush
  * seuille vers le tampon 1 bit portrait et memlcd_panel_show() l'écrit sous le
  * verrou du bus radio. Si la radio tient le bus, le flush garde l'image et
@@ -55,26 +56,12 @@ static lv_disp_drv_t s_drv;
 static lv_disp_t *s_disp;
 static memlcd_model_t s_shown;          /* dernier modèle dessiné */
 
-/* Données distantes (trame DISPLAY) — scalaires, écrits par la tâche radio. */
-static volatile uint8_t s_r_couche, s_r_batt_dv = 0xFF, s_r_batt_chg, s_r_dongle_ok;
-static volatile bool    s_r_valide;
-
-void memlcd_backend_set_remote(uint8_t couche, uint8_t batt_autre_dv, uint8_t batt_autre_chg, bool dongle_ok)
-{
-    s_r_couche = couche; s_r_batt_dv = batt_autre_dv; s_r_batt_chg = batt_autre_chg;
-    s_r_dongle_ok = dongle_ok;
-    if (!s_r_valide)   /* première trame : une ligne, preuve du canal descendant */
-        ESP_LOGI(TAG, "trame DISPLAY recue : couche %u, autre moitie %u dV (chg %u)",
-                 (unsigned)couche, (unsigned)batt_autre_dv, (unsigned)batt_autre_chg);
-    s_r_valide = true;
-}
-
 /* ── Objets LVGL ──────────────────────────────────────────────────── */
-static lv_obj_t *s_l_route, *s_bar, *s_l_volt, *s_l_nom[MEMLCD_NOM_LIGNES], *s_l_couche,
-                *s_l_autre, *s_l_autre_v;
+static lv_obj_t *s_l_route, *s_bar, *s_l_volt, *s_l_nom[MEMLCD_NOM_LIGNES], *s_l_couche;
 
 #define Y_BANDEAU_FIN 31
-#define Y_PIED_DEBUT  132
+#define Y_CENTRE      (Y_BANDEAU_FIN + 1)
+#define H_CENTRE      (MEMLCD_H - Y_CENTRE)
 
 static void trait(lv_obj_t *parent, lv_coord_t y)
 {
@@ -121,14 +108,17 @@ static void construire(void)
     lv_obj_set_style_bg_opa(s_bar, LV_OPA_COVER, LV_PART_INDICATOR);
     trait(scr, Y_BANDEAU_FIN);
 
-    /* Centre */
+    /* Centre : toute la hauteur sous le bandeau */
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
+    /* 3 lignes de 18 px + « Ln » 14 px plus bas, le bloc centré verticalement */
+    const lv_coord_t bloc = MEMLCD_NOM_LIGNES * 18 + 14 + 8;
+    const lv_coord_t y0 = Y_CENTRE + (H_CENTRE - bloc) / 2;
     for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) {
-        s_l_nom[i] = texte(scr, &lv_font_montserrat_14, 0, 48 + i * 18);
+        s_l_nom[i] = texte(scr, &lv_font_montserrat_14, 0, y0 + i * 18);
         lv_obj_set_width(s_l_nom[i], MEMLCD_W);
         lv_obj_set_style_text_align(s_l_nom[i], LV_TEXT_ALIGN_CENTER, 0);
     }
-    s_l_couche = texte(scr, &lv_font_unscii_8, 0, 110);
+    s_l_couche = texte(scr, &lv_font_unscii_8, 0, y0 + MEMLCD_NOM_LIGNES * 18 + 8);
     lv_obj_set_width(s_l_couche, MEMLCD_W);
     lv_obj_set_style_text_align(s_l_couche, LV_TEXT_ALIGN_CENTER, 0);
 #else
@@ -136,15 +126,8 @@ static void construire(void)
     lv_img_set_src(img, &img_niphargus_60);
     lv_obj_set_style_img_recolor(img, lv_color_black(), 0);
     lv_obj_set_style_img_recolor_opa(img, LV_OPA_COVER, 0);
-    /* centré dans la zone entre les deux traits */
-    lv_obj_set_pos(img, (MEMLCD_W - 60) / 2,
-                   Y_BANDEAU_FIN + 1 + ((Y_PIED_DEBUT - Y_BANDEAU_FIN - 1) - 60) / 2);
+    lv_obj_set_pos(img, (MEMLCD_W - 60) / 2, Y_CENTRE + (H_CENTRE - 60) / 2);   /* centré */
 #endif
-
-    /* Pied : l'autre moitié */
-    trait(scr, Y_PIED_DEBUT);
-    s_l_autre   = texte(scr, &lv_font_unscii_8, 3, Y_PIED_DEBUT + 5);
-    s_l_autre_v = texte(scr, &lv_font_unscii_8, 3, Y_PIED_DEBUT + 17);
     s_built = true;
 }
 
@@ -152,7 +135,7 @@ static void construire(void)
 static void lire_modele(memlcd_model_t *m)
 {
     memset(m, 0, sizeof *m);
-    m->batt_local_dv = 0xFF; m->batt_autre_dv = s_r_batt_dv; m->batt_autre_chg = s_r_batt_chg;
+    m->batt_local_dv = 0xFF;
 #if CONFIG_KASE_BATT_SENSE
     { uint8_t dv = batt_sense_dv(); m->batt_local_dv = dv ? dv : 0xFF; m->batt_local_chg = batt_sense_charging(); }
 #endif
@@ -168,11 +151,8 @@ static void lire_modele(memlcd_model_t *m)
     m->is_left   = 0;
     m->route_rf  = 1;
 #if CONFIG_KASE_HALF_LINK_TX
-    m->dongle_vu = half_link_tx_dongle_vu() || s_r_dongle_ok;
-#else
-    m->dongle_vu = s_r_dongle_ok;
+    m->dongle_vu = half_link_tx_dongle_vu();
 #endif
-    m->couche    = s_r_couche;
 #endif
 }
 
@@ -199,9 +179,6 @@ static void dessiner(const memlcd_model_t *m)
     for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) lv_label_set_text(s_l_nom[i], lignes[i]);
     lv_label_set_text_fmt(s_l_couche, "L%u", (unsigned)m->couche);
 #endif
-    lv_label_set_text(s_l_autre, m->is_left ? "DROITE" : "GAUCHE");
-    tension(buf, sizeof buf, m->batt_autre_dv, m->batt_autre_chg);
-    lv_label_set_text(s_l_autre_v, buf);
 }
 
 /* ── LVGL → panneau ───────────────────────────────────────────────── */
@@ -216,8 +193,8 @@ static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *px)
         }
     }
     if (lv_disp_flush_is_last(drv)) {
-        if (s_sleeping || !s_attached || !memlcd_panel_show(s_fb)) s_dirty = true;   /* repoussé par update() */
-        else s_dirty = false;
+        bool ok = !s_sleeping && s_attached && memlcd_panel_show(s_fb);
+        s_dirty = !ok;                                   /* repoussé par update() */
     }
     lv_disp_flush_ready(drv);
 }
@@ -279,7 +256,9 @@ static void memlcd_update(void)
         if (lvgl_port_lock(50)) { s_shown = m; dessiner(&m); lvgl_port_unlock(); }
     }
     if (s_dirty && s_attached) {
-        if (memlcd_panel_show(s_fb)) s_dirty = false;
+        static uint16_t s_refus;
+        if (memlcd_panel_show(s_fb)) { if (s_refus >= 5) ESP_LOGW(TAG, "image poussee apres %u refus (bus occupe)", (unsigned)s_refus); s_refus = 0; s_dirty = false; }
+        else if (++s_refus == 20) ESP_LOGW(TAG, "20 refus de suite : le bus radio ne se libere pas pour l'ecran");
         return;
     }
     /* Entretien VCOM ~1 Hz quand rien ne s'écrit (update() toutes les ~100 ms). */

@@ -308,25 +308,4 @@ void dongle_engine_start(void)
     ESP_LOGI(TAG, "moteur keymap du dongle démarré (fusion)");
 }
 
-/* ── Trame DISPLAY : ce que le dongle glisse dans l'ACK d'une moitié ─────────
- * Couche STATIQUE = last_layer (TO / base ; un MO tenu ne la change pas — les
- * écrans ne clignotent pas au rythme des pouces). Les DEUX batteries depuis le
- * cache (0xFF « inconnue » côté cache, ou plus de 2 min → 0 sur la radio, la
- * frontière inverse de cache_battery_half) : la trame n'a pas de destinataire,
- * voir rf_packet.h. */
-extern void dongle_cache_get_battery(uint8_t slot, uint8_t *batt_dV, uint8_t *soc_pct,
-                                     uint8_t *charging, uint32_t *age_ms_out);
-uint16_t dongle_display_ack_for(uint8_t *out)
-{
-    if (out == NULL) return 0;
-    rf_display_t d = { .couche = last_layer, .dongle_ok = 1 };
-    for (uint8_t h = 0; h < 2; h++) {
-        uint8_t dv, soc, chg; uint32_t age;
-        dongle_cache_get_battery(h, &dv, &soc, &chg, &age);   /* index cache = moitié */
-        d.batt_dv[h]  = (dv == 0xFF || age > 2 * 60 * 1000u) ? 0 : dv;
-        d.batt_chg[h] = (chg == 0xFF) ? 0 : chg;
-    }
-    return rf_encode_display(out, &d);
-}
-
 #endif /* CONFIG_KASE_DONGLE_FUSION */

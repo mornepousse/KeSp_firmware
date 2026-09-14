@@ -185,35 +185,6 @@ static void test_rf_status_half_et_charge(void)
     TEST_ASSERT(out.mode_usb, "mode_usb préservé");
 }
 
-/* Écrans : trame DISPLAY que le dongle glisse dans l'ACK payload — 5 octets,
- * SANS destinataire : les deux moitiés partagent le pipe 0 et une charge d'ACK
- * part avec le prochain ACK quel qu'en soit l'émetteur (banc 2026-09-14 : la
- * gauche en USB, 5 annonces/s, mangeait toutes les trames « pour la droite »).
- * Elle porte donc la couche statique et les DEUX batteries ; chacune y lit
- * celle de l'autre (rf_display_autre). */
-static void test_rf_display_roundtrip(void)
-{
-    rf_display_t in = { .couche = 3, .batt_dv = { 39, 41 }, .batt_chg = { 1, 2 }, .dongle_ok = 1 };
-    uint8_t buf[8];
-    uint16_t n = rf_encode_display(buf, &in);
-    TEST_ASSERT_EQ(n, 5, "DISPLAY = 5 octets (tient dans un ACK)");
-    TEST_ASSERT_EQ(rf_packet_type(buf, n), PKT_TYPE_DISPLAY, "type DISPLAY");
-    rf_display_t out = {0};
-    TEST_ASSERT(rf_decode_display(buf, n, &out), "decode");
-    TEST_ASSERT(out.couche == 3 && out.batt_dv[0] == 39 && out.batt_dv[1] == 41 &&
-                out.batt_chg[0] == 1 && out.batt_chg[1] == 2 && out.dongle_ok == 1, "champs round-trip");
-    uint8_t dv, chg;
-    rf_display_autre(&out, RF_HALF_LEFT, &dv, &chg);
-    TEST_ASSERT(dv == 41 && chg == 2, "vue de la gauche : la batterie de la DROITE");
-    rf_display_autre(&out, RF_HALF_RIGHT, &dv, &chg);
-    TEST_ASSERT(dv == 39 && chg == 1, "vue de la droite : la batterie de la GAUCHE");
-    rf_display_t g = {0};
-    rf_encode_display(buf, &g);
-    TEST_ASSERT(rf_decode_display(buf, 5, &out) && !out.dongle_ok && out.batt_dv[1] == 0, "tout à zéro");
-    TEST_ASSERT(!rf_decode_display(buf, 4, &out), "rejette trop court");
-    uint8_t bad[5]; memcpy(bad, buf, 5); bad[0] = (PKT_TYPE_STATUS << 4);
-    TEST_ASSERT(!rf_decode_display(bad, 5, &out), "rejette autre type");
-}
 
 static void test_rf_status_rejects_short_and_wrong_type(void)
 {
@@ -505,7 +476,6 @@ void test_rf_packet(void)
     test_rf_status_mode_usb_flag();
     test_rf_status_config_fp();
     test_rf_status_half_et_charge();
-    test_rf_display_roundtrip();
     test_rf_status_rejects_short_and_wrong_type();
     test_rf_status_no_bigger_than_a_heartbeat();
     test_rf_bitmap_all_positions();

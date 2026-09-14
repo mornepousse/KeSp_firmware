@@ -109,6 +109,7 @@ bool memlcd_panel_write_lines(uint16_t first, uint16_t count, const uint8_t *lin
         }
         s_buf[p++] = 0x00;                                             /* 8 ck dummy de fin de trame */
         ok = xfer(s_buf, p);
+        if (!ok) ESP_LOGE(TAG, "spi_device_polling_transmit KO (transaction de %u octets)", (unsigned)p);
     }
     rf_bus_unlock();
     return ok;

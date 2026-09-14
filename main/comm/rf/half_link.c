@@ -20,9 +20,6 @@
 #endif
 #include "esp_attr.h"
 #include "esp_timer.h"
-#if CONFIG_KASE_DISPLAY_MEMLCD
-#include "memlcd_backend.h"   /* trame DISPLAY reçue dans l'ACK → écran */
-#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -365,20 +362,7 @@ static bool half_link_tx_frame(const uint8_t *buf, uint8_t n)
         return false;
     }
     s_seq++;                       /* la trame part : ce numéro est consommé */
-#if CONFIG_KASE_DISPLAY_MEMLCD
-    /* L'ACK du dongle porte la trame DISPLAY (couche statique, batterie de la
-     * gauche) : c'est le seul chemin descendant vers une moitié qui n'écoute
-     * pas. Les trames de sync (destinées à la gauche) sont ignorées ici. */
-    uint8_t ackp[32]; uint8_t ackn = 0;
-    bool ack = rf_driver_send_ap(&s_radio, buf, n, ackp, &ackn);
-    rf_display_t d;
-    if (ackn && rf_decode_display(ackp, ackn, &d)) {
-        uint8_t dv, chg; rf_display_autre(&d, RF_HALF_RIGHT, &dv, &chg);
-        memlcd_backend_set_remote(d.couche, dv ? dv : 0xFF, chg, d.dongle_ok);
-    }
-#else
     bool ack = rf_driver_send(&s_radio, buf, n);
-#endif
     if (ack) s_dernier_ack_ms = (uint32_t)(esp_timer_get_time() / 1000);
     /* Le verrou reste TENU jusqu'après le chien de garde : la décision de
      * bascule (s_tx_fsm) et le réarmement doivent être sérialisés avec l'envoi.
