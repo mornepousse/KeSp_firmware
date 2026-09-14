@@ -104,6 +104,13 @@ extern uint32_t rf_oob_ok, rf_oob_maxrt, rf_oob_timeout;
 bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
                       const uint8_t *payload, uint8_t len,
                       uint8_t restore_ch, const uint8_t restore_addr[5]);
+/* Même excursion, en récupérant la charge utile de l'ACK (EN_ACK_PAY) — le
+ * seul canal descendant vers une moitié en PRX sur un autre canal (gauche en
+ * mode USB : trame DISPLAY). ack_out ≥ 32 o ; *ack_len = 0 si l'ACK était nu. */
+bool rf_driver_oob_tx_ap(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
+                         const uint8_t *payload, uint8_t len,
+                         uint8_t restore_ch, const uint8_t restore_addr[5],
+                         uint8_t *ack_out, uint8_t *ack_len);
 
 /* Power-down/up the NRF chip (works for both PTX and PRX roles).
  * power_down: CE low (standby) → clear PWR_UP (CONFIG bit1) → chip draws ~900 nA.

@@ -62,7 +62,11 @@ static volatile bool    s_r_valide;
 void memlcd_backend_set_remote(uint8_t couche, uint8_t batt_autre_dv, uint8_t batt_autre_chg, bool dongle_ok)
 {
     s_r_couche = couche; s_r_batt_dv = batt_autre_dv; s_r_batt_chg = batt_autre_chg;
-    s_r_dongle_ok = dongle_ok; s_r_valide = true;
+    s_r_dongle_ok = dongle_ok;
+    if (!s_r_valide)   /* première trame : une ligne, preuve du canal descendant */
+        ESP_LOGI(TAG, "trame DISPLAY recue : couche %u, autre moitie %u dV (chg %u)",
+                 (unsigned)couche, (unsigned)batt_autre_dv, (unsigned)batt_autre_chg);
+    s_r_valide = true;
 }
 
 /* ── Objets LVGL ──────────────────────────────────────────────────── */

@@ -35,6 +35,9 @@
 #include "esp_mac.h"        /* esp_read_mac */
 #include "esp_system.h"     /* esp_restart */
 #include "esp_timer.h"
+#if CONFIG_KASE_DISPLAY_MEMLCD
+#include "memlcd_backend.h"   /* trame DISPLAY reçue dans l'ACK → écran */
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -202,6 +205,15 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
                 }
             }
         }
+#if CONFIG_KASE_DISPLAY_MEMLCD
+        /* Trame DISPLAY (quand la sync n'a rien à dire) : la batterie de la
+         * DROITE pour notre pied d'écran. La couche affichée à gauche est la
+         * locale (elle a le moteur) : celle du dongle n'est qu'un écho. */
+        rf_display_t d;
+        if (ack_n && rf_decode_display(ack, ack_n, &d) && !d.to_right)
+            memlcd_backend_set_remote(d.couche, d.batt_autre_dv ? d.batt_autre_dv : 0xFF,
+                                      d.batt_autre_chg, d.dongle_ok);
+#endif
 #endif
 #endif
         if (ok) s_tx_remis++; else s_tx_refuses++;
@@ -289,8 +301,21 @@ static void kbd_relay_refresh_cb(void *arg)
             uint8_t dst[5] = { s_kbd_cfg.rx_addr[0], s_kbd_cfg.rx_addr[1],
                                s_kbd_cfg.rx_addr[2], s_kbd_cfg.rx_addr[3],
                                s_kbd_cfg.addr_suffix };
-            rf_driver_oob_tx(&s_radio, s_kbd_cfg.channel, dst, sb, (uint8_t)sn,
-                             RF_CH_HALF_LINK, link_addr);
+#if CONFIG_KASE_DISPLAY_MEMLCD
+            /* L'ACK de l'annonce porte la trame DISPLAY (batterie de la droite)
+             * : en USB c'est notre seule émission, donc notre seul canal descendant. */
+            uint8_t ackp[32]; uint8_t ackn = 0;
+            bool ok = rf_driver_oob_tx_ap(&s_radio, s_kbd_cfg.channel, dst, sb, (uint8_t)sn,
+                                          RF_CH_HALF_LINK, link_addr, ackp, &ackn);
+            rf_display_t d;
+            if (ackn && rf_decode_display(ackp, ackn, &d) && !d.to_right)
+                memlcd_backend_set_remote(d.couche, d.batt_autre_dv ? d.batt_autre_dv : 0xFF,
+                                          d.batt_autre_chg, d.dongle_ok);
+#else
+            bool ok = rf_driver_oob_tx(&s_radio, s_kbd_cfg.channel, dst, sb, (uint8_t)sn,
+                                       RF_CH_HALF_LINK, link_addr);
+#endif
+            if (ok) s_dernier_ack_ms = now;         /* « dongle vu » aussi en mode USB */
             s_derniere_emission_ms = now;
         }
         xSemaphoreGive(s_tx_mutex);

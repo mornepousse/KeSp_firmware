@@ -196,9 +196,35 @@ void rf_driver_load_ack_payload(rf_radio_t *r, uint8_t pipe, const uint8_t *data
     csn_low(r); spi_xfer(r, tx, rxb, (size_t)(len + 1)); csn_high(r);
 }
 
-bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
-                      const uint8_t *payload, uint8_t len,
-                      uint8_t restore_ch, const uint8_t restore_addr[5])
+/* Charge utile de l'ACK (EN_ACK_PAY) : si RX_DR accompagne TX_DS, la lire
+ * MAINTENANT (voir le commentaire dans rf_driver_send_ap) ; largeur nulle ou
+ * > 32, ou pas de destinataire → vider la FIFO au lieu de lire. */
+static void rf_lire_ack_payload(rf_radio_t *r, uint8_t status, uint8_t *ack_out, uint8_t *ack_len)
+{
+    if (ack_len) *ack_len = 0;
+    if (status & 0x40) {
+        uint8_t wc[2] = { CMD_R_RX_PL_WID, CMD_NOP }, wr[2];
+        csn_low(r); spi_xfer(r, wc, wr, 2); csn_high(r);
+        uint8_t n = wr[1];
+        if (n == 0 || n > 32 || ack_out == NULL) {
+            uint8_t f = CMD_FLUSH_RX, fr;
+            csn_low(r); spi_xfer(r, &f, &fr, 1); csn_high(r);
+        } else {
+            uint8_t rd[33], rb[33];
+            rd[0] = CMD_R_RX_PAYLOAD;
+            memset(&rd[1], CMD_NOP, n);
+            csn_low(r); spi_xfer(r, rd, rb, (size_t)(n + 1)); csn_high(r);
+            memcpy(ack_out, &rb[1], n);
+            if (ack_len) *ack_len = n;
+        }
+        rf_driver_write_reg(r, REG_STATUS, 0x40);   /* effacer RX_DR */
+    }
+}
+
+bool rf_driver_oob_tx_ap(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
+                         const uint8_t *payload, uint8_t len,
+                         uint8_t restore_ch, const uint8_t restore_addr[5],
+                         uint8_t *ack_out, uint8_t *ack_len)
 {
     /* ── Enter PTX on the pairing channel/address ── */
     ce_low(r);
@@ -236,6 +262,7 @@ bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
      * et plus rien ne part ensuite. Degradation lente et silencieuse, du genre
      * qui se lit comme « la liaison n'est pas tres bonne ». */
     if (!ok) { uint8_t c = CMD_FLUSH_TX, rx; csn_low(r); spi_xfer(r,&c,&rx,1); csn_high(r); }
+    rf_lire_ack_payload(r, status, ack_out, ack_len);   /* avant le FLUSH_RX du retour PRX */
     rf_driver_write_reg(r, REG_STATUS, 0x30);
 
     /* Instrument : sans lui, « ca marche mal » ne se distingue pas de « ca ne
@@ -256,6 +283,13 @@ bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
     { uint8_t c = CMD_FLUSH_RX, rx; csn_low(r); spi_xfer(r, &c, &rx, 1); csn_high(r); }
     ce_high(r);                                    /* resume listening */
     return ok;
+}
+
+bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
+                      const uint8_t *payload, uint8_t len,
+                      uint8_t restore_ch, const uint8_t restore_addr[5])
+{
+    return rf_driver_oob_tx_ap(r, ch, addr, payload, len, restore_ch, restore_addr, NULL, NULL);
 }
 
 bool rf_driver_probe(rf_radio_t *r)
@@ -706,24 +740,7 @@ bool rf_driver_send_ap(rf_radio_t *r, const uint8_t *buf, uint8_t len,
      * charges suivantes sont perdues en silence. Largeur nulle ou > 32 = trame
      * corrompue (PS §7.3.4) : vider au lieu de lire. Sans destinataire (ack_out
      * NULL) on vide aussi, pour la même raison d'encrassement. */
-    if (ack_len) *ack_len = 0;
-    if (status & 0x40) {
-        uint8_t wc[2] = { CMD_R_RX_PL_WID, CMD_NOP }, wr[2];
-        csn_low(r); spi_xfer(r, wc, wr, 2); csn_high(r);
-        uint8_t n = wr[1];
-        if (n == 0 || n > 32 || ack_out == NULL) {
-            uint8_t f = CMD_FLUSH_RX, fr;
-            csn_low(r); spi_xfer(r, &f, &fr, 1); csn_high(r);
-        } else {
-            uint8_t rd[33], rb[33];
-            rd[0] = CMD_R_RX_PAYLOAD;
-            memset(&rd[1], CMD_NOP, n);
-            csn_low(r); spi_xfer(r, rd, rb, (size_t)(n + 1)); csn_high(r);
-            memcpy(ack_out, &rb[1], n);
-            if (ack_len) *ack_len = n;
-        }
-        rf_driver_write_reg(r, REG_STATUS, 0x40);   /* effacer RX_DR */
-    }
+    rf_lire_ack_payload(r, status, ack_out, ack_len);
 
     /* Clear TX_DS + MAX_RT flags in STATUS (write 1 to clear) */
     rf_driver_write_reg(r, REG_STATUS, 0x30);

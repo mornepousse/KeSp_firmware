@@ -164,3 +164,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   scripts/gen_logo_memlcd.sh), pied (l'AUTRE moitié : tension, « ? » tant
   qu'inconnue) ; l'écran ne se réécrit que si un champ affiché change ; une
   image refusée par le bus occupé est repoussée au tick suivant, jamais perdue.
+- [smoke:Écrans memory-LCD UI] Trame DISPLAY : le dongle glisse dans l'ACK de
+  chaque trame d'une moitié identifiée (MATRIX, STATUS, SYNC_REQ) sa couche
+  STATIQUE (last_layer : un MO tenu ne bouge pas) et la batterie de l'AUTRE
+  moitié (0 si inconnue ou vieille de plus de 2 min) — seulement si la sync
+  keymap n'a rien chargé (elle reste prioritaire) ; la droite la lit dans l'ACK
+  de ses envois, la gauche dans l'ACK de sa matrice (sans-fil) ou de son
+  annonce de mode (USB, excursion rf_driver_oob_tx_ap) ; chaque moitié n'accepte
+  que la trame qui lui est adressée (flag to_right). Console au boot :
+  « trame DISPLAY recue : couche n, autre moitie NN dV ».

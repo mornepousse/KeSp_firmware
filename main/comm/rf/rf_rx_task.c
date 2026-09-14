@@ -173,16 +173,27 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
          * droite, et le pull de la gauche stagne sous frappe bilatérale (revue
          * 2026-09-13). STATUS et SYNC_REQ ne viennent que de la gauche ; MATRIX
          * porte l'identité de moitié. */
-        rf_matrix_t lm;
-        bool de_la_gauche = (type == PKT_TYPE_STATUS) || (type == PKT_TYPE_SYNC_REQ) ||
-                            (type == PKT_TYPE_MATRIX && rf_decode_matrix(buf, n, &lm) &&
-                             lm.half == RF_HALF_LEFT);
-        if (slot == RF_SLOT_KBD && de_la_gauche && dongle_sync_active()) {
-            uint8_t req_next = SYNC_N_CHUNKS;   /* défaut : balise */
-            rf_sync_req_t q;
-            if (type == PKT_TYPE_SYNC_REQ && rf_decode_sync_req(buf, n, &q)) req_next = q.next;
+        /* Identité de l'émetteur : MATRIX et STATUS la portent, SYNC_REQ ne
+         * vient que de la gauche. -1 = inconnue (souris, ancien format). */
+        int moitie = -1;
+        { rf_matrix_t lm; rf_status_t ls;
+          if (type == PKT_TYPE_SYNC_REQ) moitie = RF_HALF_LEFT;
+          else if (type == PKT_TYPE_MATRIX && rf_decode_matrix(buf, n, &lm)) moitie = lm.half;
+          else if (type == PKT_TYPE_STATUS && rf_decode_status(buf, n, &ls)) moitie = ls.half; }
+        bool de_la_gauche = (moitie == RF_HALF_LEFT);
+        if (slot == RF_SLOT_KBD && moitie >= 0) {
             uint8_t ap[32];
-            uint16_t apl = dongle_sync_ack_for(req_next, ap);
+            uint16_t apl = 0;
+            if (de_la_gauche && dongle_sync_active()) {
+                uint8_t req_next = SYNC_N_CHUNKS;   /* défaut : balise */
+                rf_sync_req_t q;
+                if (type == PKT_TYPE_SYNC_REQ && rf_decode_sync_req(buf, n, &q)) req_next = q.next;
+                apl = dongle_sync_ack_for(req_next, ap);
+            }
+            /* Sync muette → trame DISPLAY pour l'ÉCRAN de cette moitié (couche
+             * statique, batterie de l'autre). La sync reste prioritaire : un
+             * seul ACK, la keymap d'abord, l'écran attend la fin du pull. */
+            if (apl == 0) apl = dongle_display_ack_for((uint8_t)moitie, ap);
             if (apl) rf_driver_load_ack_payload(radio, 0, ap, (uint8_t)apl);
         }
 #endif
