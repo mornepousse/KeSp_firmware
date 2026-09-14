@@ -462,4 +462,44 @@ static inline bool rf_decode_sync_req(const uint8_t *buf, uint16_t len, rf_sync_
     return true;
 }
 
+/* ── Trame d'affichage dongle→moitié, glissée dans l'ACK payload ─────────────
+ *
+ * Les moitiés n'écoutent pas (PTX, autonomie) : ce que le dongle veut leur
+ * montrer — la couche STATIQUE courante, la batterie de l'AUTRE moitié — voyage
+ * dans l'ACK de leurs propres émissions, comme la sync keymap (prioritaire).
+ * 4 octets : [type<<4 | flags][couche][batt autre dV][chg & 0x3 | dongle_ok<<2].
+ * flags bit0 = destinée à la DROITE (les deux moitiés partagent le slot).
+ * Testée host dans test/test_rf_packet.c. Spec : ecrans-memlcd-design.md §4. */
+#define PKT_TYPE_DISPLAY          0xA
+#define PKT_DISPLAY_FLAG_TO_RIGHT 0x1
+
+typedef struct {
+    uint8_t to_right;        /* 1 = pour la droite, 0 = pour la gauche */
+    uint8_t couche;          /* couche statique (TO / base), jamais un MO tenu */
+    uint8_t batt_autre_dv;   /* tension de l'AUTRE moitié, 0 = inconnue */
+    uint8_t batt_autre_chg;  /* 0 inconnu, 1 en charge probable, 2 pleine */
+    uint8_t dongle_ok;       /* 1 = le dongle parle (toujours 1 quand reçu…) */
+} rf_display_t;
+
+static inline uint16_t rf_encode_display(uint8_t *buf, const rf_display_t *d)
+{
+    if (buf == NULL || d == NULL) return 0;
+    buf[0] = (uint8_t)((PKT_TYPE_DISPLAY << 4) | (d->to_right ? PKT_DISPLAY_FLAG_TO_RIGHT : 0));
+    buf[1] = d->couche;
+    buf[2] = d->batt_autre_dv;
+    buf[3] = (uint8_t)((d->batt_autre_chg & 0x3) | (d->dongle_ok ? 0x4 : 0));
+    return 4;
+}
+static inline bool rf_decode_display(const uint8_t *buf, uint16_t len, rf_display_t *o)
+{
+    if (buf == NULL || o == NULL) return false;
+    if (len < 4 || rf_packet_type(buf, len) != PKT_TYPE_DISPLAY) return false;
+    o->to_right       = (buf[0] & PKT_DISPLAY_FLAG_TO_RIGHT) != 0;
+    o->couche         = buf[1];
+    o->batt_autre_dv  = buf[2];
+    o->batt_autre_chg = buf[3] & 0x3;
+    o->dongle_ok      = (buf[3] & 0x4) != 0;
+    return true;
+}
+
 #endif /* RF_PACKET_H */

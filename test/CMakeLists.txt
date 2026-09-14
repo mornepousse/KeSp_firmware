@@ -84,6 +84,7 @@ add_executable(test_runner
     test_keymap_sync.c
     test_wake_grace.c
     test_batt_calc.c
+    test_memlcd_model.c
     test_oled_nav.c
     ../main/display/oled/oled_nav.c
     test_niphar_left_pins.c

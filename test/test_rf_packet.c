@@ -185,6 +185,27 @@ static void test_rf_status_half_et_charge(void)
     TEST_ASSERT(out.mode_usb, "mode_usb préservé");
 }
 
+/* Écrans : trame DISPLAY que le dongle glisse dans l'ACK payload — 4 octets
+ * (couche statique, batterie de l'AUTRE moitié, dongle vu, destinataire). */
+static void test_rf_display_roundtrip(void)
+{
+    rf_display_t in = { .to_right = 1, .couche = 3, .batt_autre_dv = 41, .batt_autre_chg = 2, .dongle_ok = 1 };
+    uint8_t buf[8];
+    uint16_t n = rf_encode_display(buf, &in);
+    TEST_ASSERT_EQ(n, 4, "DISPLAY = 4 octets (tient dans un ACK)");
+    TEST_ASSERT_EQ(rf_packet_type(buf, n), PKT_TYPE_DISPLAY, "type DISPLAY");
+    rf_display_t out = {0};
+    TEST_ASSERT(rf_decode_display(buf, n, &out), "decode");
+    TEST_ASSERT(out.to_right == 1 && out.couche == 3 && out.batt_autre_dv == 41 &&
+                out.batt_autre_chg == 2 && out.dongle_ok == 1, "champs round-trip");
+    rf_display_t g = { .to_right = 0, .couche = 0, .batt_autre_dv = 0, .batt_autre_chg = 0, .dongle_ok = 0 };
+    rf_encode_display(buf, &g);
+    TEST_ASSERT(rf_decode_display(buf, 4, &out) && !out.to_right && !out.dongle_ok, "gauche, tout à zéro");
+    TEST_ASSERT(!rf_decode_display(buf, 3, &out), "rejette trop court");
+    uint8_t bad[4]; memcpy(bad, buf, 4); bad[0] = (PKT_TYPE_STATUS << 4);
+    TEST_ASSERT(!rf_decode_display(bad, 4, &out), "rejette autre type");
+}
+
 static void test_rf_status_rejects_short_and_wrong_type(void)
 {
     uint8_t buf[16];
@@ -475,6 +496,7 @@ void test_rf_packet(void)
     test_rf_status_mode_usb_flag();
     test_rf_status_config_fp();
     test_rf_status_half_et_charge();
+    test_rf_display_roundtrip();
     test_rf_status_rejects_short_and_wrong_type();
     test_rf_status_no_bigger_than_a_heartbeat();
     test_rf_bitmap_all_positions();
