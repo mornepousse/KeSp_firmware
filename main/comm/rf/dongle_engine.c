@@ -310,24 +310,22 @@ void dongle_engine_start(void)
 
 /* ── Trame DISPLAY : ce que le dongle glisse dans l'ACK d'une moitié ─────────
  * Couche STATIQUE = last_layer (TO / base ; un MO tenu ne la change pas — les
- * écrans ne clignotent pas au rythme des pouces). Batterie de l'AUTRE moitié
- * depuis le cache (0xFF « inconnue » côté cache → 0 sur la radio, la frontière
- * inverse de cache_battery_half). */
+ * écrans ne clignotent pas au rythme des pouces). Les DEUX batteries depuis le
+ * cache (0xFF « inconnue » côté cache, ou plus de 2 min → 0 sur la radio, la
+ * frontière inverse de cache_battery_half) : la trame n'a pas de destinataire,
+ * voir rf_packet.h. */
 extern void dongle_cache_get_battery(uint8_t slot, uint8_t *batt_dV, uint8_t *soc_pct,
                                      uint8_t *charging, uint32_t *age_ms_out);
-uint16_t dongle_display_ack_for(uint8_t half, uint8_t *out)
+uint16_t dongle_display_ack_for(uint8_t *out)
 {
     if (out == NULL) return 0;
-    uint8_t autre = (half == RF_HALF_RIGHT) ? 0 : 1;   /* index cache de l'autre moitié */
-    uint8_t dv, soc, chg; uint32_t age;
-    dongle_cache_get_battery(autre, &dv, &soc, &chg, &age);
-    rf_display_t d = {
-        .to_right       = (half == RF_HALF_RIGHT),
-        .couche         = last_layer,
-        .batt_autre_dv  = (dv == 0xFF || age > 2 * 60 * 1000u) ? 0 : dv,   /* > 2 min : périmée */
-        .batt_autre_chg = (chg == 0xFF) ? 0 : chg,
-        .dongle_ok      = 1,
-    };
+    rf_display_t d = { .couche = last_layer, .dongle_ok = 1 };
+    for (uint8_t h = 0; h < 2; h++) {
+        uint8_t dv, soc, chg; uint32_t age;
+        dongle_cache_get_battery(h, &dv, &soc, &chg, &age);   /* index cache = moitié */
+        d.batt_dv[h]  = (dv == 0xFF || age > 2 * 60 * 1000u) ? 0 : dv;
+        d.batt_chg[h] = (chg == 0xFF) ? 0 : chg;
+    }
     return rf_encode_display(out, &d);
 }
 

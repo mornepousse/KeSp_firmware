@@ -185,25 +185,34 @@ static void test_rf_status_half_et_charge(void)
     TEST_ASSERT(out.mode_usb, "mode_usb préservé");
 }
 
-/* Écrans : trame DISPLAY que le dongle glisse dans l'ACK payload — 4 octets
- * (couche statique, batterie de l'AUTRE moitié, dongle vu, destinataire). */
+/* Écrans : trame DISPLAY que le dongle glisse dans l'ACK payload — 5 octets,
+ * SANS destinataire : les deux moitiés partagent le pipe 0 et une charge d'ACK
+ * part avec le prochain ACK quel qu'en soit l'émetteur (banc 2026-09-14 : la
+ * gauche en USB, 5 annonces/s, mangeait toutes les trames « pour la droite »).
+ * Elle porte donc la couche statique et les DEUX batteries ; chacune y lit
+ * celle de l'autre (rf_display_autre). */
 static void test_rf_display_roundtrip(void)
 {
-    rf_display_t in = { .to_right = 1, .couche = 3, .batt_autre_dv = 41, .batt_autre_chg = 2, .dongle_ok = 1 };
+    rf_display_t in = { .couche = 3, .batt_dv = { 39, 41 }, .batt_chg = { 1, 2 }, .dongle_ok = 1 };
     uint8_t buf[8];
     uint16_t n = rf_encode_display(buf, &in);
-    TEST_ASSERT_EQ(n, 4, "DISPLAY = 4 octets (tient dans un ACK)");
+    TEST_ASSERT_EQ(n, 5, "DISPLAY = 5 octets (tient dans un ACK)");
     TEST_ASSERT_EQ(rf_packet_type(buf, n), PKT_TYPE_DISPLAY, "type DISPLAY");
     rf_display_t out = {0};
     TEST_ASSERT(rf_decode_display(buf, n, &out), "decode");
-    TEST_ASSERT(out.to_right == 1 && out.couche == 3 && out.batt_autre_dv == 41 &&
-                out.batt_autre_chg == 2 && out.dongle_ok == 1, "champs round-trip");
-    rf_display_t g = { .to_right = 0, .couche = 0, .batt_autre_dv = 0, .batt_autre_chg = 0, .dongle_ok = 0 };
+    TEST_ASSERT(out.couche == 3 && out.batt_dv[0] == 39 && out.batt_dv[1] == 41 &&
+                out.batt_chg[0] == 1 && out.batt_chg[1] == 2 && out.dongle_ok == 1, "champs round-trip");
+    uint8_t dv, chg;
+    rf_display_autre(&out, RF_HALF_LEFT, &dv, &chg);
+    TEST_ASSERT(dv == 41 && chg == 2, "vue de la gauche : la batterie de la DROITE");
+    rf_display_autre(&out, RF_HALF_RIGHT, &dv, &chg);
+    TEST_ASSERT(dv == 39 && chg == 1, "vue de la droite : la batterie de la GAUCHE");
+    rf_display_t g = {0};
     rf_encode_display(buf, &g);
-    TEST_ASSERT(rf_decode_display(buf, 4, &out) && !out.to_right && !out.dongle_ok, "gauche, tout à zéro");
-    TEST_ASSERT(!rf_decode_display(buf, 3, &out), "rejette trop court");
-    uint8_t bad[4]; memcpy(bad, buf, 4); bad[0] = (PKT_TYPE_STATUS << 4);
-    TEST_ASSERT(!rf_decode_display(bad, 4, &out), "rejette autre type");
+    TEST_ASSERT(rf_decode_display(buf, 5, &out) && !out.dongle_ok && out.batt_dv[1] == 0, "tout à zéro");
+    TEST_ASSERT(!rf_decode_display(buf, 4, &out), "rejette trop court");
+    uint8_t bad[5]; memcpy(bad, buf, 5); bad[0] = (PKT_TYPE_STATUS << 4);
+    TEST_ASSERT(!rf_decode_display(bad, 5, &out), "rejette autre type");
 }
 
 static void test_rf_status_rejects_short_and_wrong_type(void)

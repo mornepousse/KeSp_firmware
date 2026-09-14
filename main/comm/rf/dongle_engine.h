@@ -59,9 +59,9 @@ bool dongle_sync_active(void);
  * Écrit dans out (≤ 32 o), rend la longueur (0 = rien). */
 uint16_t dongle_sync_ack_for(uint8_t req_next, uint8_t *out);
 
-/* Trame DISPLAY pour l'écran de la moitié `half` (RF_HALF_LEFT/RIGHT) : couche
- * statique du dongle, batterie de l'AUTRE moitié (0 si inconnue ou > 2 min).
- * Chargée dans l'ACK quand la sync n'a rien à dire. Longueur écrite (4). */
-uint16_t dongle_display_ack_for(uint8_t half, uint8_t *out);
+/* Trame DISPLAY pour l'écran des moitiés : couche statique du dongle et les
+ * deux batteries (0 si inconnue ou > 2 min). Chargée dans l'ACK quand la sync
+ * n'a rien à dire. Longueur écrite (RF_DISPLAY_LEN). */
+uint16_t dongle_display_ack_for(uint8_t *out);
 
 #endif /* CONFIG_KASE_DONGLE_FUSION */

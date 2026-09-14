@@ -181,20 +181,25 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
           else if (type == PKT_TYPE_MATRIX && rf_decode_matrix(buf, n, &lm)) moitie = lm.half;
           else if (type == PKT_TYPE_STATUS && rf_decode_status(buf, n, &ls)) moitie = ls.half; }
         bool de_la_gauche = (moitie == RF_HALF_LEFT);
+        /* La charge d'ACK est CONSTRUITE ici mais CHARGÉE en fin de tour : la
+         * réémission droite→gauche (mode USB) est une excursion oob_tx qui vide
+         * la FIFO TX du PRX — chargée avant elle, la charge partait à la
+         * poubelle et la droite ne recevait jamais sa trame DISPLAY (banc
+         * 2026-09-14 : 150 trames acquittées, zéro charge reçue). */
+        uint8_t  ap[32];
+        uint16_t apl = 0;
         if (slot == RF_SLOT_KBD && moitie >= 0) {
-            uint8_t ap[32];
-            uint16_t apl = 0;
             if (de_la_gauche && dongle_sync_active()) {
                 uint8_t req_next = SYNC_N_CHUNKS;   /* défaut : balise */
                 rf_sync_req_t q;
                 if (type == PKT_TYPE_SYNC_REQ && rf_decode_sync_req(buf, n, &q)) req_next = q.next;
                 apl = dongle_sync_ack_for(req_next, ap);
             }
-            /* Sync muette → trame DISPLAY pour l'ÉCRAN de cette moitié (couche
-             * statique, batterie de l'autre). La sync reste prioritaire : un
-             * seul ACK, la keymap d'abord, l'écran attend la fin du pull. */
-            if (apl == 0) apl = dongle_display_ack_for((uint8_t)moitie, ap);
-            if (apl) rf_driver_load_ack_payload(radio, 0, ap, (uint8_t)apl);
+            /* Sync muette → trame DISPLAY pour les écrans (couche statique, les
+             * deux batteries — sans destinataire, le prochain ACK peut partir
+             * vers l'une ou l'autre). La sync reste prioritaire : un seul ACK,
+             * la keymap d'abord, l'écran attend la fin du pull. */
+            if (apl == 0) apl = dongle_display_ack_for(ap);
         }
 #endif
         /* PKT_TYPE_KEY (matrice brute) et PKT_TYPE_TRACKPAD (gestuelle brute) ne
@@ -288,6 +293,9 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
                 }
             }
         }
+        /* Après toute excursion : la charge d'ACK pour la PROCHAINE trame de
+         * cette moitié (sync ou DISPLAY), voir plus haut. */
+        if (apl) rf_driver_load_ack_payload(radio, 0, ap, (uint8_t)apl);
 #endif
     }
 }

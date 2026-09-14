@@ -210,9 +210,10 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
          * DROITE pour notre pied d'écran. La couche affichée à gauche est la
          * locale (elle a le moteur) : celle du dongle n'est qu'un écho. */
         rf_display_t d;
-        if (ack_n && rf_decode_display(ack, ack_n, &d) && !d.to_right)
-            memlcd_backend_set_remote(d.couche, d.batt_autre_dv ? d.batt_autre_dv : 0xFF,
-                                      d.batt_autre_chg, d.dongle_ok);
+        if (ack_n && rf_decode_display(ack, ack_n, &d)) {
+            uint8_t dv, chg; rf_display_autre(&d, RF_HALF_LEFT, &dv, &chg);
+            memlcd_backend_set_remote(d.couche, dv ? dv : 0xFF, chg, d.dongle_ok);
+        }
 #endif
 #endif
 #endif
@@ -308,9 +309,10 @@ static void kbd_relay_refresh_cb(void *arg)
             bool ok = rf_driver_oob_tx_ap(&s_radio, s_kbd_cfg.channel, dst, sb, (uint8_t)sn,
                                           RF_CH_HALF_LINK, link_addr, ackp, &ackn);
             rf_display_t d;
-            if (ackn && rf_decode_display(ackp, ackn, &d) && !d.to_right)
-                memlcd_backend_set_remote(d.couche, d.batt_autre_dv ? d.batt_autre_dv : 0xFF,
-                                          d.batt_autre_chg, d.dongle_ok);
+            if (ackn && rf_decode_display(ackp, ackn, &d)) {
+                uint8_t dv, chg; rf_display_autre(&d, RF_HALF_LEFT, &dv, &chg);
+                memlcd_backend_set_remote(d.couche, dv ? dv : 0xFF, chg, d.dongle_ok);
+            }
 #else
             bool ok = rf_driver_oob_tx(&s_radio, s_kbd_cfg.channel, dst, sb, (uint8_t)sn,
                                        RF_CH_HALF_LINK, link_addr);

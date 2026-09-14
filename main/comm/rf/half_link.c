@@ -372,9 +372,10 @@ static bool half_link_tx_frame(const uint8_t *buf, uint8_t n)
     uint8_t ackp[32]; uint8_t ackn = 0;
     bool ack = rf_driver_send_ap(&s_radio, buf, n, ackp, &ackn);
     rf_display_t d;
-    if (ackn && rf_decode_display(ackp, ackn, &d) && d.to_right)
-        memlcd_backend_set_remote(d.couche, d.batt_autre_dv ? d.batt_autre_dv : 0xFF,
-                                  d.batt_autre_chg, d.dongle_ok);
+    if (ackn && rf_decode_display(ackp, ackn, &d)) {
+        uint8_t dv, chg; rf_display_autre(&d, RF_HALF_RIGHT, &dv, &chg);
+        memlcd_backend_set_remote(d.couche, dv ? dv : 0xFF, chg, d.dongle_ok);
+    }
 #else
     bool ack = rf_driver_send(&s_radio, buf, n);
 #endif

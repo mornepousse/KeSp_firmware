@@ -141,9 +141,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   nom de couche se coupe en 4 caractères × 3 lignes puis « … », jamais zéro
   ligne, NULL sûr ; le modèle ne déclenche un redessin que si un champ AFFICHÉ
   change — chaque redessin est une transaction sur le bus partagé avec la radio.
-- [test:test_rf_display_roundtrip] La trame DISPLAY (couche statique, batterie
-  de l'autre moitié, dongle vu, destinataire) tient en 4 octets dans un ACK
-  payload et survit à l'encode/decode.
+- [test:test_rf_display_roundtrip] La trame DISPLAY (couche statique, les DEUX
+  batteries, dongle vu) tient en 5 octets dans un ACK payload, survit à
+  l'encode/decode, et chaque moitié y lit la batterie de l'AUTRE
+  (rf_display_autre) — elle n'a PAS de destinataire : les deux moitiés
+  partagent le pipe 0 du dongle et une charge d'ACK part avec le prochain ACK,
+  quel qu'en soit l'émetteur.
 - [test:test_ecran_memlcd_gauche] La gauche a LE MÊME écran que la droite
   (J12 soudé le 2026-09-14) : CS 14 actif haut, portrait 68×160, et aucun autre
   backend (ROUND/OLED) ne peut être choisi par CMake pour cette moitié.
@@ -166,10 +169,10 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   image refusée par le bus occupé est repoussée au tick suivant, jamais perdue.
 - [smoke:Écrans memory-LCD UI] Trame DISPLAY : le dongle glisse dans l'ACK de
   chaque trame d'une moitié identifiée (MATRIX, STATUS, SYNC_REQ) sa couche
-  STATIQUE (last_layer : un MO tenu ne bouge pas) et la batterie de l'AUTRE
-  moitié (0 si inconnue ou vieille de plus de 2 min) — seulement si la sync
-  keymap n'a rien chargé (elle reste prioritaire) ; la droite la lit dans l'ACK
-  de ses envois, la gauche dans l'ACK de sa matrice (sans-fil) ou de son
-  annonce de mode (USB, excursion rf_driver_oob_tx_ap) ; chaque moitié n'accepte
-  que la trame qui lui est adressée (flag to_right). Console au boot :
-  « trame DISPLAY recue : couche n, autre moitie NN dV ».
+  STATIQUE (last_layer : un MO tenu ne bouge pas) et les deux batteries (0 si
+  inconnue ou vieille de plus de 2 min) — seulement si la sync keymap n'a rien
+  chargé (elle reste prioritaire), et CHARGÉE APRÈS la réémission droite→gauche
+  (l'excursion oob_tx vide la FIFO TX : chargée avant, la charge était perdue) ;
+  la droite la lit dans l'ACK de ses envois, la gauche dans l'ACK de sa matrice
+  (sans-fil) ou de son annonce de mode (USB, excursion rf_driver_oob_tx_ap).
+  Console au boot : « trame DISPLAY recue : couche n, autre moitie NN dV ».
