@@ -134,8 +134,10 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
 
 ## Écrans — Sharp memory-LCD des moitiés
 
-- [test:test_memlcd_model] rev8 est une involution (le panneau lit LSB-first,
-  l'ESP32 émet MSB-first : une inversion fausse = écran muet sans erreur) ; le
+- [test:test_memlcd_model] rev8 est une involution (l'adresse de ligne se lit
+  CA0 en premier, l'ESP32 émet MSB-first : une inversion fausse = écran muet
+  sans erreur) ; le tampon portrait se transpose en 68 lignes × 20 octets, 1 =
+  blanc, tampon vide = panneau blanc, pixel (0,0) → ligne 0 colonne 159 ; le
   nom de couche se coupe en 4 caractères × 3 lignes puis « … », jamais zéro
   ligne, NULL sûr ; le modèle ne déclenche un redessin que si un champ AFFICHÉ
   change — chaque redessin est une transaction sur le bus partagé avec la radio.
@@ -146,11 +148,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   (J12 soudé le 2026-09-14) : CS 14 actif haut, portrait 68×160, et aucun autre
   backend (ROUND/OLED) ne peut être choisi par CMake pour cette moitié.
 - [smoke:Écrans memory-LCD] Le CS de l'écran (actif haut) est tenu BAS dès le
-  boot des deux moitiés et sa mobilité est PROUVÉE au bring-up (relu 1/0 au
-  journal : « CS GPIO14 relu : haut=1 bas=0 ») ; tant que le protocole n'est pas prouvé, le boot balaie 4
-  hypothèses (rev8 / MSB brut × damier / noir-blanc, 4 s chacune, numérotées
-  au journal « SWEEP n ») pour que l'observation tranche au lieu de deviner ; l'attachement du panneau attend que la radio ait créé
-  le bus SPI (init différée) ; toute transaction écran passe sous le verrou du
-  propriétaire de la radio et cède si elle est occupée ; le damier de bring-up
-  est net sur tout le panneau ; l'image reste gelée en light sleep et aucun
-  réveil n'est dû à l'écran.
+  boot des deux moitiés ; le protocole suit l'app note Sharp (lemia doc 6845
+  p. 10-12) : mot de commande BRUT (M0 = premier bit clocké), adresse de ligne
+  en rev8 (CA0 en premier), 68 lignes × 20 octets (catalogue doc 6844 p. 5 :
+  160 × 68, H = sens des données) transposées depuis le portrait 68 × 160 ;
+  l'attachement du panneau attend que la radio ait créé le bus SPI (init
+  différée) ; toute transaction écran passe sous le verrou du propriétaire de
+  la radio et cède si elle est occupée ; la mire de bring-up (cadre, pavé plein
+  en HAUT-GAUCHE, damier 8 px) est nette et bien orientée ; l'image reste gelée
+  en light sleep et aucun réveil n'est dû à l'écran.

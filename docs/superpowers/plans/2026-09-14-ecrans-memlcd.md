@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Panneau **portrait** : LVGL travaille en **68 × 160** ; 160 lignes de 68 px utiles (le panneau physique adresse 160 lignes ; chaque ligne = 68 px arrondis à **9 octets** de données ; on pousse 9 octets utiles, le reste de la ligne physique n'est pas adressé). ⚠ À CONFIRMER au banc en étape 1 : si le damier est décalé, le panneau attend 160 px par ligne (20 octets) et 68 lignes — le pilote paramètre `MEMLCD_LINE_BYTES` / `MEMLCD_LINES` en un seul endroit.
+- Panneau **portrait** : LVGL travaille en **68 × 160** (tampon 9 octets par rangée). **Tranché à la datasheet le 2026-09-14** (Task 3) : le panneau physique est 68 lignes × 160 px (20 octets) ; `memlcd_fb_to_panel` (memlcd_model.h, testée) transpose le portrait en lignes physiques, `memlcd_panel_show(fb)` l'écrit. Le mot de commande part brut (M0 = bit 7), seule l'adresse passe par rev8.
 - SPI : mode 0, **1 MHz**, **LSB-first émulé** (table d'inversion de bits pour les octets de commande et d'adresse ; les octets de pixels sont écrits de sorte que le pixel 0 soit le bit de poids faible), `spics_io_num = -1`, **CS actif HAUT** piloté à la main (`BOARD_LCD_CS_GPIO` = 14 des deux côtés), **tenu BAS dès le boot** des deux moitiés même sans écran.
 - Bus partagé avec le nRF24 : **toute** transaction écran s'exécute sous `rf_bus_lock(5 ms)` / `rf_bus_unlock()` exposés par le propriétaire de la puce (gauche `kbd_relay`, droite `half_link`) ; si le verrou n'est pas obtenu, le rafraîchissement **cède** et réessaie au tick suivant. Jamais de transaction écran depuis un contexte ISR.
 - Énergie : `sleep()` = arrêt des timers écran, **image gelée** (pas d'effacement) ; `wake()` = reprise + redessin complet. Aucun timer écran ne doit exister pendant le light sleep.

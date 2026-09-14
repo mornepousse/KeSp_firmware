@@ -47,15 +47,21 @@ s'y plier, pas les redécouvrir.
 
 Protocole Sharp memory-LCD (public, à **prouver au banc** — la datasheet du
 LS011B7DH03 n'est pas dans la bibliothèque lemia) :
-- SPI mode 0, **≤ 1 MHz** (2 MHz max spec), **LSB-first** : l'ESP32 émet
-  MSB-first → on inverse les bits des octets de commande/adresse à l'écriture
-  (table 256 o) ; les données pixel sont posées directement dans l'ordre attendu.
+- SPI mode 0, **≤ 1 MHz** (2 MHz max spec). L'ESP32 émet MSB-first et le
+  panneau lit le PREMIER bit clocké comme M0 (app note Sharp, lemia doc 6845
+  p. 10-11) : le mot de commande part **brut** (`0x80` = write, `0x40` = VCOM,
+  `0x20` = clear) ; seule l'**adresse de ligne** se lit CA0 en premier et passe
+  par `memlcd_rev8` ; les pixels partent D1 en premier (bit 7), D = L → noir.
 - **CS actif HAUT** : `BOARD_LCD_CS_ACTIVE_HIGH`. Piloté **bas dès le boot des
   deux côtés** (même si l'écran est absent) pour qu'il n'écoute jamais le trafic
   nRF sur le bus partagé.
-- Trame « write line » : `[M0=1 M1 M2 0 0 0 0 0][adresse ligne 1..160][160 px =
-  20 o][0x00]`, plusieurs lignes à la suite, `0x00 0x00` final. Une image entière
-  = 160 × 22 o ≈ 3,5 Ko ; on n'écrit que les lignes **modifiées**.
+- **Géométrie physique : 68 lignes × 160 px** (catalogue Sharp, lemia doc 6844
+  p. 5 : « 160 × 68 », H = sens des données). Le portrait 68 × 160 de l'UI est
+  une rotation de 90° : `memlcd_fb_to_panel` (pure, testée) transpose le tampon
+  portrait en 68 lignes de 20 octets ; `BOARD_LCD_ROTATE_180` retourne l'image.
+- Trame « write line » : `[0x80|M1][rev8(adresse 1..68)][160 px = 20 o][0x00]`,
+  plusieurs lignes à la suite, `0x00` final. Une image entière = 68 × 22 o
+  ≈ 1,5 Ko, ~12 ms à 1 MHz ; on réécrit l'image quand le modèle change.
 - **VCOM** : bit M1 basculé à chaque écriture, et une trame « VCOM seul »
   (`[M1][0x00]`) **~1 Hz** quand rien ne change, tant que la carte est éveillée.
   En light sleep : rien (image conservée ; le panneau tolère l'absence de VCOM

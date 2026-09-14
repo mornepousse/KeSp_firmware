@@ -6,8 +6,8 @@
 
 /* Pilote du Sharp LS011B7DH03 (module nice!view) sur le SPI PARTAGÉ avec le
  * nRF24. Toute transaction passe sous rf_bus_lock() : jamais pendant une trame
- * radio. Write-only, CS ACTIF HAUT piloté à la main, LSB-first émulé (rev8 sur
- * commandes/adresses), VCOM logiciel basculé à chaque écriture et par
+ * radio. Write-only, CS ACTIF HAUT piloté à la main, commande brute (M0 = bit 7), adresse
+ * de ligne en rev8 (CA0 en premier), VCOM logiciel basculé à chaque écriture et par
  * memlcd_panel_vcom_tick() (~1 Hz éveillé ; rien en veille : image conservée).
  * Spec : docs/superpowers/specs/2026-09-14-ecrans-memlcd-design.md §1 */
 
@@ -19,10 +19,11 @@ void memlcd_cs_idle(void);
 esp_err_t memlcd_panel_init(void);
 
 bool memlcd_panel_clear(void);                       /* M2 : tout blanc */
-/* Écrit `count` lignes à partir de `first` (0..159) ; bits = count × 9 octets,
- * bit 0 de l'octet 0 = pixel x=0 ; polarité : 1 = BLANC (convention Sharp),
- * à confirmer au damier. */
-bool memlcd_panel_write_lines(uint16_t first, uint16_t count, const uint8_t *bits);
+/* Écrit `count` LIGNES DU PANNEAU à partir de `first` (0..67) ; lines = count × 20
+ * octets déjà transposés (memlcd_fb_to_panel) : bit 7 = D1, 1 = blanc. */
+bool memlcd_panel_write_lines(uint16_t first, uint16_t count, const uint8_t *lines);
+/* Affiche un tampon PORTRAIT (MEMLCD_H × MEMLCD_LINE_BYTES, 1 = encre) :
+ * transposition + écriture des 68 lignes. ~12 ms à 1 MHz. */
+bool memlcd_panel_show(const uint8_t *fb);
 bool memlcd_panel_vcom_tick(void);                   /* M1 seul : entretien VCOM */
-void memlcd_panel_test_pattern(void);                /* damier 8 px : bring-up */
-void memlcd_panel_sweep(void);                       /* BANC : 4 hypothèses de protocole, 4 s chacune */
+void memlcd_panel_test_pattern(void);                /* mire de bring-up : cadre + pavé haut-gauche + damier */

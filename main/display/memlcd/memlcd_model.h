@@ -9,7 +9,15 @@
  * Spec : docs/superpowers/specs/2026-09-14-ecrans-memlcd-design.md */
 #define MEMLCD_W          68
 #define MEMLCD_H          160
-#define MEMLCD_LINE_BYTES 9     /* ceil(68 / 8) */
+#define MEMLCD_LINE_BYTES 9     /* ceil(68 / 8) : une RANGÉE du tampon portrait */
+
+/* Géométrie PHYSIQUE du panneau : 68 lignes de grille de 160 pixels (catalogue
+ * Sharp, lemia doc 6844 p. 5 : « LS011B7DH03 160 × 68 », H = sens des données,
+ * comme le LS013B7DH05 144 × 168 = 18 octets × 168 lignes). Le portrait 68 × 160
+ * est donc une ROTATION de 90° : une colonne du tampon devient une ligne du
+ * panneau. Adresses de ligne 1..68, 20 octets de pixels par ligne. */
+#define MEMLCD_PANEL_LINES      68
+#define MEMLCD_PANEL_LINE_BYTES 20
 
 /* Le panneau lit LSB-first ; le maître SPI de l'ESP32 émet MSB-first. On
  * inverse donc les bits des octets de COMMANDE et d'ADRESSE avant émission
@@ -21,6 +29,26 @@ static inline uint8_t memlcd_rev8(uint8_t b)
     b = (uint8_t)(((b & 0xCC) >> 2) | ((b & 0x33) << 2));
     b = (uint8_t)(((b & 0xAA) >> 1) | ((b & 0x55) << 1));
     return b;
+}
+
+/* Transpose le tampon portrait (MEMLCD_H rangées × MEMLCD_LINE_BYTES, bit 7 de
+ * l'octet 0 = x 0, 1 = ENCRE) en lignes du panneau (MEMLCD_PANEL_LINES × 20
+ * octets, bit 7 = D1 émis en premier par le SPI MSB-first, 1 = BLANC — app note
+ * lemia doc 6845 p. 10 : D(n) = L → noir). Rotation 90° : le pixel portrait
+ * (x, y) tombe ligne x, colonne 159 - y ; rot180 retourne l'image (ligne 67 - x,
+ * colonne y) pour un module monté tête en bas. */
+static inline void memlcd_fb_to_panel(const uint8_t *fb, uint8_t *panel, bool rot180)
+{
+    memset(panel, 0xFF, (size_t)MEMLCD_PANEL_LINES * MEMLCD_PANEL_LINE_BYTES);
+    for (int y = 0; y < MEMLCD_H; y++) {
+        const uint8_t *row = fb + (size_t)y * MEMLCD_LINE_BYTES;
+        for (int x = 0; x < MEMLCD_W; x++) {
+            if (!(row[x >> 3] & (0x80 >> (x & 7)))) continue;   /* pas d'encre */
+            int ligne = rot180 ? (MEMLCD_PANEL_LINES - 1 - x) : x;
+            int col   = rot180 ? y : (MEMLCD_H - 1 - y);
+            panel[ligne * MEMLCD_PANEL_LINE_BYTES + (col >> 3)] &= (uint8_t)~(0x80 >> (col & 7));
+        }
+    }
 }
 
 /* Nom de couche sur 68 px en Montserrat 14 : 4 caractères par ligne, 3 lignes

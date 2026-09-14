@@ -59,8 +59,9 @@ dans la PR/release.
       repasse « inconnue » ; batterie en charge → après ≥ 2 min à ≥ 4,15 V,
       charging = 2 (PLEINE)
 - [ ] Écrans memory-LCD (gauche ET droite) : au boot, console « panneau attache
-      (bus radio pret), damier ecrit » APRÈS « radio PTX … init OK » ; damier
-      8×8 net sur tout le panneau, sans pixel parasite ; taper pendant un
+      (bus radio pret), mire ecrite » APRÈS « radio PTX … init OK » ; mire
+      nette sur tout le panneau (cadre 1 px, pavé plein 16×16 en HAUT-GAUCHE
+      du portrait, damier 8×8 ailleurs), sans pixel parasite ; taper pendant un
       rafraîchissement ne perd aucune frappe ; en light sleep l'image reste
       figée et lisible, la carte dort toujours à 60 s ; au réveil l'écran revit
 - [ ] Première touche après veille : laisser la moitié s'endormir (60 s sans

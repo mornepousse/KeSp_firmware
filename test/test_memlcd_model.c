@@ -54,10 +54,48 @@ static void test_model_diff(void)
     b = a; b.is_left = 0;  TEST_ASSERT(!memlcd_model_diff(&a, &b), "is_left n'est pas une donnée affichée qui bouge");
 }
 
+/* Le panneau est PHYSIQUEMENT 68 lignes de 160 pixels (catalogue Sharp, doc
+ * lemia 6844 p. 5 : « LS011B7DH03 160 × 68 », H = sens des données) ; on le
+ * monte debout. Le tampon portrait (68 × 160, 9 octets par rangée, bit 7 =
+ * x = 0, 1 = encre) se transpose donc en 68 lignes de 20 octets, bit 7 = D1,
+ * 1 = BLANC (app note doc 6845 p. 10 : D(n) = L → noir). */
+static void test_fb_to_panel(void)
+{
+    static uint8_t fb[MEMLCD_H * MEMLCD_LINE_BYTES];
+    static uint8_t panel[MEMLCD_PANEL_LINES * MEMLCD_PANEL_LINE_BYTES];
+    TEST_ASSERT_EQ(MEMLCD_PANEL_LINES, 68, "68 lignes de grille");
+    TEST_ASSERT_EQ(MEMLCD_PANEL_LINE_BYTES, 20, "160 pixels par ligne = 20 octets");
+
+    memset(fb, 0, sizeof fb);
+    memlcd_fb_to_panel(fb, panel, false);
+    bool blanc = true;
+    for (size_t i = 0; i < sizeof panel; i++) if (panel[i] != 0xFF) blanc = false;
+    TEST_ASSERT(blanc, "tampon vide → panneau tout blanc (1 = blanc chez Sharp)");
+
+    /* pixel portrait (x=0, y=0) : coin haut-gauche → ligne 0, colonne 159 (rotation 90°) */
+    fb[0] = 0x80;
+    memlcd_fb_to_panel(fb, panel, false);
+    TEST_ASSERT_EQ(panel[0 * MEMLCD_PANEL_LINE_BYTES + 19], 0xFE, "(0,0) → ligne 0, D160 (bit 0 du dernier octet) noir");
+    TEST_ASSERT_EQ(panel[1 * MEMLCD_PANEL_LINE_BYTES + 19], 0xFF, "la ligne 1 n'est pas touchée");
+
+    /* pixel (x=67, y=159) : coin bas-droit → ligne 67, colonne 0 (D1 = bit 7 de l'octet 0) */
+    memset(fb, 0, sizeof fb);
+    fb[159 * MEMLCD_LINE_BYTES + 8] = 0x10;   /* x = 67 = octet 8, bit (7 - 3) */
+    memlcd_fb_to_panel(fb, panel, false);
+    TEST_ASSERT_EQ(panel[67 * MEMLCD_PANEL_LINE_BYTES + 0], 0x7F, "(67,159) → ligne 67, D1 noir");
+
+    /* rotation 180 : (0,0) → ligne 67, colonne 0 */
+    memset(fb, 0, sizeof fb); fb[0] = 0x80;
+    memlcd_fb_to_panel(fb, panel, true);
+    TEST_ASSERT_EQ(panel[67 * MEMLCD_PANEL_LINE_BYTES + 0], 0x7F, "rot180 : (0,0) → ligne 67, D1");
+    TEST_ASSERT_EQ(panel[0 * MEMLCD_PANEL_LINE_BYTES + 19], 0xFF, "rot180 : la ligne 0 reste blanche");
+}
+
 void test_memlcd_model(void)
 {
     TEST_SUITE("Écran memory-LCD : logique pure");
     test_rev8();
     test_couper_nom();
     test_model_diff();
+    test_fb_to_panel();
 }
