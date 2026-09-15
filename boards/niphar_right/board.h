@@ -110,16 +110,11 @@
 /* ── Pas de trackpad sur la droite (gauche uniquement) ── */
 
 /* ── Écran Sharp LS011B7DH03 (module type nice!view, J4) ──────
- * CS ACTIF HAUT, write-only, LSB-first, VCOM logiciel à basculer (EXTCOMIN
- * géré par le module). Partage le SPI de la nRF24 (BOARD_NRF_SCK/MOSI
- * ci-dessus). Le driver écran est en phase 2 : ces macros ne sont que le
- * contrat de brochage, personne ne les lit encore. CONFIG_KASE_HAS_DISPLAY
- * n'est PAS activé pour ce rôle — il ne concerne que les backends OLED/round
- * existants, pas le Sharp memory-LCD.
- * Dimensions du panneau : non confirmées dans docs/NIPHARGUS_V2_HARDWARE.md
- * ni dans une fiche produit vérifiée — pas de BOARD_LCD_WIDTH/HEIGHT ici tant
- * qu'elles ne sont pas figées. À poser en brique B6, quand le driver écran
- * les utilisera réellement. */
+ * Même module que la gauche (J12), même bus : partage le SPI du nRF24
+ * (write-only, pas de MISO), CS ACTIF HAUT sur GPIO14, monté en PORTRAIT
+ * (68 de large × 160 de haut). Pilote : display/memlcd, prouvé au banc le
+ * 2026-09-14. Le CS est tenu BAS dès le boot et tiré bas en veille pour que
+ * l'écran n'écoute jamais le trafic radio du bus partagé. */
 #define BOARD_DISPLAY_BACKEND_MEMLCD
 #define BOARD_LCD_CS_GPIO         GPIO_NUM_14
 #define BOARD_LCD_CS_ACTIVE_HIGH  1

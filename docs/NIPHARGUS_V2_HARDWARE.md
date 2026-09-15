@@ -97,9 +97,14 @@ Conséquences de conception, non traitées à ce jour :
 
 ## Périphériques
 
-- **Écran (droite)** : module type nice!view (Sharp LS011B7DH03) sur J4 5 broches :
-  MOSI/SCK/3V3/GND/CS. LSB-first, CS actif haut, VCOM logiciel à basculer (EXTCOMIN
-  géré par le module). Connecteur miroir J12 côté gauche non peuplé (populate-per-half).
+- **Écrans (les DEUX moitiés)** : module type nice!view (Sharp LS011B7DH03) sur
+  J4 (droite) et J12 (gauche, peuplé le 2026-09-14), 5 broches :
+  MOSI/SCK/3V3/GND/CS. Monté DEBOUT (portrait 68 × 160). CS actif haut, tenu BAS
+  dès le boot et tiré bas en veille (broches isolées par le light sleep) ; VCOM
+  logiciel à basculer (EXTCOMIN géré par le module). Protocole tranché à la
+  datasheet (lemia docs 6844/6845) : panneau 68 lignes × 160 px, mot de commande
+  brut en MSB-first (M0 = premier bit), adresse de ligne en LSB-first (rev8).
+  Pilote : `main/display/memlcd/`.
 - **Trackpad (gauche)** : Azoteq TPS43 (IQS572) en I2C + RDY obligatoire (handshake).
 - **nRF24L01+** : modules breakout 2×4, alim 3,3 V, 100 Ω série sur les 6 signaux.
 

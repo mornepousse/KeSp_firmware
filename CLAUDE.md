@@ -40,8 +40,9 @@ matériel qui n'existe plus.
 
 Le clavier split est redessiné sous le nom **Niphargus** — matériel dans
 `~/Documents/GitHub/rili` (KiCad), **firmware ici**. Deux moitiés ESP32-S3 +
-nRF24L01+, matrice 4×7, trackpad Azoteq TPS43 à gauche, Sharp Memory LCD à
-droite, lien filaire TRRS. Pas de WiFi ni de BLE : config et mises à jour par USB.
+nRF24L01+, matrice 4×7, trackpad Azoteq TPS43 à gauche, Sharp Memory LCD sur
+LES DEUX moitiés (portrait 68 × 160), lien filaire TRRS. Pas de WiFi ni de BLE :
+config et mises à jour par USB.
 
 Architecture actée : la **moitié gauche est le maître en toutes circonstances**
 (elle porte le seul moteur keymap et le trackpad) ; la droite est un scanner. Le
@@ -89,6 +90,14 @@ après 1 min (~244 µA, état conservé, réveil ~1 ms), deep sleep après 4 h (
 réveil EXT1, redémarrage en 704 ms). Seuils réglables par Kconfig — éprouver
 EXT1 avec le défaut de 4 h demanderait d'attendre quatre heures.
 
+⚠ **Le sommeil profond n'était PAS atteignable** (corrigé le 2026-09-15) :
+l'inactivité n'est évaluée qu'éveillé et la carte reste bloquée en light sleep
+jusqu'à une touche, qui remet le compteur à zéro. Un réveil par TIMER au seuil
+profond bascule en deep sleep ; un réveil GPIO le désarme. Et une nuit à 0,2 V
+perdus (~20 mA) est indiscernable d'une nuit à 244 µA sans chiffre : chaque
+réveil journalise la durée dormie, les deux moitiés portent un battement de
+coeur `inactif=… dormi=X s/n`. Lire ça avant de sortir le multimètre.
+
 ⚠ **L'ULP est exclu par la mesure** : 170 µA à lui seul (ESP32-S3 datasheet v2.2,
 table 5-10, p. 68), contre 50 µA de cible. Le « scan RTC » du design ne peut pas
 tenir — et il est inutile : le montage COL → interrupteur → diode → ROW permet de
@@ -126,6 +135,21 @@ REPACKE les slots (`matrix_apply_remote` tasse le distant après la frontière
 locale), et une touche absorbée héritait alors du keycode du chiffre qu'elle
 remplaçait : la touche se répétait à l'infini sous un MO distant tenu. Verrouillé
 par `test_kp_slot_recycle_ne_gele_pas_le_keycode`.
+
+**Écrans faits le 2026-09-14** (`main/display/memlcd/`) : Sharp LS011B7DH03
+(module nice!view) sur les deux moitiés, SPI partagé avec le nRF24 (CS GPIO14
+actif haut, prêté par `rf_bus_lock`). Bandeau (route, ▲ dongle vu, jauge),
+couche en lignes de 4 à gauche, logo Niphargus généré (`scripts/gen_logo_memlcd.sh`)
+à droite. Pas de « batterie de l'autre moitié » (décision utilisateur ; le canal
+ACK qui l'aurait portée a été retiré).
+⚠ Le panneau est **68 lignes × 160 px** (catalogue Sharp : « 160 × 68 », H =
+sens des données), le portrait est une transposition ; le **mot de commande
+part BRUT** (M0 = premier bit clocké en MSB-first), seule l'adresse de ligne
+passe par rev8 — un écran write-only ne renvoie rien, une hypothèse fausse fait
+du silence, pas une erreur. Datasheets dans lemia (docs 6844, 6845).
+⚠ **Batterie du Niphargus** (`main/power/batt_sense.c`, ADC2 GPIO13, 1M/1M) :
+la droite remonte un STATUS toutes les 30 s ; la tension AFFICHÉE est
+stabilisée 30 s (une hystérésis autour de l'affiché avait figé 4,2 V une nuit).
 
 Reste ouvert : le driver du trackpad (matériel). Sa logique pure — parseur de
 trame IQS5xx, mapping gestes→HID, config d'accel — existe et est testée
@@ -245,15 +269,18 @@ main/
 │   ├── hid_report.c      # HID queue + sender task
 │   └── keymap.c key_stats.c
 ├── display/
-│   ├── display_backend.h # vtable for OLED/round
+│   ├── display_backend.h # vtable for OLED/round/memlcd
 │   ├── status_display.c  # Coordinator
 │   ├── oled/             # I2C OLED (V2/V2D)
-│   └── round/            # SPI GC9A01 (V1)
+│   ├── round/            # SPI GC9A01 (V1)
+│   ├── memlcd/           # Sharp memory-LCD des moitiés Niphargus (68×160 portrait)
+│   └── assets/           # images LVGL (logo Niphargus généré par scripts/gen_logo_memlcd.sh)
+├── power/                # veille.c (light/deep sleep), batt_sense.c (jauge)
 └── led/                  # WS2812 strip anim (V1 only)
 
 boards/
 ├── kase_v1/   kase_v2/   kase_v2_debug/   kase_dongle/
-├── niphar_left/   niphar_right/   # Niphargus split, phase 1 (pas de carte fabriquée)
+├── niphar_left/   niphar_right/   # Niphargus split (cartes fabriquées, en service)
 └── kase_layout.inc  # Layout JSON shared V2/V2D
 ```
 
