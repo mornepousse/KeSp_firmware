@@ -93,12 +93,19 @@ static void cpu_time_logger_task(void *arg) {
        * debranche et ne dit plus rien. Il affiche aussi le routage, ce qui
        * permet de verifier que la bascule USB -> RF a bien eu lieu. */
       uint32_t up_s = (uint32_t)(esp_timer_get_time() / 1000000);
+      uint32_t dodo_n = 0, dodo_ms = 0;
+#if CONFIG_KASE_VEILLE
+      veille_bilan(&dodo_n, &dodo_ms);   /* « dormi X s sur Y » : lit une nuit d'un coup d'oeil */
+#endif
+      uint32_t inactif_s = (uint32_t)((esp_timer_get_time() / 1000) - get_last_activity_time_ms()) / 1000;
 #if CONFIG_KASE_KBD_WIRELESS
-      ESP_LOGW(TAG, "HB up=%us route=%s relais=%s", (unsigned)up_s,
+      ESP_LOGW(TAG, "HB up=%us inactif=%us dormi=%us/%u route=%s relais=%s", (unsigned)up_s,
+               (unsigned)inactif_s, (unsigned)(dodo_ms / 1000), (unsigned)dodo_n,
                (kbd_active_route() == KBD_OUT_RF) ? "RF" : "USB",
                kbd_relay_active() ? "actif" : "inactif");
 #else
-      ESP_LOGW(TAG, "HB up=%us", (unsigned)up_s);
+      ESP_LOGW(TAG, "HB up=%us inactif=%us dormi=%us/%u", (unsigned)up_s, (unsigned)inactif_s,
+               (unsigned)(dodo_ms / 1000), (unsigned)dodo_n);
 #endif
     }
     vTaskDelay(pdMS_TO_TICKS(2000));

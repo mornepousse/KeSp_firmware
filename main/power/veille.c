@@ -25,6 +25,14 @@
 
 static const char *TAG = "veille";
 
+/* Bilan de sommeil depuis le boot, pour lire une nuit : veille_bilan(). */
+static uint32_t s_sommeils, s_dormi_ms;
+void veille_bilan(uint32_t *sommeils, uint32_t *dormi_ms)
+{
+    if (sommeils) *sommeils = s_sommeils;
+    if (dormi_ms) *dormi_ms = s_dormi_ms;
+}
+
 /* Seuils reglables au banc : eprouver le reveil EXT1 avec le defaut de 4 h
  * demanderait d'attendre quatre heures. Les valeurs de veille.h restent la
  * documentation et l'ancrage du test host. */
@@ -92,16 +100,33 @@ void veille_legere_entrer(void)
     bool etait_connecte = tud_mounted();
     if (etait_connecte) tud_disconnect();
 
-    esp_light_sleep_start();      /* bloque ici jusqu'à une touche */
+    /* Le sommeil PROFOND était inatteignable : l'inactivité n'est évaluée
+     * qu'éveillé, et la carte reste bloquée ici jusqu'à une touche — qui remet
+     * le compteur à zéro. Un réveil par timer au seuil profond (moins ce qui
+     * est déjà écoulé) bascule en deep sleep sans passer par une frappe
+     * (l'utilisateur, 2026-09-15 : « il ne part jamais en deep sleep »). */
+    uint64_t reste_us = (uint64_t)(CONFIG_KASE_VEILLE_PROFONDE_S - CONFIG_KASE_VEILLE_LEGERE_S) * 1000000ULL;
+    esp_sleep_enable_timer_wakeup(reste_us);
+    uint64_t avant_us = (uint64_t)esp_timer_get_time();   /* esp_timer suit le RTC : seul témoin fiable */
+    esp_light_sleep_start();      /* bloque ici jusqu'à une touche, ou le timer */
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+    uint32_t dormi_ms = (uint32_t)(((uint64_t)esp_timer_get_time() - avant_us) / 1000);
+    s_sommeils++; s_dormi_ms += dormi_ms;
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+        ESP_LOGW(TAG, "%lu s de sommeil leger sans une touche : sommeil profond", (unsigned long)(dormi_ms / 1000));
+        veille_profonde_entrer();   /* ne revient pas ; la radio est déjà éteinte */
+    }
     /* AVANT tout : prouver le réveil ET le nommer. cause=7 est ESP_SLEEP_WAKEUP_GPIO
      * et le masque dit quelle ligne ; toute autre cause est un réveil qu'on n'a
-     * pas demandé. */
-    ESP_LOGW(TAG,"WAKEDBG reveil");
+     * pas demandé. Et dire COMBIEN on a dormi : une nuit à 0,2 V perdus
+     * (= ~20 mA) est indiscernable d'une nuit à 244 µA sans ce chiffre. */
+    ESP_LOGW(TAG, "reveil apres %lu s de sommeil (cause=%d) — cumul : %lu sommeils, %lu s dormies sur %lu s",
+             (unsigned long)(dormi_ms / 1000), (int)esp_sleep_get_wakeup_cause(),
+             (unsigned long)s_sommeils, (unsigned long)(s_dormi_ms / 1000),
+             (unsigned long)(esp_timer_get_time() / 1000000));
 #if CONFIG_KASE_HALF_LINK_RX
     half_link_note_wake();
 #endif
-    ESP_LOGI(TAG, "sorti du sommeil : cause=%d",
-             (int)esp_sleep_get_wakeup_cause());
 
     if (etait_connecte) tud_connect();
 

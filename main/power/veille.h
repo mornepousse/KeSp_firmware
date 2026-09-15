@@ -60,6 +60,9 @@ void veille_pas(uint32_t inactif_ms, bool bloque);
  * lieu de 244 µA (0,2 V perdus sur la gauche, 2026-09-12) n'a laissé aucune
  * trace parce que rien ne journalisait un sommeil refusé. */
 void veille_diag(uint32_t inactif_ms, bool usb, bool lien);
+/* Bilan depuis le boot : nombre de sommeils légers et temps total dormi (ms,
+ * mesuré à l'esp_timer, qui suit le RTC). Sert au battement de coeur. */
+void veille_bilan(uint32_t *sommeils, uint32_t *dormi_ms);
 #endif
 
 static inline veille_t veille_niveau(uint32_t inactif_ms, bool bloque,

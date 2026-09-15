@@ -65,7 +65,19 @@ esp_err_t memlcd_panel_init(void)
     esp_err_t e = spi_bus_add_device(rf_bus_host(), &dev, &s_dev);
     if (e == ESP_ERR_INVALID_STATE) { s_dev = NULL; return e; }   /* bus pas encore créé par la radio : réessayer */
     if (e != ESP_OK) { ESP_LOGE(TAG, "spi_bus_add_device: %d", (int)e); s_dev = NULL; return e; }
-    ESP_LOGI(TAG, "panneau LS011B7DH03 : %d lignes x %d px, portrait %dx%d, CS GPIO%d actif haut, bus partage nRF24",
+    /* En light sleep l'ESP ISOLE ses broches (sleep_gpio : « isolate all GPIO
+     * pins ») : CS, SCK et MOSI flotteraient sur les entrées CMOS du panneau,
+     * qui consomment à mi-tension. Configuration de sommeil : entrée tirée BAS
+     * (CS bas = écran désélectionné, comme au boot). Appliquée d'elle-même à
+     * chaque sommeil, les pulls internes restant actifs (Kconfig
+     * ESP_SLEEP_GPIO_ENABLE_INTERNAL_RESISTORS). */
+    const gpio_num_t dodo[] = { BOARD_LCD_CS_GPIO, BOARD_NRF_SCK, BOARD_NRF_MOSI };
+    for (unsigned i = 0; i < sizeof dodo / sizeof dodo[0]; i++) {
+        gpio_sleep_sel_en(dodo[i]);
+        gpio_sleep_set_direction(dodo[i], GPIO_MODE_INPUT);
+        gpio_sleep_set_pull_mode(dodo[i], GPIO_PULLDOWN_ONLY);
+    }
+    ESP_LOGI(TAG, "panneau LS011B7DH03 : %d lignes x %d px, portrait %dx%d, CS GPIO%d actif haut, bus partage nRF24, broches tirees bas en veille",
              MEMLCD_PANEL_LINES, MEMLCD_PANEL_LINE_BYTES * 8, MEMLCD_W, MEMLCD_H, BOARD_LCD_CS_GPIO);
     return ESP_OK;
 }

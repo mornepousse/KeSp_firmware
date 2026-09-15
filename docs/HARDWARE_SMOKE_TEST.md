@@ -36,7 +36,11 @@ dans la PR/release.
 ## Dongle
 - [ ] Lien RF s'établit avec une half (pairing < 120s)
 - [ ] NRF ne se wedge pas après 5 min (watchdog OK)
-- [ ] Une nuit sur batterie : la moitié droite tient, moins de 0,2 V perdus
+- [ ] Une nuit sur batterie : une moitié perd de l'ordre du centième de volt ;
+      0,2 V = elle n'a pas dormi. Console au matin : « HB … dormi=X s/n » avec
+      X ≈ la durée de la nuit, et « reveil apres N s de sommeil » cohérent ;
+      après 4 h sans frappe : « sommeil profond » puis redémarrage à la
+      première touche (réveil EXT1, ~700 ms)
 - [ ] set_id survit à un erase_flash
 - [ ] Fusion — Divergence de config signalée : keymap du dongle ≠ celle de la
       gauche → console dongle logue « DIVERGENCE de config » et

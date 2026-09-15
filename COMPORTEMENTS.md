@@ -50,8 +50,20 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   toujours son anti-rebond (debounce × intervalle + 2 balayages), plancher
   10 ms, plafond 50 ms. Un `vTaskDelay(1)` (entre ~0 et 10 ms selon la phase)
   relâchait à tort une touche tenue — tap de Super, Super+F perdu.
-- [smoke:Une nuit sur batterie] La moitié droite tient une nuit sur batterie,
-  moins de 0,2 V perdus.
+- [smoke:Une nuit sur batterie] Une moitié tient une nuit sur batterie : de
+  l'ordre du centième de volt perdu (244 µA), pas 0,2 V (= ~20 mA : elle n'a
+  pas dormi — 2026-09-12 gauche, 2026-09-15 encore). Pour le LIRE : chaque
+  réveil journalise « reveil apres N s de sommeil (cause=…) — cumul : n
+  sommeils, X s dormies sur Y s », et le battement de coeur porte
+  « inactif=… dormi=X s/n » ; une nuit sans sommeil se lit sans multimètre.
+- [smoke:Une nuit sur batterie] Le sommeil PROFOND est atteignable : un réveil
+  par timer au seuil profond (4 h moins l'étage léger) bascule en deep sleep
+  sans passer par une frappe — l'inactivité n'étant évaluée qu'éveillé, la
+  carte restait en light sleep jusqu'à une touche (« il ne part jamais en
+  deep sleep », 2026-09-15). Un réveil GPIO désarme le timer.
+- [smoke:Une nuit sur batterie] En veille, CS, SCK et MOSI de l'écran sont
+  tirés BAS (config de sommeil des GPIO), jamais flottants sur les entrées
+  CMOS du panneau — l'ESP isole ses broches en light sleep.
 
 ## Entrées — matrice et rapport HID
 
