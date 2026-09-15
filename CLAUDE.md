@@ -86,7 +86,9 @@ succès pendant que la gauche perdait 5 % des trames. Vider la FIFO AVANT
 d'émettre, jamais après.
 
 **B7 fait le 2026-09-08** — veille hybride (`main/power/veille.c`) : light sleep
-après 1 min (~244 µA, état conservé, réveil ~1 ms), deep sleep après 4 h (~12 µA,
+après **15 s** (60 s jusqu'au 2026-09-15 : éveillée et oisive la carte tire ~28 mA
+à 160 MHz, table 5-9 p. 67, soit cent fois le sommeil — une journée de frappe
+perdait 0,2 V ; ~244 µA endormie, état conservé, réveil ~1 ms), deep sleep après 4 h (~12 µA,
 réveil EXT1, redémarrage en 704 ms). Seuils réglables par Kconfig — éprouver
 EXT1 avec le défaut de 4 h demanderait d'attendre quatre heures.
 

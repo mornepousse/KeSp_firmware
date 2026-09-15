@@ -71,8 +71,10 @@ divider, calibrated, plausibility window 2.5–4.5 V); the right reports every
 (`KS_CMD_BATTERY`). The displayed voltage settles for 30 s before changing, so
 ADC jitter does not redraw the panel and a slow overnight drift still shows.
 
-**Sleep** is a hybrid: light sleep after a minute (~244 µA, state kept, ~1 ms
-wake), deep sleep beyond four hours (~12 µA, EXT1 wake, a full reboot before
+**Sleep** is a hybrid: light sleep after 15 s (~244 µA, state kept, ~1 ms
+wake — it was a minute until 2026-09-15, but an idle ESP32-S3 at 160 MHz draws
+~28 mA, a hundred times its sleep current, and a day of typing with pauses lost
+0.2 V that way), deep sleep beyond four hours (~12 µA, EXT1 wake, a full reboot before
 the matrix is scanned again). Deep sleep was **unreachable until 2026-09-15**:
 inactivity was only measured while awake, and a light-sleeping half sits in
 `esp_light_sleep_start()` until a key — which resets the counter. A timer wake

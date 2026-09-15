@@ -71,6 +71,15 @@ static void test_les_seuils_sont_ordonnes(void)
                 "le seuil leger vient avant le profond");
     TEST_ASSERT(VEILLE_PROFONDE_MS >= 3600000u,
                 "le sommeil profond n'arrive pas avant une heure d'absence");
+    /* Eveillee et oisive, la carte tire ~28 mA (160 MHz) contre 0,24 mA
+     * endormie : chaque seconde d'attente vaut cent secondes de sommeil. A
+     * 60 s, une journee de frappe perdait ~0,2 V (2026-09-15). Le leger doit
+     * rester COURT — et pas nul non plus : une pause de frappe de quelques
+     * secondes ne doit pas endormir la carte a chaque respiration. */
+    TEST_ASSERT(VEILLE_LEGERE_MS <= 20000u,
+                "le light sleep vient en 20 s au plus : eveillee, la carte coute 100 fois le sommeil");
+    TEST_ASSERT(VEILLE_LEGERE_MS >= 5000u,
+                "mais pas avant 5 s : une respiration entre deux mots n'est pas une pause");
 }
 
 void test_veille(void)

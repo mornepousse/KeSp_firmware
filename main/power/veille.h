@@ -38,10 +38,12 @@ typedef enum {
     VEILLE_PROFONDE,     /* deep sleep, réveil EXT1 */
 } veille_t;
 
-/* Seuils par défaut. Le léger est court — une minute suffit pour que la pause
- * soit réelle — et le profond se compte en heures, puisque l'étage léger ne
- * coûte presque rien et évite le redémarrage. */
-#define VEILLE_LEGERE_MS     60000u      /* 1 min  */
+/* Seuils par défaut. Le léger est COURT : éveillée et oisive la carte tire
+ * ~28 mA à 160 MHz (ESP32-S3 datasheet v2.2, table 5-9, p. 67) contre 0,24 mA
+ * endormie — chaque seconde d'attente vaut cent secondes de sommeil, et à 60 s
+ * une journée de frappe perdait ~0,2 V (2026-09-15). Le profond se compte en
+ * heures, puisque l'étage léger ne coûte presque rien et évite le redémarrage. */
+#define VEILLE_LEGERE_MS     15000u      /* 15 s   */
 #define VEILLE_PROFONDE_MS   14400000u   /* 4 h    */
 
 /* `bloque` interdit toute veille : USB branché, mise à jour en cours, ou toute

@@ -59,7 +59,7 @@ dans la PR/release.
 - [ ] Jauge batterie : console au boot « batt: jauge : NN dV » avec NN plausible
       (36-42) et à ±0,1 V d'un voltmètre sur la batterie ; CDC BATTERY (dongle)
       donne les DEUX moitiés avec age frais (gauche ~1 s, droite ≤ 30 s) ; la
-      droite s'endort toujours à 60 s malgré son STATUS lent ; une moitié éteinte
+      droite s'endort toujours à 15 s malgré son STATUS lent ; une moitié éteinte
       repasse « inconnue » ; batterie en charge → après ≥ 2 min à ≥ 4,15 V,
       charging = 2 (PLEINE)
 - [ ] Écrans memory-LCD (gauche ET droite) : au boot, console « panneau attache
@@ -67,12 +67,12 @@ dans la PR/release.
       nette sur tout le panneau (cadre 1 px, pavé plein 16×16 en HAUT-GAUCHE
       du portrait, damier 8×8 ailleurs), sans pixel parasite ; taper pendant un
       rafraîchissement ne perd aucune frappe ; en light sleep l'image reste
-      figée et lisible, la carte dort toujours à 60 s ; au réveil l'écran revit
+      figée et lisible, la carte dort toujours à 15 s ; au réveil l'écran revit
 - [ ] Écrans memory-LCD UI : gauche → bandeau « RF ▲ » (ou « USB ») + jauge +
       tension, nom de couche en lignes de 4 (ex. « DVO / RAK »), « L0 » ;
       droite → même bandeau, logo Niphargus net et centré ; changer de couche
       (MO tenu) met le nom à jour en < 200 ms sans perdre de frappe
-- [ ] Première touche après veille : laisser la moitié s'endormir (60 s sans
+- [ ] Première touche après veille : laisser la moitié s'endormir (15 s sans
       toucher), taper UNE touche brève → le caractère sort (pas avalé) et rien
       ne reste collé ; console : « reveil : 1 touche(s) capturee(s) ». À faire
       sur la gauche ET la droite, en sans-fil (fusion)

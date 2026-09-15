@@ -50,6 +50,11 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   toujours son anti-rebond (debounce × intervalle + 2 balayages), plancher
   10 ms, plafond 50 ms. Un `vTaskDelay(1)` (entre ~0 et 10 ms selon la phase)
   relâchait à tort une touche tenue — tap de Super, Super+F perdu.
+- [test:test_veille] Le light sleep vient en 15 s (entre 5 et 20 s) : éveillée
+  et oisive la carte tire ~28 mA à 160 MHz (datasheet v2.2 table 5-9 p. 67)
+  contre 0,24 mA endormie — à 60 s, une journée de frappe entrecoupée de pauses
+  perdait ~0,2 V (2026-09-15). Le réveil sur touche est le chemin nominal, pas
+  une exception.
 - [smoke:Une nuit sur batterie] Une moitié tient une nuit sur batterie : de
   l'ordre du centième de volt perdu (244 µA), pas 0,2 V (= ~20 mA : elle n'a
   pas dormi — 2026-09-12 gauche, 2026-09-15 encore). Pour le LIRE : chaque
