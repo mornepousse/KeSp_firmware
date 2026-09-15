@@ -556,6 +556,27 @@ static void half_link_tx_refresh_task(void *arg)
             lien = link_uart_active();
 #endif
             veille_diag(inactif, false, lien);
+            /* Battement de coeur de la DROITE (elle n'a pas celui de main.c) :
+             * toutes les 10 s, inactivité et bilan de sommeil. Une nuit à 0,2 V
+             * perdus (2026-09-15, droite, 4,02 V au voltmètre) n'a laissé
+             * aucune trace faute de ce chiffre. */
+            {
+                static uint32_t dernier_hb_ms;
+                uint32_t now_hb = (uint32_t)(esp_timer_get_time() / 1000);
+                if ((uint32_t)(now_hb - dernier_hb_ms) >= 10000u) {
+                    dernier_hb_ms = now_hb;
+                    uint32_t dodo_n = 0, dodo_ms = 0;
+                    veille_bilan(&dodo_n, &dodo_ms);
+                    ESP_LOGW(TAG, "HB up=%lus inactif=%lus dormi=%lus/%lu lien=%d batt=%u dV",
+                             (unsigned long)(now_hb / 1000), (unsigned long)(inactif / 1000),
+                             (unsigned long)(dodo_ms / 1000), (unsigned long)dodo_n, (int)lien,
+#if CONFIG_KASE_BATT_SENSE
+                             (unsigned)batt_sense_dv());
+#else
+                             0u);
+#endif
+                }
+            }
             veille_pas(inactif, lien);
         }
 #endif
