@@ -158,8 +158,11 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   (route RF/USB, ▲ « dongle vu » COLLANT — une moitié est muette au repos, un
   indicateur daté clignoterait à chaque STATUS — qui ne tombe qu'après 3
   émissions consécutives sans ACK, jamais sur un refus ESB isolé, et jamais
-  allumé avant le premier ACK ; jauge et tension locales avec une hystérésis
-  d'un dixième de volt, l'ADC oscillant entre deux dV voisins), centre (GAUCHE : nom de couche en
+  allumé avant le premier ACK ; jauge et tension locales, la tension
+  STABILISÉE 30 s — [test:test_memlcd_model] une valeur différente de
+  l'affichée s'affiche quand elle a tenu 30 s : l'oscillation ADC ne tient
+  jamais, une dérive lente finit toujours par tenir (une hystérésis autour de
+  l'affiché avait figé 4,2 V toute une nuit, 2026-09-15)), centre (GAUCHE : nom de couche en
   lignes de 4 + « Ln » ; DROITE : logo Niphargus 60 px centré, généré par
   scripts/gen_logo_memlcd.sh). PAS de batterie de l'autre moitié : décision
   utilisateur du 2026-09-14, et le canal ACK qui l'aurait portée (trame

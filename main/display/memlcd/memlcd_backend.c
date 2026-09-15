@@ -23,6 +23,7 @@
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <string.h>
@@ -264,11 +265,12 @@ static void memlcd_update(void)
     if (s_sleeping) return;
     if (!s_built) { memlcd_refresh_all(); return; }
     memlcd_model_t m; lire_modele(&m);
-    /* Hystérésis d'un dixième de volt : l'ADC oscille entre deux dV voisins et
-     * chaque changement est une réécriture complète du panneau. */
-    if (m.batt_local_dv != 0xFF && s_shown.batt_local_dv != 0xFF &&
-        (m.batt_local_dv == s_shown.batt_local_dv + 1 || m.batt_local_dv + 1 == s_shown.batt_local_dv))
-        m.batt_local_dv = s_shown.batt_local_dv;
+    /* Tension : stabilisée 30 s (memlcd_batt_aff_step, pure) — filtre
+     * l'oscillation ADC sans jamais figer une dérive lente. */
+    static memlcd_batt_aff_t s_baff; static bool s_baff_init;
+    if (!s_baff_init) { memlcd_batt_aff_init(&s_baff); s_baff_init = true; }
+    m.batt_local_dv = memlcd_batt_aff_step(&s_baff, m.batt_local_dv,
+                                           (uint32_t)(esp_timer_get_time() / 1000), 30000);
     if (memlcd_model_diff(&s_shown, &m)) {
         if (lvgl_port_lock(50)) { s_shown = m; dessiner(&m); lvgl_port_unlock(); }
     }

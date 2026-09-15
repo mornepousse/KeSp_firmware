@@ -51,6 +51,23 @@ static inline void memlcd_fb_to_panel(const uint8_t *fb, uint8_t *panel, bool ro
     }
 }
 
+/* Tension affichée. L'ADC oscille entre deux dV voisins et chaque changement
+ * est une réécriture du panneau ; mais une hystérésis « ±1 autour de l'AFFICHÉ »
+ * a figé 4,2 V toute une nuit pendant que la batterie perdait 0,1 V (banc
+ * 2026-09-15). Règle : une valeur différente de l'affichée s'affiche quand elle
+ * a TENU hold_ms d'affilée — l'oscillation ne tient jamais, la dérive finit par
+ * tenir. Inconnue (0xFF) et le retour d'inconnue passent sans délai. */
+typedef struct { uint8_t aff, cand; uint32_t cand_ms; bool vide; } memlcd_batt_aff_t;
+static inline void memlcd_batt_aff_init(memlcd_batt_aff_t *b) { b->aff = 0xFF; b->cand = 0xFF; b->cand_ms = 0; b->vide = true; }
+static inline uint8_t memlcd_batt_aff_step(memlcd_batt_aff_t *b, uint8_t dv, uint32_t now_ms, uint32_t hold_ms)
+{
+    if (b->vide || dv == 0xFF || b->aff == 0xFF) { b->vide = false; b->aff = dv; b->cand = dv; return b->aff; }
+    if (dv == b->aff) { b->cand = dv; return b->aff; }
+    if (dv != b->cand) { b->cand = dv; b->cand_ms = now_ms; return b->aff; }
+    if ((uint32_t)(now_ms - b->cand_ms) >= hold_ms) b->aff = dv;
+    return b->aff;
+}
+
 /* Nom de couche sur 68 px en Montserrat 14 : 4 caractères par ligne, 3 lignes
  * au plus, et « … » sur la dernière si le nom dépasse 12 caractères.
  * L'utilisateur a préféré des lignes lisibles à un texte tourné de 90°.

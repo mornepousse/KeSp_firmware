@@ -91,6 +91,26 @@ static void test_fb_to_panel(void)
     TEST_ASSERT_EQ(panel[0 * MEMLCD_PANEL_LINE_BYTES + 19], 0xFF, "rot180 : la ligne 0 reste blanche");
 }
 
+/* La tension affichée : l'ADC oscille entre deux dV voisins (une réécriture du
+ * panneau à chaque fois), mais une hystérésis « ±1 autour de l'AFFICHÉ » a figé
+ * 4,2 V toute une nuit pendant que la batterie perdait 0,1 V (banc 2026-09-15).
+ * Règle : une valeur DIFFÉRENTE de l'affichée s'affiche quand elle a TENU
+ * hold_ms d'affilée — l'oscillation ne tient jamais, la dérive finit par tenir. */
+static void test_batt_affichee(void)
+{
+    memlcd_batt_aff_t b; memlcd_batt_aff_init(&b);
+    TEST_ASSERT_EQ(memlcd_batt_aff_step(&b, 42, 0, 30000), 42, "première mesure : affichée tout de suite");
+    TEST_ASSERT_EQ(memlcd_batt_aff_step(&b, 41, 10000, 30000), 42, "41 depuis 0 s : pas encore");
+    TEST_ASSERT_EQ(memlcd_batt_aff_step(&b, 42, 20000, 30000), 42, "retour à 42 : le compte de 41 repart de zéro");
+    TEST_ASSERT_EQ(memlcd_batt_aff_step(&b, 41, 30000, 30000), 42, "41 à nouveau, depuis 0 s");
+    TEST_ASSERT_EQ(memlcd_batt_aff_step(&b, 41, 50000, 30000), 42, "41 depuis 20 s : pas encore");
+    TEST_ASSERT_EQ(memlcd_batt_aff_step(&b, 41, 60000, 30000), 41, "41 depuis 30 s : la dérive s'affiche");
+    TEST_ASSERT_EQ(memlcd_batt_aff_step(&b, 40, 60001, 30000), 41, "40 : nouveau candidat, repart de zéro");
+    TEST_ASSERT_EQ(memlcd_batt_aff_step(&b, 40, 90001, 30000), 40, "40 depuis 30 s : suit encore");
+    TEST_ASSERT_EQ(memlcd_batt_aff_step(&b, 0xFF, 90002, 30000), 0xFF, "inconnue : affichée sans délai (pas une oscillation)");
+    TEST_ASSERT_EQ(memlcd_batt_aff_step(&b, 39, 90003, 30000), 39, "retour d'une mesure après inconnue : sans délai");
+}
+
 void test_memlcd_model(void)
 {
     TEST_SUITE("Écran memory-LCD : logique pure");
@@ -98,4 +118,5 @@ void test_memlcd_model(void)
     test_couper_nom();
     test_model_diff();
     test_fb_to_panel();
+    test_batt_affichee();
 }
