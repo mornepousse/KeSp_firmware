@@ -19,112 +19,94 @@ mouse on the dongle's second radio slot), and `niphar_left` / `niphar_right`
 
 The split keyboard is being redesigned as
 **[Niphargus](https://github.com/mornepousse/Niphargus)**: two ESP32-S3 halves,
-an Azoteq TPS43 trackpad on the left, a Sharp Memory LCD on the right.
+an Azoteq TPS43 trackpad on the left, a Sharp Memory LCD on **each** half.
 Configuration and updates go over USB; there is no WiFi and no BLE on either
 half — the power budget forbids it.
 
-The halves talk over **nRF24 radio** (channel 0x4F), and the left half relays
-finished HID reports to the dongle on its own channel. A wired **TRRS link**
-also works: its UART transport, probe/ACK handshake and 5 V load-switch control
-were brought up on the bench 2026-09-11 — the link comes up, both switches
-close, and it stays up. Charging the far half through it is not yet validated:
-that is an electrical question (the switch is fed something below 5 V), not a
-firmware one, and the software offers 5 V only when a *host* enumerates it —
-a wall charger, which is how you would charge, does not. Detecting VBUS instead
-needs the GPIO33 divider populated.
-
-**Hardware status — 2026-09-12.** The keyboard works in its nominal mode: both
+**Hardware status — 2026-09-15.** The keyboard works in its nominal mode: both
 halves on battery, no cable anywhere, typing together through the dongle. Pin
-tables were verified against the netlist on each half; the left runs the keymap
-engine over all 14 columns and relays finished HID to the dongle by a
-PRX→PTX→PRX excursion on its single radio. Symbol keys (`!@#$…`) are one press
-each (Modified Keys, 0x8000 range), and the physical layout the remapper draws
-is generated from the PCB.
+tables were verified against the netlist on each half; symbol keys (`!@#$…`)
+are one press each (Modified Keys, 0x8000 range), and the physical layout the
+remapper draws is generated from the PCB. A wired **TRRS link** also works
+(UART transport, probe/ACK handshake, 5 V load switch); charging the far half
+through it is still an electrical question, not a firmware one.
+
+**Dongle-side fusion landed (2026-09-13).** Both halves transmit their *raw*
+half-matrix to the dongle, which fuses them and runs the keymap engine — so
+**neither half listens on battery**, and a sleeping half no longer needs the
+other one to wake it. The left keeps working as a standalone USB keyboard with
+its own engine; the two engines are kept from diverging by construction: same
+code, exactly one engine active at a time by route, and one configuration.
+That last point is handled without ever plugging the left in: the dongle carries
+the keymap fingerprint check (`KS_CMD_CONFIG_COHERENCE`) and, on divergence,
+**streams its keymap to the left inside the nRF24 ACK payloads** (40 chunks of
+28 bytes, pulled by the left, done in a few seconds of typing). Should the
+dongle vanish, the right half falls back to the left over the direct link after
+eight unacknowledged frames, and comes back the same way.
 
 Getting there took three bugs that were all the same bug. *Emit on change* and
 *release on silence* are each reasonable, and they do not compose: whoever emits
 only when something changes goes quiet while a key is merely **held**, and
-whoever releases on silence then drops that key. The pattern bit at three links
-in a row — right half to left, and left half to dongle — and each time the cure
-was the same: silent at rest, refreshed while something is held. The constants
-that bind an emitter to a listener's patience now live together in
-`main/comm/rf/rf_slot.h`, because they are a contract between two firmwares
-rather than a number each side picks alone.
+whoever releases on silence then drops that key. The cure was the same at every
+link: silent at rest, refreshed while something is held. And ESB has a second
+trap — about 1 % of frames are refused outright; a change frame that is sent
+exactly once has exactly one chance, so every change is now re-emitted a
+bounded number of times.
 
-**Sleep landed on 2026-09-08**, as a hybrid: light sleep after a minute
-(~244 µA, state kept, ~1 ms wake) held for *hours* because at that current four
-of them cost 1 mAh out of 650 — then deep sleep beyond (~12 µA, EXT1 wake, 704 ms
-to reboot). The ULP coprocessor is ruled out by measurement rather than taste:
-170 µA on its own against a 50 µA target (ESP32-S3 datasheet v2.2, table 5-10,
-p. 68). It is also unnecessary — the COL → switch → diode → ROW wiring lets the
-columns be held high and any row wake the chip, so nothing needs scanning.
+**Screens (2026-09-14).** Both halves drive a Sharp LS011B7DH03 (nice!view
+module) mounted upright, 68 × 160, on the SPI bus they share with the radio —
+the radio owner lends the bus under a lock, so a refresh never lands in the
+middle of a frame. The left shows the current layer name split in four-letter
+lines; the right shows the Niphargus logo, generated from the project SVG by
+`scripts/gen_logo_memlcd.sh`. Both show route, dongle-seen and their own
+battery. The protocol was settled from the datasheet, not by trial: the panel is
+**68 lines of 160 pixels** (Sharp's "160 × 68" lists the data direction first),
+the command byte goes out raw in MSB-first SPI (M0 is the first clocked bit)
+and only the line address is bit-reversed. A write-only panel answers a wrong
+guess with silence, never with an error.
 
-The radio is off from the light tier onward: listening costs 13.1 mA (nRF24L01+
-PS v1.0, table 4, p. 14) and the nRF24 has no low-power listening mode. A
-sleeping half therefore cannot hear the other one, so after a long absence the
-first keypress has to land on the left half — the one that talks to the host.
-That is the chip's constraint, not an implementation shortcut.
+**Battery gauge (2026-09-14).** Each half reads its cell on ADC2 (1 M / 1 M
+divider, calibrated, plausibility window 2.5–4.5 V); the right reports every
+30 s inside its STATUS frame, the dongle caches both halves per side
+(`KS_CMD_BATTERY`). The displayed voltage settles for 30 s before changing, so
+ADC jitter does not redraw the panel and a slow overnight drift still shows.
 
-**Where this is going — dongle-side fusion (planned, 2026-09-12).** The left
-being sole master means it must *listen* to the right (~13 mA) whenever it is
-awake — that is the ceiling on the left's battery, and the reason a sleeping
-half cannot be woken by the other. A rework is designed: both halves transmit
-their *raw* half-matrix to the dongle, which fuses them and runs the engine, so
-**neither half listens on battery** — the autonomy win, and the end of the
-first-keypress lag. The left keeps working as a standalone USB keyboard, which
-means two engines (dongle + left) kept from diverging by three rules: same code,
-one config replicated and versioned across both NVS, exactly one engine active
-at a time by route. It is staged behind `KASE_DONGLE_FUSION` (off by default) so
-the current firmware keeps working at every step. Design and plan live in
-`docs/superpowers/specs/2026-09-12-dongle-fusion-deux-moteurs-design.md` and
-`docs/superpowers/plans/2026-09-12-dongle-fusion.md`.
+**Sleep** is a hybrid: light sleep after a minute (~244 µA, state kept, ~1 ms
+wake), deep sleep beyond four hours (~12 µA, EXT1 wake, a full reboot before
+the matrix is scanned again). Deep sleep was **unreachable until 2026-09-15**:
+inactivity was only measured while awake, and a light-sleeping half sits in
+`esp_light_sleep_start()` until a key — which resets the counter. A timer wake
+at the deep threshold now performs the switch. Every wake logs how long the
+half actually slept, and both halves carry a heartbeat with `inactif=` and
+`dormi=X s/n`, because a night that loses 0.2 V (~20 mA) and a night at 244 µA
+looked identical without that number. The radio is off from the light tier
+onward — listening costs 13.1 mA and the nRF24 has no low-power listening mode.
 
 **The trackpad still has no hardware driver.** Its pure logic — the IQS5xx
-frame parser, the gesture→HID mapping (cursor accel, taps, scroll,
-press-and-hold), the accel config — exists and is host-tested; what is missing
-is the I2C + RDY bring-up on the *left* half that feeds it, plus wiring its
-output through the mouse-relay path. The mapping was written for the old
-dongle-side approach and carries over unchanged, only it now runs on the master.
+frame parser, the gesture→HID mapping, the accel config — exists and is
+host-tested; what is missing is the I2C + RDY bring-up on the left half and
+wiring its output through the mouse-relay path.
 
-**Wake latency and the matrix.** Waking from light sleep captures the key by a
-manual double-scan the instant the chip resumes, so a brief tap is not lost; a
-glitch that clears on the second scan is rejected. A held key that is briefly
-mis-read as released is now handled at the source — the report is rebuilt slot
-by slot each cycle, so a recycled slot never keeps a stale keycode (the bug
-where a digit repeated forever under a held remote layer).
-
-Two decisions shape the whole codebase, and they are worth stating plainly
-because both replaced an earlier design that is still visible in the git history.
-
-**The left half is the master, in all circumstances.** It carries the only
-keymap engine and the trackpad; the right half is a scanner that sends its
-half-matrix over the wire. The left half has to run the engine anyway — it must
-work over USB with no dongle in sight — so putting a second engine anywhere else
-would mean two sources of truth for the same keystroke. That question came up
-three times in two months; it is now closed by construction.
-
-**The dongle is a repeater, not a brain.** It receives *finished HID reports*
-and pushes them to the host. The input engine is not compiled for that role, the
-keyboard half of the CDC protocol is not compiled either, and its `board.h` no
-longer declares a matrix — because it has no switches. Keymap commands sent to a
-dongle answer `KS_STATUS_ERR_UNKNOWN` rather than pretending to work: a silent
-no-op would be worse than the missing feature.
-
-Its two radio slots are no longer two halves of one keyboard. Slot 1 is the
-keyboard, slot 2 is the
-**[Conchodytes](https://github.com/mornepousse/Conchodytes)** mouse — two
-unrelated devices, which is
-why losing one slot releases only what that slot was holding. A mouse going out
-of range must not wipe the keystroke in progress.
+**Open: erratic lost keystrokes.** Light-sleep wake is cleared (22 instrumented
+wakes, matrix/radio/host events all consistent). The current suspect is the
+dongle engine playing only the *current* half-state every 10 ms, so a press and
+release that land between two cycles are coalesced away; the dongle now counts
+those overwritten transitions (`KS_CMD_RF_STATUS[27..30]`) so the next lost
+key can be attributed rather than guessed.
 
 Removed along the way, and not coming back: the first-generation e-ink halves,
-their ESP-NOW side channel, and the dongle's keymap engine.
+their ESP-NOW side channel, and the "left is the only engine" doctrine that
+preceded fusion.
 
 | Document | |
 |---|---|
 | [`niphargus-firmware-design.md`](docs/superpowers/specs/2026-08-19-niphargus-firmware-design.md) | overall design |
-| [`dongle-role-niphargus-design.md`](docs/superpowers/specs/2026-08-19-dongle-role-niphargus-design.md) | the dongle's role, and the RF budget behind it |
+| [`dongle-fusion-deux-moteurs-design.md`](docs/superpowers/specs/2026-09-12-dongle-fusion-deux-moteurs-design.md) | fusion: two engines, one active by route |
+| [`keymap-sync-ack-payload-design.md`](docs/superpowers/specs/2026-09-13-keymap-sync-ack-payload-design.md) | keymap sync over the ACK payloads |
+| [`batterie-jauge-design.md`](docs/superpowers/specs/2026-09-14-batterie-jauge-design.md) | the battery gauge |
+| [`ecrans-memlcd-design.md`](docs/superpowers/specs/2026-09-14-ecrans-memlcd-design.md) | the screens |
 | [`docs/NIPHARGUS_V2_HARDWARE.md`](docs/NIPHARGUS_V2_HARDWARE.md) | pinout, verified against the netlist |
+| [`COMPORTEMENTS.md`](COMPORTEMENTS.md) | the behaviour contract: what the firmware must do, and what guards each line |
 
 ---
 
@@ -232,6 +214,9 @@ main/
     display_backend.h   # Backend interface (vtable)
     oled/               # I2C OLED backend
     round/              # SPI round display backend
+    memlcd/             # Sharp memory-LCD backend (Niphargus halves, 68×160 portrait)
+    assets/             # LVGL images (Niphargus logo generated by scripts/gen_logo_memlcd.sh)
+  power/                # Sleep tiers (veille.c) and battery gauge (batt_sense.c)
   led/                  # WS2812 LED strip animations
   sys/                  # NVS helpers, CPU monitoring
 test/                   # Host-side unit tests (CMake, link real modules)
