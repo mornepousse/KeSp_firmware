@@ -521,7 +521,7 @@ Pour savoir si le pairing a abouti, poller `RF_PAIR_LIST` apres ~5–30 s : `pai
 Snapshot complet de l'etat du lien radio pour les deux moities. Idempotent, sans effet de bord — peut etre poll a 1–2 Hz pour piloter un indicateur de barres dans le soft.
 
 - Request: payload vide
-- Response: `27 bytes`
+- Response: `31 bytes` (27 avant l'ajout de `transitions_ecrasees` ; un client qui ne lit que 27 octets reste juste)
 
 | Offset | Type   | Champ           | Description                                                |
 |-------:|--------|-----------------|------------------------------------------------------------|
@@ -534,6 +534,7 @@ Snapshot complet de l'etat du lien radio pour les deux moities. Idempotent, sans
 | 15..18 | u32 LE | `pkt_rx_right`  | idem droite                                                |
 | 19..22 | u32 LE | `pkt_dup_left`  | nombre de duplicats rejetes (seq deja vue)                 |
 | 23..26 | u32 LE | `pkt_dup_right` | idem droite                                                |
+| 27..30 | u32 LE | `transitions_ecrasees` | fusion : trames ayant changé l'état d'une moitié avant que le moteur ait joué le changement précédent (tap potentiellement perdu/fondu) ; 0 hors fusion |
 
 **Mapping recommande pour 4 barres de signal :**
 ```

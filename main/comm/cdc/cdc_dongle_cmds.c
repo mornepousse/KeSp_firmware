@@ -45,7 +45,7 @@ static inline void put_u32_le(uint8_t *p, uint32_t v)
 
 /* ── KS_CMD_RF_STATUS ───────────────────────────────────────────────
  * Request: no payload.
- * Response (27 bytes):
+ * Response (31 bytes):
  *   [0]    flags         bit0=lien clavier, bit1=lien souris,
  *                        bit2=radio 1 PRESENTE, bit3=radio 2 PRESENTE,
  *                        bits4-7=rsvd
@@ -60,6 +60,10 @@ static inline void put_u32_le(uint8_t *p, uint32_t v)
  *   [15..18] pkt_rx_mouse idem souris
  *   [19..22] pkt_dup_kbd u32 LE doublons rejetés du clavier
  *   [23..26] pkt_dup_mouse idem souris
+ *   [27..30] transitions_ecrasees u32 LE (fusion) : trames qui ont changé
+ *            l'état d'une moitié avant que le moteur ait joué le changement
+ *            précédent — chacune est un tap potentiellement perdu ou fondu.
+ *            0 hors fusion.
  */
 static void bin_cmd_rf_status(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
@@ -68,7 +72,7 @@ static void bin_cmd_rf_status(uint8_t cmd, const uint8_t *p, uint16_t l)
     rf_link_status_t st;
     rf_rx_get_status(&st);
 
-    uint8_t buf[27];
+    uint8_t buf[31];
     buf[0] = (uint8_t)((st.link_kbd             ? 0x01 : 0) |
                        (st.link_mouse           ? 0x02 : 0) |
                        (st.radio_kbd_present    ? 0x04 : 0) |
@@ -81,6 +85,11 @@ static void bin_cmd_rf_status(uint8_t cmd, const uint8_t *p, uint16_t l)
     put_u32_le(&buf[15], st.pkt_rx_mouse);
     put_u32_le(&buf[19], st.pkt_dup_kbd);
     put_u32_le(&buf[23], st.pkt_dup_mouse);
+#if CONFIG_KASE_DONGLE_FUSION
+    put_u32_le(&buf[27], dongle_engine_transitions_ecrasees());
+#else
+    put_u32_le(&buf[27], 0);
+#endif
 
     ks_respond(cmd, KS_STATUS_OK, buf, sizeof(buf));
 }

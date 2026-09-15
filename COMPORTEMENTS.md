@@ -91,6 +91,14 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   (`hid_transport.c`) se taisent — pas d'attente d'EP ni de « report not sent
   (EP busy) » à chaque frappe vers un USB sans hôte.
 
+- [NON GARDÉ] Le moteur du dongle ne joue que l'état COURANT de chaque moitié
+  à chaque cycle (10 ms) : une transition écrasée avant lecture (appui +
+  relâchement, ou relâchement + ré-appui entre deux cycles) est un tap perdu
+  ou fondu. Un compteur `transitions_ecrasees` (CDC RF_STATUS[27..30], ligne
+  « transition ecrasee » au journal) dit si ça arrive ; s'il reste à 0 pendant
+  un épisode de touches perdues, le coupable est ailleurs. Mesure avant refonte
+  (file d'états) — 2026-09-15.
+
 ## Fusion — garde-fou de sync config
 
 - [test:test_rf_status_config_fp] L'empreinte CRC-32 de la keymap voyage dans

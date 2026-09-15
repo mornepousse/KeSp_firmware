@@ -51,6 +51,10 @@ void dongle_engine_get_coherence(uint32_t *own_fp, uint32_t *left_fp,
  * le seul moment où le dongle glisse quelque chose dans les ACK. Dès que la
  * gauche annonce notre empreinte (match=1), silence — coût nul en régime
  * synchronisé. */
+/* Compteur de diagnostic : trames qui ont changé l'état d'une moitié avant que
+ * le moteur ait consommé le changement précédent (tap potentiellement perdu). */
+uint32_t dongle_engine_transitions_ecrasees(void);
+
 bool dongle_sync_active(void);
 
 /* Construit la charge d'ACK à charger pour la PROCHAINE trame de la gauche, à

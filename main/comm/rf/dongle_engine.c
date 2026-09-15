@@ -182,6 +182,17 @@ static void fill_current_press_locked(void)
     }
 }
 
+/* Transitions ÉCRASÉES : une trame qui change l'état d'une moitié alors que le
+ * moteur n'a pas encore consommé le changement précédent. Le moteur ne joue
+ * que l'état COURANT à chaque cycle (10 ms, plus quand il est occupé) : un
+ * appui + relâchement, ou un relâchement + ré-appui, tombés entre deux
+ * lectures sont perdus ou fondus — un tap qui ne sort pas, deux t qui n'en
+ * font qu'un. Ce compteur dit si ça arrive vraiment (CDC RF_STATUS[27..30]) ;
+ * s'il reste à 0 pendant un épisode de « touches perdues », le coupable est
+ * ailleurs. Compteur, pas correctif : on mesure avant de refondre. */
+static uint32_t s_transitions_ecrasees;
+uint32_t dongle_engine_transitions_ecrasees(void) { return s_transitions_ecrasees; }
+
 void dongle_engine_on_matrix(const rf_matrix_t *m)
 {
     if (!s_mux) return;
@@ -189,6 +200,11 @@ void dongle_engine_on_matrix(const rf_matrix_t *m)
                            : (m->half == RF_HALF_LEFT)  ? &s_fusion.left : NULL;
     xSemaphoreTake(s_mux, portMAX_DELAY);
     bool changed = hs && memcmp(hs->bitmap, m->bitmap, RF_HALF_BITMAP_BYTES) != 0;
+    if (changed && s_dirty) {
+        s_transitions_ecrasees++;
+        ESP_LOGW(TAG, "transition ecrasee (#%lu) : moitie %u, le moteur n'avait pas consomme la precedente",
+                 (unsigned long)s_transitions_ecrasees, (unsigned)m->half);
+    }
     if (fusion_apply(&s_fusion, m, now_ms()) && changed)
         s_dirty = true;
     xSemaphoreGive(s_mux);
