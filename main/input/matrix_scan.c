@@ -31,9 +31,6 @@
 #include "status_display.h"
 #endif
 #include "driver/gpio.h"
-#include "esp_adc/adc_oneshot.h"
-#include "esp_adc/adc_cali.h"
-#include "esp_adc/adc_cali_scheme.h"
 #include "esp_sleep.h"
 
 #define TAG "MATRIX_SCAN"
@@ -613,47 +610,6 @@ void matrix_wake_capture(void)
     /* Une ligne par réveil : ce que la capture a trouvé. C'est elle qui a
      * prouvé, le 2026-09-11, que la gauche voyait bien la touche de réveil. */
     ESP_LOGI(TAG, "reveil : %u touche(s) capturee(s)", filled);
-    /* BANC 2026-09-16 : TENSION RÉELLE de la ligne pendant l'appui capturé.
-     * Hypothèse : COL 3,3 V → 1N4148W (0,6-0,7 V) → ligne à 2,6-2,7 V pour un
-     * seuil haut de 2,475 V — marge de deux dixièmes, un contact léger reste
-     * sous le seuil (ligne du réveil basse 7 ms après, touche « apparue »
-     * 36-76 ms plus tard). Les lignes de la gauche sont des entrées ADC1 : on
-     * redrive la colonne de la première touche capturée et on lit sa ligne. */
-    if (filled) {
-        static adc_oneshot_unit_handle_t s_adc1;
-        static adc_cali_handle_t s_adc1_cali;
-        adc_unit_t u; adc_channel_t ch;
-        int r0 = current_press_row[0], c0 = current_press_col[0];
-        if (adc_oneshot_io_to_channel(rows[r0], &u, &ch) == ESP_OK && u == ADC_UNIT_1) {
-            if (!s_adc1) {
-                adc_oneshot_unit_init_cfg_t uc = { .unit_id = ADC_UNIT_1 };
-                if (adc_oneshot_new_unit(&uc, &s_adc1) == ESP_OK) {
-                    adc_cali_curve_fitting_config_t cc = { .unit_id = ADC_UNIT_1, .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT };
-                    adc_cali_create_scheme_curve_fitting(&cc, &s_adc1_cali);
-                }
-            }
-            if (s_adc1) {
-                adc_oneshot_chan_cfg_t cfg = { .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT };
-                adc_oneshot_config_channel(s_adc1, ch, &cfg);
-                for (int c = 0; c < MATRIX_COLS; c++) gpio_set_level(cols[c], c == c0);
-                esp_rom_delay_us(50);
-                int raw = 0, mv = -1;
-                adc_oneshot_read(s_adc1, ch, &raw);
-                if (s_adc1_cali) adc_cali_raw_to_voltage(s_adc1_cali, raw, &mv);
-                int vide = 0, mv_vide = -1;
-                gpio_set_level(cols[c0], 0); esp_rom_delay_us(50);
-                adc_oneshot_read(s_adc1, ch, &vide);
-                if (s_adc1_cali) adc_cali_raw_to_voltage(s_adc1_cali, vide, &mv_vide);
-                for (int c = 0; c < MATRIX_COLS; c++) gpio_set_level(cols[c], 1);
-                ESP_LOGW(TAG, "  tension ligne %d (GPIO%d) touche (%d,%d) tenue : %d mV (colonne basse : %d mV) — seuil haut S3 = 2475 mV",
-                         r0, rows[r0], r0, c0, mv, mv_vide);
-                /* Le mode ADC a pris la broche : la rendre au GPIO numérique. */
-                gpio_reset_pin(rows[r0]);
-                gpio_set_direction(rows[r0], GPIO_MODE_INPUT);
-                gpio_set_pull_mode(rows[r0], GPIO_PULLDOWN_ONLY);
-            }
-        }
-    }
     if (filled == 0) {
         /* Capture vide sur un réveil GPIO : dire ce que CHAQUE passe a lu, pour
          * distinguer un rebond (passe 1 pleine, passe 2 vide ou l'inverse) d'un

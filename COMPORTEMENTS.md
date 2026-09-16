@@ -82,9 +82,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   Mesuré le 2026-09-16 11:03 : ligne du « a » (GPIO2) déclencheuse du réveil
   mais BASSE 7 ms après, touche lisible seulement à +36 ms — signature d'un
   niveau à la limite du seuil (COL 3,3 V → 1N4148W → ligne ~2,6-2,7 V, seuil
-  haut S3 2,475 V). La capture mesure donc la TENSION RÉELLE de la ligne par
-  ADC1 pendant l'appui capturé (« tension ligne … mV ») : < 2,8 V = marge
-  insuffisante, correctif matériel (diodes Schottky).
+  haut S3 2,475 V). Mesuré par ADC1 (diagnostic retiré ensuite, il passait la
+  broche en analogique) : 2885 mV sur la ligne pendant un appui tenu — marge
+  réelle, hypothèse écartée. Reste observé et non expliqué par le firmware :
+  un premier appui après une longue pause vu nulle part (ni réveil, ni
+  capture, ni pilote) ; piste switch (premier contact hésitant), à départager
+  en changeant la touche de position.
 - [test:test_wake_grace] La grâce laissée au pilote recréé au réveil couvre
   toujours son anti-rebond (debounce × intervalle + 2 balayages), plancher
   10 ms, plafond 50 ms. Un `vTaskDelay(1)` (entre ~0 et 10 ms selon la phase)
