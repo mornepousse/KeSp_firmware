@@ -92,6 +92,26 @@ perdait 0,2 V ; ~244 µA endormie, état conservé, réveil ~1 ms), deep sleep a
 réveil EXT1, redémarrage en 704 ms). Seuils réglables par Kconfig — éprouver
 EXT1 avec le défaut de 4 h demanderait d'attendre quatre heures.
 
+**Éveil oisif dompté le 2026-09-16** (`main/power/pm_dfs.c`, tickless) : DFS
+160/40 MHz, balayage arrêté au repos (keyboard_button en économie d'énergie),
+cadences des tâches à 100 ms au repos, stats coupées, et light sleep
+automatique entre les touches (`CONFIG_FREERTOS_USE_TICKLESS_IDLE`, ~9
+sommeils/s). Le HB de banc (`CONFIG_PM_PROFILING=y`) imprime `esp_pm_dump_locks`
+— lire `light_sleep_counts` avant de croire qu'on dort.
+⚠ **Tickless : à 100 Hz une boucle de 10 ms laisse UN tick libre, le sommeil
+en exige TROIS** (`FREERTOS_IDLE_TIME_BEFORE_SLEEP`). La tâche clavier à 10 ms
+donnait « mode SLEEP 92 % » et zéro sommeil réel — un mode oisif n'est pas un
+sommeil. Toute nouvelle attente périodique < 30 ms sur les moitiés tue le
+tickless en silence.
+⚠ **Ralentir un tick change ce qu'il vide.** Le tick du relais de la gauche
+passé à 100 ms au repos a fait perdre les touches de la droite en mode USB :
+c'est lui qui vide la FIFO nRF24 (3 trames) des trames réémises par le dongle,
+et appui + relâchement tombaient dans le même tour. Avant de ralentir une
+cadence, lister ce que le tick consomme, pas seulement ce qu'il émet
+(`kbd_relay_cadence_ms`, testée).
+⚠ Un « l'USB ne bascule pas » était un câble de charge seule : vérifier
+`lsusb` (cafe:4003) avant d'incriminer le DFS — le branchement à froid énumère.
+
 ⚠ **Le sommeil profond n'était PAS atteignable** (corrigé le 2026-09-15) :
 l'inactivité n'est évaluée qu'éveillé et la carte reste bloquée en light sleep
 jusqu'à une touche, qui remet le compteur à zéro. Un réveil par TIMER au seuil

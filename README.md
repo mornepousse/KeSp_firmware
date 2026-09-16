@@ -96,7 +96,14 @@ between keystrokes**: tickless idle plus ESP-IDF's automatic light sleep,
 about nine naps a second at rest. The last one only worked once the keyboard
 task stopped waking every 10 ms — one free tick at 100 Hz, where the sleeper
 needs three; the profiler showed 92 % "idle" time and zero actual sleeps.
-Multimeter figures per half are the next step.
+Cold USB plug still enumerates under all of this (a "USB does not switch"
+scare turned out to be a charge-only cable). One regression from the slower
+idle cadences was caught the same day: with the left on USB, its radio tick is
+what drains the nRF24 receive FIFO of the right half's re-emitted frames, and
+at 100 ms a short press and its release landed in the same tick — the right
+half lost keys in USB mode. That tick now stays at 10 ms while the left is
+listening (`kbd_relay_cadence_ms`, host-tested). Multimeter figures per half
+are the next step.
 
 **The trackpad still has no hardware driver.** Its pure logic — the IQS5xx
 frame parser, the gesture→HID mapping, the accel config — exists and is
