@@ -67,7 +67,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   relecture toutes les 10 ms pendant 150 ms, le journal dit à quel délai une
   touche apparaît (« JAMAIS » = réveil tardif ou glitch ; 10-20 ms = lecture
   précoce fausse ; 100 ms+ = appui suivant) — la gauche voit 4 appuis sur 5,
-  le premier, celui qui réveille, manque partout.
+  le premier, celui qui réveille, manque partout. Et un chronomètre de la
+  FENÊTRE AVEUGLE au journal (« chrono entree : radio / pilote / armement /
+  jusqu'au sommeil », « chrono sortie : sommeil -> capture ») : entre la
+  destruction du pilote et le sommeil réel, puis entre le réveil et la
+  capture, une touche n'est ni balayée ni capable de réveiller — 160 à
+  570 ms d'éveil autour d'un sommeil vus au tick, à localiser.
 - [test:test_wake_grace] La grâce laissée au pilote recréé au réveil couvre
   toujours son anti-rebond (debounce × intervalle + 2 balayages), plancher
   10 ms, plafond 50 ms. Un `vTaskDelay(1)` (entre ~0 et 10 ms selon la phase)

@@ -81,12 +81,21 @@ void veille_liberer_gpio(void)
 void veille_legere_entrer(void)
 {
     ESP_LOGI(TAG, "light sleep");
+    /* BANC 2026-09-16 : chronométrer la FENÊTRE AVEUGLE. Entre la destruction
+     * du pilote et l'armement du réveil, puis entre le réveil et la capture,
+     * une touche n'est ni balayée ni capable de réveiller — 160 à 570 ms
+     * d'éveil autour d'un sommeil au journal de la gauche, et le premier appui
+     * après une pause de 15 s se perdait. Quatre repères esp_timer (µs). */
+    int64_t t_entree = esp_timer_get_time(), t_radio, t_pilote, t_arme;
 
 #if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
     half_link_radio_sleep();      /* 900 nA au lieu de 26 µA en standby-I */
 #endif
+    t_radio = esp_timer_get_time();
     rtc_matrix_deinit();          /* rendre les GPIO au réveil statique */
+    t_pilote = esp_timer_get_time();
     matrix_arm_key_wake();
+    t_arme = esp_timer_get_time();
 
     /* Se retirer du bus USB AVANT de dormir. Le light sleep coupe la PHY : vu
      * de l'hôte c'est un débranchement brutal, et au réveil TinyUSB retrouve
@@ -110,8 +119,12 @@ void veille_legere_entrer(void)
     esp_sleep_enable_timer_wakeup(reste_us);
     uint64_t avant_us = (uint64_t)esp_timer_get_time();   /* esp_timer suit le RTC : seul témoin fiable */
     esp_light_sleep_start();      /* bloque ici jusqu'à une touche, ou le timer */
+    int64_t t_sorti = esp_timer_get_time();
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
     uint32_t dormi_ms = (uint32_t)(((uint64_t)esp_timer_get_time() - avant_us) / 1000);
+    ESP_LOGW(TAG, "chrono entree : radio %lld us, pilote %lld us, armement %lld us, jusqu'au sommeil %lld us",
+             (long long)(t_radio - t_entree), (long long)(t_pilote - t_radio),
+             (long long)(t_arme - t_pilote), (long long)((int64_t)avant_us - t_arme));
     s_sommeils++; s_dormi_ms += dormi_ms;
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
         ESP_LOGW(TAG, "%lu s de sommeil leger sans une touche : sommeil profond", (unsigned long)(dormi_ms / 1000));
@@ -150,6 +163,7 @@ void veille_legere_entrer(void)
 #if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
     half_link_radio_wake();
 #endif
+    ESP_LOGW(TAG, "chrono sortie : sommeil -> capture %lld us", (long long)(esp_timer_get_time() - t_sorti));
     matrix_wake_capture();
     /* Premier front dans le REBOND du contact : la capture 2 passes (1 ms) lit
      * alors 0 touche, la carte conclut « fantôme », se rendort 10-50 ms et se
