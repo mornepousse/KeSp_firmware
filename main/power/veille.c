@@ -163,6 +163,24 @@ void veille_legere_entrer(void)
         esp_rom_delay_us(5000);
         matrix_wake_capture();
     }
+    /* BANC 2026-09-16 (gauche) : la touche qui réveille n'est vue ni par les deux
+     * captures ni par le pilote — 5 appuis, 4 vus, le premier manque. Soit le
+     * réveil arrive ~150 ms après l'appui (touche déjà relâchée), soit la
+     * lecture des lignes est fausse pendant les premières ms après le réveil
+     * (la droite lit 7 ms plus tard, après sa radio, et capture presque
+     * toujours). On relit toutes les 10 ms pendant 150 ms et on note À QUEL
+     * DÉLAI une touche apparaît : « jamais » = réveil tardif ou glitch ;
+     * « à 10-20 ms » = lecture précoce fausse ; « à 100 ms+ » = appui suivant. */
+    if (!matrix_wake_had_keys() && esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) {
+        int trouve_ms = -1;
+        for (int d = 10; d <= 150; d += 10) {
+            esp_rom_delay_us(10000);
+            matrix_wake_capture();
+            if (matrix_wake_had_keys()) { trouve_ms = d + 6; break; }
+        }
+        ESP_LOGW(TAG, "capture vide au reveil : touche %s", trouve_ms < 0 ? "JAMAIS vue en 156 ms" : "vue plus tard");
+        if (trouve_ms >= 0) ESP_LOGW(TAG, "  apparue a +%d ms apres le reveil", trouve_ms);
+    }
 #if CONFIG_KASE_BATT_SENSE
     batt_sense_sample_now();   /* une mesure au réveil : le timer était gelé */
 #endif

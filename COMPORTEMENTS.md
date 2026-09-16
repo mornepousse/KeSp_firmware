@@ -63,6 +63,11 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   passe1=… passe2=… ») : rebond (une passe pleine), pré-contact ou fantôme (les
   deux vides) se distinguent au journal — « touche de réveil perdue sur la
   gauche, depuis toujours » (2026-09-16) se chasse avec ça, pas à l'oreille.
+  Diagnostic de banc en cours (à retirer une fois tranché) : sur capture vide,
+  relecture toutes les 10 ms pendant 150 ms, le journal dit à quel délai une
+  touche apparaît (« JAMAIS » = réveil tardif ou glitch ; 10-20 ms = lecture
+  précoce fausse ; 100 ms+ = appui suivant) — la gauche voit 4 appuis sur 5,
+  le premier, celui qui réveille, manque partout.
 - [test:test_wake_grace] La grâce laissée au pilote recréé au réveil couvre
   toujours son anti-rebond (debounce × intervalle + 2 balayages), plancher
   10 ms, plafond 50 ms. Un `vTaskDelay(1)` (entre ~0 et 10 ms selon la phase)
