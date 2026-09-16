@@ -103,9 +103,11 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   (datasheet v2.2 table 5-9 p. 67). Sous DFS : la radio acquitte à ≥ 98 %,
   l'écran se rafraîchit, la console UART0 reste lisible (esp_pm la passe sur
   XTAL), l'UART du lien TRRS est sur XTAL, la veille et le réveil sont
-  inchangés ; un hôte USB monté tient l'APB à 80 MHz (verrou), un branchement
-  USB à froid peut ne pas énumérer (assumé : les ports USB des moitiés servent
-  à charger). Journal au boot : « DFS actif : 160 MHz en travail, 40 MHz oisif ».
+  inchangés ; un hôte USB monté tient l'APB à 80 MHz (verrou) et suspend les
+  sommeils automatiques ; un branchement USB à froid pendant l'oisiveté
+  ÉNUMÈRE (banc 2026-09-16 : cafe:4003 vu, route=USB, verrou pris — le seul
+  échec observé était un câble de charge seule). Journal au boot : « DFS
+  actif : 160 MHz en travail, 40 MHz oisif ».
 - [smoke:Éveil oisif] Au repos, le balayage de la matrice S'ARRÊTE
   (keyboard_button en économie d'énergie : gptimer stoppé, colonnes tenues
   hautes, interruption sur les lignes qui le relance au premier appui, premier

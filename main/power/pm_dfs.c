@@ -12,15 +12,14 @@
  * l'ADC (jauge) prennent un verrou APB_FREQ_MAX le temps de leurs transactions.
  * Ce qu'il ne gère pas : l'UART1 du lien TRRS (source XTAL posée dans
  * link_uart.c) et l'USB OTG, qui a besoin de la PLL — à 40 MHz sur XTAL elle
- * est coupée, un hôte ne verrait pas la carte. On tient donc un verrou
- * APB_FREQ_MAX tant qu'un hôte est monté. Un branchement à froid pendant
- * l'oisiveté à 40 MHz peut ne pas énumérer : les ports USB des moitiés servent
- * à charger, la config passe par le FTDI et la radio — assumé, documenté.
+ * est coupée. On tient donc un verrou APB_FREQ_MAX tant qu'un hôte est monté.
+ * Le branchement à FROID marche quand même (banc 2026-09-16, gauche oisive à
+ * 40 MHz avec sommeils automatiques : cafe:4003 énumère, route=USB, verrou
+ * pris — une panne de branchement s'est révélée être un câble de charge seule).
  *
- * Pas de light sleep automatique ici (tickless) : les tâches périodiques à
- * 10-20 ms (rafraîchissement radio, LVGL) l'empêcheraient de toute façon ;
- * c'est le chantier « dormir entre les touches ». La veille manuelle
- * (veille.c, esp_light_sleep_start) est indépendante du DFS. */
+ * Light sleep automatique (tickless) sous CONFIG_FREERTOS_USE_TICKLESS_IDLE :
+ * voir pm_dfs_init. La veille manuelle (veille.c, esp_light_sleep_start) est
+ * indépendante du DFS. */
 #include "pm_dfs.h"
 #include "sdkconfig.h"
 #if CONFIG_PM_ENABLE
