@@ -72,7 +72,13 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   jusqu'au sommeil », « chrono sortie : sommeil -> capture ») : entre la
   destruction du pilote et le sommeil réel, puis entre le réveil et la
   capture, une touche n'est ni balayée ni capable de réveiller — 160 à
-  570 ms d'éveil autour d'un sommeil vus au tick, à localiser.
+  570 ms d'éveil autour d'un sommeil vus au tick, à localiser. Mesuré : entrée
+  9 ms, sortie 6-8 ms (timer), ce n'est pas là. La même ligne journalise
+  désormais les niveaux BRUTS des lignes à la toute première instruction après
+  le réveil et le registre d'état GPIO (« lignes a la sortie=0x.. ; broches
+  du reveil=0x.. ») : une ligne déclencheuse déjà basse à la sortie = réveil
+  GPIO lent ; haute mais invisible à la capture = capture fausse. Un tap léger
+  après une longue pause ne réveillait pas la gauche, une pression tenue si.
 - [test:test_wake_grace] La grâce laissée au pilote recréé au réveil couvre
   toujours son anti-rebond (debounce × intervalle + 2 balayages), plancher
   10 ms, plafond 50 ms. Un `vTaskDelay(1)` (entre ~0 et 10 ms selon la phase)

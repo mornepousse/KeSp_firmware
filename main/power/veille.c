@@ -10,6 +10,7 @@
 #endif
 #include "esp_log.h"
 #include "esp_sleep.h"
+#include "soc/gpio_reg.h"
 #if CONFIG_KASE_BATT_SENSE
 #include "batt_sense.h"
 #endif
@@ -120,6 +121,18 @@ void veille_legere_entrer(void)
     uint64_t avant_us = (uint64_t)esp_timer_get_time();   /* esp_timer suit le RTC : seul témoin fiable */
     esp_light_sleep_start();      /* bloque ici jusqu'à une touche, ou le timer */
     int64_t t_sorti = esp_timer_get_time();
+    /* BANC 2026-09-16 : TOUTE PREMIÈRE lecture après le réveil, avant tout
+     * journal — les lignes sont-elles encore hautes ? Et quelle broche a
+     * déclenché (masque mémorisé par l'ESP) ? Un tap léger sur la gauche ne
+     * réveillait pas ; une pression tenue, si. Si la broche est dans le masque
+     * mais déjà basse ici, le réveil GPIO est LENT ; haute ici et invisible à
+     * la capture, c'est la capture. */
+    uint8_t lignes_sortie = 0;
+    for (int i = 0; i < MATRIX_ROWS; i++) if (gpio_get_level(s_rows[i])) lignes_sortie |= (uint8_t)(1u << i);
+    /* Pas d'API de statut GPIO de réveil sur le S3 (EXT1 seulement) : on lit le
+     * registre d'état d'interruption GPIO, qui mémorise les broches dont la
+     * condition de niveau s'est produite, INT_ENA ou pas. */
+    uint64_t masque_reveil = REG_READ(GPIO_STATUS_REG);
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
     uint32_t dormi_ms = (uint32_t)(((uint64_t)esp_timer_get_time() - avant_us) / 1000);
     ESP_LOGW(TAG, "chrono entree : radio %lld us, pilote %lld us, armement %lld us, jusqu'au sommeil %lld us",
@@ -163,7 +176,8 @@ void veille_legere_entrer(void)
 #if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
     half_link_radio_wake();
 #endif
-    ESP_LOGW(TAG, "chrono sortie : sommeil -> capture %lld us", (long long)(esp_timer_get_time() - t_sorti));
+    ESP_LOGW(TAG, "chrono sortie : sommeil -> capture %lld us ; lignes a la sortie=0x%X ; broches du reveil=0x%llX",
+             (long long)(esp_timer_get_time() - t_sorti), (unsigned)lignes_sortie, (unsigned long long)masque_reveil);
     matrix_wake_capture();
     /* Premier front dans le REBOND du contact : la capture 2 passes (1 ms) lit
      * alors 0 touche, la carte conclut « fantôme », se rendort 10-50 ms et se
