@@ -17,6 +17,7 @@
 #endif
 #if CONFIG_KASE_VEILLE
 #include "veille.h"
+#include "pm_dfs.h"
 #endif
 #include "esp_ota_ops.h"
 #include "esp_timer.h"
@@ -227,6 +228,9 @@ void app_main(void) {
   /* Jauge : premiere mesure au boot, puis toutes les 10 s et a chaque reveil. */
   batt_sense_init();
 #endif
+  /* Frequence dynamique : 160 MHz en travail, 40 MHz oisif (power/pm_dfs.c).
+   * Rien sans CONFIG_PM_ENABLE (moities Niphargus seulement). */
+  pm_dfs_init();
 
   if (boot_crash_count > BOOT_CRASH_LIMIT) {
     ESP_LOGW(TAG, "Crash loop detected (%lu boots) — SAFE MODE",

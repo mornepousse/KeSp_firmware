@@ -163,7 +163,10 @@ void link_uart_start(void)
         .parity    = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
+        /* XTAL, pas APB : avec le DFS (CONFIG_PM_ENABLE) l'APB tombe à 40 MHz au
+         * repos et une UART cadencée dessus perd son baud entre deux verrous.
+         * Le XTAL ne bouge jamais. */
+        .source_clk = UART_SCLK_XTAL,
     };
     ESP_ERROR_CHECK(uart_driver_install(BOARD_LINK_UART_NUM, 256, 0, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(BOARD_LINK_UART_NUM, &uc));

@@ -55,6 +55,15 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   contre 0,24 mA endormie — à 60 s, une journée de frappe entrecoupée de pauses
   perdait ~0,2 V (2026-09-15). Le réveil sur touche est le chemin nominal, pas
   une exception.
+- [smoke:Éveil oisif] Les moitiés tournent en fréquence dynamique
+  (CONFIG_PM_ENABLE, esp_pm) : 160 MHz tant qu'une tâche travaille, 40 MHz
+  (XTAL, PLL coupée) dès que les deux cœurs sont oisifs — 27,6 → 13,2 mA
+  (datasheet v2.2 table 5-9 p. 67). Sous DFS : la radio acquitte à ≥ 98 %,
+  l'écran se rafraîchit, la console UART0 reste lisible (esp_pm la passe sur
+  XTAL), l'UART du lien TRRS est sur XTAL, la veille et le réveil sont
+  inchangés ; un hôte USB monté tient l'APB à 80 MHz (verrou), un branchement
+  USB à froid peut ne pas énumérer (assumé : les ports USB des moitiés servent
+  à charger). Journal au boot : « DFS actif : 160 MHz en travail, 40 MHz oisif ».
 - [smoke:Une nuit sur batterie] Une moitié tient une nuit sur batterie : de
   l'ordre du centième de volt perdu (244 µA), pas 0,2 V (= ~20 mA : elle n'a
   pas dormi — 2026-09-12 gauche, 2026-09-15 encore). Pour le LIRE : chaque

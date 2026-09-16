@@ -71,7 +71,7 @@ CONFIG_KASE_HALF_LINK_RX=y
 CONFIG_KASE_VEILLE=y
 # carte ne repart pas, c'est le light sleep et rien d'autre. À rabaisser à 30 s
 # ensuite pour éprouver EXT1.
-CONFIG_KASE_VEILLE_LEGERE_S=60
+CONFIG_KASE_VEILLE_LEGERE_S=15
 CONFIG_KASE_VEILLE_PROFONDE_S=14400
 
 # B2 — lien filaire TRRS. Le 5 V est mort par défaut et ne se ferme qu'après
@@ -83,3 +83,16 @@ CONFIG_KASE_BATT_SENSE=y
 
 # Ecran Sharp memory-LCD (portrait 68x160) sur le SPI partage avec le nRF24.
 CONFIG_KASE_DISPLAY_MEMLCD=y
+
+# Frequence dynamique (esp_pm, DFS) — 2026-09-16. Le cout du clavier est
+# l'EVEIL OISIF, pas la veille : coeurs oisifs 27,6 mA a 160 MHz contre
+# 13,2 mA a 40 MHz (ESP32-S3 datasheet v2.2, table 5-9, p. 67). esp_pm tient
+# la frequence MAX tant qu'une tache tourne, MIN (XTAL, PLL coupee) quand tout
+# dort. La console repasse sur XTAL toute seule ; SPI/gptimer/ADC prennent
+# leurs verrous ; l'UART du lien est sur XTAL (link_uart.c) ; l'USB tient un
+# verrou APB tant qu'un hote est monte (power/pm_dfs.c). Pas de tickless ici.
+CONFIG_PM_ENABLE=y
+CONFIG_PM_DFS_INIT_AUTO=y
+# La console secondaire USB-Serial/JTAG garde la PLL allumee et n'a aucun
+# lecteur sur une moitie (console = UART0 au connecteur de prog).
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
