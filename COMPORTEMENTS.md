@@ -149,6 +149,16 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   rafraîchissement LVGL de 200 ms. La veille B7 à 15 s reste le seul chemin
   vers l'étage long et le sommeil profond ; frappe, ACK, écran, console et
   réveil inchangés.
+- [smoke:Éveil oisif] Le battement de coeur de la DROITE (half_link, 10 s)
+  porte les mêmes témoins de banc que celui de la gauche quand
+  CONFIG_PM_PROFILING est posé : modes et verrous esp_pm, alarmes esp_timer
+  armées, et le temps CPU par tâche si les statistiques FreeRTOS sont
+  compilées. Mesuré : la droite ne dort pas entre les touches pendant ses
+  ~10 premières secondes après un démarrage (116 réveils/s par cœur au lieu
+  de 60-80, TinyUSB hors de cause : son temps CPU ne bouge plus après l'init),
+  puis ~100 sommeils par 10 s, y compris avant sa première veille B7. Un
+  démarrage ne suit qu'un sommeil profond ou un flash : ≤ 15 s à 13 mA,
+  assumé et non poursuivi. Aucun effet hors banc.
 - [smoke:Une nuit sur batterie] Une moitié tient une nuit sur batterie : de
   l'ordre du centième de volt perdu (244 µA), pas 0,2 V (= ~20 mA : elle n'a
   pas dormi — 2026-09-12 gauche, 2026-09-15 encore). Pour le LIRE : chaque

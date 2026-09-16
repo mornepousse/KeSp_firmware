@@ -20,6 +20,9 @@
 #endif
 #include "esp_attr.h"
 #include "esp_timer.h"
+#if CONFIG_PM_PROFILING
+#include "esp_pm.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -569,6 +572,13 @@ static void half_link_tx_refresh_task(void *arg)
                     dernier_hb_ms = now_hb;
                     uint32_t dodo_n = 0, dodo_ms = 0;
                     veille_bilan(&dodo_n, &dodo_ms);
+#if CONFIG_PM_PROFILING
+                    esp_pm_dump_locks(stdout);   /* banc : sommeils automatiques, temps par mode */
+                    esp_timer_dump(stdout);      /* banc : qui arme des alarmes trop rapprochées */
+#if CONFIG_FREERTOS_USE_TRACE_FACILITY && CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+                    { static char stats[1024]; vTaskGetRunTimeStats(stats); printf("Run time stats:\n%s", stats); }
+#endif
+#endif
                     ESP_LOGW(TAG, "HB up=%lus inactif=%lus dormi=%lus/%lu lien=%d batt=%u dV",
                              (unsigned long)(now_hb / 1000), (unsigned long)(inactif / 1000),
                              (unsigned long)(dodo_ms / 1000), (unsigned long)dodo_n, (int)lien,
