@@ -116,11 +116,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   toute sa rangée. L'ISR du pilote n'est pas en IRAM (elle appelle du code
   flash) : une touche pressée pendant une écriture NVS attend quelques ms au
   lieu de planter. Le tick LVGL passe à 50 ms, la tâche dort jusqu'à 500 ms.
-- [smoke:Première touche après veille] Revue gauche/droite du 2026-09-16 : la
-  gauche en fusion ne sauvegarde PLUS ses statistiques de frappe en NVS (le
-  moteur qui tape est celui du dongle ; une écriture flash coupe le cache et
-  arrête balayage et émission — 21 sauvegardes en une matinée à gauche, zéro
-  à droite), et elle ÉTEINT sa radio en veille comme la droite
+- [smoke:Première touche après veille] Revue gauche/droite du 2026-09-16 :
+  AUCUNE statistique de frappe sur les moitiés (CONFIG_KASE_KEY_STATS=n :
+  ni comptage, ni bigrammes, ni NVS — « pas de stats sur le clavier, au mieux
+  sur le dongle » ; une écriture flash coupe le cache et arrête balayage et
+  émission — 21 sauvegardes en une matinée à gauche, zéro à droite), et la
+  gauche ÉTEINT sa radio en veille comme la droite
   (kbd_relay_sleep_prepare / wake_restore autour du light sleep : la puce
   repart ~5 ms avant la capture, comme la droite).
 - [smoke:Une nuit sur batterie] Une moitié tient une nuit sur batterie : de

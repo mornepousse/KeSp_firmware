@@ -165,14 +165,7 @@ static void status_display_task(void *arg) {
     status_display_update();
 
     /* Periodically save stats + tick WPM every second */
-#if !(CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS)
-    /* Pas en fusion sur la gauche : le moteur qui tape est celui du dongle, ces
-     * statistiques sont un doublon muet, et chaque sauvegarde NVS coupe le
-     * cache d'instructions le temps d'une écriture flash — balayage et
-     * émission s'arrêtent, une frappe tombée pile dedans est perdue. Vu 21
-     * sauvegardes en une matinée sur la gauche (2026-09-16), zéro à droite. */
-    key_stats_check_save();
-#endif
+    key_stats_check_save();   /* no-op sur les moitiés : CONFIG_KASE_KEY_STATS=n */
     {
       static uint32_t last_wpm_tick = 0;
       uint32_t now_wpm = esp_timer_get_time() / 1000;

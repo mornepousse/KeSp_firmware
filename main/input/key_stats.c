@@ -48,6 +48,9 @@ static int16_t last_key_idx = -1;
 
 void key_stats_record_press(uint8_t row, uint8_t col)
 {
+#if defined(CONFIG_KASE_KEY_STATS) && !CONFIG_KASE_KEY_STATS
+    (void)row; (void)col; return;   /* pas de stats sur les moitiés (Kconfig) */
+#endif
     if (row >= MATRIX_ROWS || col >= MATRIX_COLS) return;
 
     key_stats[row][col]++;
@@ -116,6 +119,9 @@ void reset_bigram_stats(void)
 #ifndef TEST_HOST
 void save_key_stats(void)
 {
+#if defined(CONFIG_KASE_KEY_STATS) && !CONFIG_KASE_KEY_STATS
+    return;   /* jamais d'écriture NVS de stats sur une moitié */
+#endif
     esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "key_stats", key_stats,
                                               sizeof(key_stats), "key_stats_tot", key_stats_total);
     if (err != ESP_OK) {
@@ -129,6 +135,9 @@ void save_key_stats(void)
 
 void load_key_stats(void)
 {
+#if defined(CONFIG_KASE_KEY_STATS) && !CONFIG_KASE_KEY_STATS
+    return;   /* rien à charger : une moitié ne compte pas */
+#endif
     nvs_load_blob_with_total(STORAGE_NAMESPACE, "key_stats", key_stats,
                               sizeof(key_stats), "key_stats_tot", &key_stats_total);
     if (key_stats_total == 0) {
@@ -164,6 +173,9 @@ void load_bigram_stats(void) {}
 
 void key_stats_check_save(void)
 {
+#if defined(CONFIG_KASE_KEY_STATS) && !CONFIG_KASE_KEY_STATS
+    return;
+#endif
     uint32_t diff = key_stats_total - key_stats_last_saved_total;
     TickType_t elapsed = xTaskGetTickCount() - key_stats_last_save_tick;
 

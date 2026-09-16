@@ -167,6 +167,19 @@ config KASE_VEILLE_PROFONDE_S
         carte. Abaisser temporairement (30 s) pour eprouver le reveil EXT1 au
         banc, sans quoi il faudrait attendre quatre heures.
 
+config KASE_KEY_STATS
+    bool "Statistiques de frappe (compteurs, bigrammes, WPM, NVS)"
+    default n if KASE_NIPHAR_MASTER || KASE_DEVICE_ROLE_NIPHAR_SLAVE
+    default y
+    depends on !KASE_NO_KEYMAP_ENGINE
+    help
+        Compteurs par touche, bigrammes (17 Ko de RAM), WPM et leur sauvegarde
+        NVS. Coupe sur les moities du Niphargus : « pas de stats sur le
+        clavier, au mieux sur le dongle » (2026-09-16). Une sauvegarde NVS
+        coupe le cache d'instructions le temps d'une ecriture flash — balayage
+        et emission s'arretent, une frappe tombee dedans est perdue. Les
+        commandes CDC des stats repondent alors des zeros.
+
 config KASE_BATT_SENSE
     bool "Jauge batterie : lecture ADC de VBAT_SENSE (moities Niphargus)"
     default n
