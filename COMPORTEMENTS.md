@@ -79,6 +79,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   du reveil=0x.. ») : une ligne déclencheuse déjà basse à la sortie = réveil
   GPIO lent ; haute mais invisible à la capture = capture fausse. Un tap léger
   après une longue pause ne réveillait pas la gauche, une pression tenue si.
+  Mesuré le 2026-09-16 11:03 : ligne du « a » (GPIO2) déclencheuse du réveil
+  mais BASSE 7 ms après, touche lisible seulement à +36 ms — signature d'un
+  niveau à la limite du seuil (COL 3,3 V → 1N4148W → ligne ~2,6-2,7 V, seuil
+  haut S3 2,475 V). La capture mesure donc la TENSION RÉELLE de la ligne par
+  ADC1 pendant l'appui capturé (« tension ligne … mV ») : < 2,8 V = marge
+  insuffisante, correctif matériel (diodes Schottky).
 - [test:test_wake_grace] La grâce laissée au pilote recréé au réveil couvre
   toujours son anti-rebond (debounce × intervalle + 2 balayages), plancher
   10 ms, plafond 50 ms. Un `vTaskDelay(1)` (entre ~0 et 10 ms selon la phase)
