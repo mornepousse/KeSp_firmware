@@ -109,7 +109,10 @@ static void cpu_time_logger_task(void *arg) {
                (unsigned)(dodo_ms / 1000), (unsigned)dodo_n);
 #endif
     }
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    /* 10 s : ce battement est un témoin de banc (inactif, dormi, route), pas
+     * un service ; à 2 s il coûtait une ligne série et une sortie d'oisiveté
+     * toutes les deux secondes. Assez pour lire une nuit. */
+    vTaskDelay(pdMS_TO_TICKS(10000));
   }
 }
 #endif

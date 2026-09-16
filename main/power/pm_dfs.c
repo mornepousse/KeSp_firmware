@@ -25,7 +25,6 @@
 #include "sdkconfig.h"
 #if CONFIG_PM_ENABLE
 #include "esp_pm.h"
-#include "esp_timer.h"
 #include "esp_log.h"
 #include "tinyusb.h"
 
@@ -33,13 +32,18 @@ static const char *TAG = "pm_dfs";
 static esp_pm_lock_handle_t s_usb_lock;
 static bool s_usb_tenu;
 
-static void usb_poll_cb(void *arg)
+/* Verrou APB tenu tant qu'un hôte est monté. Piloté par les ÉVÉNEMENTS
+ * TinyUSB (montage / démontage), pas par un poll : un timer à 200 ms sortait
+ * le processeur d'oisiveté cinq fois par seconde pour lire un booléen. */
+static void usb_hote(bool monte)
 {
-    (void)arg;
-    bool monte = tud_mounted();
+    if (!s_usb_lock) return;
     if (monte && !s_usb_tenu)       { esp_pm_lock_acquire(s_usb_lock); s_usb_tenu = true;  ESP_LOGI(TAG, "hote USB monte : APB tenu a 80 MHz"); }
     else if (!monte && s_usb_tenu)  { esp_pm_lock_release(s_usb_lock); s_usb_tenu = false; ESP_LOGI(TAG, "hote USB parti : DFS libre"); }
 }
+/* Événement TinyUSB (tinyusb_config_t.event_cb, posé par usb_hid.c) :
+ * esp_tinyusb possède tud_mount_cb/tud_umount_cb, on passe par son relais. */
+void pm_dfs_usb_event(bool monte) { usb_hote(monte); }
 
 void pm_dfs_init(void)
 {
@@ -51,13 +55,11 @@ void pm_dfs_init(void)
     esp_err_t e = esp_pm_configure(&cfg);
     if (e != ESP_OK) { ESP_LOGE(TAG, "esp_pm_configure: %s", esp_err_to_name(e)); return; }
     ESP_ERROR_CHECK(esp_pm_lock_create(ESP_PM_APB_FREQ_MAX, 0, "usb_hote", &s_usb_lock));
-    const esp_timer_create_args_t ta = { .callback = usb_poll_cb, .name = "pm_usb" };
-    esp_timer_handle_t t;
-    ESP_ERROR_CHECK(esp_timer_create(&ta, &t));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(t, 200 * 1000));
+    usb_hote(tud_mounted());   /* si l'hôte a énuméré avant nous */
     ESP_LOGW(TAG, "DFS actif : %d MHz en travail, %d MHz oisif (PLL coupee) ; hote USB => APB 80 MHz",
              cfg.max_freq_mhz, cfg.min_freq_mhz);
 }
 #else
 void pm_dfs_init(void) {}
+void pm_dfs_usb_event(bool monte) { (void)monte; }
 #endif

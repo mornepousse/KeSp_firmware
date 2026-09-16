@@ -227,9 +227,37 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
  * keyboard-state refresh. Polling here keeps the debounce + cached route fresh
  * even when idle. Only transmits over RF when RF is the active path — when USB is
  * plugged we must NOT relay (the dongle would type a duplicate on its own host). */
+/* Période du timer de rafraîchissement : 10 ms tant qu'il y a quelque chose à
+ * répéter (touche tenue, réparation bornée, pull de sync), 100 ms au repos.
+ * À 10 ms permanents, le processeur sortait d'oisiveté 100 fois par seconde
+ * pour un memcmp et un poll de route — et à chaque fois le DFS remontait la PLL.
+ * La route (débounce 50 ms) et l'annonce USB (200 ms) tiennent à 100 ms. */
+#define KBD_RELAY_REPOS_MS 100
+static uint32_t s_periode_ms;
+static void kbd_relay_timer_set(uint32_t ms)
+{
+    if (!s_refresh_timer || s_periode_ms == ms) return;
+    esp_timer_stop(s_refresh_timer);
+    esp_timer_start_periodic(s_refresh_timer, (uint64_t)ms * 1000);
+    s_periode_ms = ms;
+}
+static void kbd_relay_refresh_body(void);
 static void kbd_relay_refresh_cb(void *arg)
 {
     (void)arg;
+    kbd_relay_refresh_body();
+    bool actif = s_refresh.left != 0;
+#if CONFIG_KASE_DONGLE_FUSION
+    bool tenu = (s_last_left_bm[0] | s_last_left_bm[1] | s_last_left_bm[2] | s_last_left_bm[3]) != 0;
+    actif = actif || tenu || s_syncing || s_sync_done;
+#else
+    for (int i = 0; i < 6; i++) if (s_last_kb[i]) actif = true;   /* rapport HID tenu (V2D) */
+    if (s_last_mod) actif = true;
+#endif
+    kbd_relay_timer_set(actif ? KBD_RELAY_REFRESH_MS : KBD_RELAY_REPOS_MS);
+}
+static void kbd_relay_refresh_body(void)
+{
     usb_presence_poll(s_paired);
 #if CONFIG_KASE_DONGLE_FUSION && !CONFIG_KASE_HALF_LINK_RX
     /* Fusion phase 2 : bascule dynamique de la radio selon la route.
@@ -584,7 +612,7 @@ void kbd_relay_init(void)
         .callback = kbd_relay_refresh_cb, .name = "kbd_refresh",
     };
     if (esp_timer_create(&ta, &s_refresh_timer) == ESP_OK)
-        esp_timer_start_periodic(s_refresh_timer, (uint64_t)KBD_RELAY_REFRESH_MS * 1000);
+        kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);
 }
 
 #if CONFIG_KASE_DONGLE_FUSION && !CONFIG_KASE_HALF_LINK_RX
@@ -624,8 +652,8 @@ void kbd_relay_wake_restore(void)
     rf_driver_power_up(&s_radio);
 #endif
     if (s_tx_mutex) xSemaphoreGive(s_tx_mutex);
-    if (s_refresh_timer) esp_timer_start_periodic(s_refresh_timer,
-                                                  (uint64_t)KBD_RELAY_REFRESH_MS * 1000);
+    s_periode_ms = 0;                              /* le timer a été arrêté : forcer le redémarrage */
+    kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);
 }
 
 bool kbd_relay_active(void)
@@ -645,6 +673,7 @@ void kbd_relay_send_kbd(uint8_t modifier, const uint8_t kb[6])
     s_last_mod = modifier;
     memcpy(s_last_kb, kb, 6);
     kbd_refresh_arm(&s_refresh, KBD_RELAY_REPEATS);
+    kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);   /* un changement réveille la cadence rapide */
     uint8_t buf[9];
     rf_encode_hidreport_kbd(buf, modifier, kb);
     kbd_tx_locked(buf, 9);
@@ -701,5 +730,6 @@ void kbd_relay_send_matrix(uint8_t half, const uint8_t *bitmap)
      * dongle déduplique par contenu, les répétitions sont gratuites pour lui.
      * Les répétitions passent par send_matrix_frame : elles ne se réarment pas. */
     kbd_refresh_arm(&s_refresh, KBD_RELAY_REPEATS);
+    kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);   /* un changement réveille la cadence rapide */
 }
 #endif

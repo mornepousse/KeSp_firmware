@@ -83,6 +83,7 @@ static void IRAM_ATTR half_link_irq_isr(void *arg)
 static uint8_t  s_etat_local[RF_HALF_BITMAP_BYTES];
 static uint32_t s_dernier_tx_ms;
 static portMUX_TYPE s_etat_mux = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t s_refresh_task;   /* notifiée sur changement : cadence rapide sans attendre */
 
 /* Verrou de la PUCE côté émetteur. Jusqu'au 2026-09-07 un seul appelant
  * existait — le callback du pilote keyboard_button — et rf_driver_send pouvait
@@ -460,6 +461,7 @@ void half_link_tx_update(const uint8_t *bitmap, bool change)
     if (emettre) s_dernier_tx_ms = now;
     taskEXIT_CRITICAL(&s_etat_mux);
 
+    if (change && s_refresh_task) xTaskNotifyGive(s_refresh_task);   /* réveiller la cadence rapide */
     if (!emettre) return;
     half_link_tx_matrix(etat);
 }
@@ -580,7 +582,18 @@ static void half_link_tx_refresh_task(void *arg)
             veille_pas(inactif, lien);
         }
 #endif
-        vTaskDelay(pdMS_TO_TICKS(20));
+        /* 20 ms tant qu'une touche est tenue (réaffirmation à 100 ms, réparation
+         * bornée), 100 ms au repos : à 20 ms permanents cette tâche sortait le
+         * processeur d'oisiveté 50 fois par seconde pour un memcmp — et avec le
+         * DFS, chaque sortie rallume la PLL. La veille (seuil 15 s), la jauge
+         * (30 s) et le HB (10 s) s'en accommodent. */
+        bool tenu = false;
+        taskENTER_CRITICAL(&s_etat_mux);
+        for (int i = 0; i < RF_HALF_BITMAP_BYTES; i++) if (s_etat_local[i]) { tenu = true; break; }
+        taskEXIT_CRITICAL(&s_etat_mux);
+        /* Un changement (callback de scan) notifie la tâche : la réparation
+         * bornée part dans la foulée, pas au prochain tick de 100 ms. */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(tenu ? 20 : 100));
     }
 }
 
@@ -588,7 +601,7 @@ bool half_link_tx_refresh_start(void)
 {
     if (!s_radio.present) return false;
     BaseType_t r = xTaskCreate(half_link_tx_refresh_task, "half_tx_rfr",
-                               3072, NULL, 4, NULL);
+                               3072, NULL, 4, &s_refresh_task);
     if (r != pdPASS) {
         ESP_LOGE(TAG, "tache de rafraichissement non creee — les maintiens de "
                       "plus de %u ms seront relaches a tort", HALF_LINK_TIMEOUT_MS);

@@ -139,7 +139,14 @@ static void link_task(void *arg)
                      (unsigned)s_probes_tx, (unsigned)s_probes_rx,
                      (unsigned)s_acks_tx, (unsigned)s_acks_rx, (unsigned)s_skips);
         }
-        vTaskDelay(1);   /* LINK_TICK_MS : 1 tick réel, pas pdMS_TO_TICKS(10) qui vaut pareil ici */
+        /* Au repos (5 V mort, pas d'USB) la machine n'a rien à faire : 100 ms
+         * de tick suffisent à voir arriver une sonde du pair (son délai de
+         * relance est 300 ms) ou un USB. À 10 ms, cette tâche sortait le
+         * processeur d'oisiveté 100 fois par seconde pour rien — et avec le
+         * DFS, chaque sortie rallume la PLL. En poignée de main ou lien établi,
+         * retour au tick de 10 ms (keepalive 200 ms, timeouts 200-500 ms). */
+        bool repos = (s_hs.state == LINK_HS_IDLE) && !usb;
+        vTaskDelay(repos ? pdMS_TO_TICKS(100) : 1);   /* LINK_TICK_MS = 1 tick */
     }
 }
 

@@ -124,6 +124,15 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   gauche ÉTEINT sa radio en veille comme la droite
   (kbd_relay_sleep_prepare / wake_restore autour du light sleep : la puce
   repart ~5 ms avant la capture, comme la droite).
+- [smoke:Éveil oisif] Au repos, presque rien ne réveille le processeur : le
+  relais radio de la gauche passe à 100 ms (10 ms dès qu'une touche est tenue,
+  une réparation bornée en cours ou une sync, et un changement le réveille
+  aussitôt) ; la tâche de rafraîchissement de la droite à 100 ms (20 ms
+  touche tenue, notifiée par le balayage sur changement) ; le lien TRRS à
+  100 ms tant que le 5 V est mort et l'USB absent (10 ms en poignée de main) ;
+  le verrou USB du DFS suit les événements TinyUSB, plus de poll ; le
+  battement de coeur à 10 s. Frappe, réparations (ACK ≥ 98 %) et réveil
+  inchangés — c'est le smoke DFS qui le vérifie.
 - [smoke:Une nuit sur batterie] Une moitié tient une nuit sur batterie : de
   l'ordre du centième de volt perdu (244 µA), pas 0,2 V (= ~20 mA : elle n'a
   pas dormi — 2026-09-12 gauche, 2026-09-15 encore). Pour le LIRE : chaque
