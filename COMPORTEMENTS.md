@@ -32,8 +32,21 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
 
 ## Veille — réveil
 
-- [NON GARDÉ] Un réveil est une activité : la carte ne se rendort pas dans les
-  10 ms qui suivent. Candidat n°1 pour un test hôte avec `host_clock`.
+- [test:test_veille] Grâce après un réveil GPIO : pendant 300 ms
+  (VEILLE_GRACE_REVEIL_MS, entre 100 ms et 1 s) la carte ne se rendort pas,
+  même si l'inactivité — jamais rafraîchie par un réveil sans touche — dit le
+  contraire. Une touche à pré-contact lent réveille la carte avant que la
+  capture la voie (deux passes vides) ; sans grâce la boucle renvoyait dormir
+  en ~15 ms, avant que le pilote recréé ait vu la touche. Un glitch coûte
+  300 ms d'éveil, pas 15 s de radio. Tient au débordement du compteur.
+- [smoke:Première touche après veille] UN SEUL sommeil par board : le chemin
+  V2D (v2d_sleep.c, OLED + radio, sonde USB toutes les 3 s) est EXCLU des
+  boards à veille B7. Depuis l'écran de la gauche (2026-09-14) la garde
+  « sans-fil + écran » le compilait aussi sur elle : sur un réveil à capture
+  vide, V2D détruisait le pilote, coupait la radio, se rendormait, recréait
+  tout à son réveil — la touche de réveil passait dans ce trou (deux
+  matrix_setup à 30 ms d'écart au journal, 2026-09-16). Console au réveil :
+  un seul « matrix_setup ».
 - [NON GARDÉ] Au réveil, la réception RF est réarmée (`rf_driver_power_up` ne
   touche pas à CE). Sinon la gauche repart alimentée mais sourde.
 - [smoke:Première touche après veille] La touche qui réveille la carte est

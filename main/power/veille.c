@@ -27,6 +27,7 @@ static const char *TAG = "veille";
 
 /* Bilan de sommeil depuis le boot, pour lire une nuit : veille_bilan(). */
 static uint32_t s_sommeils, s_dormi_ms;
+static uint32_t s_dernier_reveil_ms;   /* pour veille_en_grace (0 = jamais) */
 void veille_bilan(uint32_t *sommeils, uint32_t *dormi_ms)
 {
     if (sommeils) *sommeils = s_sommeils;
@@ -116,6 +117,7 @@ void veille_legere_entrer(void)
         ESP_LOGW(TAG, "%lu s de sommeil leger sans une touche : sommeil profond", (unsigned long)(dormi_ms / 1000));
         veille_profonde_entrer();   /* ne revient pas ; la radio est déjà éteinte */
     }
+    { uint32_t t = (uint32_t)(esp_timer_get_time() / 1000); s_dernier_reveil_ms = t ? t : 1; }
     /* AVANT tout : prouver le réveil ET le nommer. cause=7 est ESP_SLEEP_WAKEUP_GPIO
      * et le masque dit quelle ligne ; toute autre cause est un réveil qu'on n'a
      * pas demandé. Et dire COMBIEN on a dormi : une nuit à 0,2 V perdus
@@ -242,6 +244,11 @@ void veille_diag(uint32_t inactif_ms, bool usb, bool lien)
 
 void veille_pas(uint32_t inactif_ms, bool bloque)
 {
+    /* Grâce après réveil (veille.h) : la touche qui a réveillé la carte peut
+     * n'avoir pas encore été vue (pré-contact lent, capture vide) ; on laisse
+     * au pilote recréé le temps de la voir et de l'émettre avant de dormir. */
+    if (veille_en_grace((uint32_t)(esp_timer_get_time() / 1000), s_dernier_reveil_ms, VEILLE_GRACE_REVEIL_MS))
+        return;
     veille_t niveau = veille_niveau(inactif_ms, bloque,
                                     (uint32_t)CONFIG_KASE_VEILLE_LEGERE_S * 1000u,
                                     (uint32_t)CONFIG_KASE_VEILLE_PROFONDE_S * 1000u);

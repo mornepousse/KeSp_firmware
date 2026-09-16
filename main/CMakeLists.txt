@@ -241,13 +241,15 @@ if(CONFIG_KASE_HAS_RF_TX AND NOT CONFIG_KASE_KBD_WIRELESS)
 endif()
 
 # v2d_sleep.c fait du light-sleep RF en eteignant un OLED et en prenant le
-# verrou LVGL : il depend durement de status_display_sleep/wake. Il ne peut donc
-# etre compile que sur un board qui a un ecran — la moitie gauche du Niphargus
-# n'en a pas (J12 non peuple) et le lien echouait sur ces deux symboles.
-# Le sommeil du Niphargus est un autre design (reveil EXT1 sur les rows, scan en
-# domaine RTC, cible < 50 uA) : c'est la brick B7 de
-# docs/superpowers/specs/2026-08-19-niphargus-firmware-design.md.
-if(CONFIG_KASE_KBD_WIRELESS AND CONFIG_KASE_HAS_DISPLAY)
+# verrou LVGL : il depend durement de status_display_sleep/wake, donc d'un ecran.
+# ⚠ JAMAIS avec la veille B7 (KASE_VEILLE) : depuis que la gauche du Niphargus
+# a un ecran (2026-09-14), la garde « sans-fil + ecran » le compilait AUSSI sur
+# elle, et DEUX sommeils cohabitaient. Sur un reveil a capture vide (activite non
+# rafraichie), V2D detruisait le pilote, coupait la radio, se rendormait, puis
+# recreait tout a son propre reveil — la touche de reveil passait dans ce trou
+# (« touche de reveil perdue sur la gauche, depuis toujours », banc 2026-09-16 :
+# deux matrix_setup a 30 ms d'ecart). Et sa boucle sondait l'USB toutes les 3 s.
+if(CONFIG_KASE_KBD_WIRELESS AND CONFIG_KASE_HAS_DISPLAY AND NOT CONFIG_KASE_VEILLE)
     list(APPEND srcs "comm/rf/v2d_sleep.c")
 endif()
 

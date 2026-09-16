@@ -67,6 +67,20 @@ void veille_diag(uint32_t inactif_ms, bool usb, bool lien);
 void veille_bilan(uint32_t *sommeils, uint32_t *dormi_ms);
 #endif
 
+/* Grâce après un réveil GPIO : pendant VEILLE_GRACE_REVEIL_MS on ne se rendort
+ * pas, même si l'inactivité (jamais rafraîchie par un réveil sans touche) dit
+ * le contraire. Une touche à pré-contact lent réveille la carte avant que la
+ * capture la voie ; le pilote recréé la verra dans ces 300 ms et l'émettra.
+ * Un glitch coûte 300 ms d'éveil (~2 µAh), pas 15 s de radio.
+ * dernier_reveil_ms = 0 : jamais réveillé, pas de grâce. Soustraction non
+ * signée : tient au débordement du compteur. */
+#define VEILLE_GRACE_REVEIL_MS 300u
+static inline bool veille_en_grace(uint32_t now_ms, uint32_t dernier_reveil_ms, uint32_t grace_ms)
+{
+    if (dernier_reveil_ms == 0) return false;
+    return (uint32_t)(now_ms - dernier_reveil_ms) < grace_ms;
+}
+
 static inline veille_t veille_niveau(uint32_t inactif_ms, bool bloque,
                                      uint32_t seuil_legere_ms,
                                      uint32_t seuil_profonde_ms)

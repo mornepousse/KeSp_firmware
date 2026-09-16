@@ -82,6 +82,24 @@ static void test_les_seuils_sont_ordonnes(void)
                 "mais pas avant 5 s : une respiration entre deux mots n'est pas une pause");
 }
 
+/* Grace apres un reveil : un reveil GPIO n'est PAS une activite (un glitch ne
+ * doit pas acheter des secondes de radio), mais il n'est pas non plus un
+ * rendormissement immediat. Une touche a pre-contact lent reveille la carte
+ * avant que sa capture la voie (deux passes vides, banc 2026-09-16) ; sans
+ * grace, la boucle relisait une inactivite ancienne et renvoyait dormir en
+ * ~15 ms, AVANT que le pilote recree ait vu la touche — perdue. 300 ms d'eveil
+ * suffisent au pilote (debounce 3 ms) et coutent ~2 uAh par glitch. */
+static void test_grace_apres_reveil(void)
+{
+    TEST_ASSERT(veille_en_grace(1000, 1000, VEILLE_GRACE_REVEIL_MS), "a l'instant du reveil : en grace");
+    TEST_ASSERT(veille_en_grace(1299, 1000, VEILLE_GRACE_REVEIL_MS), "299 ms apres : encore en grace");
+    TEST_ASSERT(!veille_en_grace(1300, 1000, VEILLE_GRACE_REVEIL_MS), "300 ms apres : la grace est finie");
+    TEST_ASSERT(!veille_en_grace(5000, 0, VEILLE_GRACE_REVEIL_MS), "jamais reveille (0) : pas de grace");
+    TEST_ASSERT(veille_en_grace(50, 0xFFFFFFF0u, VEILLE_GRACE_REVEIL_MS), "debordement du compteur (reveil 16 ms avant le passage a zero, now = 50) : 66 ms ecoulees, en grace");
+    TEST_ASSERT(VEILLE_GRACE_REVEIL_MS >= 100 && VEILLE_GRACE_REVEIL_MS <= 1000,
+                "entre 100 ms (pilote + rebond long) et 1 s (un glitch ne doit pas couter plus)");
+}
+
 void test_veille(void)
 {
     printf("\n-- choix du niveau de veille (B7) --\n");
@@ -90,4 +108,5 @@ void test_veille(void)
     test_etage_profond();
     test_le_blocage_prime_sur_tout();
     test_les_seuils_sont_ordonnes();
+    test_grace_apres_reveil();
 }
