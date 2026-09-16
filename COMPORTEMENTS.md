@@ -46,6 +46,10 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   Un premier front lu pendant le rebond (capture vide sur réveil GPIO) est
   relu 5 ms plus tard avant d'être déclaré fantôme — pas de rendormissement
   qui avalerait un tap bref ; un vrai glitch (deux captures vides) reste rejeté.
+  Une capture VIDE journalise les deux passes brutes (« capture vide :
+  passe1=… passe2=… ») : rebond (une passe pleine), pré-contact ou fantôme (les
+  deux vides) se distinguent au journal — « touche de réveil perdue sur la
+  gauche, depuis toujours » (2026-09-16) se chasse avec ça, pas à l'oreille.
 - [test:test_wake_grace] La grâce laissée au pilote recréé au réveil couvre
   toujours son anti-rebond (debounce × intervalle + 2 balayages), plancher
   10 ms, plafond 50 ms. Un `vTaskDelay(1)` (entre ~0 et 10 ms selon la phase)

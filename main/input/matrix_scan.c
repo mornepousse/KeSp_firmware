@@ -540,6 +540,8 @@ void matrix_wake_capture(void)
     for (int c = 0; c < MATRIX_COLS; c++) gpio_set_level(cols[c], 1);
 
     /* ET des deux passes : un fantôme transitoire tombe, un vrai appui reste. */
+    uint8_t st1[MATRIX_ROWS][MATRIX_COLS];
+    memcpy(st1, st, sizeof(st1));   /* passe 1 brute, pour le diagnostic ci-dessous */
     for (int r = 0; r < MATRIX_ROWS; r++)
         for (int c = 0; c < MATRIX_COLS; c++)
             st[r][c] = st[r][c] && st2[r][c];
@@ -608,6 +610,18 @@ void matrix_wake_capture(void)
     /* Une ligne par réveil : ce que la capture a trouvé. C'est elle qui a
      * prouvé, le 2026-09-11, que la gauche voyait bien la touche de réveil. */
     ESP_LOGI(TAG, "reveil : %u touche(s) capturee(s)", filled);
+    if (filled == 0) {
+        /* Capture vide sur un réveil GPIO : dire ce que CHAQUE passe a lu, pour
+         * distinguer un rebond (passe 1 pleine, passe 2 vide ou l'inverse) d'un
+         * pré-contact ou d'un fantôme (les deux vides). Banc 2026-09-16 :
+         * « touche de réveil perdue sur la gauche, depuis toujours ». */
+        char l1[MATRIX_ROWS * MATRIX_COLS + 1], l2[MATRIX_ROWS * MATRIX_COLS + 1];
+        int k = 0;
+        for (int r = 0; r < MATRIX_ROWS; r++)
+            for (int c = 0; c < MATRIX_COLS; c++, k++) { l1[k] = st1[r][c] ? '1' : '.'; l2[k] = st2[r][c] ? '1' : '.'; }
+        l1[k] = l2[k] = '\0';
+        ESP_LOGW(TAG, "  capture vide : passe1=%s passe2=%s", l1, l2);
+    }
     for (uint8_t i = 0; i < filled; i++)
         ESP_LOGI(TAG, "  (%u,%u)", current_press_row[i], current_press_col[i]);
 }
