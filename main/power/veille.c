@@ -23,6 +23,9 @@
 #if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
 #include "half_link.h"
 #endif
+#if CONFIG_KASE_KBD_WIRELESS
+#include "kbd_relay_tx.h"   /* sleep_prepare / wake_restore : la radio de la gauche */
+#endif
 
 static const char *TAG = "veille";
 
@@ -91,6 +94,12 @@ void veille_legere_entrer(void)
 
 #if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
     half_link_radio_sleep();      /* 900 nA au lieu de 26 µA en standby-I */
+#endif
+#if CONFIG_KASE_KBD_WIRELESS && !CONFIG_KASE_HALF_LINK_RX
+    /* Gauche en fusion : sa radio est à kbd_relay, personne ne l'éteignait
+     * (26 µA de standby toute la nuit, et son timer de 10 ms restait armé).
+     * Même geste que la droite : timer arrêté, mutex tenu, puce en power-down. */
+    kbd_relay_sleep_prepare();
 #endif
     t_radio = esp_timer_get_time();
     rtc_matrix_deinit();          /* rendre les GPIO au réveil statique */
@@ -176,6 +185,9 @@ void veille_legere_entrer(void)
      *    elle reste collée jusqu'au prochain événement de cette moitié. */
 #if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
     half_link_radio_wake();
+#endif
+#if CONFIG_KASE_KBD_WIRELESS && !CONFIG_KASE_HALF_LINK_RX
+    kbd_relay_wake_restore();     /* puce rallumée (~5 ms) AVANT la capture, qui émet */
 #endif
     ESP_LOGW(TAG, "chrono sortie : sommeil -> capture %lld us ; lignes a la sortie=0x%X ; broches du reveil=0x%llX",
              (long long)(esp_timer_get_time() - t_sorti), (unsigned)lignes_sortie, (unsigned long long)masque_reveil);
