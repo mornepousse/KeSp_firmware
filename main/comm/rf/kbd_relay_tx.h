@@ -47,6 +47,19 @@ static inline bool kbd_refresh_step(kbd_refresh_t *r)
     return true;
 }
 
+/* Cadence du timer de rafraîchissement (pure, test/test_kbd_refresh.c).
+ * 10 ms tant qu'il y a quelque chose à répéter, une touche tenue, une sync en
+ * cours — ou que la gauche ÉCOUTE la droite réémise par le dongle (route USB) :
+ * c'est ce tick qui vide la FIFO de réception (3 trames) ; à 100 ms l'appui et
+ * le relâchement d'une touche de la droite tombaient dans le même tour et seul
+ * le relâchement survivait (banc 2026-09-16). 100 ms sinon (repos, DFS). */
+#define KBD_RELAY_REFRESH_MS 10
+#define KBD_RELAY_REPOS_MS   100
+static inline uint32_t kbd_relay_cadence_ms(bool reparation, bool tenu, bool sync, bool ecoute_usb)
+{
+    return (reparation || tenu || sync || ecoute_usb) ? KBD_RELAY_REFRESH_MS : KBD_RELAY_REPOS_MS;
+}
+
 /* Init NRF radio in PTX mode and restore (or discover) the dongle pairing from
  * NVS, declaring device type RF_DEV_SMART_KBD. Sets the internal s_paired flag.
  * Safe to call even if the board has no NRF hardware — the flag stays false. */

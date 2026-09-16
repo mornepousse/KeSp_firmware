@@ -45,8 +45,8 @@ static const char *TAG = "kbd_relay";
 /* Refresh the current keyboard report every 25 ms so a lost key-up self-heals
  * (the NRF link is lossy + the HIDREPORT relay has no heartbeat reconciliation).
  * HID keyboard reports are idempotent, so resending the live state is harmless;
- * mouse is relative (non-idempotent) so it is NOT refreshed. */
-#define KBD_RELAY_REFRESH_MS  10
+ * mouse is relative (non-idempotent) so it is NOT refreshed.
+ * KBD_RELAY_REFRESH_MS / KBD_RELAY_REPOS_MS : kbd_relay_tx.h (cadence pure). */
 
 /* Répétitions du dernier rapport après un changement, à KBD_RELAY_REFRESH_MS
  * d'intervalle. 5 × 10 ms = 50 ms d'auto-réparation : un key-up perdu cinq fois
@@ -232,7 +232,6 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
  * À 10 ms permanents, le processeur sortait d'oisiveté 100 fois par seconde
  * pour un memcmp et un poll de route — et à chaque fois le DFS remontait la PLL.
  * La route (débounce 50 ms) et l'annonce USB (200 ms) tiennent à 100 ms. */
-#define KBD_RELAY_REPOS_MS 100
 static uint32_t s_periode_ms;
 static void kbd_relay_timer_set(uint32_t ms)
 {
@@ -246,15 +245,18 @@ static void kbd_relay_refresh_cb(void *arg)
 {
     (void)arg;
     kbd_relay_refresh_body();
-    bool actif = s_refresh.left != 0;
+    bool reparation = s_refresh.left != 0, tenu = false, sync = false, ecoute_usb = false;
 #if CONFIG_KASE_DONGLE_FUSION
-    bool tenu = (s_last_left_bm[0] | s_last_left_bm[1] | s_last_left_bm[2] | s_last_left_bm[3]) != 0;
-    actif = actif || tenu || s_syncing || s_sync_done;
-#else
-    for (int i = 0; i < 6; i++) if (s_last_kb[i]) actif = true;   /* rapport HID tenu (V2D) */
-    if (s_last_mod) actif = true;
+    tenu = (s_last_left_bm[0] | s_last_left_bm[1] | s_last_left_bm[2] | s_last_left_bm[3]) != 0;
+    sync = s_syncing || s_sync_done;
+#if !CONFIG_KASE_HALF_LINK_RX
+    ecoute_usb = s_usb_listening;   /* route USB : ce tick vide la FIFO des trames de la droite */
 #endif
-    kbd_relay_timer_set(actif ? KBD_RELAY_REFRESH_MS : KBD_RELAY_REPOS_MS);
+#else
+    for (int i = 0; i < 6; i++) if (s_last_kb[i]) tenu = true;   /* rapport HID tenu (V2D) */
+    if (s_last_mod) tenu = true;
+#endif
+    kbd_relay_timer_set(kbd_relay_cadence_ms(reparation, tenu, sync, ecoute_usb));
 }
 static void kbd_relay_refresh_body(void)
 {

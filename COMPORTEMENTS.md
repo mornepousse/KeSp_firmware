@@ -128,8 +128,11 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   repart ~5 ms avant la capture, comme la droite).
 - [smoke:Éveil oisif] Au repos, presque rien ne réveille le processeur : le
   relais radio de la gauche passe à 100 ms (10 ms dès qu'une touche est tenue,
-  une réparation bornée en cours ou une sync, et un changement le réveille
-  aussitôt) ; la tâche de rafraîchissement de la droite à 100 ms (20 ms
+  une réparation bornée en cours, une sync, ou que la gauche ÉCOUTE la droite
+  réémise en route USB — [test:test_kbd_refresh] `kbd_relay_cadence_ms` : à
+  100 ms ce tick, qui vide la FIFO de réception, avalait les appuis brefs de la
+  droite en USB (régression b545e2aa, banc 2026-09-16) ; un changement le
+  réveille aussitôt) ; la tâche de rafraîchissement de la droite à 100 ms (20 ms
   touche tenue, notifiée par le balayage sur changement) ; le lien TRRS à
   100 ms tant que le 5 V est mort et l'USB absent (10 ms en poignée de main) ;
   le verrou USB du DFS suit les événements TinyUSB, plus de poll ; le

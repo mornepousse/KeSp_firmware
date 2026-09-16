@@ -52,9 +52,25 @@ static void test_zero_repetition_est_muet(void)
     TEST_ASSERT(!kbd_refresh_step(&r), "arme a zero -> muet");
 }
 
+static void test_cadence_du_relais(void)
+{
+    /* 100 ms au repos ; 10 ms dès qu'il y a quelque chose à répéter, une touche
+     * tenue, une sync — ET tant que la gauche écoute la droite réémise (route
+     * USB) : c'est ce sondage qui vide la FIFO du nRF24 (3 trames), et à
+     * 100 ms l'appui et le relâchement d'une touche de la droite arrivaient
+     * dans le même tour, ne laissant que le relâchement (banc 2026-09-16 :
+     * « je perds plein de touches de la droite » en USB). */
+    TEST_ASSERT_EQ(kbd_relay_cadence_ms(false, false, false, false), KBD_RELAY_REPOS_MS, "repos");
+    TEST_ASSERT_EQ(kbd_relay_cadence_ms(true,  false, false, false), KBD_RELAY_REFRESH_MS, "reparation en cours");
+    TEST_ASSERT_EQ(kbd_relay_cadence_ms(false, true,  false, false), KBD_RELAY_REFRESH_MS, "touche tenue");
+    TEST_ASSERT_EQ(kbd_relay_cadence_ms(false, false, true,  false), KBD_RELAY_REFRESH_MS, "sync");
+    TEST_ASSERT_EQ(kbd_relay_cadence_ms(false, false, false, true),  KBD_RELAY_REFRESH_MS, "ecoute USB de la droite");
+}
+
 void test_kbd_refresh(void)
 {
     printf("\n-- repetition bornee du rapport HID (radio) --\n");
+    test_cadence_du_relais();
     test_repos_ne_reemet_pas();
     test_arme_puis_se_tait();
     test_rearmement_repart_du_plein();
