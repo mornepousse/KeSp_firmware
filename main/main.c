@@ -19,6 +19,9 @@
 #include "veille.h"
 #endif
 #include "pm_dfs.h"   /* vide sans CONFIG_PM_ENABLE */
+#if CONFIG_PM_PROFILING
+#include "esp_pm.h"
+#endif
 #include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -99,6 +102,9 @@ static void cpu_time_logger_task(void *arg) {
       veille_bilan(&dodo_n, &dodo_ms);   /* « dormi X s sur Y » : lit une nuit d'un coup d'oeil */
 #endif
       uint32_t inactif_s = (uint32_t)((esp_timer_get_time() / 1000) - get_last_activity_time_ms()) / 1000;
+#if CONFIG_PM_PROFILING
+      esp_pm_dump_locks(stdout);   /* banc : temps passé par mode (light sleep, APB min/max) */
+#endif
 #if CONFIG_KASE_KBD_WIRELESS
       ESP_LOGW(TAG, "HB up=%us inactif=%us dormi=%us/%u route=%s relais=%s", (unsigned)up_s,
                (unsigned)inactif_s, (unsigned)(dodo_ms / 1000), (unsigned)dodo_n,

@@ -334,6 +334,27 @@ static void rf_claim_chip(int csn, const char *mode)
     if (s_csn_n < RF_MAX_CHIPS) s_csn_pris[s_csn_n++] = csn;
 }
 
+/* Configuration de SOMMEIL des broches de la radio (light sleep automatique,
+ * CONFIG_PM_ENABLE + tickless) : l'ESP isole ses broches en dormant, CE et CSN
+ * flotteraient. CE flottant HAUT en PTX = standby-II du nRF24 (320 µA) ; CSN
+ * flottant BAS = puce sélectionnée, sensible au moindre bruit sur SCK. On fixe
+ * donc, en sommeil : CE tiré bas, CSN tiré haut, IRQ tiré haut (actif bas). Les
+ * pulls internes restent actifs en sommeil (ESP_SLEEP_GPIO_ENABLE_INTERNAL_RESISTORS). */
+static void rf_pins_sleep_config(const rf_radio_cfg_t *cfg)
+{
+    gpio_sleep_sel_en(cfg->pin_ce);
+    gpio_sleep_set_direction(cfg->pin_ce, GPIO_MODE_INPUT);
+    gpio_sleep_set_pull_mode(cfg->pin_ce, GPIO_PULLDOWN_ONLY);
+    gpio_sleep_sel_en(cfg->pin_csn);
+    gpio_sleep_set_direction(cfg->pin_csn, GPIO_MODE_INPUT);
+    gpio_sleep_set_pull_mode(cfg->pin_csn, GPIO_PULLUP_ONLY);
+    if (cfg->pin_irq >= 0) {
+        gpio_sleep_sel_en(cfg->pin_irq);
+        gpio_sleep_set_direction(cfg->pin_irq, GPIO_MODE_INPUT);
+        gpio_sleep_set_pull_mode(cfg->pin_irq, GPIO_PULLUP_ONLY);
+    }
+}
+
 esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
 {
     rf_claim_chip(cfg->pin_csn, "PRX");
@@ -361,6 +382,7 @@ esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
         .intr_type = GPIO_INTR_DISABLE,  /* ISR attached later by rf_rx_task */
     };
     gpio_config(&irq_io);
+    rf_pins_sleep_config(cfg);
 
     /* SPI bus (only the first radio initializes it) */
     if (cfg->shares_bus_first) {
@@ -597,6 +619,7 @@ esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     gpio_config(&io);
     csn_high(r);
     ce_low(r);
+    rf_pins_sleep_config(cfg);
 
     /* SPI bus — half has one radio, always shares_bus_first=true */
     if (cfg->shares_bus_first) {

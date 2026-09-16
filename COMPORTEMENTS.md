@@ -133,6 +133,22 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   le verrou USB du DFS suit les événements TinyUSB, plus de poll ; le
   battement de coeur à 10 s. Frappe, réparations (ACK ≥ 98 %) et réveil
   inchangés — c'est le smoke DFS qui le vérifie.
+- [test:test_keyboard_cadence] La tâche clavier tourne à 10 ms tant qu'une
+  minuterie peut courir — moins de 1,5 s depuis la dernière frappe (couvre
+  tap-hold et tap-dance 200 ms, leader 1000 ms), hôte USB présent, mode test
+  matrice — et à 100 ms au repos ; un changement de matrice la notifie, la
+  première touche n'attend jamais. À 100 Hz sa boucle de 10 ms laissait UN
+  tick libre quand le light sleep automatique en exige trois : mode SLEEP 92 %
+  du temps oisif et light_sleep_counts = 0 (banc 2026-09-16).
+- [smoke:Éveil oisif] Les moitiés DORMENT ENTRE LES TOUCHES : tickless idle
+  (CONFIG_FREERTOS_USE_TICKLESS_IDLE) + light sleep automatique d'esp_pm dès que
+  les deux cœurs sont oisifs plus de 30 ms — au repos ~9 sommeils/s (cadences
+  de 100 ms), le battement de coeur de banc en fait foi (CONFIG_PM_PROFILING :
+  « light_sleep_counts » qui grimpe, rejets à 0). En sommeil automatique les
+  broches du nRF24 sont tenues (CE bas, CSN et IRQ hauts) et l'écran suit un
+  rafraîchissement LVGL de 200 ms. La veille B7 à 15 s reste le seul chemin
+  vers l'étage long et le sommeil profond ; frappe, ACK, écran, console et
+  réveil inchangés.
 - [smoke:Une nuit sur batterie] Une moitié tient une nuit sur batterie : de
   l'ordre du centième de volt perdu (244 µA), pas 0,2 V (= ~20 mA : elle n'a
   pas dormi — 2026-09-12 gauche, 2026-09-15 encore). Pour le LIRE : chaque

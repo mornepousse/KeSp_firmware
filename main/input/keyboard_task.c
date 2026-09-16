@@ -1,13 +1,14 @@
 /* Keyboard task: main coordinator loop.
    Waits for matrix ISR notification, delegates to key_processor and hid_report. */
 #include "keyboard_task.h"
+#include "keyboard_cadence.h"
 #if CONFIG_KASE_VEILLE
 #include "veille.h"
 #if CONFIG_KASE_LINK_WIRE
 #include "link_uart.h"
 #endif
-#include "tinyusb.h"
 #endif
+#include "tinyusb.h"
 #include "key_processor.h"
 #include "hid_report.h"
 #include "keyboard_actions.h"
@@ -63,8 +64,17 @@ void vTaskKeyboard(void *pvParameters)
         if (keyboard_task_handle == NULL)
             keyboard_task_handle = xTaskGetCurrentTaskHandle();
 
-        /* 10ms loop for responsive tap/hold and tap dance timing */
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
+        /* 10 ms tant qu'une minuterie peut courir (tap-hold, tap-dance, leader,
+         * mode test, USB), 100 ms au repos : voir keyboard_cadence.h. Un
+         * changement de matrice notifie la tâche, la première touche n'attend
+         * pas. */
+        {
+            extern volatile bool matrix_test_mode;
+            uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+            uint32_t attente = kbd_cadence_attente_ms(now, get_last_activity_time_ms(),
+                                                      tud_ready(), matrix_test_mode);
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(attente));
+        }
 
         /* Tick timers — even without matrix change */
         tap_hold_tick();

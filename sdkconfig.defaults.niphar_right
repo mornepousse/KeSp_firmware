@@ -72,3 +72,9 @@ CONFIG_PM_DFS_INIT_AUTO=y
 # La console secondaire USB-Serial/JTAG garde la PLL allumee et n'a aucun
 # lecteur sur une moitie (console = UART0 au connecteur de prog).
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+# Dormir ENTRE les touches (2026-09-16) : light sleep automatique d'ESP-IDF
+# (tickless idle) des que tout dort >= 3 ticks et qu'aucun verrou n'est tenu.
+# Balayage a interruption au repos, cadences des taches a 100 ms, LVGL a 200 ms :
+# il reste de la place pour dormir entre deux frappes. Broches radio et ecran
+# ont leur configuration de sommeil (CE bas, CSN haut, CS/SCK/MOSI bas).
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y

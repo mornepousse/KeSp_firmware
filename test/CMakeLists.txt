@@ -74,6 +74,7 @@ add_executable(test_runner
     test_fusion_route.c
     test_matrix_bitmap.c
     test_veille.c
+    test_keyboard_cadence.c
     test_rf_status_cadence.c
     test_keymap_blob_size.c
     test_half_col_map.c

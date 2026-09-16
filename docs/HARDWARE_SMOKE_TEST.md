@@ -43,7 +43,9 @@ dans la PR/release.
       endormie ≈ 250 µA ; balayage au repos arrêté : taper après une pause
       sort la première touche sans retard ni doublon, tenir une touche puis
       en presser une autre de la même rangée ne fantôme pas, une touche tenue
-      au réveil ne se lit pas sur toute sa rangée
+      au réveil ne se lit pas sur toute sa rangée ; dormir entre les touches :
+      au repos le HB de banc (CONFIG_PM_PROFILING=y) montre « light_sleep_counts » qui grimpe (~90 par
+      10 s) et « light_sleep_reject_counts:0 », la frappe reste immédiate
 - [ ] Une nuit sur batterie : une moitié perd de l'ordre du centième de volt ;
       0,2 V = elle n'a pas dormi. Console au matin : « HB … dormi=X s/n » avec
       X ≈ la durée de la nuit, et « reveil apres N s de sommeil » cohérent ;

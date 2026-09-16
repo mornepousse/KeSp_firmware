@@ -230,6 +230,11 @@ static bool lvgl_pret(void)
     s_drv.hor_res = MEMLCD_W; s_drv.ver_res = MEMLCD_H;
     s_drv.flush_cb = flush_cb; s_drv.draw_buf = &s_draw_buf; s_drv.full_refresh = 1;
     s_disp = lv_disp_drv_register(&s_drv);
+    /* Le timer de rafraîchissement LVGL tourne à 30 ms par défaut, même quand
+     * rien ne change : 33 réveils par seconde qui interdiraient le light sleep
+     * automatique. 200 ms suffisent à un écran d'état (update() invalide toutes
+     * les 100 ms au plus). */
+    if (s_disp) { lv_timer_t *t = _lv_disp_get_refr_timer(s_disp); if (t) lv_timer_set_period(t, 200); }
     lvgl_port_unlock();
     return s_disp != NULL;
 }

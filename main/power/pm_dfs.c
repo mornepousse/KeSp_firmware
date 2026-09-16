@@ -50,14 +50,24 @@ void pm_dfs_init(void)
     esp_pm_config_t cfg = {
         .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
         .min_freq_mhz = CONFIG_XTAL_FREQ,          /* 40 MHz : PLL coupee au repos */
+#if CONFIG_FREERTOS_USE_TICKLESS_IDLE
+        /* Dormir ENTRE les touches : light sleep automatique dès que toutes
+         * les tâches sont bloquées ≥ FREERTOS_IDLE_TIME_BEFORE_SLEEP ticks et
+         * qu'aucun verrou n'est tenu (un hôte USB monté en tient un). Réveil
+         * GPIO sur les lignes (armé par le pilote de balayage en économie
+         * d'énergie), esp_timer, tick. La veille B7 (veille.c) reste par-dessus
+         * pour les longues absences : radio éteinte, puis sommeil profond. */
+        .light_sleep_enable = true,
+#else
         .light_sleep_enable = false,               /* veille.c s'en charge, a la main */
+#endif
     };
     esp_err_t e = esp_pm_configure(&cfg);
     if (e != ESP_OK) { ESP_LOGE(TAG, "esp_pm_configure: %s", esp_err_to_name(e)); return; }
     ESP_ERROR_CHECK(esp_pm_lock_create(ESP_PM_APB_FREQ_MAX, 0, "usb_hote", &s_usb_lock));
     usb_hote(tud_mounted());   /* si l'hôte a énuméré avant nous */
-    ESP_LOGW(TAG, "DFS actif : %d MHz en travail, %d MHz oisif (PLL coupee) ; hote USB => APB 80 MHz",
-             cfg.max_freq_mhz, cfg.min_freq_mhz);
+    ESP_LOGW(TAG, "DFS actif : %d MHz en travail, %d MHz oisif (PLL coupee) ; light sleep auto : %s ; hote USB => APB 80 MHz",
+             cfg.max_freq_mhz, cfg.min_freq_mhz, cfg.light_sleep_enable ? "OUI" : "non");
 }
 #else
 void pm_dfs_init(void) {}
