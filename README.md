@@ -23,7 +23,7 @@ an Azoteq TPS43 trackpad on the left, a Sharp Memory LCD on **each** half.
 Configuration and updates go over USB; there is no WiFi and no BLE on either
 half — the power budget forbids it.
 
-**Hardware status — 2026-09-15.** The keyboard works in its nominal mode: both
+**Hardware status — 2026-09-16.** The keyboard works in its nominal mode: both
 halves on battery, no cable anywhere, typing together through the dongle. Pin
 tables were verified against the netlist on each half; symbol keys (`!@#$…`)
 are one press each (Modified Keys, 0x8000 range), and the physical layout the
@@ -84,17 +84,33 @@ half actually slept, and both halves carry a heartbeat with `inactif=` and
 looked identical without that number. The radio is off from the light tier
 onward — listening costs 13.1 mA and the nRF24 has no low-power listening mode.
 
+**Idle power (2026-09-16).** The battery was not draining in sleep but
+*awake and idle*: 27.6 mA of cores doing nothing at 160 MHz. Both halves now
+run dynamic frequency scaling (160 MHz under load, 40 MHz idle, PLL off), stop
+scanning the matrix at rest (columns held high, a row-level interrupt restarts
+the scan on the first press, first scan under a millisecond), slow every
+periodic task to 100 ms at rest (10–20 ms while a key is held, notified on
+change), keep no typing statistics at all on the halves (`KASE_KEY_STATS=n`),
+leave the left's local keymap engine dormant off USB, and finally **sleep
+between keystrokes**: tickless idle plus ESP-IDF's automatic light sleep,
+about nine naps a second at rest. The last one only worked once the keyboard
+task stopped waking every 10 ms — one free tick at 100 Hz, where the sleeper
+needs three; the profiler showed 92 % "idle" time and zero actual sleeps.
+Multimeter figures per half are the next step.
+
 **The trackpad still has no hardware driver.** Its pure logic — the IQS5xx
 frame parser, the gesture→HID mapping, the accel config — exists and is
 host-tested; what is missing is the I2C + RDY bring-up on the left half and
 wiring its output through the mouse-relay path.
 
-**Open: erratic lost keystrokes.** Light-sleep wake is cleared (22 instrumented
-wakes, matrix/radio/host events all consistent). The current suspect is the
-dongle engine playing only the *current* half-state every 10 ms, so a press and
-release that land between two cycles are coalesced away; the dongle now counts
-those overwritten transitions (`KS_CMD_RF_STATUS[27..30]`) so the next lost
-key can be attributed rather than guessed.
+**Open: a lost first keystroke on the left.** After a pause of a couple of
+minutes, a light first press on the left half sometimes produces nothing —
+no wake, no capture, no driver event — while a firm press or the second press
+works; the right half behaves better. Light-sleep wake, sleep-path double
+entry (a real bug, removed), row voltage under press, NVS writes and dongle
+coalescing have all been instrumented and cleared; the dongle counts
+overwritten transitions and USB refusals (`KS_CMD_RF_STATUS[27..42]`) and
+they read zero in the failing trials. Still unexplained.
 
 Removed along the way, and not coming back: the first-generation e-ink halves,
 their ESP-NOW side channel, and the "left is the only engine" doctrine that
