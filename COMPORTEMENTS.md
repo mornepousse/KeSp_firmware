@@ -164,6 +164,13 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   elle émet son brut, le dongle tape. En route RF, ses émetteurs HID USB
   (`hid_transport.c`) se taisent — pas d'attente d'EP ni de « report not sent
   (EP busy) » à chaque frappe vers un USB sans hôte.
+- [smoke:Fusion — moteur local dormant] Hors USB, le moteur LOCAL de la gauche
+  ne tourne pas du tout : le callback de balayage émet la matrice brute au
+  dongle, mémorise l'état, note l'activité et s'arrête (ni rapport, ni
+  tap-hold, ni combos, ni HID muet). USB branché → la route bascule et le
+  moteur reprend au balayage suivant, keymaps déjà chargées au boot. Le mode
+  test matrice (CDC) garde la main. « Ne charger le keymap local qu'avec
+  l'USB » (2026-09-16) : c'est l'exécution qu'on conditionne, pas le code.
 
 - [NON GARDÉ] Le moteur du dongle ne joue que l'état COURANT de chaque moitié
   à chaque cycle (10 ms) : une transition écrasée avant lecture (appui +

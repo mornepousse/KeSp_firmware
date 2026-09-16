@@ -197,6 +197,18 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
             rf_matrix_to_bitmap(&new_state[0][0], MATRIX_ROWS, MATRIX_COLS, bm);
             kbd_relay_send_matrix(RF_HALF_LEFT, bm);
         }
+        /* Hors USB, le moteur LOCAL ne sert à rien : c'est le dongle qui tape.
+         * Le faire tourner quand même (rapport, tap-hold, combos, HID muet)
+         * coûtait du temps par frappe pour un résultat jeté. On s'arrête ici :
+         * état mémorisé, activité notée, rien d'autre. USB rebranché → la route
+         * bascule et le moteur reprend au balayage suivant (« ne charger le
+         * keymap local qu'avec l'USB », 2026-09-16 — c'est l'exécution qu'on
+         * conditionne, le code reste là). Le mode test matrice garde la main. */
+        if (!fusion_left_types_local(usb) && !matrix_test_mode) {
+            memcpy(prev_matrix_state, new_state, sizeof(prev_matrix_state));
+            last_activity_time_ms = esp_timer_get_time() / 1000;
+            return;
+        }
     }
 #endif
 

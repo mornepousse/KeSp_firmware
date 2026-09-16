@@ -50,6 +50,11 @@ dans la PR/release.
       après 4 h sans frappe : « sommeil profond » puis redémarrage à la
       première touche (réveil EXT1, ~700 ms)
 - [ ] set_id survit à un erase_flash
+- [ ] Fusion — moteur local dormant : gauche sur batterie (route RF), taper →
+      le dongle tape et la console gauche ne montre AUCUN traitement local
+      (pas de tap-hold/combo/HID) ; brancher un hôte USB sur la gauche → elle
+      tape en local dès la frappe suivante, le dongle se tait ; débrancher →
+      retour au brut
 - [ ] Fusion — Divergence de config signalée : keymap du dongle ≠ celle de la
       gauche → console dongle logue « DIVERGENCE de config » et
       KS_CMD_CONFIG_COHERENCE renvoie match=0 ; keymaps identiques → match=1
