@@ -40,7 +40,10 @@ dans la PR/release.
       40 MHz oisif » ; taper 1 min → « TX … acquittes » ≥ 98 % ; écran à jour ;
       console lisible au repos ; veille à 15 s et réveil sur touche inchangés ;
       multimètre en série : éveillée oisive ≈ 13-19 mA (contre 28-42 avant),
-      endormie ≈ 250 µA
+      endormie ≈ 250 µA ; balayage au repos arrêté : taper après une pause
+      sort la première touche sans retard ni doublon, tenir une touche puis
+      en presser une autre de la même rangée ne fantôme pas, une touche tenue
+      au réveil ne se lit pas sur toute sa rangée
 - [ ] Une nuit sur batterie : une moitié perd de l'ordre du centième de volt ;
       0,2 V = elle n'a pas dormi. Console au matin : « HB … dormi=X s/n » avec
       X ≈ la durée de la nuit, et « reveil apres N s de sommeil » cohérent ;

@@ -64,6 +64,16 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   inchangés ; un hôte USB monté tient l'APB à 80 MHz (verrou), un branchement
   USB à froid peut ne pas énumérer (assumé : les ports USB des moitiés servent
   à charger). Journal au boot : « DFS actif : 160 MHz en travail, 40 MHz oisif ».
+- [smoke:Éveil oisif] Au repos, le balayage de la matrice S'ARRÊTE
+  (keyboard_button en économie d'énergie : gptimer stoppé, colonnes tenues
+  hautes, interruption sur les lignes qui le relance au premier appui, premier
+  balayage < 1 ms). Sans cela le processeur sortait d'oisiveté 1000 fois par
+  seconde et le DFS ne descendait jamais. Le maintien (gpio_hold) que ce mode
+  pose sur les colonnes est LEVÉ avant toute conduite hors pilote (capture au
+  réveil, armement de veille, recréation) : sinon une touche tenue se lit sur
+  toute sa rangée. L'ISR du pilote n'est pas en IRAM (elle appelle du code
+  flash) : une touche pressée pendant une écriture NVS attend quelques ms au
+  lieu de planter. Le tick LVGL passe à 50 ms, la tâche dort jusqu'à 500 ms.
 - [smoke:Une nuit sur batterie] Une moitié tient une nuit sur batterie : de
   l'ordre du centième de volt perdu (244 µA), pas 0,2 V (= ~20 mA : elle n'a
   pas dormi — 2026-09-12 gauche, 2026-09-15 encore). Pour le LIRE : chaque

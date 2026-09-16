@@ -306,6 +306,19 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
         xTaskNotifyGive(keyboard_task_handle);
 }
 
+/* Le pilote en économie d'énergie (enable_power_save) POSE un gpio_hold_en sur
+ * les colonnes au repos et ne le lève qu'en tête de son propre balayage ;
+ * keyboard_button_delete (gpio_reset_pin) ne le lève PAS. Tout ce qui pilote
+ * les colonnes hors du pilote — capture au réveil, armement de la veille,
+ * recréation — doit d'abord les libérer, sinon les sept colonnes restent
+ * hautes ensemble et une touche tenue se lit sur toute sa rangée. */
+static void matrix_cols_unhold(void)
+{
+    const int cols[] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5,
+                         COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
+    for (int c = 0; c < MATRIX_COLS; c++) gpio_hold_dis(cols[c]);
+}
+
 void rtc_matrix_deinit(void)
 {
     ESP_LOGD(TAG, "rtc_matrix_deinit");
@@ -313,6 +326,7 @@ void rtc_matrix_deinit(void)
         keyboard_button_delete(s_kbd);
         s_kbd = NULL;
     }
+    matrix_cols_unhold();
 }
 
 /* ── Light-sleep matrix key-wake (V2D wireless) ──────────────────────────────
@@ -399,6 +413,7 @@ void matrix_setup(void)
 
     /* Reset all matrix GPIOs to detach any function set by ROM bootloader
        (UART0 on GPIO43/44, SPI on GPIO37, etc.) */
+    matrix_cols_unhold();   /* un maintien survivrait au gpio_reset_pin */
     for (int i = 0; i < MATRIX_COLS; i++) gpio_reset_pin(cols_map[i]);
     for (int i = 0; i < MATRIX_ROWS; i++) gpio_reset_pin(rows_map[i]);
 #else
@@ -424,7 +439,13 @@ void matrix_setup(void)
     cfg.active_level = 1; // Active HIGH 
     cfg.debounce_ticks = BOARD_DEBOUNCE_TICKS;
     cfg.ticks_interval = BOARD_MATRIX_SCAN_INTERVAL_US;
-    cfg.enable_power_save = false;
+    /* Économie d'énergie du pilote : sans touche enfoncée, le gptimer de 1 ms
+     * s'ARRÊTE, les colonnes sont tenues hautes et une interruption sur les
+     * lignes le relance au premier appui. Sans cela le processeur sortait
+     * d'oisiveté 1000 fois par seconde au repos — chaque fois en rallumant la
+     * PLL pour 160 MHz — et le DFS (power/pm_dfs.c) ne descendait jamais
+     * vraiment. Le premier balayage suit l'appui en < 1 ms, comme avant. */
+    cfg.enable_power_save = true;
     cfg.priority = 5;
     cfg.core_id = 0;
 
@@ -502,6 +523,7 @@ void matrix_wake_capture(void)
     uint8_t st2[MATRIX_ROWS][MATRIX_COLS];
     memset(st, 0, sizeof(st));
     memset(st2, 0, sizeof(st2));
+    matrix_cols_unhold();   /* le pilote détruit a pu laisser ses maintiens */
 
     for (int pass = 0; pass < 2; pass++) {
         uint8_t (*dst)[MATRIX_COLS] = (pass == 0) ? st : st2;

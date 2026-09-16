@@ -216,8 +216,12 @@ static bool lvgl_pret(void)
     if (s_disp) return true;
     if (!s_fb_mux) s_fb_mux = xSemaphoreCreateMutex();
     if (!lv_is_initialized()) {
+        /* Tick LVGL à 50 ms, tâche endormie jusqu'à 500 ms : rien n'est animé
+         * sur ce panneau, et chaque réveil de tâche au repos coûte une remontée
+         * de fréquence (DFS). Un changement de modèle est poussé au tick
+         * suivant de update() (100 ms), inchangé. */
         const lvgl_port_cfg_t cfg = { .task_priority = 2, .task_stack = 6144, .task_affinity = 0,
-                                      .task_max_sleep_ms = 100, .timer_period_ms = 20 };
+                                      .task_max_sleep_ms = 500, .timer_period_ms = 50 };
         if (lvgl_port_init(&cfg) != ESP_OK) { ESP_LOGE(TAG, "lvgl_port_init KO"); return false; }
     }
     if (!lvgl_port_lock(200)) return false;

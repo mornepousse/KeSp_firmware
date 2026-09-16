@@ -50,10 +50,17 @@ esp_err_t kbd_gptimer_stop(gptimer_handle_t gptimer)
 esp_err_t kbd_gptimer_deinit(gptimer_handle_t gptimer)
 {
     ESP_RETURN_ON_FALSE(gptimer != NULL, ESP_ERR_INVALID_ARG, TAG, "Pointer of gptimer is NULL");
+    /* KaSe : en économie d'énergie (enable_power_save) le timer est DÉJÀ arrêté
+     * et désactivé au repos ; gptimer_stop/disable rendent alors
+     * ESP_ERR_INVALID_STATE. L'original sortait là, AVANT gptimer_del_timer :
+     * un timer fuyait à chaque destruction du pilote (chaque entrée en veille),
+     * et après quelques dizaines de cycles plus aucun gptimer n'était libre pour
+     * recréer le pilote au réveil. On tolère « déjà arrêté » et on supprime
+     * toujours. */
     esp_err_t err = gptimer_stop(gptimer);
-    ESP_RETURN_ON_FALSE(err == ESP_OK, err, TAG, "Failed to stop gptimer");
+    ESP_RETURN_ON_FALSE(err == ESP_OK || err == ESP_ERR_INVALID_STATE, err, TAG, "Failed to stop gptimer");
     err = gptimer_disable(gptimer);
-    ESP_RETURN_ON_FALSE(err == ESP_OK, err, TAG, "Failed to disable gptimer");
+    ESP_RETURN_ON_FALSE(err == ESP_OK || err == ESP_ERR_INVALID_STATE, err, TAG, "Failed to disable gptimer");
     err = gptimer_del_timer(gptimer);
     ESP_RETURN_ON_FALSE(err == ESP_OK, err, TAG, "Failed to delete gptimer");
     return ESP_OK;
