@@ -118,6 +118,7 @@ void veille_legere_entrer(void)
      * (l'utilisateur, 2026-09-15 : « il ne part jamais en deep sleep »). */
     uint64_t reste_us = (uint64_t)(CONFIG_KASE_VEILLE_PROFONDE_S - CONFIG_KASE_VEILLE_LEGERE_S) * 1000000ULL;
     esp_sleep_enable_timer_wakeup(reste_us);
+    REG_WRITE(GPIO_STATUS_W1TC_REG, 0xFFFFFFFFu);   /* état GPIO propre : le masque au réveil ne dira que le sommeil */
     uint64_t avant_us = (uint64_t)esp_timer_get_time();   /* esp_timer suit le RTC : seul témoin fiable */
     esp_light_sleep_start();      /* bloque ici jusqu'à une touche, ou le timer */
     int64_t t_sorti = esp_timer_get_time();
