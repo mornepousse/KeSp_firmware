@@ -17,8 +17,8 @@
 #endif
 #if CONFIG_KASE_VEILLE
 #include "veille.h"
-#include "pm_dfs.h"
 #endif
+#include "pm_dfs.h"   /* vide sans CONFIG_PM_ENABLE */
 #include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
