@@ -54,6 +54,8 @@ void dongle_engine_get_coherence(uint32_t *own_fp, uint32_t *left_fp,
 /* Compteur de diagnostic : trames qui ont changé l'état d'une moitié avant que
  * le moteur ait consommé le changement précédent (tap potentiellement perdu). */
 uint32_t dongle_engine_transitions_ecrasees(void);
+/* Écart max entre deux tours du moteur depuis la dernière lecture (ms), remis à 0. */
+uint32_t dongle_engine_gap_max_ms(void);
 
 bool dongle_sync_active(void);
 

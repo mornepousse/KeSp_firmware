@@ -45,7 +45,7 @@ static inline void put_u32_le(uint8_t *p, uint32_t v)
 
 /* ── KS_CMD_RF_STATUS ───────────────────────────────────────────────
  * Request: no payload.
- * Response (31 bytes):
+ * Response (35 bytes):
  *   [0]    flags         bit0=lien clavier, bit1=lien souris,
  *                        bit2=radio 1 PRESENTE, bit3=radio 2 PRESENTE,
  *                        bits4-7=rsvd
@@ -64,6 +64,9 @@ static inline void put_u32_le(uint8_t *p, uint32_t v)
  *            l'état d'une moitié avant que le moteur ait joué le changement
  *            précédent — chacune est un tap potentiellement perdu ou fondu.
  *            0 hors fusion.
+ *   [31..34] gap_moteur_max_ms u32 LE (fusion) : plus long écart entre deux
+ *            tours du moteur depuis la dernière lecture (remis à 0). Un tap de
+ *            70 ms n'est écrasé que si le moteur a dormi 70 ms.
  */
 static void bin_cmd_rf_status(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
@@ -72,7 +75,7 @@ static void bin_cmd_rf_status(uint8_t cmd, const uint8_t *p, uint16_t l)
     rf_link_status_t st;
     rf_rx_get_status(&st);
 
-    uint8_t buf[31];
+    uint8_t buf[35];
     buf[0] = (uint8_t)((st.link_kbd             ? 0x01 : 0) |
                        (st.link_mouse           ? 0x02 : 0) |
                        (st.radio_kbd_present    ? 0x04 : 0) |
@@ -87,8 +90,10 @@ static void bin_cmd_rf_status(uint8_t cmd, const uint8_t *p, uint16_t l)
     put_u32_le(&buf[23], st.pkt_dup_mouse);
 #if CONFIG_KASE_DONGLE_FUSION
     put_u32_le(&buf[27], dongle_engine_transitions_ecrasees());
+    put_u32_le(&buf[31], dongle_engine_gap_max_ms());
 #else
     put_u32_le(&buf[27], 0);
+    put_u32_le(&buf[31], 0);
 #endif
 
     ks_respond(cmd, KS_STATUS_OK, buf, sizeof(buf));

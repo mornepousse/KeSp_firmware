@@ -192,6 +192,11 @@ static void fill_current_press_locked(void)
  * ailleurs. Compteur, pas correctif : on mesure avant de refondre. */
 static uint32_t s_transitions_ecrasees;
 uint32_t dongle_engine_transitions_ecrasees(void) { return s_transitions_ecrasees; }
+/* Écart maximal entre deux tours du moteur depuis la dernière lecture (ms) :
+ * un tap de 70 ms n'est écrasé que si le moteur n'a pas tourné pendant 70 ms.
+ * Dit ce qui le bloque, pas seulement qu'il l'a été. Remis à zéro à la lecture. */
+static uint32_t s_gap_max_ms, s_gap_dernier_ms;
+uint32_t dongle_engine_gap_max_ms(void) { uint32_t g = s_gap_max_ms; s_gap_max_ms = 0; return g; }
 
 void dongle_engine_on_matrix(const rf_matrix_t *m)
 {
@@ -233,6 +238,12 @@ static void dongle_engine_task(void *arg)
     for (;;) {
         /* 10 ms : cadence des minuteries tap-hold / tap-dance, comme le clavier. */
         vTaskDelay(pdMS_TO_TICKS(10));
+        {
+            uint32_t t = now_ms();
+            if (s_gap_dernier_ms && (uint32_t)(t - s_gap_dernier_ms) > s_gap_max_ms)
+                s_gap_max_ms = (uint32_t)(t - s_gap_dernier_ms);
+            s_gap_dernier_ms = t ? t : 1;
+        }
         tap_hold_tick();
         tap_dance_tick();
 

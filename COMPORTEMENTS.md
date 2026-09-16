@@ -138,7 +138,11 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   ou fondu. Un compteur `transitions_ecrasees` (CDC RF_STATUS[27..30], ligne
   « transition ecrasee » au journal) dit si ça arrive ; s'il reste à 0 pendant
   un épisode de touches perdues, le coupable est ailleurs. Mesure avant refonte
-  (file d'états) — 2026-09-15.
+  (file d'états) — 2026-09-15. Confirmé le 2026-09-16 : 83 écrasements en une
+  matinée, « oooo » → 2 o, la gauche ayant vu et émis les 4 (journal + 0 refus
+  radio). RF_STATUS[31..34] donne l'écart MAXIMAL entre deux tours du moteur
+  depuis la dernière lecture : un tap de 70 ms n'est écrasé que si le moteur a
+  dormi 70 ms — c'est ce blocage qu'il faut nommer avant de refondre.
 
 ## Fusion — garde-fou de sync config
 
