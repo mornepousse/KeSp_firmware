@@ -142,7 +142,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   matinée, « oooo » → 2 o, la gauche ayant vu et émis les 4 (journal + 0 refus
   radio). RF_STATUS[31..34] donne l'écart MAXIMAL entre deux tours du moteur
   depuis la dernière lecture : un tap de 70 ms n'est écrasé que si le moteur a
-  dormi 70 ms — c'est ce blocage qu'il faut nommer avant de refondre.
+  dormi 70 ms — c'est ce blocage qu'il faut nommer avant de refondre. Et
+  RF_STATUS[35..42] compte les rapports clavier USB partis / refusés (point
+  d'accès muet) et les reprises de bus demandées / ratées : le maillon
+  dongle→hôte se lit sans console (le 09:40 du 2026-09-16 : « aa » vu et émis
+  par la gauche, reçu par le dongle, 0 écrasement, écart moteur 13 ms — et
+  rien à l'écran).
 
 ## Fusion — garde-fou de sync config
 

@@ -24,3 +24,7 @@ bool hid_send_keyboard(uint8_t modifier, const uint8_t kb[6]);
 
 /* Send a mouse-only HID report via the active transport. */
 bool hid_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel);
+
+/* Compteurs de banc : rapports clavier USB partis / refusés (point d'accès
+ * muet), reprises de bus demandées / restées suspendues. Voir hid_transport.c. */
+void hid_transport_stats(uint32_t *kb_ok, uint32_t *kb_refuses, uint32_t *reprises, uint32_t *reprises_ratees);

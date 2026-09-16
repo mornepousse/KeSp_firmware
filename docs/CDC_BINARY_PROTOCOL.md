@@ -521,7 +521,7 @@ Pour savoir si le pairing a abouti, poller `RF_PAIR_LIST` apres ~5–30 s : `pai
 Snapshot complet de l'etat du lien radio pour les deux moities. Idempotent, sans effet de bord — peut etre poll a 1–2 Hz pour piloter un indicateur de barres dans le soft.
 
 - Request: payload vide
-- Response: `35 bytes` (27 à l'origine, puis 31 ; un client qui ne lit que les premiers octets reste juste)
+- Response: `43 bytes` (27 à l'origine, puis 31, 35 ; un client qui ne lit que les premiers octets reste juste)
 
 | Offset | Type   | Champ           | Description                                                |
 |-------:|--------|-----------------|------------------------------------------------------------|
@@ -536,6 +536,10 @@ Snapshot complet de l'etat du lien radio pour les deux moities. Idempotent, sans
 | 23..26 | u32 LE | `pkt_dup_right` | idem droite                                                |
 | 27..30 | u32 LE | `transitions_ecrasees` | fusion : trames ayant changé l'état d'une moitié avant que le moteur ait joué le changement précédent (tap potentiellement perdu/fondu) ; 0 hors fusion |
 | 31..34 | u32 LE | `gap_moteur_max_ms` | fusion : plus long écart entre deux tours du moteur depuis la dernière lecture (remis à 0 à chaque lecture) |
+| 35..36 | u16 LE | `kb_usb_ok` | rapports clavier USB partis (saturé à 65535) |
+| 37..38 | u16 LE | `kb_usb_refuses` | rapports clavier USB refusés (point d'accès muet 2,5 ms) |
+| 39..40 | u16 LE | `reprises` | bus USB suspendu à l'envoi : réveils distants demandés |
+| 41..42 | u16 LE | `reprises_ratees` | idem, bus toujours suspendu 100 ms après |
 
 **Mapping recommande pour 4 barres de signal :**
 ```

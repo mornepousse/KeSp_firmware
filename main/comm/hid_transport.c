@@ -77,6 +77,12 @@ static inline void usb_tx_unlock(void)
 
 /* Wait until the HID endpoint can take a report, or give up after
  * USB_HID_TX_WAIT_US. Must be called with the tx mutex held. */
+/* Compteurs de banc (CDC RF_STATUS[35..42] sur le dongle) : rapports clavier
+ * partis / refusés (point d'accès muet), reprises demandées / restées
+ * suspendues après 100 ms. « La première touche après une pause se perd » se
+ * lit ici sans console. */
+static uint32_t s_kb_ok, s_kb_refuses, s_reprises, s_reprises_ratees;
+
 static bool usb_hid_wait_ready(void)
 {
     for (int waited = 0; waited < USB_HID_TX_WAIT_US; waited += USB_HID_TX_POLL_US) {
@@ -98,6 +104,7 @@ static bool send_usb_kb_mouse(uint8_t modifier, const uint8_t kb[6],
             tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, x, y, wheel, 0);
     }
     usb_tx_unlock();
+    if (ok) s_kb_ok++; else s_kb_refuses++;
     if (!ok) ESP_LOGW(TAG_HTX, "kb+mouse report not sent (EP busy %d us)", USB_HID_TX_WAIT_US);
     return ok;
 }
@@ -122,12 +129,22 @@ static bool send_usb_kb_mouse(uint8_t modifier, const uint8_t kb[6],
  * on attend jusqu'à 100 ms que tud_suspended() retombe. tud_remote_wakeup()
  * ne fait rien si l'hôte n'a pas autorisé le réveil distant — la chaîne
  * échoue alors comme avant, mais on aura essayé. */
+void hid_transport_stats(uint32_t *kb_ok, uint32_t *kb_refuses, uint32_t *reprises, uint32_t *reprises_ratees)
+{
+    if (kb_ok) *kb_ok = s_kb_ok;
+    if (kb_refuses) *kb_refuses = s_kb_refuses;
+    if (reprises) *reprises = s_reprises;
+    if (reprises_ratees) *reprises_ratees = s_reprises_ratees;
+}
+
 static void usb_resume_if_suspended(void)
 {
     if (!tud_mounted() || !tud_suspended()) return;
+    s_reprises++;
     tud_remote_wakeup();
     for (int i = 0; i < 10 && tud_suspended(); i++)
         vTaskDelay(1);   /* 1 tick = 10 ms (CONFIG_FREERTOS_HZ=100) */
+    if (tud_suspended()) s_reprises_ratees++;
 }
 
 static bool send_usb_keyboard(uint8_t modifier, const uint8_t kb[6])
@@ -137,6 +154,7 @@ static bool send_usb_keyboard(uint8_t modifier, const uint8_t kb[6])
     bool ok = usb_hid_wait_ready() &&
               tud_hid_keyboard_report(REPORT_ID_KEYBOARD, modifier, kb);
     usb_tx_unlock();
+    if (ok) s_kb_ok++; else s_kb_refuses++;
     if (!ok) ESP_LOGW(TAG_HTX, "kb report not sent (EP busy %d us)", USB_HID_TX_WAIT_US);
     return ok;
 }

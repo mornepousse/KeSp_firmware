@@ -18,6 +18,7 @@
 #include "rf_rx_task.h"
 #include "rf_pairing.h"
 #include "dongle_engine.h"   /* fusion : cohérence de config gauche↔dongle */
+#include "hid_transport.h"   /* compteurs d'envoi USB (RF_STATUS) */
 
 #include <string.h>
 #include <stdint.h>
@@ -45,7 +46,7 @@ static inline void put_u32_le(uint8_t *p, uint32_t v)
 
 /* ── KS_CMD_RF_STATUS ───────────────────────────────────────────────
  * Request: no payload.
- * Response (35 bytes):
+ * Response (43 bytes):
  *   [0]    flags         bit0=lien clavier, bit1=lien souris,
  *                        bit2=radio 1 PRESENTE, bit3=radio 2 PRESENTE,
  *                        bits4-7=rsvd
@@ -67,6 +68,10 @@ static inline void put_u32_le(uint8_t *p, uint32_t v)
  *   [31..34] gap_moteur_max_ms u32 LE (fusion) : plus long écart entre deux
  *            tours du moteur depuis la dernière lecture (remis à 0). Un tap de
  *            70 ms n'est écrasé que si le moteur a dormi 70 ms.
+ *   [35..36] kb_usb_ok u16 LE, [37..38] kb_usb_refuses u16 LE : rapports
+ *            clavier USB partis / refusés (point d'accès muet) ;
+ *   [39..40] reprises u16 LE, [41..42] reprises_ratees u16 LE : bus suspendu
+ *            à l'envoi → réveil distant demandé / toujours suspendu 100 ms après.
  */
 static void bin_cmd_rf_status(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
@@ -75,7 +80,7 @@ static void bin_cmd_rf_status(uint8_t cmd, const uint8_t *p, uint16_t l)
     rf_link_status_t st;
     rf_rx_get_status(&st);
 
-    uint8_t buf[35];
+    uint8_t buf[43];
     buf[0] = (uint8_t)((st.link_kbd             ? 0x01 : 0) |
                        (st.link_mouse           ? 0x02 : 0) |
                        (st.radio_kbd_present    ? 0x04 : 0) |
@@ -95,6 +100,14 @@ static void bin_cmd_rf_status(uint8_t cmd, const uint8_t *p, uint16_t l)
     put_u32_le(&buf[27], 0);
     put_u32_le(&buf[31], 0);
 #endif
+    {
+        uint32_t ok, ref, rep, rat;
+        hid_transport_stats(&ok, &ref, &rep, &rat);
+        put_u16_le(&buf[35], (uint16_t)(ok  > 0xFFFF ? 0xFFFF : ok));
+        put_u16_le(&buf[37], (uint16_t)(ref > 0xFFFF ? 0xFFFF : ref));
+        put_u16_le(&buf[39], (uint16_t)(rep > 0xFFFF ? 0xFFFF : rep));
+        put_u16_le(&buf[41], (uint16_t)(rat > 0xFFFF ? 0xFFFF : rat));
+    }
 
     ks_respond(cmd, KS_STATUS_OK, buf, sizeof(buf));
 }
