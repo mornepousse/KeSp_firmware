@@ -56,7 +56,8 @@ dans la PR/release.
       le dongle tape et la console gauche ne montre AUCUN traitement local
       (pas de tap-hold/combo/HID) ; brancher un hôte USB sur la gauche → elle
       tape en local dès la frappe suivante, le dongle se tait ; débrancher →
-      retour au brut
+      retour au brut (binaires issus de `build_niphar_left` /
+      `build_niphar_right` / `build_kase_dongle` — pas d'un dossier `_fusion`)
 - [ ] Fusion — Divergence de config signalée : keymap du dongle ≠ celle de la
       gauche → console dongle logue « DIVERGENCE de config » et
       KS_CMD_CONFIG_COHERENCE renvoie match=0 ; keymaps identiques → match=1

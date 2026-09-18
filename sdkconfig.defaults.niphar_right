@@ -42,6 +42,9 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
 # B3 : la droite emet sa demi-matrice vers la gauche.
 CONFIG_KASE_HALF_LINK_TX=y
+# Fusion au dongle (2026-09-13) : la droite emet sa demi-matrice brute au dongle
+# (KaSe.01), repli vers la gauche si le dongle se tait (half_tx_target_step).
+CONFIG_KASE_DONGLE_FUSION=y
 
 # B7 — veille hybride. Léger (light sleep, ~240 µA, réveil ~1 ms, état
 # conservé) tenu plusieurs heures parce qu'il ne coûte quasiment rien, puis

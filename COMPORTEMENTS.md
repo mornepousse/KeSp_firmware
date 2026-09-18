@@ -211,6 +211,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   moteur reprend au balayage suivant, keymaps déjà chargées au boot. Le mode
   test matrice (CDC) garde la main. « Ne charger le keymap local qu'avec
   l'USB » (2026-09-16) : c'est l'exécution qu'on conditionne, pas le code.
+- [smoke:Fusion — moteur local dormant] La FUSION est la configuration PAR
+  DÉFAUT des trois cartes du Niphargus (sdkconfig.defaults.niphar_left/right,
+  dongle) : ce que `scripts/check.sh` construit au pre-push est ce qui est
+  flashé. Jusqu'au 2026-09-18 le check gardait la gauche pré-fusion
+  (HALF_LINK_RX) pendant que les cartes tournaient des builds `*_fusion` non
+  gardés.
 
 - [NON GARDÉ] Le moteur du dongle ne joue que l'état COURANT de chaque moitié
   à chaque cycle (10 ms) : une transition écrasée avant lecture (appui +

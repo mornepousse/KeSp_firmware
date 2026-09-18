@@ -2,6 +2,9 @@
 
 # --- Device role ---
 CONFIG_KASE_DEVICE_ROLE_DONGLE=y
+# Fusion (2026-09-13) : le dongle recoit deux demi-matrices brutes, fusionne et
+# fait tourner le moteur keymap (NO_KEYMAP_ENGINE retombe a n par Kconfig).
+CONFIG_KASE_DONGLE_FUSION=y
 
 # --- Bluetooth disabled (saves ~80KB heap, no BLE on dongle) ---
 CONFIG_BT_ENABLED=n

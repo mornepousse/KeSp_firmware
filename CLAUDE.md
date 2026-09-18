@@ -61,6 +61,11 @@ nominal du clavier.
 **Full RF le 2026-09-07** : la gauche écoute la droite en PRX sur le canal du
 lien ET relaie le HID fini au dongle, par excursion PRX→PTX→PRX. Le routage
 reste USB-first — USB branché → HID par USB, sur batterie → radio.
+**Fusion par défaut depuis le 2026-09-18** : `KASE_DONGLE_FUSION=y` dans les
+defaults des trois cartes (gauche, droite, dongle) — le pre-push garde ce qui
+est flashé. Le chemin pré-fusion `HALF_LINK_RX` (la gauche écoute la droite en
+direct) est retiré. Les dossiers `build_*_fusion` n'existent plus : les
+binaires sortent de `build_niphar_left`, `build_niphar_right`, `build_kase_dongle`.
 
 ⚠ **Une puce, un propriétaire.** La radio de chaque moitié appartient à
 `half_link` seul ; `kbd_relay_tx` la lui emprunte via `half_link_excursion_tx`.

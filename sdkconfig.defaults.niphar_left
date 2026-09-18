@@ -49,7 +49,10 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # moitie sur le mauvais canal trois fois — rf_driver le dit desormais tout haut
 # (rf_claim_chip).
 CONFIG_KASE_KBD_WIRELESS=y
-CONFIG_KASE_HALF_LINK_RX=y
+# Fusion au dongle (design 2026-09-12, en service depuis le 2026-09-13) : la
+# gauche emet sa demi-matrice BRUTE, le dongle fusionne et tape. C'est le mode
+# nominal du clavier ; le chemin pre-fusion (HALF_LINK_RX) est retire.
+CONFIG_KASE_DONGLE_FUSION=y
 
 # Epreuve R1 : mesurer ce que coute la bascule PRX/PTX.
 # Verdict rendu (0 perte, 0,4 retransmission/paquet) — desactivee : ses paquets
