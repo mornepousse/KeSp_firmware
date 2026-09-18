@@ -56,7 +56,7 @@ Les tâches 1-2 et 3-5 sont indépendantes ; 7 est le gros morceau.
 - Modify: `main/Kconfig.projbuild:89-91` (`default n` → `default y if NIPHAR_MASTER || NIPHAR_SLAVE || DONGLE` **n'est pas** retenu : un défaut explicite dans chaque fichier est plus lisible et n'affecte pas V1/V2/conchodytes)
 - Modify: `COMPORTEMENTS.md`, `CLAUDE.md` (section Périmètre), `docs/HARDWARE_SMOKE_TEST.md`
 
-- [ ] **Step 1 : gauche — fusion par défaut, RX retiré**
+- [x] **Step 1 : gauche — fusion par défaut, RX retiré**
 
 Dans `sdkconfig.defaults.niphar_left`, remplacer :
 ```
@@ -72,7 +72,7 @@ CONFIG_KASE_KBD_WIRELESS=y
 CONFIG_KASE_DONGLE_FUSION=y
 ```
 
-- [ ] **Step 2 : droite et dongle — fusion par défaut**
+- [x] **Step 2 : droite et dongle — fusion par défaut**
 
 `sdkconfig.defaults.niphar_right`, après `CONFIG_KASE_HALF_LINK_TX=y` :
 ```
@@ -87,7 +87,7 @@ CONFIG_KASE_DONGLE_FUSION=y
 CONFIG_KASE_DONGLE_FUSION=y
 ```
 
-- [ ] **Step 3 : régénérer les sdkconfig des trois boards et vérifier**
+- [x] **Step 3 : régénérer les sdkconfig des trois boards et vérifier**
 
 ```bash
 rm -f build_niphar_left/sdkconfig build_niphar_right/sdkconfig build_kase_dongle/sdkconfig
@@ -102,18 +102,18 @@ done
 ```
 Attendu : `fusion=1 rx=0` pour les trois, trois « Project build complete ».
 
-- [ ] **Step 4 : preuve au banc — le binaire par défaut se comporte comme le binaire fusion**
+- [x] **Step 4 : preuve au banc — le binaire par défaut se comporte comme le binaire fusion**
 
 Flasher la moitié qui porte le FTDI depuis `build_niphar_<côté>/KeSp.bin` (MAC-check), relancer la capture, taper 1 min : ACK ≥ 98 % (« HID->dongle : N remis, 0 refuses » côté gauche ; « TX n envois, m acquittes » côté droite), écran à jour, veille à 15 s, réveil sur touche. Faire l'autre moitié quand le FTDI change de côté. Le dongle : `esptool --chip esp32s3 -p /dev/ttyUSB0 write_flash 0x20000 build_kase_dongle/KeSp.bin` (MAC `ac:a7:04:18:82:24`), puis frappe depuis les deux moitiés.
 
-- [ ] **Step 5 : les dossiers `build_*_fusion` deviennent obsolètes**
+- [x] **Step 5 : les dossiers `build_*_fusion` deviennent obsolètes**
 
 ```bash
 rm -rf build_niphar_left_fusion build_niphar_right_fusion build_dongle_fusion
 ```
 (Non suivis par git.) Les options de banc qu'ils portaient — `CONFIG_PM_PROFILING=y`, `CONFIG_FREERTOS_USE_TRACE_FACILITY=y`, `CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y`, `CONFIG_KASE_MATRIX_LOG_CONSOLE=y` — se posent à la main dans `build_<board>/sdkconfig` quand on en a besoin (ce sont des options de banc, pas des défauts).
 
-- [ ] **Step 6 : contrat et docs**
+- [x] **Step 6 : contrat et docs**
 
 `COMPORTEMENTS.md`, à la suite de la ligne `[smoke:Fusion — moteur local dormant]` la plus proche du bloc fusion, ajouter :
 ```
@@ -127,7 +127,7 @@ rm -rf build_niphar_left_fusion build_niphar_right_fusion build_dongle_fusion
 `CLAUDE.md`, section « Périmètre », après le paragraphe « Full RF le 2026-09-07 » : une phrase « **Fusion par défaut depuis le 2026-09-18** : `KASE_DONGLE_FUSION=y` dans les defaults des trois cartes ; le chemin pré-fusion `HALF_LINK_RX` est retiré (Task 2). Les dossiers `build_*_fusion` n'existent plus. »
 `docs/HARDWARE_SMOKE_TEST.md` : dans l'item « Fusion — moteur local dormant », ajouter « (binaires issus de `build_niphar_left`/`build_niphar_right`/`build_kase_dongle`, pas d'un dossier `_fusion`) ».
 
-- [ ] **Step 7 : check et commit**
+- [x] **Step 7 : check et commit**
 
 ```bash
 ./scripts/check.sh --fast
