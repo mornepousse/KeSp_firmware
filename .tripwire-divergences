@@ -5,3 +5,4 @@ scripts/check.sh	--variant|--board)	dialecte KaSe : --board = --variant standard
 scripts/check.sh	export IDF_CCACHE_ENABLE=1	préambule projet : les 7 boards partagent la plupart des composants, le cache croisé divise le temps du build full
 scripts/check.sh	command -v idf.py	un outil absent n'est pas une régression : sans devshell la phase de build se saute en l'annonçant au lieu de rendre un rouge indiscernable d'un code cassé (doctrine v0.12.0)
 scripts/hooks/cc_session_start.sh	.kase-board	fichier de variante custom, antérieur à .tripwire-variant et référencé par .esp-dev.yml, CLAUDE.md et l'agent kase-board-variant
+scripts/check.sh	export IDF_COMPONENT_CHECK_NEW_VERSION=0	préambule projet : le component manager 2.2.2 plante à la configuration en évaluant les manifestes LVGL 9 du registre contre un sdkconfig LVGL 8 (LV_USE_LIBJPEG_TURBO) ; le lock fait foi, pas de réseau au build

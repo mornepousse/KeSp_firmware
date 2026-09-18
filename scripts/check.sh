@@ -25,6 +25,12 @@ cd "$PROJECT_DIR" || exit 1
 
 # ccache : les 7 boards partagent la majorité des composants → cache hit croisé.
 export IDF_CCACHE_ENABLE=1
+# Pas de « check for new versions » du component manager (2.2.2, 2026-09-18) :
+# il interroge le registre et évalue les manifestes de LVGL 9 contre notre
+# sdkconfig LVGL 8 → MissingKconfigError: LV_USE_LIBJPEG_TURBO, fatal à la
+# configuration. Le lock (dependencies.lock) fait foi ; un build ne dépend pas
+# du réseau.
+export IDF_COMPONENT_CHECK_NEW_VERSION=0
 
 # Variantes de build. Laisser vide pour un projet mono-cible.
 ALL_VARIANTS=(kase_v1 kase_v2 kase_v2_debug kase_dongle niphar_left niphar_right conchodytes)

@@ -225,6 +225,12 @@ objets compilés (gros gain sur le build full + pre-push). Pour tes builds
 interactifs, ajoute `export IDF_CCACHE_ENABLE=1` à ton shell (ou source-le avant
 `idf.py`). Stats : `ccache -s`.
 
+**Component manager** : `check.sh` exporte aussi `IDF_COMPONENT_CHECK_NEW_VERSION=0`.
+Sans ça, le manager 2.2.2 (2026-09-18) interroge le registre à chaque
+configuration et évalue les manifestes de LVGL 9 contre notre sdkconfig LVGL 8 →
+`MissingKconfigError: LV_USE_LIBJPEG_TURBO`, fatal. Pour un `idf.py` à la main
+hors `check.sh`, exporter la même variable.
+
 **Important** : avec `-DSDKCONFIG=build_kase_<name>/sdkconfig`, chaque board a
 son sdkconfig isolé dans son dossier build — plus de fuite de config entre
 boards. Le `sdkconfig` historique à la racine reste celui d'un build legacy
