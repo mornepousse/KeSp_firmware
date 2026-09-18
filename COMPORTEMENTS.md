@@ -47,8 +47,6 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   tout à son réveil — la touche de réveil passait dans ce trou (deux
   matrix_setup à 30 ms d'écart au journal, 2026-09-16). Console au réveil :
   un seul « matrix_setup ».
-- [NON GARDÉ] Au réveil, la réception RF est réarmée (`rf_driver_power_up` ne
-  touche pas à CE). Sinon la gauche repart alimentée mais sourde.
 - [smoke:Première touche après veille] La touche qui réveille la carte est
   capturée, émise et réconciliée — jamais perdue. Sous fusion, la gauche
   émet l'appui capturé au réveil (matrix_wake_capture) et son relâchement à la
@@ -217,6 +215,11 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   flashé. Jusqu'au 2026-09-18 le check gardait la gauche pré-fusion
   (HALF_LINK_RX) pendant que les cartes tournaient des builds `*_fusion` non
   gardés.
+- [smoke:Fusion — moteur local dormant] Le chemin pré-fusion « la gauche écoute
+  la droite en direct » (HALF_LINK_RX, B3 première version) est RETIRÉ le
+  2026-09-18 : il n'était plus compilé par aucune carte. `half_link.c` ne
+  contient plus que la droite, `kbd_relay_tx.c` que la gauche ; la veille
+  n'a plus d'échelle d'#if par rôle pour la radio.
 
 - [NON GARDÉ] Le moteur du dongle ne joue que l'état COURANT de chaque moitié
   à chaque cycle (10 ms) : une transition écrasée avant lecture (appui +

@@ -3,11 +3,6 @@
 #include "veille.h"
 #include "board.h"
 #include "matrix_scan.h"
-#include "matrix_flag.h"
-#if CONFIG_KASE_HALF_LINK_RX
-#include "key_processor.h"
-#include "hid_report.h"
-#endif
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "soc/gpio_reg.h"
@@ -20,7 +15,7 @@
 #include "driver/rtc_io.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_HALF_LINK_TX
 #include "half_link.h"
 #endif
 #if CONFIG_KASE_KBD_WIRELESS
@@ -92,10 +87,10 @@ void veille_legere_entrer(void)
      * après une pause de 15 s se perdait. Quatre repères esp_timer (µs). */
     int64_t t_entree = esp_timer_get_time(), t_radio, t_pilote, t_arme;
 
-#if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_HALF_LINK_TX
     half_link_radio_sleep();      /* 900 nA au lieu de 26 µA en standby-I */
 #endif
-#if CONFIG_KASE_KBD_WIRELESS && !CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_KBD_WIRELESS
     /* Gauche en fusion : sa radio est à kbd_relay, personne ne l'éteignait
      * (26 µA de standby toute la nuit, et son timer de 10 ms restait armé).
      * Même geste que la droite : timer arrêté, mutex tenu, puce en power-down. */
@@ -162,9 +157,6 @@ void veille_legere_entrer(void)
              (unsigned long)(dormi_ms / 1000), (int)esp_sleep_get_wakeup_cause(),
              (unsigned long)s_sommeils, (unsigned long)(s_dormi_ms / 1000),
              (unsigned long)(esp_timer_get_time() / 1000000));
-#if CONFIG_KASE_HALF_LINK_RX
-    half_link_note_wake();
-#endif
 
     if (etait_connecte) tud_connect();
 
@@ -183,10 +175,10 @@ void veille_legere_entrer(void)
      * 5. Réconcilier : s'il n'a rien dit, la touche a été relâchée entre-temps
      *    et il ne le dira jamais — publier et émettre le relâchement, sinon
      *    elle reste collée jusqu'au prochain événement de cette moitié. */
-#if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_HALF_LINK_TX
     half_link_radio_wake();
 #endif
-#if CONFIG_KASE_KBD_WIRELESS && !CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_KBD_WIRELESS
     kbd_relay_wake_restore();     /* puce rallumée (~5 ms) AVANT la capture, qui émet */
 #endif
     ESP_LOGW(TAG, "chrono sortie : sommeil -> capture %lld us ; lignes a la sortie=0x%X ; broches du reveil=0x%llX",
@@ -225,12 +217,6 @@ void veille_legere_entrer(void)
 #if CONFIG_KASE_BATT_SENSE
     batt_sense_sample_now();   /* une mesure au réveil : le timer était gelé */
 #endif
-#if CONFIG_KASE_HALF_LINK_RX
-    if (matrix_flag_take(&stat_matrix_changed)) {
-        build_keycode_report();
-        send_hid_key();
-    }
-#endif
     matrix_disarm_key_wake();
     matrix_setup();
     /* ⚠ Pas de vTaskDelay(1) ici : un tick nu attend jusqu'à la PROCHAINE
@@ -242,11 +228,6 @@ void veille_legere_entrer(void)
      * déduite de son anti-rebond (wake_grace.h). */
     matrix_wake_wait_first_scan();
     if (matrix_wake_reconcile()) {
-#if CONFIG_KASE_HALF_LINK_RX
-        (void)matrix_flag_take(&stat_matrix_changed);
-        build_keycode_report();
-        send_hid_key();
-#endif
     }
     ESP_LOGI(TAG, "reveil");
 }
@@ -255,7 +236,7 @@ void veille_profonde_entrer(void)
 {
     ESP_LOGW(TAG, "deep sleep — le reveil sera un redemarrage");
 
-#if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_HALF_LINK_TX
     half_link_radio_sleep();
 #endif
     rtc_matrix_deinit();

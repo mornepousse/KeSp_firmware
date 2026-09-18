@@ -210,45 +210,6 @@ config KASE_HALF_LINK_TX
         (RF_CH_HALF_LINK, cf. rf_slot.h) a chaque changement. Elle n'a ni moteur
         keymap ni sortie HID : c'est un scanner.
 
-config KASE_HALF_LINK_RX
-    bool "Lien inter-moities : ecouter la demi-matrice (moitie gauche)"
-    default n
-    depends on !KASE_DONGLE_FUSION
-    help
-        Brick B3, autre bout. La moitie gauche ecoute en PRX et journalise ce
-        qu'elle recoit.
-
-        ⚠ Ne traite PAS le risque R1 : tant que cette option est active la
-        gauche ECOUTE, elle n'emet donc pas vers le dongle. La bascule PRX/PTX
-        est l'etape suivante. On prouve d'abord que le lien porte — sinon un
-        echec de bascule serait indiscernable d'un lien qui ne marche pas.
-
-        ⚠ INCOMPATIBLE AVEC LA FUSION (depends !KASE_DONGLE_FUSION). En fusion la
-        droite emet au DONGLE, plus a la gauche : la gauche n'a donc rien a
-        ecouter, et l'ecouter gaspille ~13 mA en continu (le nRF24 n'a pas
-        d'ecoute basse conso). La couper est le GAIN D'AUTONOMIE de la
-        rearchitecture — les deux moities deviennent des emetteurs purs vers le
-        dongle. Valide au banc le 2026-09-13 (les deux cotes tapent, aucune
-        n'ecoute). La dependance force donc RX off des que la fusion est active,
-        meme si un sdkconfig.defaults tente de l'allumer.
-
-config KASE_HALF_LINK_R1
-    bool "Epreuve R1 : la gauche emet-elle sans devenir sourde ?"
-    default n
-    depends on KASE_HALF_LINK_RX
-    help
-        Le pari central du design (§2.3, risque R1) : la moitie gauche ecoute la
-        droite en PRX et bascule en PTX vers le dongle sur evenement. Elle est
-        sourde pendant qu'elle emet.
-
-        Cette epreuve provoque l'excursion PRX->PTX->PRX a cadence fixe (20 ms,
-        soit 50/s, au-dela de ce qu'une frappe rapide produit) et compte les
-        trous dans les numeros de sequence de la droite. Le taux de perte
-        mesure directement le cout de la bascule.
-
-        Diagnostic de banc : la cible des excursions est un paquet bidon, pas du
-        HID reel.
-
 config KASE_RF_FORCE_ROUTE
     bool "Forcer le HID sur la radio meme quand l'USB est branche"
     default n

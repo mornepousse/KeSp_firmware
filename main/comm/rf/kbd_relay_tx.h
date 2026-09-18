@@ -88,7 +88,7 @@ void kbd_relay_send_matrix(uint8_t half, const uint8_t *bitmap);
 /* Fusion phase 2 (4b) : état de la demi-matrice DISTANTE (droite) réémise par le
  * dongle et reçue en écoute USB. Le moteur de la gauche les lit pour fusionner la
  * droite dans les colonnes hautes (matrix_apply_remote). Miroir de
- * half_link_remote_pressed/changed. */
+ * ce que le maître pré-fusion lisait de half_link. */
 bool kbd_relay_remote_pressed(uint8_t row, uint8_t col);
 bool kbd_relay_remote_changed(void);
 

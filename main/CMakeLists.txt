@@ -273,7 +273,7 @@ list(APPEND srcs "power/pm_dfs.c")
 
 # Lien radio inter-moities (B3). rf_driver.c est deja tire par les gardes RF
 # ci-dessus quand l'un des deux bouts est actif.
-if(CONFIG_KASE_HALF_LINK_TX OR CONFIG_KASE_HALF_LINK_RX)
+if(CONFIG_KASE_HALF_LINK_TX)
     list(APPEND srcs "comm/rf/half_link.c")
     if(NOT CONFIG_KASE_KBD_WIRELESS AND NOT CONFIG_KASE_HAS_RF_RX
        AND NOT CONFIG_KASE_HAS_RF_TX AND NOT CONFIG_KASE_NRF_PROBE)
@@ -339,7 +339,7 @@ if(CONFIG_KASE_NRF_PROBE AND NOT CONFIG_KASE_HAS_RF_RX AND NOT CONFIG_KASE_KBD_W
     list(APPEND priv_requires esp_driver_spi)
 endif()
 
-if((CONFIG_KASE_HALF_LINK_TX OR CONFIG_KASE_HALF_LINK_RX)
+if(CONFIG_KASE_HALF_LINK_TX
    AND NOT CONFIG_KASE_HAS_RF_RX AND NOT CONFIG_KASE_KBD_WIRELESS
    AND NOT CONFIG_KASE_NRF_PROBE)
     list(APPEND priv_requires esp_driver_spi)

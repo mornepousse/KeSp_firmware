@@ -158,22 +158,22 @@ git commit -m "build(fusion): la fusion devient la configuration par défaut des
 **Interfaces:**
 - Produces : `half_link.c` ne contient plus que la DROITE (TX) : `half_link_tx_init`, `half_link_tx_update`, `half_link_tx_matrix`, `half_link_tx_status`, `half_link_tx_refresh_start`, `half_link_tx_dongle_vu`, `half_link_radio_sleep/wake`, `rf_bus_lock`. `kbd_relay_tx.c` ne contient plus que la GAUCHE.
 
-- [ ] **Step 1 : inventaire exact avant de couper**
+- [x] **Step 1 : inventaire exact avant de couper**
 
 ```bash
 grep -rn "HALF_LINK_RX\|HALF_LINK_R1\|half_link_rx_\|half_link_remote_\|half_link_note_wake\|half_link_excursion_tx" main boards test --include=*.c --include=*.h --include=Kconfig* --include=CMakeLists.txt | cut -c1-120
 ```
 Chaque ligne listée est à traiter dans les steps suivants ; relancer la commande à la fin : elle doit être vide (sauf commentaires historiques que l'on garde volontairement — les reformuler sans le nom de l'option).
 
-- [ ] **Step 2 : Kconfig**
+- [x] **Step 2 : Kconfig**
 
 Supprimer les blocs `config KASE_HALF_LINK_RX` (l. 213-~233) et `config KASE_HALF_LINK_R1` (l. 235-~245). Vérifier qu'aucun autre symbole n'a `depends on KASE_HALF_LINK_RX` (`grep -n "HALF_LINK_RX" main/Kconfig.projbuild` → vide).
 
-- [ ] **Step 3 : half_link.c / .h**
+- [x] **Step 3 : half_link.c / .h**
 
 Supprimer : `half_link_irq_isr` (l. 72), la tâche `half_link_rx_task` (l. 699-~780) et son `rf_bus_lock` RX (l. 784), `half_link_remote_pressed/changed` (l. 830-840), `half_link_rx_start` (l. 842-~890), les branches `#if CONFIG_KASE_HALF_LINK_RX` de `half_link_radio_sleep/wake` (l. 892-921), `half_link_cfg` si seul le RX l'utilise, `s_radio_mux`, `s_distant*`. Toute condition `#if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX` devient `#if CONFIG_KASE_HALF_LINK_TX`. Le commentaire d'en-tête du fichier décrit désormais « lien droite → dongle (fusion), repli vers la gauche ».
 
-- [ ] **Step 4 : kbd_relay_tx.c, veille.c, matrix_scan.c, keyboard_task.c, main.c**
+- [x] **Step 4 : kbd_relay_tx.c, veille.c, matrix_scan.c, keyboard_task.c, main.c**
 
 Appliquer les remplacements listés dans **Files**. Dans `veille.c`, la séquence d'entrée devient :
 ```c
@@ -186,7 +186,7 @@ Appliquer les remplacements listés dans **Files**. Dans `veille.c`, la séquenc
 ```
 et symétriquement au réveil (`half_link_radio_wake` / `kbd_relay_wake_restore`). Retirer les deux blocs `build_keycode_report(); send_hid_key();` sous RX (l. 228-233, 245-249) et les includes devenus inutiles (`key_processor.h`, `hid_report.h`, `matrix_flag.h` si plus utilisés dans `veille.c`).
 
-- [ ] **Step 5 : contrat**
+- [x] **Step 5 : contrat**
 
 Supprimer la ligne 50 de `COMPORTEMENTS.md` (`[NON GARDÉ] Au réveil, la réception RF est réarmée…`) ; écrire `1` dans `.tripwire-nongardes`. Ajouter sous le bloc fusion :
 ```
@@ -196,7 +196,7 @@ Supprimer la ligne 50 de `COMPORTEMENTS.md` (`[NON GARDÉ] Au réveil, la récep
   contient plus que la droite, `kbd_relay_tx.c` que la gauche.
 ```
 
-- [ ] **Step 6 : compiler les 7 boards, preuve au banc, commit**
+- [x] **Step 6 : compiler les 7 boards, preuve au banc, commit**
 
 ```bash
 nix develop /home/mae/nixos-config#esp-idf --command ./scripts/check.sh --force

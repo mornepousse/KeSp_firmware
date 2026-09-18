@@ -321,31 +321,8 @@ void half_link_tx_update(const uint8_t *bitmap, bool change);
  * aucune trame. */
 bool half_link_tx_refresh_start(void);
 
-/* La touche (row, col) de la moitié DISTANTE est-elle enfoncée ? Coordonnées
- * locales à cette moitié — l'appelant décale vers les colonnes 7-13. Retourne
- * toujours false si le lien n'est pas compilé ou s'est tu. */
-bool half_link_remote_pressed(uint8_t row, uint8_t col);
-
-/* L'état distant a-t-il changé depuis le dernier appel ? Retourne true UNE
- * fois par changement, et consomme le drapeau. Permet à la tâche clavier de
- * n'agir que sur du nouveau, sans jamais interférer avec le chemin local qui a
- * sa propre émission. */
-bool half_link_remote_changed(void);
-
-/* Émet une trame vers le dongle SANS cesser d'écouter la droite : excursion
- * PRX→PTX→PRX sur la radio du lien, qui revient d'elle-même sur
- * RF_CH_HALF_LINK. C'est le seul chemin d'émission autorisé quand HALF_LINK_RX
- * est actif — une moitié n'a qu'une puce, et deux modules qui l'initialisent
- * chacun de leur côté se sont déjà écrasés trois fois. */
-void half_link_note_wake(void);
-bool half_link_excursion_tx(uint8_t canal, const uint8_t addr[5],
-                            const uint8_t *payload, uint8_t len);
-
 /* Veille (B7). Éteint la radio et GARDE les verrous jusqu'au réveil, pour que
  * rien ne tente d'émettre sur une puce sans alimentation. */
 void half_link_radio_sleep(void);
 void half_link_radio_wake(void);
 
-/* Récepteur — moitié gauche. Initialise la radio en PRX et démarre la tâche
- * d'écoute, qui journalise chaque matrice reçue. */
-bool half_link_rx_start(void);

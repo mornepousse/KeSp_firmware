@@ -28,36 +28,19 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # double l'init du bus SPI ("spi_bus_initialize: SPI bus already initialized")
 # et brouille le diagnostic. L'option reste dans l'arbre pour un futur bring-up
 # de la moitie droite, qui n'a pas encore de consommateur RF.
-# COUPE quand HALF_LINK_RX est actif : rf_probe reinitialise la radio avec SON
-# canal (0x4C) et SON adresse, ecrasant la config du recepteur de lien pose
-# juste avant. La gauche ecoutait alors le canal du dongle et n'acquittait rien
-# de ce que la droite emettait sur 0x4F. Une radio, un maitre.
+# Une radio, un maitre : rf_probe reinitialiserait la puce avec SON canal et
+# SON adresse par-dessus celle de kbd_relay (la gauche a ecoute le canal du
+# dongle trois fois pour ca, en silence).
 # CONFIG_KASE_NRF_PROBE=y
 
-# B4 — relais HID vers le dongle. Le routage est USB-first
-# (comm/usb/usb_presence.c : tud_mounted) : USB branche -> HID par USB, USB
-# absent -> radio vers le slot clavier du dongle. Pas d'ESP-NOW ni de WiFi,
-# malgre l'intitule du Kconfig qui est un vestige.
-# ETAPE 2 de B3, 2026-09-07 : les DEUX en meme temps. La gauche ecoute la droite
-# en PRX sur le canal du lien ET relaie le HID fini au dongle, par excursion
-# PRX->PTX->PRX (half_link_excursion_tx). C'est le pari R1, mesure le 2026-09-05
-# a 50 excursions/s : 0 perte, 0,4 retransmission par paquet — soit bien plus
-# que ce qu'une frappe reelle provoque.
-#
-# La radio appartient a half_link, seul a l'initialiser ; kbd_relay la lui
-# emprunte. Deux `static rf_radio_t s_radio` concurrents ont fait ecouter cette
-# moitie sur le mauvais canal trois fois — rf_driver le dit desormais tout haut
-# (rf_claim_chip).
+# Relais vers le dongle : la radio de la gauche appartient a kbd_relay_tx, seul
+# a l'initialiser (rf_claim_chip le verifie).
 CONFIG_KASE_KBD_WIRELESS=y
 # Fusion au dongle (design 2026-09-12, en service depuis le 2026-09-13) : la
 # gauche emet sa demi-matrice BRUTE, le dongle fusionne et tape. C'est le mode
 # nominal du clavier ; le chemin pre-fusion (HALF_LINK_RX) est retire.
 CONFIG_KASE_DONGLE_FUSION=y
 
-# Epreuve R1 : mesurer ce que coute la bascule PRX/PTX.
-# Verdict rendu (0 perte, 0,4 retransmission/paquet) — desactivee : ses paquets
-# bidons vers le dongle n ont plus lieu d etre. Reactivable pour une mesure.
-# CONFIG_KASE_HALF_LINK_R1=y
 
 # Banc du 2026-09-05 : l'alimentation batterie ne fonctionne pas, donc
 # debrancher l'USB pour faire basculer le routage n'est pas possible. On force

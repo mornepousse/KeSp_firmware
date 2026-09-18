@@ -63,7 +63,7 @@
 #include "rf_probe.h"
 #endif
 
-#if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_HALF_LINK_TX
 #include "half_link.h"
 #endif
 
@@ -352,12 +352,6 @@ void app_main(void) {
   link_uart_start();
 #endif
 
-#if CONFIG_KASE_HALF_LINK_RX
-  /* Moitié gauche à l'écoute de la droite. Placé hors du dispatch de rôles pour
-   * la même raison que le probe, et avant kbd_relay_init() qui réclamerait la
-   * même radio. */
-  half_link_rx_start();
-#endif
 
 #if CONFIG_KASE_NRF_PROBE
   /* Diagnostic de banc, HORS du dispatch de rôles : la moitié droite le veut

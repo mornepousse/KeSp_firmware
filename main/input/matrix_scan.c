@@ -6,7 +6,7 @@
 #include "keyboard_config.h"
 #include "wake_grace.h"         /* wake_grace_ms — grâce du pilote au réveil (tous boards) */
 #include "cdc_binary_protocol.h"
-#if CONFIG_KASE_HALF_LINK_TX || CONFIG_KASE_HALF_LINK_RX
+#if CONFIG_KASE_HALF_LINK_TX
 #include "half_link.h"
 #include "rf_packet.h"
 #endif
@@ -51,7 +51,7 @@ uint8_t current_press_row[MAX_REPORT_KEYS];
 uint8_t current_press_col[MAX_REPORT_KEYS];
 uint8_t current_press_stat[MAX_REPORT_KEYS];
 
-#if CONFIG_KASE_HALF_LINK_RX || (CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS)
+#if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
 /* Sens de rangement des colonnes distantes — propriété du câblage, déclarée par
  * le board.h du maître. 0 = simple décalage, 1 = miroir. */
 #ifndef BOARD_REMOTE_COLS_MIRRORED
@@ -59,14 +59,9 @@ uint8_t current_press_stat[MAX_REPORT_KEYS];
 #endif
 
 /* Source de la demi-matrice distante selon le mode :
- *  - lien inter-moitiés (maître pré-fusion) → half_link_remote_pressed ;
  *  - fusion, gauche en USB → kbd_relay_remote_pressed (droite réémise par le
  *    dongle et reçue en écoute USB). */
-#if CONFIG_KASE_HALF_LINK_RX
-#define KASE_REMOTE_PRESSED(r, c) half_link_remote_pressed((r), (c))
-#else
 #define KASE_REMOTE_PRESSED(r, c) kbd_relay_remote_pressed((r), (c))
-#endif
 
 /* Frontière entre les entrées du balayage LOCAL et celles reçues par radio.
  * Tout ce qui est au-delà appartient à la moitié distante et se reconstruit à
@@ -298,7 +293,7 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
      * chemin local n'appelait jamais la fusion et effaçait les distantes.
      * Chaque moitié tapait seule, et AUCUNE combinaison entre les deux ne
      * passait — Maj à gauche + lettre à droite, notamment. */
-#if CONFIG_KASE_HALF_LINK_RX || (CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS)
+#if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
     s_filled_local = filled;   /* frontiere local / distant, pour la fusion */
     matrix_apply_remote();
 #endif
@@ -577,7 +572,7 @@ void matrix_wake_capture(void)
     memcpy(s_wake_state, st, sizeof(s_wake_state));   /* pour matrix_setup */
     s_wake_had_keys = (filled != 0);
     memcpy(prev_matrix_state, st, sizeof(prev_matrix_state));
-#if CONFIG_KASE_HALF_LINK_RX || (CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS)
+#if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
     s_filled_local = filled;
     matrix_apply_remote();
 #endif
@@ -596,7 +591,7 @@ void matrix_wake_capture(void)
      * capture pose prev_matrix_state = st, donc le scanner recréé voit la touche
      * tenue SANS changement et n'émet rien ; seul le relâchement partait. La
      * première touche après le light sleep était avalée (banc 2026-09-13 ; la
-     * séquence de veille.c émettait sous HALF_LINK_RX, le chemin pré-fusion,
+     * séquence de veille.c émettait sur le chemin pré-fusion (retiré le 2026-09-18),
      * compilé out ici). On émet donc l'appui capturé tout de suite, hors USB
      * (règle 3), avec le même émetteur que le callback — la réaffirmation à
      * 100 ms prend ensuite le relais tant que la touche est tenue. */
@@ -679,7 +674,7 @@ bool matrix_wake_reconcile(void)
     }
     memset(MATRIX_STATE, 0, sizeof(MATRIX_STATE));
     memset(prev_matrix_state, 0, sizeof(prev_matrix_state));
-#if CONFIG_KASE_HALF_LINK_RX || (CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS)
+#if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
     s_filled_local = 0;
     matrix_apply_remote();
 #endif

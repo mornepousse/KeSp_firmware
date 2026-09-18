@@ -31,52 +31,8 @@
 static const char *TAG = "half_link";
 
 static rf_radio_t s_radio;
-static half_state_t s_distant;   /* etat de la moitie d en face */
-static volatile bool s_distant_change;   /* consomme par half_link_remote_changed */
 static uint8_t    s_seq;
 
-#if CONFIG_KASE_HALF_LINK_RX
-/* Verrou de la PUCE, pas de l'état applicatif.
- *
- * Deux tâches parlent au même nRF24 par le même bus SPI : la tâche d'écoute
- * ci-dessous, qui interroge le FIFO toutes les 2 ms, et le relais HID, qui
- * demande une excursion PRX→PTX→PRX depuis un tout autre contexte (le moteur
- * clavier ou le timer de réémission). Sans exclusion, une excursion peut
- * reconfigurer le circuit en pleine lecture de trame — et le mutex de
- * kbd_relay_tx.c ne sert à rien ici, il ne connaît que ses propres appelants.
- *
- * C'est la même faute que les deux `static rf_radio_t` concurrents, d'un cran
- * plus fin : un seul propriétaire ne suffit pas s'il a deux bouches. */
-static SemaphoreHandle_t s_radio_mux;
-static volatile int s_wdbg; static volatile uint32_t s_wake_ms;
-
-/* Réveil de la tâche d'écoute par la broche IRQ du nRF24.
- *
- * La tâche sondait le FIFO en boucle avec vTaskDelay(pdMS_TO_TICKS(2)). Or
- * CONFIG_FREERTOS_HZ vaut 100 : le tick fait 10 ms, donc 2 ms ARRONDIT À ZÉRO
- * et vTaskDelay(0) ne bloque pas — il cède la main aux tâches de priorité au
- * moins égale, jamais à l'IDLE. La tâche (priorité 4, épinglée au cœur 1)
- * affamait donc IDLE1, et le watchdog tombait toutes les 5 s. Constaté au banc
- * le 2026-09-07, backtrace dans rf_driver_rx_available.
- *
- * Plutôt que de ralentir le sondage — ce qui aurait ajouté 10 ms à chaque
- * frappe de la moitié droite — on ne sonde plus : le nRF24 a une broche IRQ,
- * active à l'état bas, et rf_driver laisse MASK_RX_DR à 0 (CONFIG = 0x3F). Elle
- * dit exactement ce qu'on passait notre temps à demander.
- *
- * Le repli à 10 ms reste : il fait tourner le contrôle de silence, et si l'IRQ
- * ne venait pas, le lien fonctionnerait encore — au rythme qu'aurait eu le
- * sondage ralenti, jamais pire. */
-static TaskHandle_t s_rx_task;
-
-static void IRAM_ATTR half_link_irq_isr(void *arg)
-{
-    (void)arg;
-    BaseType_t reveil = pdFALSE;
-    vTaskNotifyGiveFromISR(s_rx_task, &reveil);
-    portYIELD_FROM_ISR(reveil);
-}
-#endif
 
 #if CONFIG_KASE_HALF_LINK_TX
 /* Dernier état émis, et quand. Partagé entre DEUX contextes de tâche : le
@@ -284,9 +240,8 @@ bool half_link_tx_init(void)
 
 static bool half_link_tx_frame(const uint8_t *buf, uint8_t n);
 
-#if CONFIG_KASE_HALF_LINK_TX && !CONFIG_KASE_HALF_LINK_RX
-/* Prêt du bus SPI à l'écran (rf_bus.h), moitié DROITE : le même mutex que
- * half_link_tx_frame. La gauche non-fusion (RX) a le sien plus bas. */
+#if CONFIG_KASE_HALF_LINK_TX
+/* Prêt du bus SPI à l'écran (rf_bus.h) : le même mutex que half_link_tx_frame. */
 #include "rf_bus.h"
 bool rf_bus_lock(uint32_t timeout_ms)
 {
@@ -625,263 +580,6 @@ bool half_link_tx_refresh_start(void)
 
 #endif /* CONFIG_KASE_HAS_RF_TX */
 
-#if CONFIG_KASE_HALF_LINK_RX
-/* Lit et applique TOUS les paquets en attente. LE MUTEX DOIT ÊTRE TENU.
- *
- * Extrait de la tâche d'écoute le 2026-09-08 pour pouvoir être appelé AVANT une
- * excursion, et c'est tout l'objet du correctif :
- *
- * rf_driver_oob_tx() termine son retour en PRX par un CMD_FLUSH_RX. Un paquet
- * de la moitié droite arrivé juste avant l'excursion — déjà ACQUITTÉ par la
- * radio, puisque l'acquittement ESB est matériel et n'attend pas le logiciel —
- * dormait dans la FIFO et se faisait DÉTRUIRE. La droite comptait 100 %
- * d'acquittements pendant que la gauche comptait 5 % de pertes ; les deux
- * disaient vrai.
- *
- * Conséquence au clavier : un appui bref sur la droite dure moins que les
- * 100 ms de rafraîchissement, donc le paquet suivant porte déjà le relâchement
- * et la touche disparaît. Uniquement en mode RF — c'est le seul cas où la
- * gauche fait des excursions. Constaté au banc le 2026-09-08 : parfait en USB,
- * frappes perdues dès le débranchement, et toujours du côté droit. */
-static uint32_t s_recus, s_rejetes, s_perdus;
-static bool     s_seq_amorce;
-static uint8_t  s_seq_attendu;
-
-static void half_link_vider_fifo(void)
-{
-    uint8_t buf[32];
-    while (rf_driver_rx_available(&s_radio)) {
-        uint16_t n = rf_driver_read_rx(&s_radio, buf, sizeof(buf));
-        if (!n) break;
-        rf_heartbeat_t h;
-        if (!rf_decode_heartbeat(buf, n, &h)) {
-            s_rejetes++;
-            ESP_LOGW(TAG, "RX trame rejetee (len=%u, total %u)", n, (unsigned)s_rejetes);
-            continue;
-        }
-        s_recus++;
-
-        /* FUSION : l'etat recu devient celui de la moitie distante. Ne lever le
-         * drapeau que si l'ETAT a change — une retransmission ESB peut livrer
-         * deux fois la meme trame. */
-        uint8_t avant[RF_HALF_BITMAP_BYTES];
-        memcpy(avant, s_distant.bitmap, sizeof(avant));
-        half_state_recu(&s_distant, h.bitmap, (uint32_t)(esp_timer_get_time() / 1000));
-        if (memcmp(avant, s_distant.bitmap, sizeof(avant)))
-            s_distant_change = true;
-
-        /* Trous de sequence : le temoin de ce que l'excursion coute. seq est un
-         * octet, l'ecart se calcule donc modulo 256. */
-        if (s_seq_amorce) {
-            uint8_t ecart = (uint8_t)(h.seq - s_seq_attendu);
-            if (ecart) s_perdus += ecart;
-        }
-        s_seq_amorce = true;
-        s_seq_attendu = (uint8_t)(h.seq + 1);
-
-        /* Trace de banc : une ligne par trame, avec les coordonnees pressees.
-         * Coarse a 20 trames on ne peut pas dater une coupure a la seconde. */
-        {
-            char pos[64]; int off = 0;
-            for (int r = 0; r < RF_HALF_ROWS && off < (int)sizeof(pos) - 8; r++)
-                for (int c = 0; c < RF_HALF_COLS && off < (int)sizeof(pos) - 8; c++)
-                    if (rf_bitmap_get(h.bitmap, (uint8_t)r, (uint8_t)c))
-                        off += snprintf(pos + off, sizeof(pos) - off, "(%d,%d)", r, c);
-            ESP_LOGW(TAG, "RX seq=%u : %s", h.seq, off ? pos : "(rien)");
-        }
-        if ((s_recus % 20) == 0)
-            ESP_LOGW(TAG, "lien droite : %u recus, %u perdus (%u%%)",
-                     (unsigned)s_recus, (unsigned)s_perdus,
-                     (unsigned)(s_perdus * 100 / (s_recus + s_perdus)));
-    }
-}
-
-static void half_link_rx_task(void *arg)
-{
-    (void)arg;
-    uint8_t buf[32];
-    uint32_t excursions = 0; (void)excursions;
-    bool seq_amorce = false;
-    uint8_t seq_attendu = 0;
-#if CONFIG_KASE_HALF_LINK_R1
-    /* Adresse du dongle, slot clavier — cible des excursions. */
-    const uint8_t addr_dongle[5] = { 'K', 'a', 'S', 'e', 0x01 };
-    const uint8_t addr_lien[5]   = { 'K', 'a', 'S', 'e', RF_ADDR_HALF_LINK };
-    uint32_t derniere_excursion = 0;
-#endif
-    for (;;) {
-#if CONFIG_KASE_HALF_LINK_R1
-        /* ÉPREUVE R1. La gauche est sourde pendant qu'elle émet : on provoque
-         * l'excursion à cadence fixe et on mesure ce qu'elle coûte en trous de
-         * séquence. rf_driver_oob_tx fait le PRX→PTX→PRX complet, y compris la
-         * restauration du canal d'écoute et le CE haut.
-         *
-         * 20 ms, soit 50 excursions/s : au-delà de ce qu'un clavier produit en
-         * frappe rapide, donc un majorant honnête du coût. */
-        uint32_t maintenant = (uint32_t)(esp_timer_get_time() / 1000);
-        if (maintenant - derniere_excursion >= 20) {
-            derniere_excursion = maintenant;
-            uint8_t bidon[9] = { 0x50, 0, 0, 0, 0, 0, 0, 0, 0 };
-            /* Par half_link_excursion_tx, PAS par rf_driver_oob_tx en direct :
-             * l'appel direct contournait s_radio_mux, et rien n'interdit
-             * d'activer R1 en même temps que le relais HID — les deux
-             * reconfigureraient alors la puce sans exclusion. */
-            (void)addr_lien;
-            half_link_excursion_tx(RF_CH_KBD_DONGLE, addr_dongle,
-                                   bidon, sizeof(bidon));
-            excursions++;
-        }
-#endif
-        /* Sondage ET lecture sous le même verrou : entre les deux, une
-         * excursion basculerait le circuit en PTX et la lecture ne rendrait
-         * plus rien de sensé. */
-        /* Vider la FIFO sous le verrou. Voir half_link_vider_fifo(). */
-        if (xSemaphoreTake(s_radio_mux, pdMS_TO_TICKS(50)) == pdTRUE) {
-            half_link_vider_fifo();
-            xSemaphoreGive(s_radio_mux);
-        }
-        /* Repli sur silence (HALF_LINK_TIMEOUT_MS) : au-dela, une moitie qui
-         * s est tue laisse
-         * l hote sur son dernier etat — et si c etait « Maj enfoncee », il le
-         * reste. On ne relache QUE ce que cette moitie tenait. */
-        if (half_state_timeout(&s_distant,
-                               (uint32_t)(esp_timer_get_time() / 1000),
-                               HALF_LINK_TIMEOUT_MS))
-        {
-            ESP_LOGW(TAG, "lien silencieux > %u ms — touches de la droite relachees",
-                     HALF_LINK_TIMEOUT_MS);
-            s_distant_change = true;
-        }
-
-        /* Blocage réel : c'est ce qui rend la main à l'IDLE. Réveil immédiat
-         * sur IRQ, ou au bout de 10 ms pour le contrôle de silence. */
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
-    }
-}
-
-/* Excursion PRX→PTX→PRX sur LA radio du lien.
- *
- * Le Niphargus n'a qu'une puce par moitié, et la gauche en a deux usages
- * concurrents : écouter la droite en PRX sur RF_CH_HALF_LINK, et parler au
- * dongle en PTX sur son canal. Chacun des deux modules avait jusqu'ici son
- * propre `static rf_radio_t s_radio` — deux propriétaires pour une seule puce,
- * dont le second écrasait silencieusement la configuration du premier. C'est
- * l'incident qui a fait écouter la gauche sur le canal du dongle, et il s'est
- * produit trois fois.
- *
- * La radio appartient désormais à ce module, seul à l'initialiser. Le relais
- * HID passe par ici : on sort vers le dongle, on émet, on rentre sur le canal
- * du lien. C'est exactement l'excursion que l'épreuve R1 a mesurée le
- * 2026-09-05 (0 perte, 0,4 retransmission/paquet) — à cadence bien plus élevée
- * que ce qu'une frappe produit. */
-void half_link_note_wake(void){ s_wake_ms=(uint32_t)(esp_timer_get_time()/1000); s_wdbg=60; }
-
-#if CONFIG_KASE_HALF_LINK_RX
-/* Prêt du bus SPI à l'écran (rf_bus.h), moitié GAUCHE pré-fusion : la puce est
- * à half_link en PRX, et s_radio_mux sérialise déjà l'écoute et les excursions
- * — l'écran est un troisième client du même verrou, jamais pendant une trame. */
-#include "rf_bus.h"
-bool rf_bus_lock(uint32_t timeout_ms)
-{
-    return s_radio_mux && xSemaphoreTake(s_radio_mux, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
-}
-void rf_bus_unlock(void) { if (s_radio_mux) xSemaphoreGive(s_radio_mux); }
-spi_host_device_t rf_bus_host(void) { return BOARD_NRF_SPI_HOST; }
-#endif
-
-bool half_link_excursion_tx(uint8_t canal, const uint8_t addr[5],
-                            const uint8_t *payload, uint8_t len)
-{
-    if (!s_radio.present || !s_radio_mux) return false;
-    const uint8_t addr_lien[5] = { 'K', 'a', 'S', 'e', RF_ADDR_HALF_LINK };
-    /* 20 ms : la tâche d'écoute ne garde le verrou que le temps d'une lecture
-     * de FIFO. Au-delà, mieux vaut perdre ce rapport HID que bloquer le moteur
-     * clavier — le relais réémet de lui-même (kbd_refresh_arm). */
-    if (xSemaphoreTake(s_radio_mux, pdMS_TO_TICKS(20)) != pdTRUE) {
-        ESP_LOGW(TAG, "excursion abandonnee : radio occupee");
-        return false;
-    }
-
-    /* ⚠ VIDER LA FIFO AVANT DE PARTIR. rf_driver_oob_tx termine son retour en
-     * PRX par un CMD_FLUSH_RX : tout paquet de la droite arrive avant
-     * l'excursion et pas encore lu serait DETRUIT — et il a pourtant deja ete
-     * acquitte, l'acquittement ESB etant materiel. C'est ce qui faisait perdre
-     * des frappes de la moitie droite en mode RF, et en mode RF seulement. */
-    half_link_vider_fifo();
-
-    bool ok = rf_driver_oob_tx(&s_radio, canal, addr, payload, len,
-                               RF_CH_HALF_LINK, addr_lien);
-    xSemaphoreGive(s_radio_mux);
-    if (s_wdbg>0){ s_wdbg--; ESP_LOGW(TAG,"WAKEDBG +%ums %s ok=%u maxrt=%u to=%u",
-        (unsigned)((uint32_t)(esp_timer_get_time()/1000)-s_wake_ms), ok?"OK":"ECHEC",
-        (unsigned)rf_oob_ok,(unsigned)rf_oob_maxrt,(unsigned)rf_oob_timeout); }
-
-    /* Bilan périodique. « La liaison n'est pas très bonne » ne se corrige pas
-     * sans savoir LAQUELLE des trois issues domine : acquitté, MAX_RT (le
-     * dongle n'entend pas), ou scrutin expiré (il ne répond pas à temps). */
-    static uint32_t n;
-    if ((++n % 50) == 0)
-        ESP_LOGW(TAG, "excursions : %u ok, %u MAX_RT, %u expirees",
-                 (unsigned)rf_oob_ok, (unsigned)rf_oob_maxrt,
-                 (unsigned)rf_oob_timeout);
-    return ok;
-}
-
-bool half_link_remote_pressed(uint8_t row, uint8_t col)
-{
-    return half_state_pressed(&s_distant, row, col);
-}
-
-bool half_link_remote_changed(void)
-{
-    if (!s_distant_change) return false;
-    s_distant_change = false;
-    return true;
-}
-
-bool half_link_rx_start(void)
-{
-    s_radio_mux = xSemaphoreCreateMutex();
-    if (!s_radio_mux) {
-        ESP_LOGE(TAG, "mutex radio non cree — lien abandonne");
-        return false;
-    }
-    rf_radio_cfg_t cfg = half_link_cfg();
-    esp_err_t e = rf_driver_init(&s_radio, &cfg);
-    if (e != ESP_OK || !s_radio.present) {
-        ESP_LOGE(TAG, "RX init echouee (%d) — la gauche n'entendra pas la droite", (int)e);
-        return false;
-    }
-    ESP_LOGI(TAG, "RX a l'ecoute : ch=0x%02X addr=KaSe.%02X", cfg.channel, cfg.addr_suffix);
-    xTaskCreatePinnedToCore(half_link_rx_task, "half_rx", 4096, NULL, 4,
-                            &s_rx_task, 1);
-
-    /* IRQ du nRF24 : active à l'état bas, donc front descendant. Le service
-     * d'ISR peut déjà avoir été installé par un autre pilote (matrice, écran) —
-     * ESP_ERR_INVALID_STATE veut dire « déjà là » et n'est pas une faute. */
-    {
-        gpio_config_t io = {
-            .pin_bit_mask = (1ULL << BOARD_NRF_IRQ),
-            .mode         = GPIO_MODE_INPUT,
-            .pull_up_en   = GPIO_PULLUP_ENABLE,
-            .intr_type    = GPIO_INTR_NEGEDGE,
-        };
-        gpio_config(&io);
-        /* Drapeau 0, pas ESP_INTR_FLAG_IRAM : le service est PARTAGÉ avec les
-         * autres pilotes, et l'exiger en IRAM imposerait la contrainte à leurs
-         * gestionnaires, pas seulement au nôtre. */
-        esp_err_t e_isr = gpio_install_isr_service(0);
-        if (e_isr != ESP_OK && e_isr != ESP_ERR_INVALID_STATE)
-            ESP_LOGW(TAG, "service ISR indisponible (%d) — repli sur le sondage "
-                          "a 10 ms", (int)e_isr);
-        if (gpio_isr_handler_add(BOARD_NRF_IRQ, half_link_irq_isr, NULL) == ESP_OK)
-            ESP_LOGI(TAG, "ecoute reveillee par IRQ (GPIO%d)", BOARD_NRF_IRQ);
-        else
-            ESP_LOGW(TAG, "IRQ non armee — repli sur le sondage a 10 ms");
-    }
-    return true;
-}
-#endif /* CONFIG_KASE_HALF_LINK_RX */
 
 /* ── Veille : éteindre et rallumer la radio (brick B7) ──────────────────────
  *
@@ -892,12 +590,7 @@ bool half_link_rx_start(void)
 void half_link_radio_sleep(void)
 {
     if (!s_radio.present) return;
-#if CONFIG_KASE_HALF_LINK_RX
-    if (s_radio_mux) xSemaphoreTake(s_radio_mux, pdMS_TO_TICKS(50));
-#endif
-#if CONFIG_KASE_HALF_LINK_TX
     if (s_tx_radio_mux) xSemaphoreTake(s_tx_radio_mux, pdMS_TO_TICKS(50));
-#endif
     rf_driver_power_down(&s_radio);
 }
 
@@ -905,17 +598,8 @@ void half_link_radio_wake(void)
 {
     if (!s_radio.present) return;
     rf_driver_power_up(&s_radio);
-#if CONFIG_KASE_BATT_SENSE && CONFIG_KASE_HALF_LINK_TX
-    s_dernier_status_ms = 0;   /* un STATUS au réveil : la tension a pu bouger (droite) */
+#if CONFIG_KASE_BATT_SENSE
+    s_dernier_status_ms = 0;   /* un STATUS au réveil : la tension a pu bouger */
 #endif
-#if CONFIG_KASE_HALF_LINK_RX
-    /* power_up ne touche pas à CE : sans réarmement la moitié gauche
-     * repartirait alimentée mais sourde. */
-    rf_radio_cfg_t cfg = half_link_cfg();
-    rf_driver_rearm_rx(&s_radio, &cfg);
-    if (s_radio_mux) xSemaphoreGive(s_radio_mux);
-#endif
-#if CONFIG_KASE_HALF_LINK_TX
     if (s_tx_radio_mux) xSemaphoreGive(s_tx_radio_mux);
-#endif
 }
