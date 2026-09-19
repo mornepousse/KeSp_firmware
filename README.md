@@ -23,7 +23,7 @@ an Azoteq TPS43 trackpad on the left, a Sharp Memory LCD on **each** half.
 Configuration and updates go over USB; there is no WiFi and no BLE on either
 half — the power budget forbids it.
 
-**Hardware status — 2026-09-16.** The keyboard works in its nominal mode: both
+**Hardware status — 2026-09-19.** The keyboard works in its nominal mode: both
 halves on battery, no cable anywhere, typing together through the dongle. Pin
 tables were verified against the netlist on each half; symbol keys (`!@#$…`)
 are one press each (Modified Keys, 0x8000 range), and the physical layout the
@@ -105,6 +105,22 @@ half lost keys in USB mode. That tick now stays at 10 ms while the left is
 listening (`kbd_relay_cadence_ms`, host-tested). Multimeter figures per half
 are the next step.
 
+**Power policy given a home (2026-09-19).** The two regressions above had a
+common cause: energy policy was spread across six files, each task picking its
+own cadence and its own reasons to stay awake. A one-day restructuring fixed
+that. Fusion is now the default configuration of all three boards (the pre-push
+check had been guarding a configuration that was no longer flashed); the
+pre-fusion "left listens to the right" path is gone (−430 lines). Every cadence
+lives in `power/cadence.h`, and each rest cadence carries a `_Static_assert`
+against the tickless rule — a 10 ms rest loop no longer compiles. Sleep is
+**one task** (`power/veille_task.c`), identical on both halves: modules that
+need the board awake post a named **veto** (usb, TRRS link, keymap sync, test
+mode), modules that own something to put to sleep register a **hook** (radio,
+screen, gauge), and the heartbeat says why the board is up: `HB … vetos=usb+lien`.
+The right half's screen task went from 100 ms to 1 s, the TRRS link task
+blocks on the UART event queue instead of polling. All of it proven on both
+halves: wake with the key captured, 100 % ACK, link up and down, screens intact.
+
 **The trackpad still has no hardware driver.** Its pure logic — the IQS5xx
 frame parser, the gesture→HID mapping, the accel config — exists and is
 host-tested; what is missing is the I2C + RDY bring-up on the left half and
@@ -117,7 +133,10 @@ works; the right half behaves better. Light-sleep wake, sleep-path double
 entry (a real bug, removed), row voltage under press, NVS writes and dongle
 coalescing have all been instrumented and cleared; the dongle counts
 overwritten transitions and USB refusals (`KS_CMD_RF_STATUS[27..42]`) and
-they read zero in the failing trials. Still unexplained.
+they read zero in the failing trials. Latest clue (2026-09-19): a wake fired
+by row 2 with all rows already low 13 ms later, key never seen within 156 ms,
+then the next press on the same row captured normally — the first contact
+lasted under 13 ms. Points at the switch's first contact, not the firmware.
 
 Removed along the way, and not coming back: the first-generation e-ink halves,
 their ESP-NOW side channel, and the "left is the only engine" doctrine that

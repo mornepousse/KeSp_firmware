@@ -293,8 +293,8 @@ main/
 │   │   ├── rf_driver.c          # SPI + ESB, registres nRF24
 │   │   ├── rf_packet.h          # trames + géométrie de demi-matrice (4×7)
 │   │   ├── rf_slot.h            # slots dongle + PLAN DE CANAUX 2,4 GHz
-│   │   ├── kbd_relay_tx.c       # HID gauche → dongle (KBD_WIRELESS)
-│   │   ├── half_link.c          # lien droite → gauche (B3) + fusion
+│   │   ├── kbd_relay_tx.c       # la GAUCHE : brut → dongle, écoute USB de la droite, sync keymap
+│   │   ├── half_link.c          # la DROITE : demi-matrice → dongle, repli vers la gauche
 │   │   └── rf_probe.c           # diagnostic de banc (NRF_PROBE), test de lignes
 │   ├── ble/              # Bluetooth LE HID
 │   │   └── hid_bluetooth_manager.c
@@ -316,7 +316,8 @@ main/
 │   ├── round/            # SPI GC9A01 (V1)
 │   ├── memlcd/           # Sharp memory-LCD des moitiés Niphargus (68×160 portrait)
 │   └── assets/           # images LVGL (logo Niphargus généré par scripts/gen_logo_memlcd.sh)
-├── power/                # veille.c (light/deep sleep), batt_sense.c (jauge)
+├── power/                # veille_task.c (UNE tâche : vetos, hooks, HB), veille.c (séquence B7),
+│                         # cadence.h (toutes les cadences, _Static_assert), pm_dfs.c, batt_sense.c
 └── led/                  # WS2812 strip anim (V1 only)
 
 boards/
