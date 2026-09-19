@@ -135,3 +135,31 @@ static inline batt_chg_t batt_state_step(batt_state_t *s, uint32_t mv, uint32_t 
     }
     return s->etat;
 }
+
+/* ── Niveau de batterie : NORMAL / FAIBLE / CRITIQUE (2026-09-19) ─────────────
+ *
+ * FAIBLE sous BATT_FAIBLE_DV (3,5 V ≈ 15 % de la cellule) : jauge inversée à
+ * l'écran, le 5 V du TRRS est refusé (on ne charge pas l'autre moitié avec une
+ * cellule à plat). CRITIQUE sous BATT_CRITIQUE_DV (3,3 V) : en plus, veille
+ * légère à 5 s au lieu de 15. Pas d'arrêt forcé : le DW01A coupe à 2,5 V,
+ * c'est son rôle. Hystérésis BATT_NIVEAU_HYST_DV (0,1 V) à la remontée : une
+ * frappe fait chuter 30-50 mV sur une cellule fatiguée, sans elle la jauge
+ * clignoterait. dv = 0 (pas de mesure valide) = NORMAL : on ne bride pas sur
+ * une jauge muette. Testé host (test_batt_calc). */
+#define BATT_FAIBLE_DV        35u
+#define BATT_CRITIQUE_DV      33u
+#define BATT_NIVEAU_HYST_DV   1u
+
+typedef enum { BATT_NORMAL = 0, BATT_FAIBLE = 1, BATT_CRITIQUE = 2 } batt_niveau_t;
+
+static inline batt_niveau_t batt_niveau_step(batt_niveau_t courant, uint8_t dv)
+{
+    if (dv == 0) return BATT_NORMAL;
+    /* Descente : seuils stricts. */
+    if (dv < BATT_CRITIQUE_DV) return BATT_CRITIQUE;
+    if (dv < BATT_FAIBLE_DV && courant != BATT_CRITIQUE) return BATT_FAIBLE;
+    /* Remontée : il faut dépasser le seuil de l'hystérésis. */
+    if (courant == BATT_CRITIQUE) return (dv >= BATT_CRITIQUE_DV + BATT_NIVEAU_HYST_DV) ? BATT_FAIBLE : BATT_CRITIQUE;
+    if (courant == BATT_FAIBLE)   return (dv >= BATT_FAIBLE_DV + BATT_NIVEAU_HYST_DV) ? BATT_NORMAL : BATT_FAIBLE;
+    return BATT_NORMAL;
+}

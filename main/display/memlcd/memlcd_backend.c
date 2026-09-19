@@ -151,7 +151,11 @@ static void lire_modele(memlcd_model_t *m)
     memset(m, 0, sizeof *m);
     m->batt_local_dv = 0xFF;
 #if CONFIG_KASE_BATT_SENSE
-    { uint8_t dv = batt_sense_dv(); m->batt_local_dv = dv ? dv : 0xFF; m->batt_local_chg = batt_sense_charging(); }
+    { uint8_t dv = batt_sense_dv(); m->batt_local_dv = dv ? dv : 0xFF; m->batt_local_chg = batt_sense_charging(); m->batt_niveau = batt_sense_niveau(); }
+    /* Faible / critique : la ligne de tension alterne avec « BAT » toutes les
+     * 2 s — la tension reste lisible (demande du 2026-09-19), l'alerte aussi,
+     * et « 3.4V BAT » n'aurait pas tenu dans le bandeau. */
+    m->batt_phase = m->batt_niveau ? (uint8_t)((esp_timer_get_time() / 2000000) & 1) : 0;
 #endif
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
     m->is_left   = 1;
@@ -170,9 +174,10 @@ static void lire_modele(memlcd_model_t *m)
 #endif
 }
 
-static void tension(char *out, size_t n, uint8_t dv, uint8_t chg)
+static void tension(char *out, size_t n, uint8_t dv, uint8_t chg, uint8_t niveau, uint8_t phase)
 {
     if (dv == 0xFF) snprintf(out, n, "?");
+    else if (niveau && phase) snprintf(out, n, niveau == 2 ? "BAT!" : "BAT");   /* alternance 2 s */
     else snprintf(out, n, "%u.%uV%s", dv / 10, dv % 10, chg == 2 ? " #" : (chg == 1 ? " +" : ""));
 }
 
@@ -180,13 +185,16 @@ static void dessiner(const memlcd_model_t *m)
 {
     char buf[24];
     lv_label_set_text_fmt(s_l_route, "%s%s", m->route_rf ? "RF" : "USB", m->dongle_vu ? " " LV_SYMBOL_UP : "");
-    tension(buf, sizeof buf, m->batt_local_dv, m->batt_local_chg);
+    tension(buf, sizeof buf, m->batt_local_dv, m->batt_local_chg, m->batt_niveau, m->batt_phase);
     lv_label_set_text(s_l_volt, buf);
     uint8_t pct = 0;
 #if CONFIG_KASE_BATT_SENSE
     pct = (m->batt_local_dv == 0xFF) ? 0 : batt_soc_pct(m->batt_local_dv);
 #endif
     lv_bar_set_value(s_bar, pct, LV_ANIM_OFF);
+    /* Batterie faible : bordure de la jauge épaissie (une inversion fond/niveau
+     * rendait une barre pleine illisible — banc 2026-09-19). */
+    lv_obj_set_style_border_width(s_bar, m->batt_niveau ? 2 : 1, LV_PART_MAIN);
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
     char lignes[MEMLCD_NOM_LIGNES][MEMLCD_NOM_BUF];
     memlcd_couper_nom(m->nom, lignes);

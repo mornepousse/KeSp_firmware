@@ -12,4 +12,5 @@ void     batt_sense_init(void);
 void     batt_sense_sample_now(void);
 uint8_t  batt_sense_dv(void);
 uint8_t  batt_sense_charging(void);   /* batt_chg_t : 0 inconnu, 1 en charge probable, 2 pleine */
+uint8_t  batt_sense_niveau(void);     /* batt_niveau_t : 0 normal, 1 FAIBLE (< 3,5 V), 2 CRITIQUE (< 3,3 V) */
 uint32_t batt_sense_age_ms(void);     /* 0xFFFFFFFF = jamais de mesure valide */

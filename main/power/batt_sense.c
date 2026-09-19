@@ -34,6 +34,7 @@ static adc_channel_t             s_chan;
 static esp_timer_handle_t        s_timer;
 
 static volatile uint8_t  s_dv;        /* dernière tension valide, 0 = inconnue */
+static volatile uint8_t  s_niveau;    /* batt_niveau_t : NORMAL / FAIBLE / CRITIQUE, avec hystérésis */
 static volatile uint8_t  s_chg;       /* batt_chg_t */
 static volatile uint32_t s_last_ms;   /* horodatage de la dernière mesure valide */
 static batt_state_t      s_state;
@@ -64,6 +65,12 @@ void batt_sense_sample_now(void)
     s_chg = (uint8_t)batt_state_step(&s_state, mv, t);
     if (dv) { s_dv = dv; s_last_ms = t; }
     else    { s_dv = 0; }
+    {
+        uint8_t avant = s_niveau;
+        s_niveau = (uint8_t)batt_niveau_step((batt_niveau_t)s_niveau, dv);
+        if (s_niveau != avant)
+            ESP_LOGW(TAG, "batterie : %s (%u dV)", s_niveau == BATT_CRITIQUE ? "CRITIQUE" : s_niveau == BATT_FAIBLE ? "FAIBLE" : "normale", (unsigned)dv);
+    }
     ESP_LOGD(TAG, "%u mV (adc %u) -> %u dV, etat %u", (unsigned)mv, (unsigned)s[0], dv, s_chg);
 }
 
@@ -107,5 +114,6 @@ void batt_sense_init(void)
 }
 
 uint8_t  batt_sense_dv(void)       { return s_dv; }
+uint8_t  batt_sense_niveau(void)   { return s_niveau; }
 uint8_t  batt_sense_charging(void) { return s_chg; }
 uint32_t batt_sense_age_ms(void)   { return s_last_ms ? (uint32_t)(now_ms() - s_last_ms) : 0xFFFFFFFFu; }

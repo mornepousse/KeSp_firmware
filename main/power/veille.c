@@ -275,6 +275,10 @@ void veille_profonde_entrer(void)
 }
 
 
+static uint32_t s_seuil_legere_ms = (uint32_t)CONFIG_KASE_VEILLE_LEGERE_S * 1000u;
+uint32_t veille_seuil_legere_ms(void) { return s_seuil_legere_ms; }
+void     veille_seuil_legere_set(uint32_t ms) { s_seuil_legere_ms = ms; }
+
 void veille_pas(uint32_t inactif_ms, bool bloque)
 {
     /* Grâce après réveil (veille.h) : la touche qui a réveillé la carte peut
@@ -283,7 +287,7 @@ void veille_pas(uint32_t inactif_ms, bool bloque)
     if (veille_en_grace((uint32_t)(esp_timer_get_time() / 1000), s_dernier_reveil_ms, VEILLE_GRACE_REVEIL_MS))
         return;
     veille_t niveau = veille_niveau(inactif_ms, bloque,
-                                    (uint32_t)CONFIG_KASE_VEILLE_LEGERE_S * 1000u,
+                                    veille_seuil_legere_ms(),
                                     (uint32_t)CONFIG_KASE_VEILLE_PROFONDE_S * 1000u);
 
 #if CONFIG_KASE_HALF_LINK_TX

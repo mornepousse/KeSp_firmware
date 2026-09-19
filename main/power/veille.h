@@ -57,6 +57,11 @@ void veille_liberer_gpio(void);   /* au démarrage, AVANT matrix_setup() */
 void veille_legere_entrer(void);
 void veille_profonde_entrer(void);
 void veille_pas(uint32_t inactif_ms, bool bloque);
+/* Seuil de l'étage léger, en ms : CONFIG_KASE_VEILLE_LEGERE_S par défaut,
+ * VEILLE_LEGERE_CRITIQUE_MS quand la batterie est critique (veille_task). */
+uint32_t veille_seuil_legere_ms(void);
+void     veille_seuil_legere_set(uint32_t ms);
+#define VEILLE_LEGERE_CRITIQUE_MS 5000u   /* borne basse de test_veille : [5 ; 20] s */
 /* Diagnostic : quand l'inactivité dépasse le seuil léger mais que la veille
  * est bloquée, dire PAR QUOI, au plus une fois par 30 s. Une nuit à 20 mA au
  * lieu de 244 µA (0,2 V perdus sur la gauche, 2026-09-12) n'a laissé aucune

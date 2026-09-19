@@ -20,6 +20,9 @@
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 #include "usb_presence.h"   /* rattrapage du veto USB : usb_presence_cable() */
 #endif
+#if CONFIG_KASE_BATT_SENSE
+#include "batt_sense.h"     /* batterie critique : veille plus tôt */
+#endif
 #include <stdio.h>
 
 static const char *TAG = "veille";
@@ -88,11 +91,17 @@ static void veille_task(void *arg)
          * aussi le clavier dormir ; il se ré-énumère au réveil. */
         veille_veto(VEILLE_VETO_USB, usb_presence_cable());   /* pont VBUS si soudé, sinon tud_ready */
 #endif
+#if CONFIG_KASE_BATT_SENSE
+        /* Batterie CRITIQUE (< 3,3 V) : l'étage léger à 5 s au lieu de 15 —
+         * chaque seconde d'éveil oisif compte, la cellule est au bout. */
+        veille_seuil_legere_set(batt_sense_niveau() == 2 ? VEILLE_LEGERE_CRITIQUE_MS
+                                                         : (uint32_t)CONFIG_KASE_VEILLE_LEGERE_S * 1000u);
+#endif
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
         uint32_t inactif = now - get_last_activity_time_ms();
         veille_vetos_t v = vetos_lire();
         if ((uint32_t)(now - dernier_hb) >= HB_PERIODE_MS) { dernier_hb = now; hb(inactif, &v); }
-        if (veille_bloquee(&v) && inactif >= (uint32_t)CONFIG_KASE_VEILLE_LEGERE_S * 1000u
+        if (veille_bloquee(&v) && inactif >= veille_seuil_legere_ms()
             && (uint32_t)(now - dernier_refus) >= 30000u) {
             char vb[24]; dernier_refus = now;
             ESP_LOGW(TAG, "veille REFUSEE depuis %lu s : vetos=%s",

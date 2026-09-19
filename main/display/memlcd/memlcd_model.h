@@ -100,6 +100,8 @@ static inline uint8_t memlcd_couper_nom(const char *nom,
 typedef struct {
     uint8_t route_rf, dongle_vu;
     uint8_t batt_local_dv, batt_local_chg;
+    uint8_t batt_niveau;               /* 0 normal, 1 faible, 2 critique */
+    uint8_t batt_phase;                /* faible/critique : 0 = tension, 1 = « BAT »/« BAT! » (alternance 2 s) */
     uint8_t couche;
     char    nom[16];
     uint8_t is_left;
@@ -111,5 +113,6 @@ static inline bool memlcd_model_diff(const memlcd_model_t *a, const memlcd_model
 {
     return a->route_rf != b->route_rf || a->dongle_vu != b->dongle_vu ||
            a->batt_local_dv != b->batt_local_dv || a->batt_local_chg != b->batt_local_chg ||
+           a->batt_niveau != b->batt_niveau || a->batt_phase != b->batt_phase ||
            a->couche != b->couche || strcmp(a->nom, b->nom) != 0;
 }

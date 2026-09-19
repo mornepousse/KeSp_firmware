@@ -371,6 +371,19 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   dongle (CDC BATTERY, slots gauche/droite), la droite par un STATUS toutes les
   30 s sans s'empêcher de dormir ; une tension inconnue s'affiche « inconnue »
   (0xFF), jamais 0 V ; en charge, PLEINE apparaît après le plateau.
+- [test:test_batt_calc] Niveau de batterie à hystérésis (`batt_niveau_step`) :
+  FAIBLE sous 3,5 V, CRITIQUE sous 3,3 V, remontée avec 0,1 V de marge, jauge
+  muette (0) = normal ; le journal dit « batterie : FAIBLE/CRITIQUE/normale (dV) »
+  à chaque changement.
+- [smoke:Jauge batterie] Batterie FAIBLE : la ligne de tension de l'écran
+  alterne « 3.4V » / « BAT » toutes les 2 s (« BAT! » en critique), la jauge
+  garde sa lecture avec une bordure épaissie, et la moitié ne se déclare plus
+  SOURCE du 5 V TRRS (pas de sonde, `etat=0 5V=0` même en USB). CRITIQUE : en
+  plus, veille légère à 5 s au lieu de 15. Pas d'arrêt forcé (le DW01A coupe
+  à 2,5 V). Banc 2026-09-19 avec seuils décalés (4,4/4,3 puis 4,4/4,1 V sur
+  une cellule à 4,2 V) : CRITIQUE → « light sleep » à 5,7 s ; FAIBLE → USB +
+  TRRS branchés, 0 sonde, lien mort ; seuils réels → le même montage monte le
+  lien (36/38 ACK).
 
 ## Écrans — Sharp memory-LCD des moitiés
 

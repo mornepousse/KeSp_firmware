@@ -27,7 +27,10 @@
 #include "link_frame.h"
 #include "link_handshake.h"
 #include "board.h"
-#include "usb_presence.h"     /* vbus_debounce_step — inline, sans le .c */
+#include "usb_presence.h"     /* vbus_debounce_step, usb_presence_cable */
+#if CONFIG_KASE_BATT_SENSE
+#include "batt_sense.h"       /* batterie faible : pas de 5 V pour l'autre */
+#endif
 #include "driver/uart.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -130,6 +133,13 @@ static void link_task(void *arg)
          * cette moitié la source du 5 V —, sinon tud_ready(), forçage de banc
          * compris. */
         bool usb = vbus_debounce_step(&s_usb_db, usb_presence_cable(), now, 50);
+#if CONFIG_KASE_BATT_SENSE
+        /* Batterie FAIBLE (< 3,5 V) : cette moitié ne se déclare plus source du
+         * 5 V — on ne charge pas l'autre avec une cellule à plat. Sur USB avec
+         * pont VBUS c'est le 5 V du câble qui nourrit ; sans pont on ne peut
+         * pas le savoir, on reste prudent. */
+        if (usb && batt_sense_niveau() != 0) usb = false;
+#endif
         if (usb != s_usb_prev) {
             s_usb_prev = usb;
             apply(link_hs_step(&s_hs, usb ? LINK_HS_EV_USB_PRESENT : LINK_HS_EV_USB_GONE, now));

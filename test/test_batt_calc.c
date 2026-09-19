@@ -88,6 +88,25 @@ static void test_inconnu_reset(void)
     TEST_ASSERT_EQ(batt_state_step(&st, 4160, 150000), BATT_CHG_UNKNOWN, "il faut refaire 120 s de plateau");
 }
 
+static void test_niveau_batterie_avec_hysteresis(void)
+{
+    /* Seuils décidés le 2026-09-19 : FAIBLE sous 3,5 V (cellule ~15 %), CRITIQUE
+     * sous 3,3 V ; on ne remonte qu'avec 0,1 V de marge (une frappe fait
+     * chuter la tension de 30-50 mV sur une cellule fatiguée). 0 (pas de
+     * mesure) = NORMAL : on ne bride pas sur une jauge muette. */
+    batt_niveau_t n = BATT_NORMAL;
+    n = batt_niveau_step(n, 39); TEST_ASSERT(n == BATT_NORMAL, "3,9 V : normal");
+    n = batt_niveau_step(n, 35); TEST_ASSERT(n == BATT_NORMAL, "3,5 V : encore normal (strict)");
+    n = batt_niveau_step(n, 34); TEST_ASSERT(n == BATT_FAIBLE, "3,4 V : faible");
+    n = batt_niveau_step(n, 35); TEST_ASSERT(n == BATT_FAIBLE, "3,5 V : reste faible (hysteresis)");
+    n = batt_niveau_step(n, 36); TEST_ASSERT(n == BATT_NORMAL, "3,6 V : normal");
+    n = batt_niveau_step(n, 32); TEST_ASSERT(n == BATT_CRITIQUE, "3,2 V : critique");
+    n = batt_niveau_step(n, 33); TEST_ASSERT(n == BATT_CRITIQUE, "3,3 V : reste critique");
+    n = batt_niveau_step(n, 34); TEST_ASSERT(n == BATT_FAIBLE, "3,4 V : faible");
+    n = batt_niveau_step(n, 0);  TEST_ASSERT(n == BATT_NORMAL, "jauge muette : normal");
+    n = batt_niveau_step(BATT_NORMAL, 31); TEST_ASSERT(n == BATT_CRITIQUE, "chute directe : critique d'un coup");
+}
+
 void test_batt_calc(void)
 {
     TEST_SUITE("Jauge batterie : calculs purs");
@@ -98,4 +117,5 @@ void test_batt_calc(void)
     test_en_charge_probable_si_ca_monte();
     test_lente_derive_ne_trompe_pas();
     test_inconnu_reset();
+    test_niveau_batterie_avec_hysteresis();
 }
