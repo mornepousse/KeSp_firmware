@@ -246,6 +246,19 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   dormir. Banc 2026-09-19 : ACK 100 % / 97 %, quatre réveils avec touche
   capturée et radio réarmée, dongle débranché → « repli : bascule TX ->
   GAUCHE » puis retour dongle et 92 → 100 % d'ACK.
+- [smoke:Fusion — moteur local dormant] La GAUCHE ne touche plus la puce :
+  `kbd_relay_tx.c` demande au propriétaire PTX vers le dongle (sans-fil) ou PRX
+  sur le lien (USB), livre ses trames (brut, HID, STATUS, REQ de sync) par
+  radio_send_ap et son annonce USB par radio_excursion_tx — qui vide la FIFO
+  des trames de la droite dans le consommateur AVANT de partir. ⚠ Le lien
+  s'écoute à l'adresse FIXE 'KaSe'.03 (celle que le dongle vise), pas à
+  l'adresse dérivée du set_id : avant le propriétaire, l'écoute partait sur la
+  mauvaise adresse et la première excursion la corrigeait par accident. Le
+  timer du relais s'arrête au sommeil par un hook local (sinon ses ticks
+  compteraient des « indisponibles » et fausseraient « dongle vu »). Banc
+  2026-09-19, quatre scénarios : batterie (98,3 % ACK gauche seule, 5 réveils
+  avec radio réarmée), USB simultané (la droite sort par la gauche), retour
+  (98,6 %), sync par ACK aller-retour (40/40, match=1 deux fois).
 
 ## Fusion — routage des moteurs
 

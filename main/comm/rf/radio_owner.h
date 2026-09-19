@@ -90,9 +90,16 @@ bool radio_excursion_tx(uint8_t canal, const uint8_t addr[5], const uint8_t *buf
 bool radio_pair_round(const uint8_t rdv_addr[5], uint8_t rdv_ch, const uint8_t *req, uint8_t n,
                       uint8_t *rx, uint16_t rx_max, uint32_t listen_ms, uint16_t *rx_n);
 
+#if CONFIG_KASE_RF_CE_SCAN
+/* Banc V2D uniquement : essayer une autre broche CE (câblage incertain). */
+void radio_ce_gpio(int gpio);
+#endif
+
 /* Veille : appelés par le hook enregistré à l'init (publics pour les tests). */
 void radio_sleep(void);
 void radio_wake(void);
 
-/* Émissions acquittées / refusées depuis le boot (écran « dongle vu », banc). */
-void radio_stats(uint32_t *ok, uint32_t *refus);
+/* Depuis le boot : émissions acquittées, refusées par l'ESB (MAX_RT), et
+ * INDISPONIBLES (verrou pris, mauvais mode, puce endormie : rien n'est parti).
+ * Pointeurs NULL acceptés. */
+void radio_stats(uint32_t *ok, uint32_t *refus, uint32_t *indispo);

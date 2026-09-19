@@ -11,6 +11,7 @@
 
 #include "kbd_relay_tx.h"
 #include "rf_driver.h"
+#include "radio_owner.h"   /* la puce a un propriétaire : ce module est une politique */
 #if CONFIG_KASE_DONGLE_FUSION
 #include "half_link.h"   /* excursion (RX) ; HALF_LINK_TIMEOUT_MS (fusion) */
 #endif
@@ -41,7 +42,6 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
 #include "driver/gpio.h"    /* CE-pin scan during pairing */
 
 static const char *TAG = "kbd_relay";
@@ -82,13 +82,12 @@ static const char *TAG = "kbd_relay";
 
 /* ── Module state ───────────────────────────────────────────────────────── */
 
-/* La radio de CE module (la gauche n'a qu'une puce, et c'est ici qu'elle vit). */
-static rf_radio_t s_radio;
+/* La puce (verrou, mode PTX/PRX, cible, sommeil) est à radio_owner.c. Ici :
+ * quoi émettre, vers qui, et l'écoute de la droite en mode USB. */
 #if CONFIG_KASE_DONGLE_FUSION
-/* Cible dongle mémorisée (canal/adresse dérivés du set_id), pour rebasculer la
- * radio en PTX après une écoute USB. Fusion phase 2 : bascule dynamique. */
+/* Cible dongle (canal/adresse dérivés du set_id) : PTX sans fil ; en USB la
+ * puce passe en PRX sur le lien (KaSe.03) — radio_mode() dit où on en est. */
 static rf_radio_cfg_t s_kbd_cfg;
-static bool s_usb_listening = false;   /* la radio est-elle en PRX (mode USB) ? */
 /* Dernière demi-matrice de la DROITE reçue (réémise par le dongle) en mode USB.
  * Le moteur de la gauche la lit via kbd_relay_remote_pressed() pour la fusionner
  * dans les colonnes hautes — chemin maître, étape 4b. */
@@ -104,19 +103,16 @@ static uint32_t         s_last_left_ms;
 static bool s_paired = false;
 
 
-/* TX serialization (engine send + refresh timer share the single radio) +
- * last keyboard report for the periodic refresh. */
-static SemaphoreHandle_t s_tx_mutex;
+/* Dernier rapport clavier, pour le rafraîchissement périodique. */
 static uint8_t s_last_mod;
 static uint8_t s_last_kb[6];
 static kbd_refresh_t s_refresh;   /* répétition bornée — voir kbd_relay_tx.h */
 static esp_timer_handle_t s_refresh_timer;   /* periodic refresh; stopped during sleep */
 
 /* Bilan du chemin radio. Sans lui, une frappe perdue en mode RF est
- * INDISCERNABLE : kbd_tx_locked abandonnait le rapport en silence quand le
- * mutex n'était pas libre sous 20 ms, sans compteur ni journal. On distingue
- * désormais les trois issues — remis à la radio, abandonné faute de mutex,
- * refusé par l'excursion. */
+ * INDISCERNABLE. Trois issues : remis (ACK), refusé par le propriétaire (verrou
+ * pris sous 20 ms, ou puce en PRX / endormie — l'émission n'a pas eu lieu),
+ * refusé par l'ESB (MAX_RT). */
 static uint32_t s_tx_remis, s_tx_sans_mutex, s_tx_refuses;
 
 /* Date de la DERNIÈRE émission, tous types confondus, et compteur de la trame
@@ -140,32 +136,31 @@ static volatile bool s_sync_done;   /* 40/40 reçus : à enregistrer (refresh_cb
 static void send_matrix_frame(uint8_t half, const uint8_t *bitmap);
 #endif
 
-/* Prêt du bus SPI à l'écran (rf_bus.h) : le même mutex que kbd_tx_locked. */
-#include "rf_bus.h"
-bool rf_bus_lock(uint32_t timeout_ms)
-{
-    return s_tx_mutex && xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
-}
-void rf_bus_unlock(void) { if (s_tx_mutex) xSemaphoreGive(s_tx_mutex); }
-spi_host_device_t rf_bus_host(void) { return BOARD_NRF_SPI_HOST; }
-
 static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
 {
-    if (!s_tx_mutex) return;
-    if (xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(20)) != pdTRUE) {
+    if (!radio_presente()) return;
+    if (radio_mode() != RADIO_PTX) {
+        /* Route USB : la puce écoute la droite, le callback de scan n'émet pas
+         * en principe (route-gated). Si on arrive ici, c'est un croisement de
+         * route : compté, pas émis. */
         s_tx_sans_mutex++;
-        ESP_LOGW(TAG, "rapport ABANDONNE (mutex occupe) — remis %u, perdus %u+%u",
-                 (unsigned)s_tx_remis, (unsigned)s_tx_sans_mutex,
-                 (unsigned)s_tx_refuses);
         return;
     }
     {
         /* Canal retour ACK payload (sync auto keymap) : on récupère ce que le
-         * dongle a glissé dans l'ACK. Loggé au banc pour le go/no-go (Task 3) ;
-         * la Task 5 consommera ces octets (balise / chunk). */
+         * dongle a glissé dans l'ACK. */
         uint8_t ack[32];
         uint8_t ack_n = 0;
-        bool ok = rf_driver_send_ap(&s_radio, buf, len, ack, &ack_n);
+        uint32_t indispo_avant, indispo_apres;
+        radio_stats(NULL, NULL, &indispo_avant);
+        bool ok = radio_send_ap(buf, len, ack, &ack_n, 20);
+        radio_stats(NULL, NULL, &indispo_apres);
+        if (indispo_apres != indispo_avant) {   /* rien n'est parti : verrou pris, puce endormie */
+            s_tx_sans_mutex++;
+            ESP_LOGW(TAG, "rapport ABANDONNE (radio indisponible) — remis %u, perdus %u+%u",
+                     (unsigned)s_tx_remis, (unsigned)s_tx_sans_mutex, (unsigned)s_tx_refuses);
+            return;
+        }
 #if CONFIG_KASE_DONGLE_FUSION
         if (ack_n && !s_sync_done) {
             rf_sync_beacon_t b;
@@ -203,7 +198,6 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
         if (buf[0] == (PKT_TYPE_HIDREPORT << 4) && buf[1] == RF_HID_SUB_KBD)
             ESP_LOGD(TAG, "TX kbd mod=%02X kc=%02X %02X -> %s", buf[2], buf[3], buf[4],
                      ok ? "ok" : "REFUSE");
-        xSemaphoreGive(s_tx_mutex);
         if (((s_tx_remis + s_tx_refuses) % 25) == 0)
             ESP_LOGW(TAG, "HID->dongle : %u remis, %u sans mutex, %u refuses",
                      (unsigned)s_tx_remis, (unsigned)s_tx_sans_mutex,
@@ -237,13 +231,30 @@ static void kbd_relay_refresh_cb(void *arg)
 #if CONFIG_KASE_DONGLE_FUSION
     tenu = (s_last_left_bm[0] | s_last_left_bm[1] | s_last_left_bm[2] | s_last_left_bm[3]) != 0;
     sync = s_syncing || s_sync_done;
-    ecoute_usb = s_usb_listening;   /* route USB : ce tick vide la FIFO des trames de la droite */
+    ecoute_usb = (radio_mode() == RADIO_PRX);   /* route USB : ce tick vide la FIFO des trames de la droite */
 #else
     for (int i = 0; i < 6; i++) if (s_last_kb[i]) tenu = true;   /* rapport HID tenu (V2D) */
     if (s_last_mod) tenu = true;
 #endif
     kbd_relay_timer_set(kbd_relay_cadence_ms(reparation, tenu, sync, ecoute_usb));
 }
+#if CONFIG_KASE_DONGLE_FUSION
+/* Consommateur des trames de la droite (réémises par le dongle sur KaSe.03),
+ * appelé par le propriétaire sous son verrou : vidange périodique et vidange
+ * AVANT chaque excursion. */
+static void kbd_relay_rx_droite(const uint8_t *rb, uint16_t rn, void *ctx)
+{
+    uint32_t now = *(uint32_t *)ctx;
+    rf_heartbeat_t h;
+    if (!rf_decode_heartbeat(rb, rn, &h)) return;
+    if (memcmp(s_remote_bm, h.bitmap, RF_HALF_BITMAP_BYTES) != 0) {
+        memcpy(s_remote_bm, h.bitmap, RF_HALF_BITMAP_BYTES);
+        s_remote_changed = true;
+    }
+    s_remote_ms = now;
+}
+#endif
+
 static void kbd_relay_refresh_body(void)
 {
     usb_presence_poll(s_paired);
@@ -253,36 +264,30 @@ static void kbd_relay_refresh_body(void)
      *    (KaSe.03) pour ÉCOUTER la droite réémise par le dongle, et ANNONCE son
      *    mode au dongle par excursion. (Sur secteur : écouter est gratuit.)
      *  - sans-fil : radio en PTX vers le dongle (autonomie : elle n'écoute pas).
-     * Un seul propriétaire (kbd_relay), pas de handoff : on écrit REG_CONFIG via
-     * rearm_rx / set_ptx. Tout sous s_tx_mutex (le callback de scan n'émet qu'en
-     * mode sans-fil, route-gated). */
+     * Le propriétaire (radio_owner) tient le mode et le verrou ; ici on ne fait
+     * que demander PRX(lien) ou PTX(dongle) selon la route. Le callback de scan
+     * n'émet qu'en mode sans-fil (route-gated) — et en PRX le propriétaire
+     * refuserait de toute façon. */
     if (kbd_active_route() == KBD_OUT_USB) {
-        if (!s_tx_mutex || xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(20)) != pdTRUE) return;
-        if (!s_usb_listening) {
+        if (radio_mode() != RADIO_PRX) {
+            /* Le lien est à adresse FIXE 'KaSe'.03 (c'est ce que le dongle vise
+             * en réémettant la droite), pas l'adresse dérivée du set_id : avant
+             * le propriétaire, l'écoute partait sur la mauvaise adresse et la
+             * première excursion la « corrigeait » en restaurant 'KaSe'.03 —
+             * ça marchait par accident (constaté le 2026-09-19). */
             rf_radio_cfg_t link = s_kbd_cfg;
+            memcpy(link.rx_addr, "KaSe", 4);
             link.channel     = RF_CH_HALF_LINK;
             link.addr_suffix = RF_ADDR_HALF_LINK;
-            rf_driver_rearm_rx(&s_radio, &link);
-            s_usb_listening = true;
+            if (!radio_mode_set(RADIO_PRX, &link)) return;
             ESP_LOGW(TAG, "fusion USB : ecoute la droite reemise (PRX ch=0x%02X KaSe.%02X)",
                      RF_CH_HALF_LINK, RF_ADDR_HALF_LINK);
         }
-        /* Réémissions de la droite (heartbeats) : on mémorise sa demi-matrice ;
-         * le moteur de la gauche la lit via kbd_relay_remote_pressed (étape 4b). */
-        uint8_t rb[32];
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-        while (rf_driver_rx_available(&s_radio)) {
-            uint16_t rn = rf_driver_read_rx(&s_radio, rb, sizeof(rb));
-            if (rn == 0) break;
-            rf_heartbeat_t h;
-            if (rf_decode_heartbeat(rb, rn, &h)) {
-                if (memcmp(s_remote_bm, h.bitmap, RF_HALF_BITMAP_BYTES) != 0) {
-                    memcpy(s_remote_bm, h.bitmap, RF_HALF_BITMAP_BYTES);
-                    s_remote_changed = true;
-                }
-                s_remote_ms = now;
-            }
-        }
+        /* Réémissions de la droite (heartbeats) : le propriétaire lit la FIFO et
+         * nous livre les trames ; on mémorise sa demi-matrice, le moteur de la
+         * gauche la lit via kbd_relay_remote_pressed (étape 4b). */
+        radio_rx_drain(kbd_relay_rx_droite, &now);
         /* Silence de la droite → relâcher ce qu'elle tenait (même prudence que le
          * dongle : une moitié muette ne laisse pas une touche collée). */
         {
@@ -292,7 +297,9 @@ static void kbd_relay_refresh_body(void)
                 s_remote_changed = true;
             }
         }
-        /* Annonce du mode au dongle par excursion (retour PRX KaSe.03). */
+        /* Annonce du mode au dongle par excursion : le propriétaire VIDE la FIFO
+         * dans notre consommateur AVANT de partir (l'excursion finit par un
+         * FLUSH_RX) et revient écouter KaSe.03. */
         if ((uint32_t)(now - s_derniere_emission_ms) >= 200u) {
             /* config_fp reste 0 ici : en USB le dongle se tait, la cohérence
              * des moteurs est sans objet. Buffer à RF_STATUS_LEN quand même —
@@ -301,29 +308,23 @@ static void kbd_relay_refresh_body(void)
                                .mode_usb = true };
             uint8_t sb[RF_STATUS_LEN];
             uint16_t sn = rf_encode_status(sb, &st);
-            static const uint8_t link_addr[5] = { 'K','a','S','e', RF_ADDR_HALF_LINK };
             uint8_t dst[5] = { s_kbd_cfg.rx_addr[0], s_kbd_cfg.rx_addr[1],
                                s_kbd_cfg.rx_addr[2], s_kbd_cfg.rx_addr[3],
                                s_kbd_cfg.addr_suffix };
-            bool ok = rf_driver_oob_tx(&s_radio, s_kbd_cfg.channel, dst, sb, (uint8_t)sn,
-                                       RF_CH_HALF_LINK, link_addr);
+            bool ok = radio_excursion_tx(s_kbd_cfg.channel, dst, sb, (uint8_t)sn, kbd_relay_rx_droite, &now);
             if (ok) s_sans_ack_ecran = 0; else if (s_sans_ack_ecran < 255) s_sans_ack_ecran++;                  /* « dongle vu » aussi en mode USB */
             s_derniere_emission_ms = now;
         }
-        xSemaphoreGive(s_tx_mutex);
         return;
     }
     /* Retour au mode sans-fil : rebasculer la radio en PTX vers le dongle. */
-    if (s_usb_listening) {
-        if (s_tx_mutex && xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
-            rf_driver_set_ptx(&s_radio, &s_kbd_cfg);
-            s_usb_listening = false;
+    if (radio_mode() == RADIO_PRX) {
+        if (radio_mode_set(RADIO_PTX, &s_kbd_cfg)) {
             /* On quitte l'écoute : relâcher le distant, sinon une touche de la
              * droite resterait figée dans la fusion locale jusqu'au retour USB. */
             memset(s_remote_bm, 0, RF_HALF_BITMAP_BYTES);
             s_remote_changed = true;
             ESP_LOGW(TAG, "fusion : retour emission PTX vers le dongle");
-            xSemaphoreGive(s_tx_mutex);
         }
     }
 #endif
@@ -353,23 +354,22 @@ static void kbd_relay_refresh_body(void)
      * jamais une touche relâchée à tort pour une keymap (la panne du 2026-09-13). */
     {
         /* 40/40 reçus : la keymap complète est dans s_krx.buf. Le drapeau et le
-         * buffer sont ÉCRITS sous s_tx_mutex (kbd_tx_locked, depuis la tâche de
-         * scan) : on les CONSOMME sous le même mutex, sinon la copie pourrait
-         * lire un buffer pas encore entièrement visible (revue 2026-09-13). La
-         * NVS (ms) se fait ensuite HORS mutex — kbd_tx_locked le reprend plus
-         * bas et il n'est pas récursif. Le STATUS suivant annoncera la nouvelle
+         * buffer sont ÉCRITS pendant une émission (kbd_tx_locked, sous le verrou
+         * du propriétaire, depuis la tâche de scan) : on les CONSOMME sous ce
+         * même verrou (radio_lock), sinon la copie pourrait lire un buffer pas
+         * encore entièrement visible (revue 2026-09-13). La NVS (ms) se fait
+         * ensuite HORS verrou. Le STATUS suivant annoncera la nouvelle
          * empreinte → le dongle coupera la balise. */
         bool a_enregistrer = false;
         uint32_t cible = 0;
-        if (s_sync_done && s_tx_mutex &&
-            xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+        if (s_sync_done && radio_lock(20)) {
             if (s_sync_done) {
                 memcpy((uint8_t *)keymaps, s_krx.buf, KEYMAP_BLOB_BYTES);
                 cible = s_sync_target_fp;
                 s_sync_done = false;
                 a_enregistrer = true;
             }
-            xSemaphoreGive(s_tx_mutex);
+            radio_unlock();
         }
         if (a_enregistrer) {
             bool saved = save_keymaps((uint16_t *)keymaps, KEYMAP_BLOB_BYTES);
@@ -506,14 +506,12 @@ static void kbd_pairing_task(void *arg)
         gpio_reset_pin(ce);
         gpio_set_direction(ce, GPIO_MODE_OUTPUT);
         gpio_set_level(ce, 0);
-        s_radio.cfg.pin_ce = ce;
+#if CONFIG_KASE_RF_CE_SCAN
+        radio_ce_gpio(ce);   /* banc V2D : la broche CE incertaine — essayer chaque candidate */
+#endif
         for (int i = 0; i < 12 && !acked; i++) {        /* ~3 s per candidate */
-            rf_driver_set_tx_address(&s_radio, pair_addr);
-            rf_driver_set_channel(&s_radio, RF_PAIR_CHANNEL);
-            rf_driver_send(&s_radio, req, 8);
-            uint8_t rxb[32];
-            uint16_t n = rf_driver_pair_listen(&s_radio, RF_PAIR_CHANNEL, pair_addr,
-                                               rxb, sizeof(rxb), 150);
+            uint8_t rxb[32]; uint16_t n = 0;
+            radio_pair_round(pair_addr, RF_PAIR_CHANNEL, req, 8, rxb, sizeof rxb, 150, &n);
             if (n && rf_decode_pair_ack(rxb, n, &ack)) { acked = true; win_ce = ce; break; }
             vTaskDelay(pdMS_TO_TICKS(50));
         }
@@ -548,9 +546,10 @@ void kbd_relay_init(void)
     uint16_t set_id = rf_pairing_load_set_id_half(BOARD_NRF_ADDR_SUFFIX, &slot);
     rf_apply_set_id(&nrf_cfg, set_id, slot);
 
-    esp_err_t err = rf_driver_init_tx(&s_radio, &nrf_cfg);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "NRF PTX init failed (%d) — wireless relay disabled", err);
+    /* Le propriétaire initialise la puce en PTX vers le dongle et enregistre
+     * lui-même son hook de veille (power-down, verrou gardé ; réveil réarmé). */
+    if (!radio_owner_init(&nrf_cfg, NULL)) {
+        ESP_LOGE(TAG, "NRF PTX init failed — wireless relay disabled");
         return;   /* s_paired stays false */
     }
 #if CONFIG_KASE_DONGLE_FUSION
@@ -568,7 +567,6 @@ void kbd_relay_init(void)
 
     ESP_LOGI(TAG, "kbd_relay: paired set_id=0x%04X slot=0x%02X — relay active",
              set_id, slot);
-    s_tx_mutex = xSemaphoreCreateMutex();
     s_paired = true;
 
     /* Periodic keyboard-state refresh: self-heals lost key-ups over the lossy
@@ -581,10 +579,9 @@ void kbd_relay_init(void)
     if (esp_timer_create(&ta, &s_refresh_timer) == ESP_OK)
         kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);
 #if CONFIG_KASE_VEILLE
-    /* Veille (B7) : timer arrêté, mutex tenu, puce en power-down au sommeil ;
-     * rallumée (~5 ms) AVANT la capture au réveil — la radio s'enregistre la
-     * première, les hooks se déroulent en ordre inverse au réveil. */
-    static const veille_hook_t hook = { "radio", kbd_relay_sleep_prepare, kbd_relay_wake_restore };
+    /* Veille (B7) : le timer de rafraîchissement s'arrête et repart avec la
+     * carte ; la puce elle-même est au hook du propriétaire. */
+    static const veille_hook_t hook = { "relais", kbd_relay_sleep_prepare, kbd_relay_wake_restore };
     veille_hook_enregistrer(&hook);
 #endif
 }
@@ -620,21 +617,19 @@ bool kbd_relay_remote_changed(void)
 }
 #endif
 
-/* ── Light-sleep hooks (V2D wireless) ─────────────────────────────────────── */
+/* ── Veille : le relais dort avec la carte ───────────────────────────────── */
 
+/* La puce est éteinte et réarmée par le hook du propriétaire (radio_owner) ;
+ * ici seulement le timer de rafraîchissement : arrêté au sommeil — sinon ses
+ * ticks compteraient des « indisponibles » pendant que la puce dort et
+ * fausseraient « dongle vu » —, relancé en cadence rapide au réveil. */
 void kbd_relay_sleep_prepare(void)
 {
-    /* Stop the refresh timer (no NRF access during sleep), then take the TX mutex
-     * and power the NRF down. Hold the mutex across sleep so nothing transmits. */
     if (s_refresh_timer) esp_timer_stop(s_refresh_timer);
-    if (s_tx_mutex) xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(50));
-    rf_driver_power_down(&s_radio);
 }
 
 void kbd_relay_wake_restore(void)
 {
-    rf_driver_power_up(&s_radio);
-    if (s_tx_mutex) xSemaphoreGive(s_tx_mutex);
     s_periode_ms = 0;                              /* le timer a été arrêté : forcer le redémarrage */
     kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);
 }

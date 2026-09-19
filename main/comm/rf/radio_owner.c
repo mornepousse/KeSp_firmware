@@ -32,7 +32,7 @@ static rf_radio_t     s_radio;
 static radio_hw_t     s_hw;
 static radio_mode_t   s_mode;
 static rf_radio_cfg_t s_cible;
-static uint32_t       s_ok, s_refus;
+static uint32_t       s_ok, s_refus, s_indispo;
 
 #ifndef TEST_HOST
 static const radio_hw_t radio_hw_defaut = {
@@ -53,7 +53,7 @@ bool radio_owner_init(const rf_radio_cfg_t *cible, const radio_hw_t *hw)
     s_hw = *hw;
 #endif
     memset(&s_radio, 0, sizeof s_radio);
-    s_mode = RADIO_ETEINTE; s_ok = s_refus = 0;
+    s_mode = RADIO_ETEINTE; s_ok = s_refus = s_indispo = 0;
     lock_create();
     if (s_hw.init_tx(&s_radio, cible) != ESP_OK || !s_radio.present) return false;
     s_cible = *cible; s_mode = RADIO_PTX;
@@ -107,8 +107,8 @@ const rf_radio_cfg_t *radio_cible(void) { return &s_cible; }
 
 bool radio_send(const uint8_t *buf, uint8_t len, uint32_t timeout_ms)
 {
-    if (!s_radio.present || s_mode != RADIO_PTX) return false;   /* en PRX : excursion */
-    if (!lock_take(timeout_ms)) return false;
+    if (!s_radio.present || s_mode != RADIO_PTX) { s_indispo++; return false; }   /* en PRX : excursion */
+    if (!lock_take(timeout_ms)) { s_indispo++; return false; }
     bool ok = s_hw.send(&s_radio, buf, len);
     if (ok) s_ok++; else s_refus++;
     lock_give();
@@ -117,8 +117,8 @@ bool radio_send(const uint8_t *buf, uint8_t len, uint32_t timeout_ms)
 bool radio_send_ap(const uint8_t *buf, uint8_t len, uint8_t *ack, uint8_t *ack_len, uint32_t timeout_ms)
 {
     *ack_len = 0;
-    if (!s_radio.present || s_mode != RADIO_PTX) return false;
-    if (!lock_take(timeout_ms)) return false;
+    if (!s_radio.present || s_mode != RADIO_PTX) { s_indispo++; return false; }
+    if (!lock_take(timeout_ms)) { s_indispo++; return false; }
     bool ok = s_hw.send_ap(&s_radio, buf, len, ack, ack_len);
     if (ok) s_ok++; else s_refus++;
     lock_give();
@@ -170,6 +170,10 @@ bool radio_pair_round(const uint8_t rdv_addr[5], uint8_t rdv_ch, const uint8_t *
     return true;
 }
 
+#if CONFIG_KASE_RF_CE_SCAN
+void radio_ce_gpio(int gpio) { if (lock_take(50)) { s_radio.cfg.pin_ce = gpio; s_cible.pin_ce = gpio; lock_give(); } }
+#endif
+
 void radio_sleep(void)
 {
     if (!s_radio.present) return;
@@ -183,4 +187,5 @@ void radio_wake(void)
     if (s_mode != RADIO_ETEINTE) appliquer(s_mode, &s_cible);   /* power_up ne touche pas à CE */
     lock_give();
 }
-void radio_stats(uint32_t *ok, uint32_t *refus) { if (ok) *ok = s_ok; if (refus) *refus = s_refus; }
+void radio_stats(uint32_t *ok, uint32_t *refus, uint32_t *indispo)
+{ if (ok) *ok = s_ok; if (refus) *refus = s_refus; if (indispo) *indispo = s_indispo; }

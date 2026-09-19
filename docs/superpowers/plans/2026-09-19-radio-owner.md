@@ -541,12 +541,12 @@ git commit -am "refactor(rf): la droite passe sur radio_owner — plus de rf_dri
 
 **Interfaces (Consumes) :** `radio_owner_init`, `radio_send_ap`, `radio_mode_set(RADIO_PRX|RADIO_PTX, …)`, `radio_rx_drain`, `radio_excursion_tx`, `radio_stats`.
 
-- [ ] **Step 1 : init et émission**
+- [x] **Step 1 : init et émission**
 
 `kbd_relay_init` : remplacer `rf_driver_init_tx(&s_radio, &nrf_cfg)` et la création de `s_tx_mutex` (l. 571) par `if (!radio_owner_init(&nrf_cfg, NULL)) { ESP_LOGE(…); return; }`. Supprimer `s_radio`, `s_tx_mutex`, le bloc `rf_bus_lock` (l. 145-150), l'enregistrement du hook (l. 583-589), `kbd_relay_sleep_prepare/wake_restore` (l. 625-640) — le timer de rafraîchissement n'a plus besoin d'être arrêté au sommeil : ses appels au propriétaire échouent proprement (verrou tenu, `radio_send` → false, compté en refus… ⚠ NON : un refus compté pendant le sommeil fausserait « dongle vu »). Donc garder un hook local : `{ "relais", kbd_relay_dormir, kbd_relay_reveiller }` qui stoppe/relance le timer (`esp_timer_stop`, `s_periode_ms = 0; kbd_relay_timer_set(KBD_RELAY_REFRESH_MS)`), sans toucher la radio.
 `kbd_tx_locked` → `kbd_tx` : plus de mutex ; `bool ok = radio_send_ap(buf, len, ack, &ack_n, 20);` ; si `radio_send_ap` retourne false **parce que le mode est PRX** (route USB) c'est attendu (le callback de scan n'émet qu'en route RF — vérifier que `s_tx_sans_mutex` n'est plus alimenté : le remplacer par un compteur « refus de mode » ou le supprimer).
 
-- [ ] **Step 2 : la bascule de mode (le cœur)**
+- [x] **Step 2 : la bascule de mode (le cœur)**
 
 Corps de `kbd_relay_refresh_body`, branche USB :
 ```c
@@ -586,7 +586,7 @@ static void kbd_relay_rx_droite(const uint8_t *rb, uint16_t rn, void *ctx)
 `s_usb_listening` disparaît : c'est `radio_mode() == RADIO_PRX`. `kbd_relay_cadence_ms(…, ecoute_usb)` reçoit `radio_mode() == RADIO_PRX`.
 ⚠ L'annonce par excursion passe désormais le **consommateur** : c'est exactement l'invariant testé en Task 1 — les trames de la droite arrivées juste avant l'annonce ne sont plus perdues (aujourd'hui `rf_driver_oob_tx` l. 308 est appelé APRÈS la vidange manuelle l. 274, c'est correct, mais rien ne l'impose ; désormais le propriétaire l'impose).
 
-- [ ] **Step 3 : compiler, banc gauche, contrat, commit**
+- [x] **Step 3 : compiler, banc gauche, contrat, commit**
 
 `grep -n "rf_driver_\|xSemaphore\|s_tx_mutex" main/comm/rf/kbd_relay_tx.c` → il ne reste que l'appairage (Task 5). Build `niphar_left` **et** `kase_v2_debug` (compile `kbd_relay_tx.c` hors fusion : la branche `#else` de `kbd_relay_cadence_ms` et le V2D). Banc gauche, FTDI dessus, dans l'ordre :
 1. batterie : frappe 1 min → « HID->dongle : n remis, m refuses » ≥ 98 %, veille à 15 s, réveil avec touche capturée et relais reparti ;

@@ -131,10 +131,11 @@ static void test_le_verrou_est_tenu_pendant_le_sommeil(void)
 static void test_compteurs(void)
 {
     reset(); rf_radio_cfg_t d = cfg(0x68); radio_owner_init(&d, &FAKE);
-    uint8_t b[4] = {0}; uint32_t ok, refus;
+    uint8_t b[4] = {0}; uint32_t ok, refus, indispo;
     radio_send(b, 4, 20); s_ack = false; radio_send(b, 4, 20); radio_send(b, 4, 20);
-    radio_stats(&ok, &refus);
-    TEST_ASSERT(ok == 1 && refus == 2, "1 ok, 2 refus");
+    radio_sleep(); radio_send(b, 4, 0); radio_wake();          /* endormie : indisponible, pas un refus */
+    radio_stats(&ok, &refus, &indispo);
+    TEST_ASSERT(ok == 1 && refus == 2 && indispo == 1, "1 ok, 2 refus ESB, 1 indisponible");
 }
 
 static esp_err_t f_init_absent(rf_radio_t *r, const rf_radio_cfg_t *c) { (void)r; (void)c; T("init_tx;"); return ESP_OK; }

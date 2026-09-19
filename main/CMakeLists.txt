@@ -135,6 +135,7 @@ if(CONFIG_KASE_KBD_WIRELESS)
         "comm/rf/rf_driver.c"
         "comm/rf/rf_pairing.c"
         "comm/rf/kbd_relay_tx.c"
+        "comm/rf/radio_owner.c"
         "comm/usb/usb_presence.c")
 endif()
 
@@ -274,7 +275,10 @@ list(APPEND srcs "power/pm_dfs.c")
 # Lien radio inter-moities (B3). rf_driver.c est deja tire par les gardes RF
 # ci-dessus quand l'un des deux bouts est actif.
 if(CONFIG_KASE_HALF_LINK_TX)
-    list(APPEND srcs "comm/rf/half_link.c" "comm/rf/radio_owner.c")   # la puce a un propriétaire
+    list(APPEND srcs "comm/rf/half_link.c")
+    if(NOT CONFIG_KASE_KBD_WIRELESS)
+        list(APPEND srcs "comm/rf/radio_owner.c")   # la puce a un propriétaire (déjà tiré par KBD_WIRELESS sinon)
+    endif()
     if(NOT CONFIG_KASE_KBD_WIRELESS AND NOT CONFIG_KASE_HAS_RF_RX
        AND NOT CONFIG_KASE_HAS_RF_TX AND NOT CONFIG_KASE_NRF_PROBE)
         list(APPEND srcs "comm/rf/rf_driver.c")
