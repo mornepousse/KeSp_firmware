@@ -225,6 +225,18 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   veille, lever un veto absent est sans effet, noms bornés pour le HB. Câblage
   dans la tâche de veille unique (Task 7 du plan structure énergie).
 
+## Niphargus — radio : une puce, un propriétaire
+
+- [test:test_radio_owner] La puce nRF24 d'une moitié a UN propriétaire
+  (`comm/rf/radio_owner.c`) : un mode à la fois (PTX vers une cible, PRX à
+  l'écoute d'une cible, éteinte), idempotent, `radio_rearmer` pour réécrire le
+  mode courant (chien de garde) ; émettre en PRX est REFUSÉ (c'est
+  l'excursion) ; une excursion VIDE la FIFO de réception dans le consommateur
+  AVANT de partir et revient écouter la cible d'avant ; le réveil RÉARME le
+  mode courant (power_up ne touche pas à CE) ; le verrou est tenu pendant tout
+  le sommeil ; une puce absente au probe refuse tout sans la toucher. Vérifié
+  sur la séquence d'appels au matériel (faux enregistreur, mordant).
+
 ## Fusion — routage des moteurs
 
 - [test:test_gauche_par_usb] Sans hôte USB, la gauche ne tape pas en local :

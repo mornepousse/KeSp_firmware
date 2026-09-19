@@ -118,7 +118,7 @@ void radio_stats(uint32_t *ok, uint32_t *refus);
 ```
 Pour le host : `TEST_HOST` remplace le mutex par un booléen et `esp_err_t`/`rf_radio_t` par les vrais en-têtes (`rf_driver.h` est déjà inclus par `test_rf_packet.c` ? vérifier ; sinon un `test/stubs/rf_driver.h` minimal avec `rf_radio_t`, `rf_radio_cfg_t`, `esp_err_t`, `ESP_OK`).
 
-- [ ] **Step 1 : test rouge — l'enregistreur et les quatre invariants**
+- [x] **Step 1 : test rouge — l'enregistreur et les quatre invariants**
 
 `test/test_radio_owner.c` :
 ```c
@@ -247,11 +247,11 @@ void test_radio_owner(void)
 ```
 Câbler : `test/CMakeLists.txt` → `test_radio_owner.c` et `../main/comm/rf/radio_owner.c` dans la liste des sources ; `test/test_main.c` → `extern void test_radio_owner(void);` + appel. `TEST_SUITE`/`TEST_RUN`/`TEST_ASSERT` sont les macros de `test_framework.h` (pas `RUN_TEST`).
 
-- [ ] **Step 2 : rouge**
+- [x] **Step 2 : rouge**
 
 `./scripts/check.sh --fast` → rouge (`radio_owner.h` absent).
 
-- [ ] **Step 3 : implémentation**
+- [x] **Step 3 : implémentation**
 
 `main/comm/rf/radio_owner.c` :
 ```c
@@ -419,11 +419,11 @@ void radio_stats(uint32_t *ok, uint32_t *refus) { if (ok) *ok = s_ok; if (refus)
 ```
 `main/CMakeLists.txt` ligne 276 : `if(CONFIG_KASE_HALF_LINK_TX)` → ajouter `list(APPEND srcs "comm/rf/radio_owner.c")` dans ce bloc **et** dans le bloc `CONFIG_KASE_KBD_WIRELESS` (une seule fois si les deux : utiliser une variable `KASE_RADIO_OWNER` ou `list(REMOVE_DUPLICATES srcs)` avant `idf_component_register`). Vérifier que `rf_bus_lock` n'est plus défini nulle part ailleurs quand radio_owner est compilé (Tasks 2-3 retirent les copies ; d'ici là, **ne pas** encore compiler radio_owner.c dans les boards — laisser la ligne CMake commentée avec un `# Task 2/3` et l'activer avec elles). Host : `test/CMakeLists.txt` compile `radio_owner.c` avec `-DTEST_HOST` ; `rf_bus.h` inclut `driver/spi_master.h` → sous `TEST_HOST` le `.c` n'inclut pas `rf_bus.h` (guarder l'include).
 
-- [ ] **Step 4 : vert, et mordant**
+- [x] **Step 4 : vert, et mordant**
 
 `./scripts/check.sh --fast` → vert. Puis, transitoirement, inverser l'ordre dans `radio_excursion_tx` (oob puis vider) → `test_excursion_vide_la_fifo_AVANT_et_revient` rouge ; rétablir. Puis retirer `appliquer(...)` de `radio_wake` → `test_reveil_rearme_le_mode` rouge ; rétablir.
 
-- [ ] **Step 5 : contrat, commit**
+- [x] **Step 5 : contrat, commit**
 
 `COMPORTEMENTS.md`, nouvelle section `## Niphargus — radio : une puce, un propriétaire` :
 ```
