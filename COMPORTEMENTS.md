@@ -294,22 +294,17 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   contient plus que la droite, `kbd_relay_tx.c` que la gauche ; la veille
   n'a plus d'échelle d'#if par rôle pour la radio.
 
-- [NON GARDÉ] Le moteur du dongle ne joue que l'état COURANT de chaque moitié
-  à chaque cycle (10 ms) : une transition écrasée avant lecture (appui +
-  relâchement, ou relâchement + ré-appui entre deux cycles) est un tap perdu
-  ou fondu. Un compteur `transitions_ecrasees` (CDC RF_STATUS[27..30], ligne
-  « transition ecrasee » au journal) dit si ça arrive ; s'il reste à 0 pendant
-  un épisode de touches perdues, le coupable est ailleurs. Mesure avant refonte
-  (file d'états) — 2026-09-15. Confirmé le 2026-09-16 : 83 écrasements en une
-  matinée, « oooo » → 2 o, la gauche ayant vu et émis les 4 (journal + 0 refus
-  radio). RF_STATUS[31..34] donne l'écart MAXIMAL entre deux tours du moteur
-  depuis la dernière lecture : un tap de 70 ms n'est écrasé que si le moteur a
-  dormi 70 ms — c'est ce blocage qu'il faut nommer avant de refondre. Et
-  RF_STATUS[35..42] compte les rapports clavier USB partis / refusés (point
-  d'accès muet) et les reprises de bus demandées / ratées : le maillon
-  dongle→hôte se lit sans console (le 09:40 du 2026-09-16 : « aa » vu et émis
-  par la gauche, reçu par le dongle, 0 écrasement, écart moteur 13 ms — et
-  rien à l'écran).
+- [test:test_fusion_file] Le moteur du dongle REJOUE chaque transition reçue,
+  dans l'ordre (`comm/rf/fusion_file.h`, file de 8 états fusionnés) : un appui
+  + relâchement tombés entre deux cycles font deux cycles, un tap joué — plus
+  de « dernier état gagne ». Un état identique au dernier poussé (réaffirmation
+  de maintien) n'est pas une transition ; pleine, la file fond les nouveaux
+  dans son dernier slot et le COMPTE : `transitions_ecrasees` (CDC
+  RF_STATUS[27..30]) ne mesure plus que ce débordement. Banc 2026-09-19 : une
+  minute de frappe rapide à deux mains, 699 trames, 182 rapports, 0 écrasement
+  (536 en une soirée avec l'ancien moteur), rien de perdu à l'usage.
+  RF_STATUS[31..34] (écart moteur max) et [35..42] (USB parti/refusé,
+  reprises) restent les témoins du maillon dongle→hôte.
 
 ## Fusion — garde-fou de sync config
 

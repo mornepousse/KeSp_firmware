@@ -14,14 +14,15 @@
  *
  * ── Concurrence ──
  * rf_rx_task dépose les trames via dongle_engine_on_matrix() ; la tâche moteur
- * les consomme. SEUL l'état de fusion (s_fusion + s_dirty) est partagé entre les
- * deux — protégé par s_mux. current_press_* et tout le cycle moteur ne sont
- * touchés QUE par la tâche moteur, donc sans verrou.
+ * les consomme. SEUL l'état de fusion (s_fusion + la file s_file) est partagé
+ * entre les deux — protégé par s_mux. current_press_* et tout le cycle moteur
+ * ne sont touchés QUE par la tâche moteur, donc sans verrou.
  */
 #include "dongle_engine.h"
 #if CONFIG_KASE_DONGLE_FUSION
 
 #include "half_link.h"          /* fusion_state_t, fusion_apply/timeout/collect */
+#include "fusion_file.h"        /* chaque transition reçue est rejouée, dans l'ordre */
 #include "fusion_route.h"       /* fusion_dongle_types (règle 3) */
 #include "key_processor.h"      /* build_keycode_report, process_matrix_changes, taps */
 #include "hid_report.h"         /* send_hid_key */
@@ -63,7 +64,7 @@ uint32_t get_last_activity_time_ms(void) { return last_activity_time_ms; }
 
 /* ── État de fusion partagé rf_rx_task ↔ tâche moteur ─────────────────────── */
 static fusion_state_t   s_fusion;
-static bool             s_dirty;     /* une demi-matrice a changé depuis le dernier cycle */
+static fusion_file_t    s_file;      /* transitions reçues, à rejouer dans l'ordre (sous s_mux) */
 static SemaphoreHandle_t s_mux;
 
 /* Mode de la gauche (phase 2). true = la gauche est pilotée par un hôte USB : le
@@ -164,10 +165,10 @@ static void send_tap(uint8_t kc, uint8_t mod)
  * Appelée sous s_mux (lit s_fusion). Gauche en colonnes directes, droite en
  * colonnes hautes via le miroir du PCB — exactement matrix_apply_remote() mais
  * pour DEUX moitiés distantes. */
-static void fill_current_press_locked(void)
+static void fill_current_press(const fusion_state_t *fs)
 {
     uint8_t rows[6], cols[6];
-    uint8_t n = fusion_collect(&s_fusion, MATRIX_COLS, BOARD_REMOTE_COLS_MIRRORED,
+    uint8_t n = fusion_collect(fs, MATRIX_COLS, BOARD_REMOTE_COLS_MIRRORED,
                                rows, cols, 6);
     for (uint8_t i = 0; i < 6; i++) {
         if (i < n) {
@@ -182,16 +183,11 @@ static void fill_current_press_locked(void)
     }
 }
 
-/* Transitions ÉCRASÉES : une trame qui change l'état d'une moitié alors que le
- * moteur n'a pas encore consommé le changement précédent. Le moteur ne joue
- * que l'état COURANT à chaque cycle (10 ms, plus quand il est occupé) : un
- * appui + relâchement, ou un relâchement + ré-appui, tombés entre deux
- * lectures sont perdus ou fondus — un tap qui ne sort pas, deux t qui n'en
- * font qu'un. Ce compteur dit si ça arrive vraiment (CDC RF_STATUS[27..30]) ;
- * s'il reste à 0 pendant un épisode de « touches perdues », le coupable est
- * ailleurs. Compteur, pas correctif : on mesure avant de refondre. */
-static uint32_t s_transitions_ecrasees;
-uint32_t dongle_engine_transitions_ecrasees(void) { return s_transitions_ecrasees; }
+/* Transitions ÉCRASÉES (CDC RF_STATUS[27..30]) : depuis la file de transitions
+ * (fusion_file.h, 2026-09-19), ce n'est plus « une trame arrivée avant que le
+ * moteur ne lise » (536 en une soirée) mais le seul DÉBORDEMENT de la file
+ * (8 états, 80 ms de retard moteur) — l'exception qu'il aurait dû être. */
+uint32_t dongle_engine_transitions_ecrasees(void) { return fusion_file_ecrasees(&s_file); }
 /* Écart maximal entre deux tours du moteur depuis la dernière lecture (ms) :
  * un tap de 70 ms n'est écrasé que si le moteur n'a pas tourné pendant 70 ms.
  * Dit ce qui le bloque, pas seulement qu'il l'a été. Remis à zéro à la lecture. */
@@ -205,13 +201,13 @@ void dongle_engine_on_matrix(const rf_matrix_t *m)
                            : (m->half == RF_HALF_LEFT)  ? &s_fusion.left : NULL;
     xSemaphoreTake(s_mux, portMAX_DELAY);
     bool changed = hs && memcmp(hs->bitmap, m->bitmap, RF_HALF_BITMAP_BYTES) != 0;
-    if (changed && s_dirty) {
-        s_transitions_ecrasees++;
-        ESP_LOGW(TAG, "transition ecrasee (#%lu) : moitie %u, le moteur n'avait pas consomme la precedente",
-                 (unsigned long)s_transitions_ecrasees, (unsigned)m->half);
+    if (fusion_apply(&s_fusion, m, now_ms()) && changed) {
+        uint32_t avant = fusion_file_ecrasees(&s_file);
+        fusion_file_push(&s_file, &s_fusion);   /* rejouée par le moteur, dans l'ordre */
+        if (fusion_file_ecrasees(&s_file) != avant)
+            ESP_LOGW(TAG, "transition ecrasee (#%lu) : file pleine, moitie %u",
+                     (unsigned long)fusion_file_ecrasees(&s_file), (unsigned)m->half);
     }
-    if (fusion_apply(&s_fusion, m, now_ms()) && changed)
-        s_dirty = true;
     xSemaphoreGive(s_mux);
 }
 
@@ -263,20 +259,21 @@ static void dongle_engine_task(void *arg)
         }
         prev_types = true;
 
-        /* Section critique minimale : expiration + snapshot du besoin de recalcul. */
-        bool do_cycle = false;
-        xSemaphoreTake(s_mux, portMAX_DELAY);
-        if (fusion_timeout(&s_fusion, now_ms(), HALF_LINK_TIMEOUT_MS))
-            s_dirty = true;
-        if (s_dirty) {
-            fill_current_press_locked();
-            s_dirty = false;
-            do_cycle = true;
-        }
-        xSemaphoreGive(s_mux);
-
-        if (do_cycle)
-            run_cycle();
+        /* Section critique minimale : expiration, puis on prend UNE transition
+         * en attente. Chaque transition reçue est jouée par un cycle complet,
+         * dans l'ordre — plus de « dernier état gagne ». S'il en reste, on
+         * enchaîne sans attendre le tick (10 ms par état seulement quand un
+         * tap est en cours dans run_cycle). */
+        fusion_state_t etat; bool do_cycle;
+        do {
+            do_cycle = false;
+            xSemaphoreTake(s_mux, portMAX_DELAY);
+            if (fusion_timeout(&s_fusion, now_ms(), HALF_LINK_TIMEOUT_MS))
+                fusion_file_push(&s_file, &s_fusion);   /* relâchement sur silence */
+            if (fusion_file_pop(&s_file, &etat)) do_cycle = true;
+            xSemaphoreGive(s_mux);
+            if (do_cycle) { fill_current_press(&etat); run_cycle(); }
+        } while (do_cycle && fusion_file_en_attente(&s_file));
 
         /* Maintien qui vient de basculer en « hold » → réémettre. */
         if (tap_hold_hold_just_activated()) {
@@ -321,7 +318,7 @@ void dongle_engine_start(void)
     if (s_mux) return;   /* déjà démarré */
     s_mux = xSemaphoreCreateMutex();
     memset(&s_fusion, 0, sizeof(s_fusion));
-    s_dirty = false;
+    fusion_file_init(&s_file);
 
     /* Même init que keyboard_manager_init(), moins le worker de scan local. */
     tap_hold_init();

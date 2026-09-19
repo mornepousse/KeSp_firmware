@@ -78,6 +78,7 @@ add_executable(test_runner
     test_cadence.c
     test_veille_veto.c
     test_radio_owner.c
+    test_fusion_file.c
     ../main/comm/rf/radio_owner.c
     test_rf_status_cadence.c
     test_keymap_blob_size.c
