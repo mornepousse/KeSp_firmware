@@ -40,6 +40,8 @@ static const radio_hw_t radio_hw_defaut = {
     .send = rf_driver_send,         .send_ap = rf_driver_send_ap,       .oob_tx = rf_driver_oob_tx,
     .rx_available = rf_driver_rx_available, .read_rx = rf_driver_read_rx,
     .power_down = rf_driver_power_down,     .power_up = rf_driver_power_up,
+    .set_tx_address = rf_driver_set_tx_address, .set_channel = rf_driver_set_channel,
+    .pair_listen = rf_driver_pair_listen,
 };
 #endif
 
@@ -151,6 +153,21 @@ bool radio_excursion_tx(uint8_t canal, const uint8_t addr[5], const uint8_t *buf
     if (ok) s_ok++; else s_refus++;
     lock_give();
     return ok;
+}
+
+bool radio_pair_round(const uint8_t rdv_addr[5], uint8_t rdv_ch, const uint8_t *req, uint8_t n,
+                      uint8_t *rx, uint16_t rx_max, uint32_t listen_ms, uint16_t *rx_n)
+{
+    *rx_n = 0;
+    if (!s_radio.present || s_mode != RADIO_PTX) return false;
+    if (!lock_take(200)) return false;
+    s_hw.set_tx_address(&s_radio, rdv_addr);
+    s_hw.set_channel(&s_radio, rdv_ch);
+    s_hw.send(&s_radio, req, n);
+    *rx_n = s_hw.pair_listen(&s_radio, rdv_ch, rdv_addr, rx, rx_max, listen_ms);
+    appliquer(s_mode, &s_cible);      /* RETOUR à la cible, ACK ou pas */
+    lock_give();
+    return true;
 }
 
 void radio_sleep(void)

@@ -1,6 +1,7 @@
 #include "half_link.h"
 #include "board.h"
 #include "rf_driver.h"
+#include "radio_owner.h"   /* la puce : un propriétaire, ce module n'est qu'une politique */
 #include "rf_packet.h"
 #include "rf_slot.h"
 #if CONFIG_KASE_DONGLE_FUSION
@@ -24,13 +25,11 @@
 #include "cadence.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
 #include <string.h>
 #include <stdio.h>
 
 static const char *TAG = "half_link";
 
-static rf_radio_t s_radio;
 static uint8_t    s_seq;
 
 
@@ -44,17 +43,12 @@ static uint32_t s_dernier_tx_ms;
 static portMUX_TYPE s_etat_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_refresh_task;   /* notifiée sur changement : cadence rapide sans attendre */
 
-/* Verrou de la PUCE côté émetteur. Jusqu'au 2026-09-07 un seul appelant
- * existait — le callback du pilote keyboard_button — et rf_driver_send pouvait
- * s'en passer. La tâche de rafraîchissement en ajoute un second.
- *
- * rf_driver_send pilote CSN à la main (spics_io_num = -1) : deux tâches qui
- * s'entrelacent entre csn_low() et csn_high() envoient une transaction avec CSN
- * dans le mauvais état — écriture de registre perdue en silence, ou impulsion CE
- * tronquée. La moitié gauche a reçu son verrou, la droite avait été oubliee. */
-static SemaphoreHandle_t s_tx_radio_mux;
-/* Config TX vivante, pour le chien de garde radio (réarmer une puce figée). */
-static rf_radio_cfg_t s_tx_cfg;
+#if CONFIG_KASE_VEILLE && CONFIG_KASE_BATT_SENSE
+static void half_link_apres_reveil(void);
+#endif
+/* La puce (verrou, mode, cible, sommeil) est à radio_owner.c : ce module ne
+ * décide que des trames et de la cible. Deux tâches appellent tx_frame
+ * (callback de scan, rafraîchissement) : la FSM de repli est sous s_etat_mux. */
 static uint8_t        s_sans_ack_ecran = 3;   /* émissions consécutives sans ACK : « dongle vu » pour l'écran (3 = pas encore vu) */
 #if CONFIG_KASE_DONGLE_FUSION
 /* Repli sans dongle : deux cibles d'émission. La droite vise le dongle par
@@ -104,7 +98,7 @@ static rf_radio_cfg_t half_link_cfg(void)
  * dans PKT_TYPE_MATRIX.
  *
  * ⚠ Le dongle doit avoir sa fenêtre d'appairage OUVERTE (KS_CMD_RF_PAIR_START).
- * Utilise s_radio, déjà initialisée en PTX par half_link_tx_init. */
+ * Passe par radio_pair_round : viser le rendez-vous puis REVENIR à la cible. */
 static void half_fusion_pairing_task(void *arg)
 {
     (void)arg;
@@ -118,12 +112,8 @@ static void half_fusion_pairing_task(void *arg)
     bool acked = false;
     /* ~30 s de tentatives : laisse le temps d'ouvrir la fenêtre du dongle. */
     for (int i = 0; i < 200 && !acked; i++) {
-        rf_driver_set_tx_address(&s_radio, pair_addr);
-        rf_driver_set_channel(&s_radio, RF_PAIR_CHANNEL);
-        rf_driver_send(&s_radio, req, 8);
-        uint8_t rxb[32];
-        uint16_t n = rf_driver_pair_listen(&s_radio, RF_PAIR_CHANNEL, pair_addr,
-                                           rxb, sizeof(rxb), 150);
+        uint8_t rxb[32]; uint16_t n = 0;
+        radio_pair_round(pair_addr, RF_PAIR_CHANNEL, req, 8, rxb, sizeof rxb, 150, &n);
         if (n && rf_decode_pair_ack(rxb, n, &ack)) { acked = true; break; }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
@@ -145,11 +135,6 @@ static void half_fusion_pairing_task(void *arg)
 
 bool half_link_tx_init(void)
 {
-    s_tx_radio_mux = xSemaphoreCreateMutex();
-    if (!s_tx_radio_mux) {
-        ESP_LOGE(TAG, "mutex radio TX non cree — emission abandonnee");
-        return false;
-    }
     rf_radio_cfg_t cfg = half_link_cfg();
 #if CONFIG_KASE_DONGLE_FUSION
     /* La config de base (KaSe.03 fixe, canal du lien) EST la cible « gauche
@@ -173,24 +158,22 @@ bool half_link_tx_init(void)
                  fusion_unpaired ? " (NON APPAIRE — appairage actif)" : "");
     }
 #endif
-    s_tx_cfg = cfg;   /* mémorisé pour le chien de garde radio */
 #if CONFIG_KASE_DONGLE_FUSION
     s_cfg_dongle    = cfg;                 /* cible par défaut : le dongle */
     s_tx_fsm.cible  = HALF_TX_TO_DONGLE;   /* au boot, on vise le dongle */
     s_tx_fsm.sans_ack = 0;
 #endif
-    esp_err_t e = rf_driver_init_tx(&s_radio, &cfg);
-    if (e != ESP_OK || !s_radio.present) {
-        ESP_LOGE(TAG, "TX init echouee (%d) — la moitie droite restera muette", (int)e);
+    /* Le propriétaire initialise la puce en PTX vers la cible et enregistre
+     * lui-même son hook de veille (power-down, verrou gardé ; réveil réarmé). */
+    if (!radio_owner_init(&cfg, NULL)) {
+        ESP_LOGE(TAG, "TX init echouee — la moitie droite restera muette");
         return false;
     }
     ESP_LOGI(TAG, "TX pret : ch=0x%02X addr=KaSe.%02X", cfg.channel, cfg.addr_suffix);
-#if CONFIG_KASE_VEILLE
-    /* Veille (B7) : la radio s'éteint au sommeil (900 nA au lieu de 26 µA en
-     * standby-I, verrou tenu) et se rallume AVANT la capture au réveil — ordre
-     * garanti par l'enregistrement en premier (veille_task.h). */
-    static const veille_hook_t hook = { "radio", half_link_radio_sleep, half_link_radio_wake };
-    veille_hook_enregistrer(&hook);
+#if CONFIG_KASE_VEILLE && CONFIG_KASE_BATT_SENSE
+    /* Au réveil : un STATUS tout de suite, la tension a pu bouger. */
+    static const veille_hook_t hook_status = { "status", NULL, half_link_apres_reveil };
+    veille_hook_enregistrer(&hook_status);
 #endif
 
 #if CONFIG_KASE_DONGLE_FUSION
@@ -247,20 +230,9 @@ bool half_link_tx_init(void)
 
 static bool half_link_tx_frame(const uint8_t *buf, uint8_t n);
 
-#if CONFIG_KASE_HALF_LINK_TX
-/* Prêt du bus SPI à l'écran (rf_bus.h) : le même mutex que half_link_tx_frame. */
-#include "rf_bus.h"
-bool rf_bus_lock(uint32_t timeout_ms)
-{
-    return s_tx_radio_mux && xSemaphoreTake(s_tx_radio_mux, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
-}
-void rf_bus_unlock(void) { if (s_tx_radio_mux) xSemaphoreGive(s_tx_radio_mux); }
-spi_host_device_t rf_bus_host(void) { return BOARD_NRF_SPI_HOST; }
-#endif
-
 bool half_link_tx_matrix(const uint8_t *bitmap)
 {
-    if (!s_radio.present) return false;
+    if (!radio_presente()) return false;
     uint8_t buf[16];
     uint16_t n;
 #if CONFIG_KASE_DONGLE_FUSION
@@ -321,42 +293,38 @@ bool half_link_tx_dongle_vu(void)
 
 static bool half_link_tx_frame(const uint8_t *buf, uint8_t n)
 {
-    if (!s_radio.present) return false;
-    /* Le verrou couvre TOUTE la transaction, CSN compris. 50 ms : une émission
-     * ESB au pire cas (ARC=15, ARD=500 µs) tient en ~13 ms. */
-    if (s_tx_radio_mux &&
-        xSemaphoreTake(s_tx_radio_mux, pdMS_TO_TICKS(50)) != pdTRUE) {
-        ESP_LOGW(TAG, "emission abandonnee : radio occupee");
-        return false;
-    }
+    if (!radio_presente()) return false;
+    /* 50 ms : une émission ESB au pire cas (ARC=15, ARD=500 µs) tient en ~13 ms.
+     * Le propriétaire tient le verrou sur toute la transaction, CSN compris. */
     s_seq++;                       /* la trame part : ce numéro est consommé */
-    bool ack = rf_driver_send(&s_radio, buf, n);
+    bool ack = radio_send(buf, n, 50);
     if (ack) s_sans_ack_ecran = 0; else if (s_sans_ack_ecran < 255) s_sans_ack_ecran++;
-    /* Le verrou reste TENU jusqu'après le chien de garde : la décision de
-     * bascule (s_tx_fsm) et le réarmement doivent être sérialisés avec l'envoi.
-     * Cette fonction est appelée par DEUX tâches (callback de scan sur
-     * changement, tâche de rafraîchissement des maintiens) — un compteur
-     * read-modify-write hors verrou perdait des incréments ou basculait deux
-     * fois (revue 2026-09-13 : « un seul propriétaire ne suffit pas s'il a deux
-     * bouches »). */
 
     /* Chien de garde radio. Un nRF24 (clone) se FIGE — sous un orage de
      * retransmissions ou un glitch (constaté au banc 2026-09-13 : à l'activation
      * du lien TRRS en mode USB, la radio de la droite gelait et n'acquittait plus
-     * RIEN, même une fois l'USB retiré, jusqu'au reset). Le dongle a un chien de
-     * garde ; la droite n'en avait pas → mort permanente. Après N envois
+     * RIEN, même une fois l'USB retiré, jusqu'au reset). Après N envois
      * consécutifs sans ACK (pas une simple perte ESB), on RÉARME la puce
-     * (réécriture de la config PTX), sans redémarrage. */
+     * (réécriture de la config PTX), sans redémarrage. Cette fonction est
+     * appelée par DEUX tâches (callback de scan, rafraîchissement) : la
+     * décision est prise sous s_etat_mux, le propriétaire applique sous le sien. */
 #if CONFIG_KASE_DONGLE_FUSION
     /* En fusion, le réarmement DOUBLE comme repli : il bascule vers l'autre
      * auditeur (dongle ↔ gauche-USB directe). Décision pure et testée
-     * (half_tx_target_step, test/test_half_tx_target.c). La bascule réécrit la
-     * config PTX de la nouvelle cible — elle réarme donc aussi une puce figée. */
-    if (half_tx_target_step(&s_tx_fsm, ack, HALF_TX_SWITCH_FAILS)) {
-        const rf_radio_cfg_t *tgt = (s_tx_fsm.cible == HALF_TX_TO_LEFT)
-                                        ? &s_cfg_left : &s_cfg_dongle;
-        rf_driver_set_ptx(&s_radio, tgt);   /* verrou déjà tenu */
-        s_tx_cfg = *tgt;                    /* la config vivante suit la cible */
+     * (half_tx_target_step, test/test_half_tx_target.c). */
+    bool bascule;
+    taskENTER_CRITICAL(&s_etat_mux);
+    bascule = half_tx_target_step(&s_tx_fsm, ack, HALF_TX_SWITCH_FAILS);
+    taskEXIT_CRITICAL(&s_etat_mux);
+    if (bascule) {
+        const rf_radio_cfg_t *tgt = (s_tx_fsm.cible == HALF_TX_TO_LEFT) ? &s_cfg_left : &s_cfg_dongle;
+        /* Même cible qu'avant (puce figée) : radio_mode_set serait idempotent,
+         * radio_rearmer réécrit quand même. */
+        const rf_radio_cfg_t *cur = radio_cible();
+        bool meme = cur->channel == tgt->channel && cur->addr_suffix == tgt->addr_suffix
+                 && memcmp(cur->rx_addr, tgt->rx_addr, sizeof cur->rx_addr) == 0;
+        if (meme) radio_rearmer();                 /* puce figée : réécrire la même config */
+        else      radio_mode_set(RADIO_PTX, tgt);  /* nouvelle cible */
         ESP_LOGW(TAG, "repli : bascule TX -> %s (rearme, %u sans ACK)",
                  s_tx_fsm.cible == HALF_TX_TO_LEFT ? "GAUCHE KaSe.03 (heartbeat)"
                                                    : "DONGLE KaSe.01 (matrix)",
@@ -368,11 +336,10 @@ static bool half_link_tx_frame(const uint8_t *buf, uint8_t n)
         s_sans_ack = 0;
     } else if (++s_sans_ack >= 30) {
         s_sans_ack = 0;
-        rf_driver_set_ptx(&s_radio, &s_tx_cfg);   /* verrou déjà tenu */
+        radio_rearmer();
         ESP_LOGW(TAG, "chien de garde : radio TX rearmee (30 envois sans ACK)");
     }
 #endif
-    if (s_tx_radio_mux) xSemaphoreGive(s_tx_radio_mux);
 
     /* Instrument de banc : sans lui, on ne distingue pas « les paquets partent
      * et sont acquittes » de « ils partent dans le vide ». Resume tous les dix
@@ -501,7 +468,7 @@ static void half_link_tx_refresh_task(void *arg)
 
 bool half_link_tx_refresh_start(void)
 {
-    if (!s_radio.present) return false;
+    if (!radio_presente()) return false;
     BaseType_t r = xTaskCreate(half_link_tx_refresh_task, "half_tx_rfr",
                                3072, NULL, 4, &s_refresh_task);
     if (r != pdPASS) {
@@ -518,28 +485,9 @@ bool half_link_tx_refresh_start(void)
 #endif /* CONFIG_KASE_HAS_RF_TX */
 
 
-/* ── Veille : éteindre et rallumer la radio (brick B7) ──────────────────────
- *
- * Écouter coûte 13,1 mA (nRF24L01+ PS v1.0, table 4, p. 14) contre 900 nA en
- * power-down : la radio doit être coupée dès l'étage léger, sans quoi le budget
- * de veille n'a aucun sens. Les verrous sont PRIS et GARDÉS pendant tout le
- * sommeil — rien ne doit tenter d'émettre sur une puce éteinte. */
-void half_link_radio_sleep(void)
-{
-    if (!s_radio.present) return;
-    if (s_tx_radio_mux) xSemaphoreTake(s_tx_radio_mux, pdMS_TO_TICKS(50));
-    rf_driver_power_down(&s_radio);
-}
-
-void half_link_radio_wake(void)
-{
-    if (!s_radio.present) return;
-    rf_driver_power_up(&s_radio);
-#if CONFIG_KASE_BATT_SENSE
-    s_dernier_status_ms = 0;   /* un STATUS au réveil : la tension a pu bouger */
+#if CONFIG_KASE_VEILLE && CONFIG_KASE_BATT_SENSE
+static void half_link_apres_reveil(void) { s_dernier_status_ms = 0; }   /* STATUS forcé au tick suivant */
 #endif
-    if (s_tx_radio_mux) xSemaphoreGive(s_tx_radio_mux);
-}
 
 #if CONFIG_KASE_VEILLE
 /* Suffixe de rôle du battement de coeur (veille_task.h) : la droite dit si le

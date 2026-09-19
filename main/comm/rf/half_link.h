@@ -321,8 +321,4 @@ void half_link_tx_update(const uint8_t *bitmap, bool change);
  * aucune trame. */
 bool half_link_tx_refresh_start(void);
 
-/* Veille (B7). Éteint la radio et GARDE les verrous jusqu'au réveil, pour que
- * rien ne tente d'émettre sur une puce sans alimentation. */
-void half_link_radio_sleep(void);
-void half_link_radio_wake(void);
 

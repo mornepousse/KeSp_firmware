@@ -21,7 +21,12 @@ static bool f_rx_avail(rf_radio_t *r) { (void)r; return s_pending_rx > 0; }
 static uint16_t f_read_rx(rf_radio_t *r, uint8_t *b, uint16_t n) { (void)r; (void)n; if (!s_pending_rx) return 0; s_pending_rx--; b[0] = 0xAB; T("read;"); return 1; }
 static void f_pd(rf_radio_t *r) { (void)r; T("pd;"); }
 static void f_pu(rf_radio_t *r) { (void)r; T("pu;"); }
-static const radio_hw_t FAKE = { f_init_tx, f_set_ptx, f_rearm_rx, f_send, f_send_ap, f_oob, f_rx_avail, f_read_rx, f_pd, f_pu };
+static void f_set_tx_address(rf_radio_t *r, const uint8_t a[5]) { (void)r; (void)a; T("addr;"); }
+static void f_set_channel(rf_radio_t *r, uint8_t ch) { (void)r; char b[16]; snprintf(b, sizeof b, "ch(%02X);", ch); T(b); }
+static uint16_t f_pair_listen(rf_radio_t *r, uint8_t ch, const uint8_t a[5], uint8_t *b, uint16_t n, uint32_t ms)
+{ (void)r; (void)ch; (void)a; (void)n; (void)ms; T("listen;"); b[0] = 0x42; return s_pending_rx ? 1 : 0; }
+static const radio_hw_t FAKE = { f_init_tx, f_set_ptx, f_rearm_rx, f_send, f_send_ap, f_oob, f_rx_avail, f_read_rx, f_pd, f_pu,
+                                 f_set_tx_address, f_set_channel, f_pair_listen };
 
 static rf_radio_cfg_t cfg(uint8_t ch) { rf_radio_cfg_t c; memset(&c, 0, sizeof c); c.channel = ch; c.addr_suffix = 0x01; return c; }
 static void reset(void) { s_trace[0] = 0; s_pending_rx = 0; s_ack = true; }
@@ -144,6 +149,19 @@ static void test_puce_absente(void)
     TEST_ASSERT(strcmp(s_trace, "init_tx;") == 0, s_trace);
 }
 
+static void test_pair_round_revient_a_la_cible(void)
+{
+    /* Un tour d'appairage vise le rendez-vous puis REVIENT à la cible courante :
+     * une carte qui reste sur le canal de rendez-vous n'acquitte plus rien. */
+    reset(); rf_radio_cfg_t d = cfg(0x68); radio_owner_init(&d, &FAKE); s_trace[0] = 0;
+    uint8_t rdv[5] = {'P','A','I','R',0}; uint8_t req[8] = {0}; uint8_t rx[32]; uint16_t rxn = 99;
+    s_pending_rx = 1;
+    TEST_ASSERT(radio_pair_round(rdv, 0x4C, req, sizeof req, rx, sizeof rx, 150, &rxn), "tour ok");
+    TEST_ASSERT(rxn == 1 && rx[0] == 0x42, "reponse rendue");
+    TEST_ASSERT(strcmp(s_trace, "addr;ch(4C);send;listen;ptx(68);") == 0, s_trace);
+    TEST_ASSERT(radio_mode() == RADIO_PTX && radio_cible()->channel == 0x68, "cible restauree");
+}
+
 void test_radio_owner(void)
 {
     TEST_SUITE("radio_owner : une puce, un proprietaire");
@@ -158,4 +176,5 @@ void test_radio_owner(void)
     TEST_RUN(test_le_verrou_est_tenu_pendant_le_sommeil);
     TEST_RUN(test_compteurs);
     TEST_RUN(test_puce_absente);
+    TEST_RUN(test_pair_round_revient_a_la_cible);
 }

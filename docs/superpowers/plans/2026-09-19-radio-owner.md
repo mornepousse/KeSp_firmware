@@ -454,7 +454,7 @@ git commit -m "feat(rf): radio_owner — la puce nRF24 d'une moitié a un propri
 
 **Interfaces (Consumes) :** `radio_owner_init`, `radio_send`, `radio_mode_set(RADIO_PTX, tgt)`, `radio_stats`.
 
-- [ ] **Step 1 : init**
+- [x] **Step 1 : init**
 
 Dans `half_link_tx_init`, remplacer la création du mutex (l. 148-152) et `rf_driver_init_tx(&s_radio, &cfg)` (l. 182) par :
 ```c
@@ -465,7 +465,7 @@ Dans `half_link_tx_init`, remplacer la création du mutex (l. 148-152) et `rf_dr
 ```
 Supprimer `static rf_radio_t s_radio;` (l. 33) et `static SemaphoreHandle_t s_tx_radio_mux;` (l. 55). Supprimer l'enregistrement du hook (l. 187-193) : c'est le propriétaire qui l'enregistre. Supprimer le bloc `rf_bus_lock/unlock/host` (l. 253-259) et l'include `rf_bus.h`.
 
-- [ ] **Step 2 : tx_frame**
+- [x] **Step 2 : tx_frame**
 
 `half_link_tx_frame` devient :
 ```c
@@ -504,7 +504,7 @@ static bool half_link_tx_frame(const uint8_t *buf, uint8_t n)
 ⚠ `radio_mode_set` est **idempotent** : un réarmement vers la MÊME cible (chien de garde hors fusion, ou FSM qui « bascule » vers la cible courante) ne réécrirait rien. Pour forcer la réécriture, ajouter à `radio_owner.h` : `bool radio_rearmer(void);` = ré-applique le mode courant sous verrou (+ un test host `test_rearmer_reecrit_le_mode_courant` : trace `ptx(68);` après `radio_rearmer()` en PTX). L'utiliser dans les deux branches ci-dessus quand la cible ne change pas.
 `s_tx_cfg` (l. 57) : ne sert plus qu'au chien de garde hors fusion → remplacer par `radio_rearmer()` et supprimer la variable.
 
-- [ ] **Step 3 : sommeil**
+- [x] **Step 3 : sommeil**
 
 Supprimer `half_link_radio_sleep/wake` (l. 527-542) et leurs prototypes ; `s_dernier_status_ms = 0` au réveil (STATUS forcé après un sommeil) migre dans un hook local léger si on y tient :
 ```c
@@ -513,7 +513,7 @@ static void half_link_apres_reveil(void) { s_dernier_status_ms = 0; }
 ```
 (le hook radio du propriétaire est enregistré AVANT dans `radio_owner_init` → au réveil, ordre inverse : status puis radio — sans importance, le STATUS partira au tick suivant, radio debout.)
 
-- [ ] **Step 4 : compiler, banc droite, contrat, commit**
+- [x] **Step 4 : compiler, banc droite, contrat, commit**
 
 `main/CMakeLists.txt` : `radio_owner.c` sous `CONFIG_KASE_HALF_LINK_TX`. Build `niphar_right` ; `grep -n "rf_driver_\|xSemaphore" main/comm/rf/half_link.c` → il ne reste que l'appairage (Task 5). Flasher la droite (FTDI dessus, MAC-check), capture : « TX pret », « épreuve : 10/10 », frappe 1 min « TX n envois, n acquittes (≥ 98 %) », veille à 15 s, réveil avec touche capturée et « TX … acquittes » qui reprend juste après (= radio réarmée au réveil), écran intact. Repli : débrancher le dongle 10 s en tapant → « repli : bascule TX -> GAUCHE » puis retour quand le dongle revient (la gauche en USB pour que quelqu'un écoute KaSe.03 — sinon la bascule se fait quand même mais personne n'acquitte : c'est le comportement actuel).
 Contrat :

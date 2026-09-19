@@ -41,6 +41,9 @@ typedef struct {
     uint16_t  (*read_rx)(rf_radio_t *, uint8_t *, uint16_t);
     void      (*power_down)(rf_radio_t *);
     void      (*power_up)(rf_radio_t *);
+    void      (*set_tx_address)(rf_radio_t *, const uint8_t[5]);
+    void      (*set_channel)(rf_radio_t *, uint8_t);
+    uint16_t  (*pair_listen)(rf_radio_t *, uint8_t, const uint8_t[5], uint8_t *, uint16_t, uint32_t);
 } radio_hw_t;
 
 typedef void (*radio_rx_cb_t)(const uint8_t *trame, uint16_t n, void *ctx);
@@ -80,6 +83,12 @@ void radio_rx_drain(radio_rx_cb_t cb, void *ctx);
  * en le disant). Refusée en PTX (radio_send suffit). */
 bool radio_excursion_tx(uint8_t canal, const uint8_t addr[5], const uint8_t *buf, uint8_t len,
                         radio_rx_cb_t cb, void *ctx);
+
+/* Un tour d'appairage : viser le rendez-vous (adresse + canal), émettre `req`,
+ * écouter `listen_ms` la réponse (rendue dans rx/rx_n), puis REVENIR à la
+ * cible courante — quoi qu'il arrive. Sous verrou. PTX seulement. */
+bool radio_pair_round(const uint8_t rdv_addr[5], uint8_t rdv_ch, const uint8_t *req, uint8_t n,
+                      uint8_t *rx, uint16_t rx_max, uint32_t listen_ms, uint16_t *rx_n);
 
 /* Veille : appelés par le hook enregistré à l'init (publics pour les tests). */
 void radio_sleep(void);

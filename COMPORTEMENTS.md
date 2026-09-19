@@ -236,6 +236,16 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   mode courant (power_up ne touche pas à CE) ; le verrou est tenu pendant tout
   le sommeil ; une puce absente au probe refuse tout sans la toucher. Vérifié
   sur la séquence d'appels au matériel (faux enregistreur, mordant).
+- [test:test_radio_owner] Un tour d'appairage (`radio_pair_round`) vise le
+  rendez-vous, émet, écoute, puis REVIENT à la cible courante quoi qu'il
+  arrive — une carte qui resterait sur le canal de rendez-vous n'acquitterait
+  plus rien.
+- [smoke:Éveil oisif] La DROITE ne touche plus la puce : `half_link.c` ne fait
+  que des trames (demi-matrice, STATUS, repli de cible par la FSM pure) et
+  passe par radio_owner pour émettre, basculer de cible, réarmer, s'appairer,
+  dormir. Banc 2026-09-19 : ACK 100 % / 97 %, quatre réveils avec touche
+  capturée et radio réarmée, dongle débranché → « repli : bascule TX ->
+  GAUCHE » puis retour dongle et 92 → 100 % d'ACK.
 
 ## Fusion — routage des moteurs
 
