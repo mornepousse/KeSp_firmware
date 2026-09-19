@@ -70,6 +70,13 @@ dans la PR/release.
       connue dans l'ACK (EN_ACK_PAY) ; la gauche, en sans-fil, la lit après
       chaque émission et la logue. Go/no-go des clones nRF24 : si RX_DR ne se
       lève jamais côté gauche, la sync auto par ACK est impossible → repli B
+- [ ] Radio — un propriétaire : dongle DÉBRANCHÉ, taper sur la droite → console
+      droite « repli : bascule TX -> GAUCHE KaSe.03 » (puis oscillation
+      GAUCHE/DONGLE si personne n'écoute) ; dongle rebranché → les ACK
+      reprennent sans reset (« TX n envois, m acquittes » ≥ 95 % cumulé) ;
+      gauche en USB → « fusion USB : ecoute la droite reemise (PRX ch=0x4F
+      KaSe.03) » et la droite tape par la gauche ; USB retiré → « retour
+      emission PTX vers le dongle », les deux tapent par le dongle
 - [ ] Fusion — Sync keymap sans câble : modifier une couche du dongle (SETLAYER)
       → gauche en sans-fil, RIEN branché d'autre : en < 15 s la console gauche
       logue « sync keymap : balise » puis « 40/40 recus … enregistree en NVS »,

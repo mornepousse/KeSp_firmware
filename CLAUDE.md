@@ -197,11 +197,19 @@ du silence, pas une erreur. Datasheets dans lemia (docs 6844, 6845).
 la droite remonte un STATUS toutes les 30 s ; la tension AFFICHÉE est
 stabilisée 30 s (une hystérésis autour de l'affiché avait figé 4,2 V une nuit).
 
-Reste ouvert : le driver du trackpad (matériel). Sa logique pure — parseur de
-trame IQS5xx, mapping gestes→HID, config d'accel — existe et est testée
-(`periph/trackpad/`) ; manquent le bring-up I2C+RDY côté GAUCHE et le
-branchement sur le relais souris. Le mapping visait l'ancien dongle mais tourne
-tel quel sur le maître.
+Reste ouvert (2026-09-19) :
+- le driver du trackpad (matériel). Sa logique pure — parseur de trame
+  IQS5xx, mapping gestes→HID, config d'accel — existe et est testée
+  (`periph/trackpad/`) ; manquent le bring-up I2C+RDY côté GAUCHE et le
+  branchement sur le relais souris ;
+- la **mesure au multimètre** de chaque moitié (éveillée oisive attendue
+  ~1-3 mA après DFS + tickless, endormie ~250 µA, en frappe) — tout le travail
+  d'autonomie du 16 au 19 est prouvé par les journaux, pas encore chiffré ;
+- la **première touche légère perdue sur la gauche** après une longue pause :
+  réveil GPIO reçu, lignes déjà basses 13 ms plus tard, touche jamais vue en
+  156 ms, l'appui suivant sur la même ligne est capturé — contact < 13 ms,
+  piste switch (l'instrumentation de `veille.c`/`matrix_scan.c` reste en
+  place pour ça ; à ranger sous `KASE_VEILLE_DIAG` une fois réglé).
 Brochage : `docs/NIPHARGUS_V2_HARDWARE.md` (source de vérité, vérifié à la netlist).
 
 ## Board variants
