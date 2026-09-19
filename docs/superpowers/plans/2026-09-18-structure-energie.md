@@ -40,6 +40,11 @@
 
 Les tâches 1-2 et 3-5 sont indépendantes ; 7 est le gros morceau.
 
+**État au 2026-09-19 soir : Tasks 1-7 FAITES, prouvées au banc sur les deux
+moitiés, poussées (`14af8c3e`).** Task 8 attend la résolution de la « première
+touche légère » (contact < 13 ms observé ce soir sur la gauche, `broches=0x100`,
+lignes déjà basses à la capture). Task 9 : plan séparé à écrire.
+
 ---
 
 ### Task 1 : La fusion devient la configuration par défaut
@@ -353,7 +358,7 @@ Dans `memlcd_wake`, après `s_dirty = true;`, ajouter un appel direct : `memlcd_
 
 `cadence.h` : `MEMLCD_DROITE_PERIODE_MS 1000u` (la `_Static_assert` reste vraie).
 
-- [ ] **Step 4 : preuve au banc (droite)**
+- [x] **Step 4 : preuve au banc (droite)**
 
 Flasher la droite, `light_sleep_counts` dans le HB doit monter d'environ la même valeur ; l'image ne clignote pas (VCOM toujours ~1 Hz : vérifier à l'œil sur 2 min qu'aucune zone ne grise) ; après une veille B7, l'écran revit à la première touche. Contrat :
 ```
