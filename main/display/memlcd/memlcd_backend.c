@@ -293,8 +293,12 @@ static void memlcd_update(void)
         xSemaphoreGive(s_fb_mux);
         return;
     }
-    /* Entretien VCOM ~1 Hz quand rien ne s'écrit (update() toutes les ~100 ms). */
-    static uint8_t n; if (++n >= 10) { n = 0; memlcd_panel_vcom_tick(); }
+    /* Entretien VCOM ~1 Hz quand rien ne s'écrit, quelle que soit la cadence
+     * d'appel (100 ms à gauche, MEMLCD_DROITE_PERIODE_MS à droite) : horodaté,
+     * pas compté. */
+    static uint32_t s_vcom_ms;
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    if ((uint32_t)(now_ms - s_vcom_ms) >= 1000u) { s_vcom_ms = now_ms; memlcd_panel_vcom_tick(); }
 }
 
 static void memlcd_sleep(void) { s_sleeping = true; }            /* image gelée, plus de VCOM */
@@ -303,6 +307,7 @@ static void memlcd_wake(void)
     s_sleeping = false;
     s_dirty = true;                                                /* l'image revit tout de suite */
     if (s_disp && lvgl_port_lock(50)) { lv_obj_invalidate(lv_scr_act()); lvgl_port_unlock(); }
+    memlcd_update();   /* sans attendre le tick de la tâche (1 s à droite) : VCOM repart, image repoussée */
 }
 static void memlcd_noop(void) {}
 static void memlcd_show_dfu(void)

@@ -44,6 +44,9 @@ dans la PR/release.
       sort la première touche sans retard ni doublon, tenir une touche puis
       en presser une autre de la même rangée ne fantôme pas, une touche tenue
       au réveil ne se lit pas sur toute sa rangée ; dormir entre les touches :
+      lien TRRS : gauche en USB + câble → console gauche « etat=2 5V=1 » et
+      les ACK de la droite qui montent, « veille REFUSEE … lien=1 » ; câble
+      retiré → « etat=0 5V=0 » en moins d'une seconde ;
       au repos le HB de banc (CONFIG_PM_PROFILING=y) montre « light_sleep_counts » qui grimpe (~90 par
       10 s) et « light_sleep_reject_counts:0 », la frappe reste immédiate
 - [ ] Une nuit sur batterie : une moitié perd de l'ordre du centième de volt ;
@@ -87,7 +90,9 @@ dans la PR/release.
 - [ ] Écrans memory-LCD UI : gauche → bandeau « RF ▲ » (ou « USB ») + jauge +
       tension, nom de couche en lignes de 4 (ex. « DVO / RAK »), « L0 » ;
       droite → même bandeau, logo Niphargus net et centré ; changer de couche
-      (MO tenu) met le nom à jour en < 200 ms sans perdre de frappe
+      (MO tenu) met le nom à jour en < 200 ms sans perdre de frappe ; droite
+      servie à 1 s : aucune zone ne grise en 2 min (VCOM ~1 Hz), l'image revit
+      à la première touche après une veille
 - [ ] Première touche après veille : laisser la moitié s'endormir (15 s sans
       toucher), taper UNE touche brève → le caractère sort (pas avalé) et rien
       ne reste collé ; console : « reveil : 1 touche(s) capturee(s) ». À faire

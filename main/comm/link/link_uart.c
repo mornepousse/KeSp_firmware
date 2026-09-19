@@ -35,6 +35,7 @@
 #include "tinyusb.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include <string.h>
 
 static const char *TAG = "link";
@@ -49,6 +50,7 @@ static uint8_t          s_seq;
 static uint8_t          s_rx[LINK_RX_BUF];
 static uint16_t         s_rx_len;
 static volatile bool    s_active;
+static QueueHandle_t    s_uart_q;      /* événements du pilote UART : réveil sur réception */
 
 /* Compteurs de banc : on ne voit pas le fil, il faut le compter. */
 static uint32_t s_probes_tx, s_acks_tx, s_probes_rx, s_acks_rx, s_skips;
@@ -139,14 +141,26 @@ static void link_task(void *arg)
                      (unsigned)s_probes_tx, (unsigned)s_probes_rx,
                      (unsigned)s_acks_tx, (unsigned)s_acks_rx, (unsigned)s_skips);
         }
-        /* Au repos (5 V mort, pas d'USB) la machine n'a rien à faire : 100 ms
-         * de tick suffisent à voir arriver une sonde du pair (son délai de
-         * relance est 300 ms) ou un USB. À 10 ms, cette tâche sortait le
-         * processeur d'oisiveté 100 fois par seconde pour rien — et avec le
-         * DFS, chaque sortie rallume la PLL. En poignée de main ou lien établi,
-         * retour au tick de 10 ms (keepalive 200 ms, timeouts 200-500 ms). */
+        /* Au repos (5 V mort, pas d'USB) : bloquée sur la file d'événements
+         * UART — un octet du pair la réveille aussitôt (sa sonde arrive toutes
+         * les 300 ms en poignée de main) ; l'USB, événement humain, est sondé
+         * à LINK_REPOS_MS. À 10 ms cette tâche sortait le processeur
+         * d'oisiveté 100 fois par seconde pour rien ; à 100 ms de poll encore
+         * dix fois. En poignée de main ou lien établi : tick de LINK_TICK_MS
+         * (keepalive 200 ms, timeouts 200-500 ms). */
         bool repos = (s_hs.state == LINK_HS_IDLE) && !usb;
-        vTaskDelay(pdMS_TO_TICKS(repos ? LINK_REPOS_MS : LINK_TICK_MS));
+        uart_event_t ev;
+        if (s_uart_q && xQueueReceive(s_uart_q, &ev, pdMS_TO_TICKS(repos ? LINK_REPOS_MS : LINK_TICK_MS)) == pdTRUE) {
+            /* Débordement (TX flottante du pair endormi = flot de faux octets) :
+             * repartir propre plutôt que de décoder du bruit pendant des secondes. */
+            if (ev.type == UART_FIFO_OVF || ev.type == UART_BUFFER_FULL) {
+                uart_flush_input(BOARD_LINK_UART_NUM);
+                xQueueReset(s_uart_q);
+                s_rx_len = 0;
+            }
+        } else if (!s_uart_q) {
+            vTaskDelay(pdMS_TO_TICKS(repos ? LINK_REPOS_MS : LINK_TICK_MS));
+        }
     }
 }
 
@@ -175,7 +189,7 @@ void link_uart_start(void)
          * Le XTAL ne bouge jamais. */
         .source_clk = UART_SCLK_XTAL,
     };
-    ESP_ERROR_CHECK(uart_driver_install(BOARD_LINK_UART_NUM, 256, 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_driver_install(BOARD_LINK_UART_NUM, 256, 0, 8, &s_uart_q, 0));
     ESP_ERROR_CHECK(uart_param_config(BOARD_LINK_UART_NUM, &uc));
 #if BOARD_LINK_SWAP_TX_RX
     const int link_rx_pin = BOARD_LINK_TX;   /* swap : la vraie RX est sur TX */

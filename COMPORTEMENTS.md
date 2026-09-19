@@ -131,8 +131,8 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   100 ms ce tick, qui vide la FIFO de réception, avalait les appuis brefs de la
   droite en USB (régression b545e2aa, banc 2026-09-16) ; un changement le
   réveille aussitôt) ; la tâche de rafraîchissement de la droite à 100 ms (20 ms
-  touche tenue, notifiée par le balayage sur changement) ; le lien TRRS à
-  100 ms tant que le 5 V est mort et l'USB absent (10 ms en poignée de main) ;
+  touche tenue, notifiée par le balayage sur changement) ; le lien TRRS
+  ÉVÉNEMENTIEL au repos (voir « poignée de main 5 V ») ;
   le verrou USB du DFS suit les événements TinyUSB, plus de poll ; le
   battement de coeur à 10 s. Frappe, réparations (ACK ≥ 98 %) et réveil
   inchangés — c'est le smoke DFS qui le vérifie.
@@ -200,6 +200,13 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
 
 - [test:test_lost_probe_eventually_reprobes] Après une sonde perdue, la poignée
   de main 5 V re-sonde. Elle ne reste pas bloquée sur un échec.
+- [smoke:Éveil oisif] La tâche du lien TRRS est ÉVÉNEMENTIELLE au repos (5 V
+  mort, pas d'USB) : bloquée sur la file d'événements du pilote UART, un octet
+  du pair la réveille aussitôt ; l'USB, événement humain, n'est sondé qu'à 1 s
+  (`LINK_REPOS_MS`). Tick de 10 ms seulement en poignée de main ou lien
+  établi. Un débordement UART (TX flottante du pair endormi) vide et repart.
+  Banc 2026-09-19 : gauche USB + TRRS → `etat=2 5V=1`, 490 sondes / 485 ACK,
+  refus de veille `lien=1` ; débranché → `etat=0 5V=0` en < 1 s.
 
 ## Fusion — routage des moteurs
 
@@ -318,6 +325,10 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   la radio et cède si elle est occupée ; la mire de bring-up (cadre, pavé plein
   en HAUT-GAUCHE, damier 8 px) est nette et bien orientée ; l'image reste gelée
   en light sleep et aucun réveil n'est dû à l'écran.
+- [smoke:Écrans memory-LCD UI] L'écran de la droite est servi à 1 s (modèle :
+  jauge 30 s, dongle vu) ; l'entretien VCOM est horodaté (~1 Hz), indépendant
+  de la cadence de la tâche qui appelle update() ; au réveil l'image est
+  repoussée immédiatement, sans attendre le tick.
 - [smoke:Écrans memory-LCD UI] Les deux moitiés affichent en portrait : bandeau
   (route RF/USB, ▲ « dongle vu » COLLANT — une moitié est muette au repos, un
   indicateur daté clignoterait à chaque STATUS — qui ne tombe qu'après 3

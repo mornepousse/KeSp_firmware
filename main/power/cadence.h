@@ -44,13 +44,14 @@ CADENCE_REPOS_OK(KBD_RELAY_REPOS_MS);
 CADENCE_REPOS_OK(HALF_TX_REPOS_MS);
 
 /* Lien TRRS : tick de la machine d'états en poignée de main / lien établi ;
- * au repos (5 V mort, pas d'USB) la tâche attend. */
+ * au repos (5 V mort, pas d'USB) la tâche est bloquée sur la file UART et ne
+ * se réveille d'elle-même que pour sonder l'USB (événement humain). */
 #define LINK_TICK_MS             10u
-#define LINK_REPOS_MS            100u
+#define LINK_REPOS_MS            1000u
 CADENCE_REPOS_OK(LINK_REPOS_MS);
 
 /* Écran de la droite (tâche minimale : update() + VCOM). */
-#define MEMLCD_DROITE_PERIODE_MS 100u
+#define MEMLCD_DROITE_PERIODE_MS 1000u  /* modèle : jauge 30 s, dongle vu ; VCOM horodaté dans update() */
 CADENCE_REPOS_OK(MEMLCD_DROITE_PERIODE_MS);
 
 /* LVGL (esp_lvgl_port) : tick, rafraîchissement, sommeil max de la tâche. */

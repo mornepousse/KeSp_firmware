@@ -373,7 +373,7 @@ Commit : `perf(ecran droite): tâche à 1 s, VCOM horodaté, image repoussée au
 - Modify: `main/comm/link/link_uart.c:178` (`uart_driver_install(…, NULL, 0)` → file d'événements), `:149` (attente), déclaration `static QueueHandle_t s_uart_q;`
 - Modify: `main/power/cadence.h` (`LINK_REPOS_MS 1000u`)
 
-- [ ] **Step 1 : file d'événements**
+- [x] **Step 1 : file d'événements**
 
 ```c
 static QueueHandle_t s_uart_q;
@@ -381,7 +381,7 @@ static QueueHandle_t s_uart_q;
 ESP_ERROR_CHECK(uart_driver_install(BOARD_LINK_UART_NUM, 256, 0, 8, &s_uart_q, 0));
 ```
 
-- [ ] **Step 2 : la tâche bloque sur la file**
+- [x] **Step 2 : la tâche bloque sur la file**
 
 Remplacer `vTaskDelay(repos ? pdMS_TO_TICKS(100) : 1);` par :
 ```c
@@ -395,7 +395,7 @@ Remplacer `vTaskDelay(repos ? pdMS_TO_TICKS(100) : 1);` par :
 ```
 La lecture (`uart_read_bytes`, l. 89) reste en tête de boucle avec timeout 0 : elle draine ce que l'événement annonce. Si `ev.type == UART_FIFO_OVF || ev.type == UART_BUFFER_FULL` : `uart_flush_input` + `xQueueReset(s_uart_q)` (bruit d'une TX flottante).
 
-- [ ] **Step 3 : cadence et banc**
+- [x] **Step 3 : cadence et banc**
 
 `cadence.h` : `LINK_REPOS_MS 1000u`. Banc : brancher le TRRS entre les deux moitiés, gauche en USB (source) → « lien monte », les deux switches ferment (`etat=2 5V=1` dans le bilan `link:`), il tient 2 min ; débrancher → repli. Sans TRRS, HB : `light_sleep_counts` inchangé ou meilleur. Contrat :
 ```
