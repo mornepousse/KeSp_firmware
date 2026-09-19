@@ -196,6 +196,17 @@ du silence, pas une erreur. Datasheets dans lemia (docs 6844, 6845).
 ⚠ **Batterie du Niphargus** (`main/power/batt_sense.c`, ADC2 GPIO13, 1M/1M) :
 la droite remonte un STATUS toutes les 30 s ; la tension AFFICHÉE est
 stabilisée 30 s (une hystérésis autour de l'affiché avait figé 4,2 V une nuit).
+**Niveaux de batterie (2026-09-19)** : `batt_niveau_step` (pur, hystérésis
+0,1 V) — FAIBLE < 3,5 V : bordure de jauge épaissie, plus de 5 V pour le TRRS ;
+CRITIQUE < 3,3 V : veille légère à 5 s. Pas de clignotement, pas d'arrêt forcé
+(le DW01A coupe à 2,5 V). Éprouver au banc en décalant `BATT_FAIBLE_DV` /
+`BATT_CRITIQUE_DV` au-dessus de la tension réelle — sans le commiter.
+**Le moteur du dongle rejoue chaque transition** (`comm/rf/fusion_file.h`,
+2026-09-19) : file de 8 états fusionnés, plus de « dernier état gagne » ;
+`transitions_ecrasees` ne compte plus que le débordement (0 en une minute de
+frappe rapide, 536 par soirée avant). Plus aucun `[NON GARDÉ]` au contrat.
+**Une règle de présence USB** (`usb_presence_brut`) pour le routage, le 5 V
+TRRS et le veto de veille : pont VBUS si `KASE_VBUS_SENSE`, sinon `tud_ready`.
 
 Reste ouvert (2026-09-19) :
 - le driver du trackpad (matériel). Sa logique pure — parseur de trame
@@ -208,8 +219,8 @@ Reste ouvert (2026-09-19) :
 - la **première touche légère perdue sur la gauche** après une longue pause :
   réveil GPIO reçu, lignes déjà basses 13 ms plus tard, touche jamais vue en
   156 ms, l'appui suivant sur la même ligne est capturé — contact < 13 ms,
-  piste switch (l'instrumentation de `veille.c`/`matrix_scan.c` reste en
-  place pour ça ; à ranger sous `KASE_VEILLE_DIAG` une fois réglé).
+  piste switch (instrumentation de `veille.c`/`matrix_scan.c` sous
+  `KASE_VEILLE_DIAG`, à activer dans le sdkconfig du build de banc).
 Brochage : `docs/NIPHARGUS_V2_HARDWARE.md` (source de vérité, vérifié à la netlist).
 
 ## Board variants

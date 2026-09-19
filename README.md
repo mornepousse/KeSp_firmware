@@ -70,6 +70,10 @@ divider, calibrated, plausibility window 2.5–4.5 V); the right reports every
 30 s inside its STATUS frame, the dongle caches both halves per side
 (`KS_CMD_BATTERY`). The displayed voltage settles for 30 s before changing, so
 ADC jitter does not redraw the panel and a slow overnight drift still shows.
+Since 2026-09-19 the gauge has two thresholds with hysteresis: **low** (< 3.5 V)
+thickens the gauge border and stops the half from offering 5 V over the TRRS
+link; **critical** (< 3.3 V) also pulls light sleep down to 5 s. No blinking,
+no forced shutdown — the DW01A does that at 2.5 V.
 
 **Sleep** is a hybrid: light sleep after 15 s (~244 µA, state kept, ~1 ms
 wake — it was a minute until 2026-09-15, but an idle ESP32-S3 at 160 MHz draws
@@ -133,6 +137,14 @@ hardware through a small operations table, so the invariants are host-tested
 against a fake recorder: the sequence of hardware calls is the oracle. The
 refactor immediately paid for itself by exposing a listen address that had
 only ever been right by accident.
+
+**The dongle engine replays every transition (2026-09-19).** It used to play
+only the *current* fused state each 10 ms cycle, so a press and release
+landing in the same cycle melted into nothing; a counter added on the 15th
+said 536 such overwrites in one evening. The engine now queues each received
+state (eight deep) and plays them in order — the same minute of fast
+two-handed typing afterwards: 699 frames, zero overwrites. That was the last
+behaviour in the contract still marked unguarded.
 
 **The trackpad still has no hardware driver.** Its pure logic — the IQS5xx
 frame parser, the gesture→HID mapping, the accel config — exists and is
