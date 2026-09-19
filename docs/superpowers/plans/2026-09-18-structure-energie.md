@@ -43,7 +43,7 @@ Les tâches 1-2 et 3-5 sont indépendantes ; 7 est le gros morceau.
 **État au 2026-09-19 soir : Tasks 1-7 FAITES, prouvées au banc sur les deux
 moitiés, poussées (`14af8c3e`).** Task 8 attend la résolution de la « première
 touche légère » (contact < 13 ms observé ce soir sur la gauche, `broches=0x100`,
-lignes déjà basses à la capture). Task 9 : plan séparé à écrire.
+lignes déjà basses à la capture). Task 9 : plan écrit → `docs/superpowers/plans/2026-09-19-radio-owner.md`.
 
 ---
 
