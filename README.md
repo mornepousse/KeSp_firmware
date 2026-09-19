@@ -121,6 +121,19 @@ The right half's screen task went from 100 ms to 1 s, the TRRS link task
 blocks on the UART event queue instead of polling. All of it proven on both
 halves: wake with the key captured, 100 % ACK, link up and down, screens intact.
 
+**The radio has one owner (2026-09-19).** The three "wrong channel, in silence"
+incidents and the receive FIFO flushed on the way back from an excursion were
+all ownership bugs: two modules each writing the chip's configuration. Each
+half's nRF24 now belongs to `comm/rf/radio_owner.c` alone — one mode at a time
+(PTX to a target, PRX listening to a target, off), one lock around every
+transaction, an excursion that drains the FIFO into the consumer *before*
+leaving, a wake that re-arms the mode. The two halves' modules became thin
+policies that never touch `rf_driver` or a mutex. The owner talks to the
+hardware through a small operations table, so the invariants are host-tested
+against a fake recorder: the sequence of hardware calls is the oracle. The
+refactor immediately paid for itself by exposing a listen address that had
+only ever been right by accident.
+
 **The trackpad still has no hardware driver.** Its pure logic — the IQS5xx
 frame parser, the gesture→HID mapping, the accel config — exists and is
 host-tested; what is missing is the I2C + RDY bring-up on the left half and

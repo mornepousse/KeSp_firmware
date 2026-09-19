@@ -68,12 +68,23 @@ direct) est retiré. Les dossiers `build_*_fusion` n'existent plus : les
 binaires sortent de `build_niphar_left`, `build_niphar_right`, `build_kase_dongle`.
 
 ⚠ **Une puce, un propriétaire.** La radio de chaque moitié appartient à
-`half_link` seul ; `kbd_relay_tx` la lui emprunte via `half_link_excursion_tx`.
-Deux modules qui l'initialisaient chacun de leur côté ont fait écouter la gauche
-sur le mauvais canal **trois fois**, toujours en silence. `rf_driver` refuse
-désormais de le taire (`rf_claim_chip`, revendication par broche CSN), et un
-mutex sérialise la tâche d'écoute et l'excursion — un propriétaire unique ne
-suffit pas s'il a deux bouches.
+`comm/rf/radio_owner.c` (2026-09-19) et à lui seul : un mode à la fois (PTX
+vers une cible, PRX à l'écoute d'une cible, éteinte), un verrou sur toute
+transaction, l'excursion qui **vide la FIFO dans le consommateur avant** de
+partir, le réveil qui **réarme** le mode, le prêt du bus à l'écran. `half_link.c`
+(la droite) et `kbd_relay_tx.c` (la gauche) sont des politiques : elles ne
+voient ni `rf_driver` ni mutex, elles demandent `radio_mode_set`, `radio_send`,
+`radio_excursion_tx`, `radio_pair_round`. Le propriétaire parle au matériel par
+une table d'opérations : les invariants sont **testés host contre un faux
+enregistreur** (`test_radio_owner`, la séquence d'appels est l'oracle).
+Historique : deux modules qui initialisaient la puce chacun de leur côté ont
+fait écouter la gauche sur le mauvais canal **trois fois**, en silence
+(`rf_claim_chip` le dit désormais tout haut) ; et le refactor a révélé que
+l'écoute USB de la gauche partait sur l'adresse dérivée du set_id et n'était
+« corrigée » que par la restauration de la première excursion — le
+propriétaire restaure fidèlement, donc la cible doit être juste dès le départ
+(`'KaSe'.03`). Toute nouvelle écriture de config de la puce passe par
+`radio_mode_set`/`radio_rearmer`, jamais par `rf_driver_*` depuis une politique.
 
 ⚠ **« Émettre sur changement » et « relâcher sur silence » ne composent pas.**
 Ce couple a produit trois pannes distinctes le 2026-09-08, à trois maillons de
@@ -290,7 +301,9 @@ main/
 │   │   ├── cdc_binary_cmds.c    # All command handlers
 │   │   └── cdc_ota.c            # OTA binary helpers
 │   ├── rf/               # nRF24 — relais dongle, lien inter-moitiés
-│   │   ├── rf_driver.c          # SPI + ESB, registres nRF24
+│   │   ├── rf_driver.c          # SPI + ESB, registres nRF24 (matériel)
+│   │   ├── radio_owner.c        # la puce des moitiés : UN propriétaire (mode, verrou, excursion, sommeil)
+│   │   ├── keymap_pull.c        # gauche : tirage de la keymap du dongle par ACK payload
 │   │   ├── rf_packet.h          # trames + géométrie de demi-matrice (4×7)
 │   │   ├── rf_slot.h            # slots dongle + PLAN DE CANAUX 2,4 GHz
 │   │   ├── kbd_relay_tx.c       # la GAUCHE : brut → dongle, écoute USB de la droite, sync keymap

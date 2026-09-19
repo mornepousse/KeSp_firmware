@@ -37,6 +37,8 @@
 
 2 et 3 sont indépendantes entre elles ; faire la droite d'abord (plus simple, un seul mode).
 
+**Exécuté le 2026-09-19 : les 6 tâches faites et prouvées au banc** (Task 5 absorbée par 2-3 : les tâches d'appairage touchaient `s_radio`, `radio_pair_round` est arrivé avec elles).
+
 ---
 
 ### Task 1 : `radio_owner` — le cœur, testé host
@@ -645,19 +647,19 @@ Le veto `VEILLE_VETO_SYNC` est posé/levé dans ce module. `kbd_relay_tx.c` appe
 - Test host : `test_pair_round_revient_a_la_cible` (trace : `…pair_listen;ptx(68);`).
 - Modify : les deux tâches d'appairage appellent `radio_pair_round`.
 
-- [ ] Step 1 : test rouge, implémentation, vert, mordant (retirer le retour → rouge).
-- [ ] Step 2 : compiler les deux moitiés ; `grep -rn "rf_driver_" main/comm/rf/kbd_relay_tx.c main/comm/rf/half_link.c` → **vide**.
-- [ ] Step 3 : banc : **pas de désappairage des cartes en service** (set_id en NVS, jamais d'erase). Vérification par revue + test host ; si une carte de rechange existe : `KS_CMD_RF_PAIR_START` sur le dongle + carte vierge → « appairage : ACK set_id=… — sauvegarde + reboot ».
-- [ ] Step 4 : contrat `[test:test_radio_owner]` (ajouter « un tour d'appairage revient à la cible courante ») ; commit `refactor(rf): l'appairage passe par radio_owner — plus aucun rf_driver_* hors du propriétaire sur les moitiés`.
+- [x] Step 1 : test rouge, implémentation, vert, mordant (retirer le retour → rouge).
+- [x] Step 2 : compiler les deux moitiés ; `grep -rn "rf_driver_" main/comm/rf/kbd_relay_tx.c main/comm/rf/half_link.c` → **vide**.
+- [x] Step 3 : banc : **pas de désappairage des cartes en service** (set_id en NVS, jamais d'erase). Vérification par revue + test host ; si une carte de rechange existe : `KS_CMD_RF_PAIR_START` sur le dongle + carte vierge → « appairage : ACK set_id=… — sauvegarde + reboot ».
+- [x] Step 4 : contrat `[test:test_radio_owner]` (ajouter « un tour d'appairage revient à la cible courante ») ; commit `refactor(rf): l'appairage passe par radio_owner — plus aucun rf_driver_* hors du propriétaire sur les moitiés`.
 
 ---
 
 ### Task 6 : Docs
 
-- [ ] `CLAUDE.md` « ⚠ Une puce, un propriétaire » : réécrire — la radio de chaque moitié appartient à `comm/rf/radio_owner.c` ; `half_link.c` (droite) et `kbd_relay_tx.c` (gauche) sont des politiques qui ne voient ni `rf_driver` ni mutex ; les invariants sont dans `test_radio_owner` ; toute nouvelle écriture de config de la puce passe par `radio_mode_set`/`radio_rearmer`. Retirer la mention de `half_link_excursion_tx` (n'existe plus). Arbre : ajouter `radio_owner.c`, `keymap_pull.c`.
-- [ ] `README.md` : une phrase dans le paragraphe « Power policy given a home » ou un nouveau court paragraphe « The radio has one owner ».
-- [ ] Mémoire : `fusion-dongle-et-usb-gauche.md` — remplacer « La radio de la gauche bascule dynamiquement PTX↔PRX (`rf_driver_set_ptx`/`rf_driver_rearm_rx` dans `kbd_relay_refresh_cb`) » par la référence à `radio_mode_set`.
-- [ ] Commit `docs: la radio des moitiés a un propriétaire (radio_owner)`, push.
+- [x] `CLAUDE.md` « ⚠ Une puce, un propriétaire » : réécrire — la radio de chaque moitié appartient à `comm/rf/radio_owner.c` ; `half_link.c` (droite) et `kbd_relay_tx.c` (gauche) sont des politiques qui ne voient ni `rf_driver` ni mutex ; les invariants sont dans `test_radio_owner` ; toute nouvelle écriture de config de la puce passe par `radio_mode_set`/`radio_rearmer`. Retirer la mention de `half_link_excursion_tx` (n'existe plus). Arbre : ajouter `radio_owner.c`, `keymap_pull.c`.
+- [x] `README.md` : une phrase dans le paragraphe « Power policy given a home » ou un nouveau court paragraphe « The radio has one owner ».
+- [x] Mémoire : `fusion-dongle-et-usb-gauche.md` — remplacer « La radio de la gauche bascule dynamiquement PTX↔PRX (`rf_driver_set_ptx`/`rf_driver_rearm_rx` dans `kbd_relay_refresh_cb`) » par la référence à `radio_mode_set`.
+- [x] Commit `docs: la radio des moitiés a un propriétaire (radio_owner)`, push.
 
 ---
 
