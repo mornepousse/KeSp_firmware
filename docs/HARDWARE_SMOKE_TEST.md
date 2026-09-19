@@ -87,7 +87,7 @@ dans la PR/release.
 - [ ] Batterie faible : builder une moitié avec `BATT_FAIBLE_DV`/`BATT_CRITIQUE_DV`
       décalés au-dessus de la tension réelle (banc, à ne pas commiter) → console
       « batterie : FAIBLE » puis, en critique, « light sleep » à ~5 s ; écran :
-      tension / « BAT » en alternance 2 s, jauge lisible à bordure épaisse ;
+      tension inchangée, jauge lisible à bordure épaisse (l'alerte) ;
       gauche en USB + TRRS → « etat=0 5V=0 », 0 sonde ; seuils réels reflashés
       → le lien remonte
 - [ ] Jauge batterie : console au boot « batt: jauge : NN dV » avec NN plausible
