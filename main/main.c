@@ -19,6 +19,7 @@
 #include "veille.h"
 #endif
 #include "pm_dfs.h"   /* vide sans CONFIG_PM_ENABLE */
+#include "cadence.h"  /* HB_PERIODE_MS, MEMLCD_DROITE_PERIODE_MS */
 #if CONFIG_PM_PROFILING
 #include "esp_pm.h"
 #endif
@@ -118,7 +119,7 @@ static void cpu_time_logger_task(void *arg) {
     /* 10 s : ce battement est un témoin de banc (inactif, dormi, route), pas
      * un service ; à 2 s il coûtait une ligne série et une sortie d'oisiveté
      * toutes les deux secondes. Assez pour lire une nuit. */
-    vTaskDelay(pdMS_TO_TICKS(10000));
+    vTaskDelay(pdMS_TO_TICKS(HB_PERIODE_MS));
   }
 }
 #endif
@@ -131,7 +132,7 @@ static void memlcd_slave_display_task(void *arg) {
   (void)arg;
   const display_backend_t *be = display_get_backend();
   if (!be || !be->init()) { ESP_LOGW(TAG, "ecran droite : init KO"); vTaskDelete(NULL); return; }
-  for (;;) { be->update(); vTaskDelay(pdMS_TO_TICKS(100)); }
+  for (;;) { be->update(); vTaskDelay(pdMS_TO_TICKS(MEMLCD_DROITE_PERIODE_MS)); }
 }
 #endif
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD

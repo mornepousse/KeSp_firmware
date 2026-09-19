@@ -20,6 +20,7 @@
 #endif
 #include "esp_attr.h"
 #include "esp_timer.h"
+#include "cadence.h"
 #if CONFIG_PM_PROFILING
 #include "esp_pm.h"
 #endif
@@ -558,7 +559,7 @@ static void half_link_tx_refresh_task(void *arg)
         taskEXIT_CRITICAL(&s_etat_mux);
         /* Un changement (callback de scan) notifie la tâche : la réparation
          * bornée part dans la foulée, pas au prochain tick de 100 ms. */
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(tenu ? 20 : 100));
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(tenu ? HALF_TX_TENU_MS : HALF_TX_REPOS_MS));
     }
 }
 

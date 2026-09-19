@@ -16,6 +16,7 @@
  * 602 ms, radio à 652 ms). L'attachement est donc DIFFÉRÉ au premier update()
  * qui trouve le bus ; LVGL, lui, est construit tout de suite. */
 #include "memlcd_backend.h"
+#include "cadence.h"   /* LVGL_* */
 #include "memlcd_panel.h"
 #include "status_display.h"
 #include "board.h"
@@ -221,7 +222,7 @@ static bool lvgl_pret(void)
          * de fréquence (DFS). Un changement de modèle est poussé au tick
          * suivant de update() (100 ms), inchangé. */
         const lvgl_port_cfg_t cfg = { .task_priority = 2, .task_stack = 6144, .task_affinity = 0,
-                                      .task_max_sleep_ms = 500, .timer_period_ms = 50 };
+                                      .task_max_sleep_ms = LVGL_TASK_MAX_SLEEP_MS, .timer_period_ms = LVGL_TICK_MS };
         if (lvgl_port_init(&cfg) != ESP_OK) { ESP_LOGE(TAG, "lvgl_port_init KO"); return false; }
     }
     if (!lvgl_port_lock(200)) return false;
@@ -234,7 +235,7 @@ static bool lvgl_pret(void)
      * rien ne change : 33 réveils par seconde qui interdiraient le light sleep
      * automatique. 200 ms suffisent à un écran d'état (update() invalide toutes
      * les 100 ms au plus). */
-    if (s_disp) { lv_timer_t *t = _lv_disp_get_refr_timer(s_disp); if (t) lv_timer_set_period(t, 200); }
+    if (s_disp) { lv_timer_t *t = _lv_disp_get_refr_timer(s_disp); if (t) lv_timer_set_period(t, LVGL_REFR_MS); }
     lvgl_port_unlock();
     return s_disp != NULL;
 }

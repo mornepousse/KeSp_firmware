@@ -244,7 +244,7 @@ git commit -am "refactor(rf): retrait du chemin pré-fusion HALF_LINK_RX — hal
 #define CADENCE_REPOS_OK(ms) _Static_assert((ms) >= CADENCE_REPOS_MIN_MS, #ms " < 3 ticks : tue le light sleep automatique")
 ```
 
-- [ ] **Step 1 : test rouge**
+- [x] **Step 1 : test rouge**
 
 `test/test_cadence.c` :
 ```c
@@ -286,11 +286,11 @@ void test_cadence(void)
 ```
 Ajouter `test_cadence.c` dans `test/CMakeLists.txt` (après `test_keyboard_cadence.c`) et `extern void test_cadence(void);` + appel dans `test/test_main.c`.
 
-- [ ] **Step 2 : rouge**
+- [x] **Step 2 : rouge**
 
 `./scripts/check.sh --fast` → rouge (`cadence.h` absent).
 
-- [ ] **Step 3 : cadence.h**
+- [x] **Step 3 : cadence.h**
 
 Créer `main/power/cadence.h` avec les constantes de **Interfaces**, un commentaire d'en-tête (règle des 3 ticks, leçon du 2026-09-16 : « mode SLEEP 92 % et 0 sommeil ») et, après chaque constante `*_REPOS_MS`/`*_PERIODE_MS`/LVGL, la garde :
 ```c
@@ -304,11 +304,11 @@ CADENCE_REPOS_OK(LVGL_REFR_MS);
 ```
 Puis retirer les `#define` doublons de `keyboard_cadence.h` et `kbd_relay_tx.h` (remplacés par `#include "cadence.h"`), et substituer les littéraux listés dans **Files**. `main/CMakeLists.txt` : `power/` est-il dans les `INCLUDE_DIRS` ? (`pm_dfs.h` est inclus par `main.c`, donc oui.)
 
-- [ ] **Step 4 : vert, puis prouver que la garde mord**
+- [x] **Step 4 : vert, puis prouver que la garde mord**
 
 `./scripts/check.sh --fast` → vert. Puis, transitoirement, `#define KBD_RELAY_REPOS_MS 10u` → `idf.py -B build_niphar_left … build` doit **échouer** sur la `_Static_assert` ; rétablir 100u.
 
-- [ ] **Step 5 : contrat, commit**
+- [x] **Step 5 : contrat, commit**
 
 `COMPORTEMENTS.md`, à côté de la ligne `[test:test_keyboard_cadence]` :
 ```

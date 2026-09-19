@@ -1,6 +1,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include "cadence.h"   /* KBD_CADENCE_* */
 
 /* Cadence de la tâche clavier (logique pure, testée host).
  *
@@ -18,11 +19,6 @@
  * minuteries — d'où la fenêtre d'activité, plus large que la plus longue
  * d'entre elles. */
 
-#define KBD_CADENCE_ACTIF_MS   10u
-#define KBD_CADENCE_REPOS_MS   100u
-/* Plus long que LEADER_TIMEOUT_MS (1000) : une minuterie démarrée par la
- * dernière frappe expire dans la fenêtre. */
-#define KBD_CADENCE_FENETRE_MS 1500u
 
 static inline uint32_t kbd_cadence_attente_ms(uint32_t now_ms, uint32_t derniere_activite_ms,
                                               bool usb_present, bool test_matrice)

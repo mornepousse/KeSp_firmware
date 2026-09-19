@@ -23,6 +23,7 @@
  * son switch. link_uart_active() sert donc de verrou à la veille, via le
  * paramètre `bloque` de veille_pas(). Un appareil branché ne dort pas. */
 #include "link_uart.h"
+#include "cadence.h"    /* LINK_TICK_MS / LINK_REPOS_MS */
 #include "link_frame.h"
 #include "link_handshake.h"
 #include "board.h"
@@ -39,7 +40,6 @@
 static const char *TAG = "link";
 
 #define LINK_BAUD        115200
-#define LINK_TICK_MS     10       /* 1 tick FreeRTOS à 100 Hz */
 #define LINK_RX_BUF      64
 
 static link_hs_t        s_hs;
@@ -146,7 +146,7 @@ static void link_task(void *arg)
          * DFS, chaque sortie rallume la PLL. En poignée de main ou lien établi,
          * retour au tick de 10 ms (keepalive 200 ms, timeouts 200-500 ms). */
         bool repos = (s_hs.state == LINK_HS_IDLE) && !usb;
-        vTaskDelay(repos ? pdMS_TO_TICKS(100) : 1);   /* LINK_TICK_MS = 1 tick */
+        vTaskDelay(pdMS_TO_TICKS(repos ? LINK_REPOS_MS : LINK_TICK_MS));
     }
 }
 

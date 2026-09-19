@@ -54,6 +54,7 @@ extern void test_fusion_route(void);
 extern void test_matrix_bitmap(void);
 extern void test_veille(void);
 extern void test_keyboard_cadence(void);
+extern void test_cadence(void);
 extern void test_rf_status_cadence(void);
 extern void test_keymap_blob_size(void);
 extern void test_half_col_map(void);
@@ -126,6 +127,7 @@ int main(void) {
     test_matrix_bitmap();
     test_veille();
     test_keyboard_cadence();
+    test_cadence();
     test_rf_status_cadence();
     test_keymap_blob_size();
     test_half_col_map();

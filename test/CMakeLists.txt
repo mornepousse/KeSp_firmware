@@ -75,6 +75,7 @@ add_executable(test_runner
     test_matrix_bitmap.c
     test_veille.c
     test_keyboard_cadence.c
+    test_cadence.c
     test_rf_status_cadence.c
     test_keymap_blob_size.c
     test_half_col_map.c
@@ -109,6 +110,7 @@ target_include_directories(test_runner PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/rf
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/link
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/input
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/power
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/ble
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/led
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/security

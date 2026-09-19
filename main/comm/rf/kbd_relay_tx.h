@@ -53,8 +53,7 @@ static inline bool kbd_refresh_step(kbd_refresh_t *r)
  * c'est ce tick qui vide la FIFO de réception (3 trames) ; à 100 ms l'appui et
  * le relâchement d'une touche de la droite tombaient dans le même tour et seul
  * le relâchement survivait (banc 2026-09-16). 100 ms sinon (repos, DFS). */
-#define KBD_RELAY_REFRESH_MS 10
-#define KBD_RELAY_REPOS_MS   100
+#include "cadence.h"   /* KBD_RELAY_REFRESH_MS / KBD_RELAY_REPOS_MS */
 static inline uint32_t kbd_relay_cadence_ms(bool reparation, bool tenu, bool sync, bool ecoute_usb)
 {
     return (reparation || tenu || sync || ecoute_usb) ? KBD_RELAY_REFRESH_MS : KBD_RELAY_REPOS_MS;

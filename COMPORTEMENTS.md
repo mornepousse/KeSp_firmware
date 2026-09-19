@@ -136,6 +136,11 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   le verrou USB du DFS suit les événements TinyUSB, plus de poll ; le
   battement de coeur à 10 s. Frappe, réparations (ACK ≥ 98 %) et réveil
   inchangés — c'est le smoke DFS qui le vérifie.
+- [test:test_cadence] Toutes les cadences des moitiés vivent dans
+  `power/cadence.h` ; chaque cadence de REPOS est gardée par une
+  `_Static_assert` ≥ 30 ms (3 ticks à 100 Hz, seuil du light sleep
+  automatique) — une attente périodique plus courte ne compile pas (vérifié :
+  10 ms → « static assertion failed »). Les cadences ACTIVES restent ≤ 20 ms.
 - [test:test_keyboard_cadence] La tâche clavier tourne à 10 ms tant qu'une
   minuterie peut courir — moins de 1,5 s depuis la dernière frappe (couvre
   tap-hold et tap-dance 200 ms, leader 1000 ms), hôte USB présent, mode test
