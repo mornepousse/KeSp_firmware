@@ -11,23 +11,22 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #if CONFIG_KASE_VEILLE
-#include "veille.h"
+#include "veille_task.h"   /* hook radio + suffixe du battement de coeur */
 #if CONFIG_KASE_LINK_WIRE
-#include "link_uart.h"
+#include "link_uart.h"     /* suffixe HB : lien */
 #endif
-#include "matrix_scan.h"
-#include "tinyusb.h"
+#endif
+#if CONFIG_KASE_BATT_SENSE
+#include "batt_sense.h"    /* suffixe HB : batt */
 #endif
 #include "esp_attr.h"
 #include "esp_timer.h"
 #include "cadence.h"
-#if CONFIG_PM_PROFILING
-#include "esp_pm.h"
-#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include <string.h>
+#include <stdio.h>
 
 static const char *TAG = "half_link";
 
@@ -186,6 +185,13 @@ bool half_link_tx_init(void)
         return false;
     }
     ESP_LOGI(TAG, "TX pret : ch=0x%02X addr=KaSe.%02X", cfg.channel, cfg.addr_suffix);
+#if CONFIG_KASE_VEILLE
+    /* Veille (B7) : la radio s'éteint au sommeil (900 nA au lieu de 26 µA en
+     * standby-I, verrou tenu) et se rallume AVANT la capture au réveil — ordre
+     * garanti par l'enregistrement en premier (veille_task.h). */
+    static const veille_hook_t hook = { "radio", half_link_radio_sleep, half_link_radio_wake };
+    veille_hook_enregistrer(&hook);
+#endif
 
 #if CONFIG_KASE_DONGLE_FUSION
     if (fusion_unpaired) {
@@ -476,78 +482,8 @@ static void half_link_tx_refresh_task(void *arg)
 #if CONFIG_KASE_BATT_SENSE
         half_link_batt_tick();   /* STATUS lent de la jauge ; pas une activité */
 #endif
-#if CONFIG_KASE_VEILLE
-        /* La moitié droite n'a pas de tâche clavier : cette tâche, qui tourne
-         * déjà à 20 ms, porte aussi sa veille. Elle dort indépendamment de la
-         * gauche et se réveille sur SA matrice — la radio étant éteinte, aucune
-         * des deux ne peut réveiller l'autre. */
-        {
-            uint32_t inactif = (uint32_t)(esp_timer_get_time() / 1000)
-                             - get_last_activity_time_ms();
-            /* tud_ready(), PAS tud_mounted() : sur l'ESP32-S3, mounted reste vrai
-             * après un débranchement à chaud — aucun événement de déconnexion —
-             * et la veille restait bloquée jusqu'au prochain redémarrage. ready
-             * retombe dès que le bus se suspend (~3 ms après le débranchement),
-             * c'est le signal qu'utilise déjà le routage USB/RF. Contrepartie
-             * assumée : un hôte qui s'endort câble branché laisse aussi le
-             * clavier dormir ; il se ré-énumère au réveil. Constaté au banc le
-             * 2026-09-11 : sept minutes sur batterie sans jamais dormir. */
-            /* PAS de verrou USB sur la moitié droite, contrairement à la gauche.
-             *
-             * Son USB n'est qu'un port CDC que personne n'ouvre : Linux le met
-             * en autosuspend après deux secondes, et tud_ready() retombe à
-             * faux. La droite se croyait alors sur batterie, s'endormait à 60 s
-             * d'inactivité, coupait sa PHY USB — l'hôte voyait un débranchement
-             * — et sa radio avec : « je perds le clavier droit si je le branche
-             * en USB ». Constaté au banc le 2026-09-11, journal noyau à l'appui
-             * (énumération, puis disconnect 66 s plus tard).
-             *
-             * tud_mounted() ne vaut pas mieux : il reste vrai après un vrai
-             * débranchement. Il n'y a pas de bon signal sans pont VBUS. Mais
-             * ici il n'en faut pas : rien sur ce port ne justifie de rester
-             * éveillé, dormir ne coûte qu'un port CDC dont personne ne se sert,
-             * et le réveil sur la matrice est le même que sur batterie.
-             *
-             * La gauche garde son verrou : elle EST le clavier HID, et un HID
-             * n'est pas autosuspendu. */
-            bool lien = false;
-#if CONFIG_KASE_LINK_WIRE
-            /* Une moitié en charge par le TRRS reste éveillée : endormie, elle
-             * cesserait de répondre aux sondes et le pair rouvrirait son 5 V. */
-            lien = link_uart_active();
-#endif
-            veille_diag(inactif, false, lien);
-            /* Battement de coeur de la DROITE (elle n'a pas celui de main.c) :
-             * toutes les 10 s, inactivité et bilan de sommeil. Une nuit à 0,2 V
-             * perdus (2026-09-15, droite, 4,02 V au voltmètre) n'a laissé
-             * aucune trace faute de ce chiffre. */
-            {
-                static uint32_t dernier_hb_ms;
-                uint32_t now_hb = (uint32_t)(esp_timer_get_time() / 1000);
-                if ((uint32_t)(now_hb - dernier_hb_ms) >= 10000u) {
-                    dernier_hb_ms = now_hb;
-                    uint32_t dodo_n = 0, dodo_ms = 0;
-                    veille_bilan(&dodo_n, &dodo_ms);
-#if CONFIG_PM_PROFILING
-                    esp_pm_dump_locks(stdout);   /* banc : sommeils automatiques, temps par mode */
-                    esp_timer_dump(stdout);      /* banc : qui arme des alarmes trop rapprochées */
-#if CONFIG_FREERTOS_USE_TRACE_FACILITY && CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
-                    { static char stats[1024]; vTaskGetRunTimeStats(stats); printf("Run time stats:\n%s", stats); }
-#endif
-#endif
-                    ESP_LOGW(TAG, "HB up=%lus inactif=%lus dormi=%lus/%lu lien=%d batt=%u dV",
-                             (unsigned long)(now_hb / 1000), (unsigned long)(inactif / 1000),
-                             (unsigned long)(dodo_ms / 1000), (unsigned long)dodo_n, (int)lien,
-#if CONFIG_KASE_BATT_SENSE
-                             (unsigned)batt_sense_dv());
-#else
-                             0u);
-#endif
-                }
-            }
-            veille_pas(inactif, lien);
-        }
-#endif
+        /* La veille (B7) n'est plus évaluée ici : power/veille_task.c, une tâche
+         * unique aux deux moitiés ; ce module a enregistré son hook radio. */
         /* 20 ms tant qu'une touche est tenue (réaffirmation à 100 ms, réparation
          * bornée), 100 ms au repos : à 20 ms permanents cette tâche sortait le
          * processeur d'oisiveté 50 fois par seconde pour un memcmp — et avec le
@@ -604,3 +540,22 @@ void half_link_radio_wake(void)
 #endif
     if (s_tx_radio_mux) xSemaphoreGive(s_tx_radio_mux);
 }
+
+#if CONFIG_KASE_VEILLE
+/* Suffixe de rôle du battement de coeur (veille_task.h) : la droite dit si le
+ * lien TRRS est actif et sa tension. */
+const char *veille_hb_suffixe(void)
+{
+    static char buf[32];
+    int lien = 0;
+#if CONFIG_KASE_LINK_WIRE
+    lien = link_uart_active();
+#endif
+    unsigned batt = 0;
+#if CONFIG_KASE_BATT_SENSE
+    batt = batt_sense_dv();
+#endif
+    snprintf(buf, sizeof buf, " lien=%d batt=%u dV", lien, batt);
+    return buf;
+}
+#endif

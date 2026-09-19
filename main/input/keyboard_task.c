@@ -3,10 +3,7 @@
 #include "keyboard_task.h"
 #include "keyboard_cadence.h"
 #if CONFIG_KASE_VEILLE
-#include "veille.h"
-#if CONFIG_KASE_LINK_WIRE
-#include "link_uart.h"
-#endif
+#include "veille_task.h"   /* veto TEST (mode test matrice) */
 #endif
 #include "tinyusb.h"
 #include "key_processor.h"
@@ -95,6 +92,9 @@ void vTaskKeyboard(void *pvParameters)
             uint32_t now = esp_timer_get_time() / 1000;
             if (now - matrix_test_last_activity_ms > 30000) {
                 matrix_test_mode = false;
+#if CONFIG_KASE_VEILLE
+                veille_veto(VEILLE_VETO_TEST, false);
+#endif
                 ESP_LOGW(TAG, "matrix test mode timeout — auto-exit");
             }
         }
@@ -174,34 +174,8 @@ void vTaskKeyboard(void *pvParameters)
             }
         }
 
-#if CONFIG_KASE_VEILLE
-        /* Veille hybride (B7). Le seuil léger est court, le profond se compte
-         * en heures : à 240 µA l'étage léger coûte 1 mAh sur quatre heures,
-         * donc autant le tenir longtemps et éviter le redémarrage de 683 ms.
-         * Bloquée tant que l'USB est énuméré — la carte est alors alimentée et
-         * l'hôte attend un clavier. */
-        {
-            uint32_t inactif = (uint32_t)(esp_timer_get_time() / 1000)
-                             - get_last_activity_time_ms();
-            /* tud_ready(), PAS tud_mounted() : sur l'ESP32-S3, mounted reste vrai
-             * après un débranchement à chaud — aucun événement de déconnexion —
-             * et la veille restait bloquée jusqu'au prochain redémarrage. ready
-             * retombe dès que le bus se suspend (~3 ms après le débranchement),
-             * c'est le signal qu'utilise déjà le routage USB/RF. Contrepartie
-             * assumée : un hôte qui s'endort câble branché laisse aussi le
-             * clavier dormir ; il se ré-énumère au réveil. Constaté au banc le
-             * 2026-09-11 : sept minutes sur batterie sans jamais dormir. */
-            bool usb  = tud_ready();
-            bool lien = false;
-#if CONFIG_KASE_LINK_WIRE
-            /* Une moitié en charge par le TRRS reste éveillée : endormie, elle
-             * cesserait de répondre aux sondes et le pair rouvrirait son 5 V. */
-            lien = link_uart_active();
-#endif
-            veille_diag(inactif, usb, lien);
-            veille_pas(inactif, usb || lien);
-        }
-#endif
+        /* La veille (B7) n'est plus évaluée ici : power/veille_task.c, une tâche
+         * unique aux deux moitiés, à vetos (USB, lien, sync, test) et hooks. */
 
 #if CONFIG_KASE_KBD_WIRELESS && CONFIG_KASE_HAS_DISPLAY && !CONFIG_KASE_VEILLE
         /* RF-mode idle → light-sleep (USB stays awake). v2d_sleep_enter() blocks

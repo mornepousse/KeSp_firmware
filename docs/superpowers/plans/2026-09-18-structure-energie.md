@@ -527,7 +527,7 @@ void veille_task_start(void);                            /* une tâche "veille",
 - Ordre des hooks au **sommeil** : radio (power-down) → écran (gel) ; au **réveil** : radio (power-up, ~5 ms, AVANT la capture qui émet) → écran. `veille_legere_entrer` conserve en dur la séquence matrice (deinit → armement → sleep → capture → recréation → réconciliation) : c'est le cœur, son ordre est documenté ligne à ligne et ne doit pas dépendre d'un enregistrement.
 - La règle « droite + `tud_mounted()` → profond plutôt que léger » (`veille.c:315-341`) reste dans `veille_pas`, sous `#if CONFIG_KASE_HALF_LINK_TX`.
 
-- [ ] **Step 1 : la tâche**
+- [x] **Step 1 : la tâche**
 
 `main/power/veille_task.c` :
 ```c
@@ -612,14 +612,14 @@ void veille_task_start(void)
 ```
 `cadence.h` : `#define VEILLE_TICK_MS 1000u` + `CADENCE_REPOS_OK(VEILLE_TICK_MS);`. `veille_hb_suffixe()` : fonction faible par rôle — gauche (`kbd_relay_tx.c`) renvoie `" route=RF relais=actif"`, droite (`half_link.c`) renvoie `" lien=0 batt=39 dV"` ; déclaration `const char *veille_hb_suffixe(void);` dans `veille_task.h`, implémentation `__attribute__((weak))` renvoyant `""` dans `veille_task.c`. **Latence** : le veto USB posé après une frappe ne retarde rien (la veille n'arrive qu'à 15 s) ; la seule chose qui attend le tick de 1 s est le HB.
 
-- [ ] **Step 2 : poser les vetos aux sources**
+- [x] **Step 2 : poser les vetos aux sources**
 
 - `pm_dfs.c` `usb_hote(bool monte)` : ajouter `#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD veille_veto(VEILLE_VETO_USB, monte); #endif`. ⚠ La gauche utilisait `tud_ready()` (retombe à l'autosuspend), pas `tud_mounted()`. `TINYUSB_EVENT_DETACHED` n'arrive pas toujours au débranchement à chaud sur S3 : garder en plus, dans `veille_task`, un rattrapage `#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD veille_veto(VEILLE_VETO_USB, tud_ready()); #endif` en tête de boucle (1 s). La droite ne pose **pas** de veto USB (règle existante : elle dort branchée, en profond).
 - `link_uart.c` `set_5v` : après `s_active = on;` → `veille_veto(VEILLE_VETO_LIEN, on);`.
 - `kbd_relay_tx.c` : l. 193 `s_syncing = true;` → `+ veille_veto(VEILLE_VETO_SYNC, true);` ; l. 200 `s_syncing = false;` → `+ veille_veto(VEILLE_VETO_SYNC, false);`.
 - `matrix_scan.c` : là où `matrix_test_mode` passe à vrai/faux (l. 219-233 et `keyboard_task.c:99-104`) → `veille_veto(VEILLE_VETO_TEST, matrix_test_mode);`.
 
-- [ ] **Step 3 : enregistrer les hooks**
+- [x] **Step 3 : enregistrer les hooks**
 
 - `half_link_tx_init` (droite), après « TX pret » : `static const veille_hook_t h = { "radio", half_link_radio_sleep, half_link_radio_wake }; veille_hook_enregistrer(&h);`
 - `kbd_relay_init` (gauche), fin : `static const veille_hook_t h = { "radio", kbd_relay_sleep_prepare, kbd_relay_wake_restore }; veille_hook_enregistrer(&h);`
@@ -627,18 +627,18 @@ void veille_task_start(void)
 - Jauge : `batt_sense_init` : `{ "jauge", NULL, batt_sense_sample_now }`.
 - `veille_legere_entrer` : remplacer les blocs `#if … half_link_radio_sleep / kbd_relay_sleep_prepare` par `veille_hooks_dormir();` et les blocs de réveil (radio + `batt_sense_sample_now`) par `veille_hooks_reveiller();` **avant** `matrix_wake_capture()` (la radio doit être debout avant la capture qui émet — l'ordre inverse des hooks le garantit si radio est enregistré avant écran ; la jauge en dernier n'a pas d'ordre).
 
-- [ ] **Step 4 : supprimer les anciens évaluateurs et HB**
+- [x] **Step 4 : supprimer les anciens évaluateurs et HB**
 
 - `keyboard_task.c:196-218` : bloc `#if CONFIG_KASE_VEILLE { … veille_diag … veille_pas … }` → supprimer ; retirer les includes `veille.h`, `link_uart.h` devenus inutiles.
 - `half_link.c:520-593` : supprimer le bloc `#if CONFIG_KASE_VEILLE` de la tâche de rafraîchissement (veille + HB + dumps PM). Il reste : `half_link_tx_update`, `half_link_batt_tick`, l'attente `tenu ? HALF_TX_TENU_MS : HALF_TX_REPOS_MS`.
 - `main.c:85-125` : supprimer `cpu_time_logger_task` et `main/sys/cpu_time.c` s'il n'a plus d'appelant ; l. ~500 remplacer la création par rien. Dans les deux rôles, après l'init des modules (gauche : après `kbd_relay_init()` ; droite : après `matrix_setup()`) : `#if CONFIG_KASE_VEILLE veille_task_start(); #endif`.
 - `veille.c` : supprimer `veille_diag` ; `veille_pas` reste publique (appelée par la tâche).
 
-- [ ] **Step 5 : compiler, banc des deux moitiés**
+- [x] **Step 5 : compiler, banc des deux moitiés**
 
 7 boards verts. Banc, par moitié : HB `vetos=-` au repos, veille à 15 s, réveil sur touche avec capture, radio réveillée (frappe relayée juste après le réveil), écran gelé/revit ; gauche en USB → `vetos=usb`, jamais de veille ; TRRS 5 V → `vetos=lien` ; sync forcée (diverge.py) → `vetos=sync` pendant ~7 s. `light_sleep_counts` grimpe comme avant.
 
-- [ ] **Step 6 : contrat, docs, commit**
+- [x] **Step 6 : contrat, docs, commit**
 
 `COMPORTEMENTS.md` : remplacer les lignes qui décrivent « la boucle clavier évalue la veille » / « la tâche de rafraîchissement de la droite porte la veille » par :
 ```

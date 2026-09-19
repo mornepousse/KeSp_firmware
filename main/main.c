@@ -3,6 +3,7 @@
  */
 #include "cdc_acm_com.h"
 #include "cpu_time.h"
+#include "veille_task.h"   /* pur hors CONFIG_KASE_VEILLE (veto/hook : appels sous #if) */
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
@@ -83,7 +84,9 @@ static const char *TAG = "Main";
 /* Task handle exported for diagnostics: status display task */
 TaskHandle_t status_display_task_handle = NULL;
 
-#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD && !CONFIG_KASE_VEILLE
+/* KaSe V1/V2 : battement de coeur de banc. Sur les moitiés du Niphargus
+ * (KASE_VEILLE) c'est la tâche de veille qui le porte (power/veille_task.c). */
 static void cpu_time_logger_task(void *arg) {
   (void)arg;
   char buf[512];
@@ -494,11 +497,18 @@ void app_main(void) {
 #endif
 #endif /* device role */
 
-#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD && !CONFIG_KASE_VEILLE
   /* CPU-time logger is a dev diagnostic; runtime stats aren't enabled on the
    * dongle build (it would just fail every 5s), so keyboard-only. */
   xTaskCreatePinnedToCore(cpu_time_logger_task, "cpu_time", 4096, NULL, 2, NULL,
                           1);
+#endif
+#if CONFIG_KASE_VEILLE
+  /* UNE tâche de veille pour les deux moitiés : inactivité, vetos (USB, lien,
+   * sync, test), hooks (radio, écran, jauge), battement de coeur. Démarrée
+   * après les modules ; un hook enregistré plus tard (écran, dans sa tâche)
+   * compte dès le sommeil suivant. */
+  veille_task_start();
 #endif
 
   /* Boot succeeded — reset crash counter and validate OTA */

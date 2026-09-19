@@ -33,6 +33,9 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "tinyusb.h"
+#if CONFIG_KASE_VEILLE
+#include "veille_task.h"   /* veto LIEN : une moitié qui charge l'autre ne dort pas */
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -60,6 +63,9 @@ static void set_5v(bool on)
     gpio_set_level(BOARD_LINK_5V_EN, on ? 1 : 0);
     if (s_active == on) return;   /* l'entretien re-ferme un switch déjà fermé toutes les 200 ms */
     s_active = on;
+#if CONFIG_KASE_VEILLE
+    veille_veto(VEILLE_VETO_LIEN, on);   /* endormie, elle cesserait de répondre et le pair rouvrirait son 5 V */
+#endif
     ESP_LOGW(TAG, "5 V %s — GPIO%d relu = %d", on ? "FERME" : "ouvert",
              BOARD_LINK_5V_EN, gpio_get_level(BOARD_LINK_5V_EN));
 }

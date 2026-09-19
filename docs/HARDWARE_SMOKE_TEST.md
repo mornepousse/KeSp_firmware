@@ -45,12 +45,14 @@ dans la PR/release.
       en presser une autre de la même rangée ne fantôme pas, une touche tenue
       au réveil ne se lit pas sur toute sa rangée ; dormir entre les touches :
       lien TRRS : gauche en USB + câble → console gauche « etat=2 5V=1 » et
-      les ACK de la droite qui montent, « veille REFUSEE … lien=1 » ; câble
-      retiré → « etat=0 5V=0 » en moins d'une seconde ;
+      les ACK de la droite qui montent, « veille REFUSEE … vetos=usb+lien » ; câble
+      retiré → « etat=0 5V=0 » en moins d'une seconde ; gauche en USB seule :
+      « vetos=usb » et jamais de veille ; USB retiré : « vetos=- », veille à
+      15 s, console « tache de veille : tick 1000 ms, 3 hook(s) » au boot ;
       au repos le HB de banc (CONFIG_PM_PROFILING=y) montre « light_sleep_counts » qui grimpe (~90 par
       10 s) et « light_sleep_reject_counts:0 », la frappe reste immédiate
 - [ ] Une nuit sur batterie : une moitié perd de l'ordre du centième de volt ;
-      0,2 V = elle n'a pas dormi. Console au matin : « HB … dormi=X s/n » avec
+      0,2 V = elle n'a pas dormi. Console au matin : « HB … dormi=X s/n vetos=- » avec
       X ≈ la durée de la nuit, et « reveil apres N s de sommeil » cohérent ;
       après 4 h sans frappe : « sommeil profond » puis redémarrage à la
       première touche (réveil EXT1, ~700 ms)
@@ -92,7 +94,7 @@ dans la PR/release.
       droite → même bandeau, logo Niphargus net et centré ; changer de couche
       (MO tenu) met le nom à jour en < 200 ms sans perdre de frappe ; droite
       servie à 1 s : aucune zone ne grise en 2 min (VCOM ~1 Hz), l'image revit
-      à la première touche après une veille
+      dans la seconde qui suit la première touche après une veille
 - [ ] Première touche après veille : laisser la moitié s'endormir (15 s sans
       toucher), taper UNE touche brève → le caractère sort (pas avalé) et rien
       ne reste collé ; console : « reveil : 1 touche(s) capturee(s) ». À faire

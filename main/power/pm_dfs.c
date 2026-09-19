@@ -26,6 +26,9 @@
 #include "esp_pm.h"
 #include "esp_log.h"
 #include "tinyusb.h"
+#if CONFIG_KASE_VEILLE && CONFIG_KASE_DEVICE_ROLE_KEYBOARD
+#include "veille_task.h"   /* veto USB : un hôte attend un clavier */
+#endif
 
 static const char *TAG = "pm_dfs";
 static esp_pm_lock_handle_t s_usb_lock;
@@ -42,7 +45,17 @@ static void usb_hote(bool monte)
 }
 /* Événement TinyUSB (tinyusb_config_t.event_cb, posé par usb_hid.c) :
  * esp_tinyusb possède tud_mount_cb/tud_umount_cb, on passe par son relais. */
-void pm_dfs_usb_event(bool monte) { usb_hote(monte); }
+void pm_dfs_usb_event(bool monte)
+{
+    usb_hote(monte);
+#if CONFIG_KASE_VEILLE && CONFIG_KASE_DEVICE_ROLE_KEYBOARD
+    /* La GAUCHE ne dort pas branchée (clavier HID, l'hôte attend). La droite
+     * n'a pas de veto USB : son port n'est qu'un CDC que personne n'ouvre, elle
+     * dort branchée (en profond, veille.c). La tâche de veille rattrape à 1 s
+     * par tud_ready() : le démontage n'est pas toujours signalé sur S3. */
+    veille_veto(VEILLE_VETO_USB, monte);
+#endif
+}
 
 void pm_dfs_init(void)
 {

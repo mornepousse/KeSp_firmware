@@ -6,21 +6,13 @@
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "soc/gpio_reg.h"
-#if CONFIG_KASE_BATT_SENSE
-#include "batt_sense.h"
-#endif
+#include "veille_task.h"   /* hooks sommeil/réveil : radio, écran, jauge */
 #include "esp_timer.h"
 #include "tinyusb.h"
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#if CONFIG_KASE_HALF_LINK_TX
-#include "half_link.h"
-#endif
-#if CONFIG_KASE_KBD_WIRELESS
-#include "kbd_relay_tx.h"   /* sleep_prepare / wake_restore : la radio de la gauche */
-#endif
 
 static const char *TAG = "veille";
 
@@ -87,15 +79,10 @@ void veille_legere_entrer(void)
      * après une pause de 15 s se perdait. Quatre repères esp_timer (µs). */
     int64_t t_entree = esp_timer_get_time(), t_radio, t_pilote, t_arme;
 
-#if CONFIG_KASE_HALF_LINK_TX
-    half_link_radio_sleep();      /* 900 nA au lieu de 26 µA en standby-I */
-#endif
-#if CONFIG_KASE_KBD_WIRELESS
-    /* Gauche en fusion : sa radio est à kbd_relay, personne ne l'éteignait
-     * (26 µA de standby toute la nuit, et son timer de 10 ms restait armé).
-     * Même geste que la droite : timer arrêté, mutex tenu, puce en power-down. */
-    kbd_relay_sleep_prepare();
-#endif
+    /* Hooks des modules (veille_task.h) : radio en power-down (900 nA au lieu
+     * de 26 µA en standby-I, timer arrêté, mutex tenu), écran gelé. La veille
+     * ne connaît plus les modules par leur nom — chacun s'est enregistré. */
+    veille_hooks_dormir();
     t_radio = esp_timer_get_time();
     rtc_matrix_deinit();          /* rendre les GPIO au réveil statique */
     t_pilote = esp_timer_get_time();
@@ -175,12 +162,7 @@ void veille_legere_entrer(void)
      * 5. Réconcilier : s'il n'a rien dit, la touche a été relâchée entre-temps
      *    et il ne le dira jamais — publier et émettre le relâchement, sinon
      *    elle reste collée jusqu'au prochain événement de cette moitié. */
-#if CONFIG_KASE_HALF_LINK_TX
-    half_link_radio_wake();
-#endif
-#if CONFIG_KASE_KBD_WIRELESS
-    kbd_relay_wake_restore();     /* puce rallumée (~5 ms) AVANT la capture, qui émet */
-#endif
+    veille_hooks_reveiller();     /* ordre inverse : la radio (~5 ms) est debout AVANT la capture, qui émet */
     ESP_LOGW(TAG, "chrono sortie : sommeil -> capture %lld us ; lignes a la sortie=0x%X ; broches du reveil=0x%llX",
              (long long)(esp_timer_get_time() - t_sorti), (unsigned)lignes_sortie, (unsigned long long)masque_reveil);
     matrix_wake_capture();
@@ -214,9 +196,6 @@ void veille_legere_entrer(void)
         ESP_LOGW(TAG, "capture vide au reveil : touche %s", trouve_ms < 0 ? "JAMAIS vue en 156 ms" : "vue plus tard");
         if (trouve_ms >= 0) ESP_LOGW(TAG, "  apparue a +%d ms apres le reveil", trouve_ms);
     }
-#if CONFIG_KASE_BATT_SENSE
-    batt_sense_sample_now();   /* une mesure au réveil : le timer était gelé */
-#endif
     matrix_disarm_key_wake();
     matrix_setup();
     /* ⚠ Pas de vTaskDelay(1) ici : un tick nu attend jusqu'à la PROCHAINE
@@ -236,9 +215,7 @@ void veille_profonde_entrer(void)
 {
     ESP_LOGW(TAG, "deep sleep — le reveil sera un redemarrage");
 
-#if CONFIG_KASE_HALF_LINK_TX
-    half_link_radio_sleep();
-#endif
+    veille_hooks_dormir();        /* idempotent : depuis le sommeil léger, la radio dort déjà */
     rtc_matrix_deinit();
 
     /* Même montage électrique que le réveil léger : COL → interrupteur →
@@ -270,17 +247,6 @@ void veille_profonde_entrer(void)
     esp_deep_sleep_start();       /* ne revient jamais : le réveil rebootera */
 }
 
-void veille_diag(uint32_t inactif_ms, bool usb, bool lien)
-{
-    static uint32_t dernier_ms;
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-    if (inactif_ms < (uint32_t)CONFIG_KASE_VEILLE_LEGERE_S * 1000u) return;
-    if (!usb && !lien) return;                       /* rien ne bloque : on va dormir */
-    if ((uint32_t)(now - dernier_ms) < 30000u) return;
-    dernier_ms = now;
-    ESP_LOGW(TAG, "veille REFUSEE depuis %lu s : usb=%d lien=%d",
-             (unsigned long)(inactif_ms / 1000), (int)usb, (int)lien);
-}
 
 void veille_pas(uint32_t inactif_ms, bool bloque)
 {

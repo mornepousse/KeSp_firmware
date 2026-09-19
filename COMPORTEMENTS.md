@@ -172,7 +172,20 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   pas dormi — 2026-09-12 gauche, 2026-09-15 encore). Pour le LIRE : chaque
   réveil journalise « reveil apres N s de sommeil (cause=…) — cumul : n
   sommeils, X s dormies sur Y s », et le battement de coeur porte
-  « inactif=… dormi=X s/n » ; une nuit sans sommeil se lit sans multimètre.
+  « inactif=… dormi=X s/n vetos=… » ; une nuit sans sommeil se lit sans
+  multimètre, et un refus se lit par son nom.
+- [smoke:Éveil oisif] UNE tâche de veille (power/veille_task.c), identique sur
+  les deux moitiés, possède l'inactivité, les vetos et le battement de coeur
+  (« HB up= inactif= dormi= vetos=… » + suffixe de rôle : route/relais à
+  gauche, lien/batt à droite). Un module qui a une raison d'empêcher la veille
+  POSE UN VETO — usb (gauche seulement : événement TinyUSB + rattrapage
+  tud_ready à 1 s), lien (5 V TRRS actif), sync (tirage de keymap), test (mode
+  test matrice) ; un module qui a quelque chose à endormir ENREGISTRE UN HOOK
+  (radio, écran, jauge), appelés dans l'ordre au sommeil et en ordre inverse
+  au réveil, tous AVANT la capture de la touche. Plus aucun module n'évalue la
+  veille, la veille n'appelle plus aucun module par son nom. Tick 1 s (la
+  veille n'arrive qu'à 15 s). « veille REFUSEE depuis N s : vetos=… » toutes
+  les 30 s quand un veto tient.
 - [smoke:Une nuit sur batterie] Le sommeil PROFOND est atteignable : un réveil
   par timer au seuil profond (4 h moins l'étage léger) bascule en deep sleep
   sans passer par une frappe — l'inactivité n'étant évaluée qu'éveillé, la
@@ -331,8 +344,9 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   en light sleep et aucun réveil n'est dû à l'écran.
 - [smoke:Écrans memory-LCD UI] L'écran de la droite est servi à 1 s (modèle :
   jauge 30 s, dongle vu) ; l'entretien VCOM est horodaté (~1 Hz), indépendant
-  de la cadence de la tâche qui appelle update() ; au réveil l'image est
-  repoussée immédiatement, sans attendre le tick.
+  de la cadence de la tâche qui appelle update() ; au réveil le hook écran ne
+  pose que des drapeaux (le bus SPI est encore à la radio), l'image est
+  repoussée au tick suivant de la tâche écran.
 - [smoke:Écrans memory-LCD UI] Les deux moitiés affichent en portrait : bandeau
   (route RF/USB, ▲ « dongle vu » COLLANT — une moitié est muette au repos, un
   indicateur daté clignoterait à chaque STATUS — qui ne tombe qu'après 3

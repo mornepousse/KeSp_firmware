@@ -1,4 +1,7 @@
 #include "matrix_scan.h"
+#if CONFIG_KASE_VEILLE
+#include "veille_task.h"   /* veto TEST */
+#endif
 #include "matrix_flag.h"
 
 #include "keyboard_task.h"
@@ -213,6 +216,9 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
         /* Auto-exit if no CDC activity or USB disconnected for > 30s */
         if (now - matrix_test_last_activity_ms > MATRIX_TEST_TIMEOUT_MS) {
             matrix_test_mode = false;
+#if CONFIG_KASE_VEILLE
+            veille_veto(VEILLE_VETO_TEST, false);
+#endif
             ESP_LOGW(TAG, "matrix test mode timeout — auto-exit");
         } else {
             for (int r = 0; r < MATRIX_ROWS; r++) {

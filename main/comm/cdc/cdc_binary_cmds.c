@@ -1,4 +1,5 @@
 /* Binary command handlers for all KaSe CDC commands */
+#include "veille_task.h"   /* pur hors CONFIG_KASE_VEILLE (veto/hook : appels sous #if) */
 #include "cdc_binary_cmds.h"
 #include "cdc_internal.h"
 #include "ks_monitor.h"
@@ -991,6 +992,9 @@ static void bin_cmd_matrix_test(uint8_t cmd, const uint8_t *p, uint16_t l)
     matrix_test_mode = !matrix_test_mode;
     if (matrix_test_mode)
         matrix_test_last_activity_ms = esp_timer_get_time() / 1000;
+#if CONFIG_KASE_VEILLE
+    veille_veto(VEILLE_VETO_TEST, matrix_test_mode);   /* pas de veille en test matrice */
+#endif
     uint8_t resp[3] = { matrix_test_mode ? 1 : 0, MATRIX_ROWS, MATRIX_COLS };
     ks_respond(cmd, KS_STATUS_OK, resp, 3);
 }

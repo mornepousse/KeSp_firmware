@@ -12,6 +12,9 @@
 #include "batt_sense.h"
 #include "batt_calc.h"
 #include "board.h"
+#if CONFIG_KASE_VEILLE
+#include "veille_task.h"   /* hook jauge : une mesure au réveil */
+#endif
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -68,6 +71,11 @@ static void timer_cb(void *arg) { (void)arg; batt_sense_sample_now(); }
 
 void batt_sense_init(void)
 {
+#if CONFIG_KASE_VEILLE
+    /* Une mesure au réveil : le timer était gelé pendant le sommeil. */
+    static const veille_hook_t hook = { "jauge", NULL, batt_sense_sample_now };
+    veille_hook_enregistrer(&hook);
+#endif
     if (adc_oneshot_io_to_channel(BOARD_VBAT_SENSE_GPIO, &s_unit_id, &s_chan) != ESP_OK) {
         ESP_LOGE(TAG, "GPIO%d n'est pas une entree ADC — jauge desactivee", BOARD_VBAT_SENSE_GPIO);
         return;

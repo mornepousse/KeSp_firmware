@@ -17,6 +17,9 @@
  * qui trouve le bus ; LVGL, lui, est construit tout de suite. */
 #include "memlcd_backend.h"
 #include "cadence.h"   /* LVGL_* */
+#if CONFIG_KASE_VEILLE
+#include "veille_task.h"   /* hook écran */
+#endif
 #include "memlcd_panel.h"
 #include "status_display.h"
 #include "board.h"
@@ -252,10 +255,18 @@ static bool try_attach(void)
 }
 
 /* ── Vtable ───────────────────────────────────────────────────────── */
+static void memlcd_sleep(void);
+static void memlcd_wake(void);
 static bool memlcd_init(void)
 {
     if (!lvgl_pret()) return false;
     try_attach();              /* réussit si la radio est déjà initialisée (droite) */
+#if CONFIG_KASE_VEILLE
+    /* Veille (B7) : image gelée et VCOM suspendu au sommeil ; au réveil,
+     * drapeaux seulement — la tâche écran repousse l'image à son tick. */
+    static const veille_hook_t hook = { "ecran", memlcd_sleep, memlcd_wake };
+    veille_hook_enregistrer(&hook);
+#endif
     return true;               /* jamais « KO » : l'attachement se fera au premier update() */
 }
 
@@ -307,7 +318,9 @@ static void memlcd_wake(void)
     s_sleeping = false;
     s_dirty = true;                                                /* l'image revit tout de suite */
     if (s_disp && lvgl_port_lock(50)) { lv_obj_invalidate(lv_scr_act()); lvgl_port_unlock(); }
-    memlcd_update();   /* sans attendre le tick de la tâche (1 s à droite) : VCOM repart, image repoussée */
+    /* Rien de plus ici : ce hook tourne dans la séquence de réveil, AVANT la
+     * capture de la touche, et le bus SPI est encore à la radio (verrou tenu
+     * jusqu'à son hook). La tâche écran pousse l'image à son prochain tick. */
 }
 static void memlcd_noop(void) {}
 static void memlcd_show_dfu(void)

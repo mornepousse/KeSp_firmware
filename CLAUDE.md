@@ -103,6 +103,14 @@ cadences des tâches à 100 ms au repos, stats coupées, et light sleep
 automatique entre les touches (`CONFIG_FREERTOS_USE_TICKLESS_IDLE`, ~9
 sommeils/s). Le HB de banc (`CONFIG_PM_PROFILING=y`) imprime `esp_pm_dump_locks`
 — lire `light_sleep_counts` avant de croire qu'on dort.
+**La veille est UNE tâche** (`power/veille_task.c`, 2026-09-19), la même sur
+les deux moitiés : inactivité, **vetos** nommés (usb, lien, sync, test — un
+module pose le sien, comme un verrou esp_pm), **hooks** sommeil/réveil
+(radio, écran, jauge — appelés en ordre inverse au réveil, avant la capture),
+battement de coeur `HB … vetos=…`. Ne jamais ré-évaluer la veille dans la
+tâche d'un module ; un nouveau blocage = un veto, un nouveau périphérique = un
+hook. Le hook de réveil d'un module ne doit PAS toucher le bus SPI (la radio
+tient le verrou jusqu'à son propre hook).
 ⚠ **Tickless : à 100 Hz une boucle de 10 ms laisse UN tick libre, le sommeil
 en exige TROIS** (`FREERTOS_IDLE_TIME_BEFORE_SLEEP`). La tâche clavier à 10 ms
 donnait « mode SLEEP 92 % » et zéro sommeil réel — un mode oisif n'est pas un

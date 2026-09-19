@@ -61,5 +61,10 @@ CADENCE_REPOS_OK(MEMLCD_DROITE_PERIODE_MS);
 CADENCE_REPOS_OK(LVGL_TICK_MS);
 CADENCE_REPOS_OK(LVGL_REFR_MS);
 
-/* Battement de coeur de banc. */
+/* Tâche de veille (veille_task.c) : évaluation de l'inactivité et des vetos.
+ * La veille n'arrive qu'à 15 s, une seconde de latence ne se voit pas. */
+#define VEILLE_TICK_MS           1000u
+CADENCE_REPOS_OK(VEILLE_TICK_MS);
+
+/* Battement de coeur de banc (porté par la tâche de veille). */
 #define HB_PERIODE_MS            10000u

@@ -260,7 +260,7 @@ endif()
 
 # Veille hybride (B7) — light sleep puis deep sleep.
 if(CONFIG_KASE_VEILLE)
-    list(APPEND srcs "power/veille.c")
+    list(APPEND srcs "power/veille.c" "power/veille_task.c")
 endif()
 
 # Jauge batterie (ADC de VBAT_SENSE) — moities Niphargus.

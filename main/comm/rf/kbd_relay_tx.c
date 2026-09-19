@@ -35,6 +35,10 @@
 #include "esp_mac.h"        /* esp_read_mac */
 #include "esp_system.h"     /* esp_restart */
 #include "esp_timer.h"
+#if CONFIG_KASE_VEILLE
+#include "veille_task.h"   /* hook radio, veto sync, suffixe HB */
+#endif
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -173,6 +177,9 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
                 if (b.fp_target != own && (!s_syncing || b.fp_target != s_sync_target_fp)) {
                     keymap_rx_reset(&s_krx);
                     s_syncing = true;
+#if CONFIG_KASE_VEILLE
+                    veille_veto(VEILLE_VETO_SYNC, true);   /* pas de veille en plein tirage */
+#endif
                     s_sync_target_fp = b.fp_target;
                     ESP_LOGW(TAG, "sync keymap : balise fp=0x%08X (la nôtre 0x%08X), %u chunks — pull",
                              (unsigned)b.fp_target, (unsigned)own, (unsigned)b.n_chunks);
@@ -370,6 +377,9 @@ static void kbd_relay_refresh_body(void)
             ESP_LOGW(TAG, "sync keymap : 40/40 recus, fp=0x%08X %s (cible 0x%08X) — %s",
                      (unsigned)fp, fp == cible ? "= cible" : "!= CIBLE", (unsigned)cible,
                      saved ? "enregistree en NVS" : "ECHEC NVS");
+#if CONFIG_KASE_VEILLE
+            veille_veto(VEILLE_VETO_SYNC, false);   /* tirage fini et enregistré */
+#endif
         }
     }
     if (s_syncing) {
@@ -570,7 +580,27 @@ void kbd_relay_init(void)
     };
     if (esp_timer_create(&ta, &s_refresh_timer) == ESP_OK)
         kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);
+#if CONFIG_KASE_VEILLE
+    /* Veille (B7) : timer arrêté, mutex tenu, puce en power-down au sommeil ;
+     * rallumée (~5 ms) AVANT la capture au réveil — la radio s'enregistre la
+     * première, les hooks se déroulent en ordre inverse au réveil. */
+    static const veille_hook_t hook = { "radio", kbd_relay_sleep_prepare, kbd_relay_wake_restore };
+    veille_hook_enregistrer(&hook);
+#endif
 }
+
+#if CONFIG_KASE_VEILLE
+/* Suffixe de rôle du battement de coeur (veille_task.h) : la gauche dit sa
+ * route et l'état du relais — la bascule USB → RF se lit là. */
+const char *veille_hb_suffixe(void)
+{
+    static char buf[32];
+    snprintf(buf, sizeof buf, " route=%s relais=%s",
+             (kbd_active_route() == KBD_OUT_RF) ? "RF" : "USB",
+             kbd_relay_active() ? "actif" : "inactif");
+    return buf;
+}
+#endif
 
 #if CONFIG_KASE_DONGLE_FUSION
 /* Fusion phase 2 (4b) : le moteur de la gauche lit la demi-matrice de la droite
