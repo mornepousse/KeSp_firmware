@@ -319,6 +319,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
 
 ## Fusion — sync auto de la keymap (ACK payload)
 
+- [smoke:Canal retour ACK payload] Le tirage est porté par `comm/rf/keymap_pull.c`
+  (extrait du relais le 2026-09-19, déplacement littéral) : `on_ack` décode
+  balise/chunk sous le verrou du propriétaire de la radio, `tick` enregistre en
+  NVS hors verrou et émet un REQ toutes les 100 ms via le relais, veto de veille
+  `sync` pendant. Banc : divergence → 40/40 en ~10 s → NVS → restore → 40/40 →
+  match=1.
 - [test:test_keymap_sync_frames] Les trames BEACON/CHUNK/REQ survivent à
   l'encode/decode et tiennent dans un ACK payload nRF24 (≤ 32 o) ; la géométrie
   40 × 28 = 1120 = keymap est verrouillée, sans chunk partiel.

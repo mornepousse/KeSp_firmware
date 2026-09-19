@@ -137,6 +137,9 @@ if(CONFIG_KASE_KBD_WIRELESS)
         "comm/rf/kbd_relay_tx.c"
         "comm/rf/radio_owner.c"
         "comm/usb/usb_presence.c")
+    if(CONFIG_KASE_DONGLE_FUSION)
+        list(APPEND srcs "comm/rf/keymap_pull.c")   # tirage de la keymap du dongle par ACK
+    endif()
 endif()
 
 # Dongle CDC stubs (no-op symbols for bt/display referenced by cdc_binary_cmds.c)

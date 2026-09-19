@@ -630,9 +630,9 @@ void keymap_pull_tick(bool (*emettre)(const uint8_t *, uint8_t));
 ```
 Le veto `VEILLE_VETO_SYNC` est posé/levé dans ce module. `kbd_relay_tx.c` appelle `keymap_pull_on_ack(ack, ack_n)` après `radio_send_ap` et `keymap_pull_tick(kbd_relay_emettre_req)` dans le rafraîchissement ; `kbd_relay_cadence_ms(…, sync = keymap_pull_en_cours(), …)`.
 
-- [ ] Step 1 : créer le module par déplacement littéral des trois blocs (pas de réécriture), compiler `niphar_left`.
-- [ ] Step 2 : banc gauche — `diverge.py` → pull → « enregistree en NVS » → `coh.py` match=1 ; `restore` → retour ; en pleine frappe, aucune sensation de perte (cf. validation du 2026-09-13).
-- [ ] Step 3 : contrat (ligne `[smoke:…sync…]` existante : ajouter « porté par `keymap_pull.c` ») ; commit `refactor(rf): keymap_pull.c — le tirage de keymap par ACK sort du relais`.
+- [x] Step 1 : créer le module par déplacement littéral des trois blocs (pas de réécriture), compiler `niphar_left`.
+- [x] Step 2 : banc gauche — `diverge.py` → pull → « enregistree en NVS » → `coh.py` match=1 ; `restore` → retour ; en pleine frappe, aucune sensation de perte (cf. validation du 2026-09-13).
+- [x] Step 3 : contrat (ligne `[smoke:…sync…]` existante : ajouter « porté par `keymap_pull.c` ») ; commit `refactor(rf): keymap_pull.c — le tirage de keymap par ACK sort du relais`.
 
 ---
 

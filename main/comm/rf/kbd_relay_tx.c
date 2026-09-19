@@ -20,8 +20,10 @@
 #include "rf_pairing.h"
 #include "usb_presence.h"   /* route poll + kbd_active_route (USB-first auto-switch) */
 #include "keymap.h"         /* keymaps[], KEYMAP_BLOB_BYTES — empreinte de config */
-#include "config_sync.h"    /* config_fp_crc32 — garde-fou de sync (fusion) */
-#include "keymap_sync.h"    /* keymap_rx_* — réassemblage de la keymap reçue par ACK */
+#include "config_sync.h"    /* config_fp_crc32 — empreinte annoncée dans le STATUS */
+#if CONFIG_KASE_DONGLE_FUSION
+#include "keymap_pull.h"    /* tirage de la keymap du dongle par ACK payload */
+#endif
 #if CONFIG_KASE_BATT_SENSE
 #include "batt_sense.h"     /* jauge : tension + état de charge dans STATUS */
 #define KBD_BATT_DV()  batt_sense_dv()
@@ -123,15 +125,7 @@ static uint8_t  s_sans_ack_ecran = 3;   /* émissions consécutives sans ACK : �
 static uint8_t  s_status_seq;
 
 #if CONFIG_KASE_DONGLE_FUSION
-/* Sync auto de la keymap reçue par ACK payload (phase 3). La gauche PILOTE : à
- * la BEACON (une keymap d'empreinte ≠ la nôtre nous attend) elle entame un
- * pull et demande le prochain chunk manquant (SYNC_REQ) à chaque tick ; chaque
- * chunk arrive dans l'ACK de son émission suivante. Quand les 40 sont là, la
- * sauvegarde NVS se fait dans refresh_cb — hors du chemin TX et de son mutex. */
-static keymap_rx_t   s_krx;
-static bool          s_syncing;
-static uint32_t      s_sync_target_fp;
-static volatile bool s_sync_done;   /* 40/40 reçus : à enregistrer (refresh_cb) */
+/* Le tirage de keymap par ACK payload est dans keymap_pull.c. */
 /* Émission brute d'une demi-matrice SANS armer la réémission — voir plus bas. */
 static void send_matrix_frame(uint8_t half, const uint8_t *bitmap);
 #endif
@@ -162,30 +156,7 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
             return;
         }
 #if CONFIG_KASE_DONGLE_FUSION
-        if (ack_n && !s_sync_done) {
-            rf_sync_beacon_t b;
-            rf_sync_chunk_t  c;
-            if (rf_decode_sync_beacon(ack, ack_n, &b)) {
-                /* Une keymap nous attend. On (re)part de zéro si c'est une autre
-                 * empreinte que celle qu'on tirait déjà — le dongle a rechangé. */
-                uint32_t own = config_fp_crc32((const uint8_t *)keymaps, KEYMAP_BLOB_BYTES);
-                if (b.fp_target != own && (!s_syncing || b.fp_target != s_sync_target_fp)) {
-                    keymap_rx_reset(&s_krx);
-                    s_syncing = true;
-#if CONFIG_KASE_VEILLE
-                    veille_veto(VEILLE_VETO_SYNC, true);   /* pas de veille en plein tirage */
-#endif
-                    s_sync_target_fp = b.fp_target;
-                    ESP_LOGW(TAG, "sync keymap : balise fp=0x%08X (la nôtre 0x%08X), %u chunks — pull",
-                             (unsigned)b.fp_target, (unsigned)own, (unsigned)b.n_chunks);
-                }
-            } else if (s_syncing && rf_decode_sync_chunk(ack, ack_n, &c)) {
-                if (keymap_rx_chunk(&s_krx, c.idx, c.data) && keymap_rx_complete(&s_krx)) {
-                    s_syncing  = false;
-                    s_sync_done = true;   /* refresh_cb enregistre hors du chemin TX */
-                }
-            }
-        }
+        keymap_pull_on_ack(ack, ack_n);   /* balise ou chunk glissé dans l'ACK */
 #endif
         if (ok) s_tx_remis++; else s_tx_refuses++;
         s_derniere_emission_ms = (uint32_t)(esp_timer_get_time() / 1000);
@@ -230,7 +201,7 @@ static void kbd_relay_refresh_cb(void *arg)
     bool reparation = s_refresh.left != 0, tenu = false, sync = false, ecoute_usb = false;
 #if CONFIG_KASE_DONGLE_FUSION
     tenu = (s_last_left_bm[0] | s_last_left_bm[1] | s_last_left_bm[2] | s_last_left_bm[3]) != 0;
-    sync = s_syncing || s_sync_done;
+    sync = keymap_pull_en_cours();
     ecoute_usb = (radio_mode() == RADIO_PRX);   /* route USB : ce tick vide la FIFO des trames de la droite */
 #else
     for (int i = 0; i < 6; i++) if (s_last_kb[i]) tenu = true;   /* rapport HID tenu (V2D) */
@@ -352,53 +323,7 @@ static void kbd_relay_refresh_body(void)
     /* Sync auto (phase 3), APRÈS la réaffirmation des maintiens : un maintien
      * garde la priorité, le pull se met en pause pendant et reprend après —
      * jamais une touche relâchée à tort pour une keymap (la panne du 2026-09-13). */
-    {
-        /* 40/40 reçus : la keymap complète est dans s_krx.buf. Le drapeau et le
-         * buffer sont ÉCRITS pendant une émission (kbd_tx_locked, sous le verrou
-         * du propriétaire, depuis la tâche de scan) : on les CONSOMME sous ce
-         * même verrou (radio_lock), sinon la copie pourrait lire un buffer pas
-         * encore entièrement visible (revue 2026-09-13). La NVS (ms) se fait
-         * ensuite HORS verrou. Le STATUS suivant annoncera la nouvelle
-         * empreinte → le dongle coupera la balise. */
-        bool a_enregistrer = false;
-        uint32_t cible = 0;
-        if (s_sync_done && radio_lock(20)) {
-            if (s_sync_done) {
-                memcpy((uint8_t *)keymaps, s_krx.buf, KEYMAP_BLOB_BYTES);
-                cible = s_sync_target_fp;
-                s_sync_done = false;
-                a_enregistrer = true;
-            }
-            radio_unlock();
-        }
-        if (a_enregistrer) {
-            bool saved = save_keymaps((uint16_t *)keymaps, KEYMAP_BLOB_BYTES);
-            uint32_t fp = config_fp_crc32((const uint8_t *)keymaps, KEYMAP_BLOB_BYTES);
-            ESP_LOGW(TAG, "sync keymap : 40/40 recus, fp=0x%08X %s (cible 0x%08X) — %s",
-                     (unsigned)fp, fp == cible ? "= cible" : "!= CIBLE", (unsigned)cible,
-                     saved ? "enregistree en NVS" : "ECHEC NVS");
-#if CONFIG_KASE_VEILLE
-            veille_veto(VEILLE_VETO_SYNC, false);   /* tirage fini et enregistré */
-#endif
-        }
-    }
-    if (s_syncing) {
-        /* Un REQ toutes les 100 ms (gate par horodatage : le timer tourne à
-         * KBD_RELAY_REFRESH_MS = 10 ms, il ne faut PAS un REQ par tick — la
-         * revue du 2026-09-13 a relevé 100 REQ/s réels contre 10 documentés).
-         * Chaque ACK rapporte le chunk demandé → ~10 chunks/s, 40 en ~4 s.
-         * Trafic borné, seulement tant qu'on diverge. */
-        static uint32_t s_dernier_req_ms;
-        uint32_t maintenant = (uint32_t)(esp_timer_get_time() / 1000);
-        if ((uint32_t)(maintenant - s_dernier_req_ms) >= 100u) {
-            s_dernier_req_ms = maintenant;
-            rf_sync_req_t q = { .next = keymap_rx_next(&s_krx) };
-            uint8_t rb[4];
-            uint16_t rn = rf_encode_sync_req(rb, &q);
-            kbd_tx_locked(rb, (uint8_t)rn);
-        }
-        return;
-    }
+    if (keymap_pull_tick(kbd_tx_locked)) return;
 #endif
     /* Réémission bornée : sans changement récent, on se tait. usb_presence_poll
      * ci-dessus reste appelé à chaque tick — c'est lui qui garde le routage
