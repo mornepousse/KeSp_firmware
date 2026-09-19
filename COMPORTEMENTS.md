@@ -207,6 +207,10 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   établi. Un débordement UART (TX flottante du pair endormi) vide et repart.
   Banc 2026-09-19 : gauche USB + TRRS → `etat=2 5V=1`, 490 sondes / 485 ACK,
   refus de veille `lien=1` ; débranché → `etat=0 5V=0` en < 1 s.
+- [test:test_veille_veto] Registre de vetos de veille (`power/veille_veto.h`,
+  pur) : un état par nom (usb, lien, sync, test), un veto posé bloque toute
+  veille, lever un veto absent est sans effet, noms bornés pour le HB. Câblage
+  dans la tâche de veille unique (Task 7 du plan structure énergie).
 
 ## Fusion — routage des moteurs
 

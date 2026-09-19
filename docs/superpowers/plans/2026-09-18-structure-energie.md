@@ -431,7 +431,7 @@ static inline bool veille_bloquee(const veille_vetos_t *v) { return v->actifs !=
 static inline const char *veille_vetos_str(const veille_vetos_t *v, char *out, size_t n);
 ```
 
-- [ ] **Step 1 : test rouge**
+- [x] **Step 1 : test rouge**
 
 `test/test_veille_veto.c` :
 ```c
@@ -482,11 +482,11 @@ void test_veille_veto(void)
 ```
 Câbler dans `test/CMakeLists.txt` et `test/test_main.c`. `./scripts/check.sh --fast` → rouge.
 
-- [ ] **Step 2 : implémentation**
+- [x] **Step 2 : implémentation**
 
 `main/power/veille_veto.h` : les types de **Interfaces** ; `veille_vetos_str` concatène dans l'ordre usb, lien, sync, test avec `+`, écrit `-` si vide (snprintf borné). Vert.
 
-- [ ] **Step 3 : mord**
+- [x] **Step 3 : mord**
 
 Transitoirement `return v->actifs == 0;` dans `veille_bloquee` → rouge → rétablir. Commit : `feat(veille): registre de vetos pur (usb, lien, sync, test) — logique testée, pas encore câblée`.
 

@@ -76,6 +76,7 @@ add_executable(test_runner
     test_veille.c
     test_keyboard_cadence.c
     test_cadence.c
+    test_veille_veto.c
     test_rf_status_cadence.c
     test_keymap_blob_size.c
     test_half_col_map.c
