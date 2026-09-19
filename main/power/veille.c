@@ -10,6 +10,9 @@
 #include "esp_timer.h"
 #include "tinyusb.h"
 #include "driver/gpio.h"
+#if CONFIG_ESP_CONSOLE_UART
+#include "driver/uart.h"   /* uart_wait_tx_done : la console sort avant le sommeil */
+#endif
 #include "driver/rtc_io.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -77,17 +80,25 @@ void veille_legere_entrer(void)
      * une touche n'est ni balayée ni capable de réveiller — 160 à 570 ms
      * d'éveil autour d'un sommeil au journal de la gauche, et le premier appui
      * après une pause de 15 s se perdait. Quatre repères esp_timer (µs). */
+#if CONFIG_KASE_VEILLE_DIAG
     int64_t t_entree = esp_timer_get_time(), t_radio, t_pilote, t_arme;
+#endif
 
     /* Hooks des modules (veille_task.h) : radio en power-down (900 nA au lieu
      * de 26 µA en standby-I, timer arrêté, mutex tenu), écran gelé. La veille
      * ne connaît plus les modules par leur nom — chacun s'est enregistré. */
     veille_hooks_dormir();
+#if CONFIG_KASE_VEILLE_DIAG
     t_radio = esp_timer_get_time();
+#endif
     rtc_matrix_deinit();          /* rendre les GPIO au réveil statique */
+#if CONFIG_KASE_VEILLE_DIAG
     t_pilote = esp_timer_get_time();
+#endif
     matrix_arm_key_wake();
+#if CONFIG_KASE_VEILLE_DIAG
     t_arme = esp_timer_get_time();
+#endif
 
     /* Se retirer du bus USB AVANT de dormir. Le light sleep coupe la PHY : vu
      * de l'hôte c'est un débranchement brutal, et au réveil TinyUSB retrouve
@@ -111,7 +122,16 @@ void veille_legere_entrer(void)
     esp_sleep_enable_timer_wakeup(reste_us);
     REG_WRITE(GPIO_STATUS_W1TC_REG, 0xFFFFFFFFu);   /* état GPIO propre : le masque au réveil ne dira que le sommeil */
     uint64_t avant_us = (uint64_t)esp_timer_get_time();   /* esp_timer suit le RTC : seul témoin fiable */
+    /* Vider la console AVANT de dormir : sans ça la ligne « light sleep » et
+     * les chronos d'entrée restaient dans la FIFO UART et ne sortaient qu'au
+     * réveil, collées au journal du réveil — le silence après le dernier HB
+     * était la seule preuve d'un sommeil (banc du 13 au 19 septembre). ~2 ms
+     * à 115200 bauds pour quelques lignes ; sans console, aucun coût. */
+#if CONFIG_ESP_CONSOLE_UART
+    uart_wait_tx_done(CONFIG_ESP_CONSOLE_UART_NUM, pdMS_TO_TICKS(20));
+#endif
     esp_light_sleep_start();      /* bloque ici jusqu'à une touche, ou le timer */
+#if CONFIG_KASE_VEILLE_DIAG
     int64_t t_sorti = esp_timer_get_time();
     /* BANC 2026-09-16 : TOUTE PREMIÈRE lecture après le réveil, avant tout
      * journal — les lignes sont-elles encore hautes ? Et quelle broche a
@@ -125,11 +145,14 @@ void veille_legere_entrer(void)
      * registre d'état d'interruption GPIO, qui mémorise les broches dont la
      * condition de niveau s'est produite, INT_ENA ou pas. */
     uint64_t masque_reveil = REG_READ(GPIO_STATUS_REG);
+#endif
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
     uint32_t dormi_ms = (uint32_t)(((uint64_t)esp_timer_get_time() - avant_us) / 1000);
+#if CONFIG_KASE_VEILLE_DIAG
     ESP_LOGW(TAG, "chrono entree : radio %lld us, pilote %lld us, armement %lld us, jusqu'au sommeil %lld us",
              (long long)(t_radio - t_entree), (long long)(t_pilote - t_radio),
              (long long)(t_arme - t_pilote), (long long)((int64_t)avant_us - t_arme));
+#endif
     s_sommeils++; s_dormi_ms += dormi_ms;
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
         ESP_LOGW(TAG, "%lu s de sommeil leger sans une touche : sommeil profond", (unsigned long)(dormi_ms / 1000));
@@ -163,8 +186,10 @@ void veille_legere_entrer(void)
      *    et il ne le dira jamais — publier et émettre le relâchement, sinon
      *    elle reste collée jusqu'au prochain événement de cette moitié. */
     veille_hooks_reveiller();     /* ordre inverse : la radio (~5 ms) est debout AVANT la capture, qui émet */
+#if CONFIG_KASE_VEILLE_DIAG
     ESP_LOGW(TAG, "chrono sortie : sommeil -> capture %lld us ; lignes a la sortie=0x%X ; broches du reveil=0x%llX",
              (long long)(esp_timer_get_time() - t_sorti), (unsigned)lignes_sortie, (unsigned long long)masque_reveil);
+#endif
     matrix_wake_capture();
     /* Premier front dans le REBOND du contact : la capture 2 passes (1 ms) lit
      * alors 0 touche, la carte conclut « fantôme », se rendort 10-50 ms et se
@@ -178,6 +203,7 @@ void veille_legere_entrer(void)
         esp_rom_delay_us(5000);
         matrix_wake_capture();
     }
+#if CONFIG_KASE_VEILLE_DIAG
     /* BANC 2026-09-16 (gauche) : la touche qui réveille n'est vue ni par les deux
      * captures ni par le pilote — 5 appuis, 4 vus, le premier manque. Soit le
      * réveil arrive ~150 ms après l'appui (touche déjà relâchée), soit la
@@ -196,6 +222,7 @@ void veille_legere_entrer(void)
         ESP_LOGW(TAG, "capture vide au reveil : touche %s", trouve_ms < 0 ? "JAMAIS vue en 156 ms" : "vue plus tard");
         if (trouve_ms >= 0) ESP_LOGW(TAG, "  apparue a +%d ms apres le reveil", trouve_ms);
     }
+#endif
     matrix_disarm_key_wake();
     matrix_setup();
     /* ⚠ Pas de vTaskDelay(1) ici : un tick nu attend jusqu'à la PROCHAINE

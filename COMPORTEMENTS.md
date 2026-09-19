@@ -47,6 +47,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   tout à son réveil — la touche de réveil passait dans ce trou (deux
   matrix_setup à 30 ms d'écart au journal, 2026-09-16). Console au réveil :
   un seul « matrix_setup ».
+- [smoke:Première touche après veille] L'instrumentation de banc du réveil
+  (chronos, lignes et masque GPIO à la sortie, échelle de relecture 150 ms,
+  dump des deux passes) est sous `CONFIG_KASE_VEILLE_DIAG` (défaut n). Hors
+  option, le réveil garde : capture, relecture unique à 5 ms, recréation du
+  pilote, réconciliation — le journal « reveil : n touche(s) capturee(s) »
+  et le bilan « reveil apres N s » restent.
 - [smoke:Première touche après veille] La touche qui réveille la carte est
   capturée, émise et réconciliée — jamais perdue. Sous fusion, la gauche
   émet l'appui capturé au réveil (matrix_wake_capture) et son relâchement à la
@@ -174,6 +180,9 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   sommeils, X s dormies sur Y s », et le battement de coeur porte
   « inactif=… dormi=X s/n vetos=… » ; une nuit sans sommeil se lit sans
   multimètre, et un refus se lit par son nom.
+- [smoke:Une nuit sur batterie] La console est VIDÉE avant `esp_light_sleep_start`
+  (`uart_wait_tx_done`, ≤ 20 ms) : la ligne « light sleep » et les chronos
+  d'entrée sortent AVANT le sommeil, plus collés au journal du réveil.
 - [smoke:Éveil oisif] UNE tâche de veille (power/veille_task.c), identique sur
   les deux moitiés, possède l'inactivité, les vetos et le battement de coeur
   (« HB up= inactif= dormi= vetos=… » + suffixe de rôle : route/relais à

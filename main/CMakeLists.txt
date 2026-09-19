@@ -326,8 +326,8 @@ set(priv_requires
     mbedtls           # HMAC-SHA1 for OTP HID (cr_hmac.c, dongle only)
 )
 
-if(CONFIG_KASE_LINK_WIRE)
-    list(APPEND priv_requires esp_driver_uart)
+if(CONFIG_KASE_LINK_WIRE OR CONFIG_KASE_VEILLE)
+    list(APPEND priv_requires esp_driver_uart)   # lien TRRS ; veille : vider la console avant le sommeil
 endif()
 
 if(CONFIG_KASE_HAS_DISPLAY)

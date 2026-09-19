@@ -623,6 +623,7 @@ void matrix_wake_capture(void)
     /* Une ligne par réveil : ce que la capture a trouvé. C'est elle qui a
      * prouvé, le 2026-09-11, que la gauche voyait bien la touche de réveil. */
     ESP_LOGI(TAG, "reveil : %u touche(s) capturee(s)", filled);
+#if CONFIG_KASE_VEILLE_DIAG
     if (filled == 0) {
         /* Capture vide sur un réveil GPIO : dire ce que CHAQUE passe a lu, pour
          * distinguer un rebond (passe 1 pleine, passe 2 vide ou l'inverse) d'un
@@ -635,6 +636,7 @@ void matrix_wake_capture(void)
         l1[k] = l2[k] = '\0';
         ESP_LOGW(TAG, "  capture vide : passe1=%s passe2=%s", l1, l2);
     }
+#endif
     for (uint8_t i = 0; i < filled; i++)
         ESP_LOGI(TAG, "  (%u,%u)", current_press_row[i], current_press_col[i]);
 }

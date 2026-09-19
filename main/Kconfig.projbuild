@@ -167,6 +167,20 @@ config KASE_VEILLE_PROFONDE_S
         carte. Abaisser temporairement (30 s) pour eprouver le reveil EXT1 au
         banc, sans quoi il faudrait attendre quatre heures.
 
+config KASE_VEILLE_DIAG
+    bool "Instrumentation de banc du reveil (chronos, lignes, echelle de relecture)"
+    default n
+    depends on KASE_VEILLE
+    help
+        Banc de la « premiere touche legere perdue » (2026-09-16..19) : chronos
+        d'entree et de sortie du sommeil, niveau des lignes et masque GPIO a la
+        premiere instruction apres le reveil, relecture toutes les 10 ms pendant
+        150 ms quand la capture est vide, dump des deux passes de capture.
+        Hors option, le chemin de reveil reste : capture, relecture unique a
+        5 ms (un correctif, pas un diagnostic), recreation du pilote,
+        reconciliation. Indice acquis : le reveil part, la ligne est deja basse
+        13 ms plus tard, la touche n'est jamais vue en 156 ms — contact < 13 ms.
+
 config KASE_KEY_STATS
     bool "Statistiques de frappe (compteurs, bigrammes, WPM, NVS)"
     default n if KASE_NIPHAR_MASTER || KASE_DEVICE_ROLE_NIPHAR_SLAVE
