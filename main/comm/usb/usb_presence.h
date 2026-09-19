@@ -51,6 +51,19 @@ static inline bool vbus_debounce_step(vbus_debounce_t *d, bool raw,
     return d->stable;
 }
 
+/* Présence d'un câble USB, décision pure (test/test_kbd_route.c) : avec le pont
+ * VBUS soudé (vbus_dispo), le niveau GPIO fait foi — un chargeur mural
+ * n'énumère pas, un hôte peut autosuspendre ; sans pont, ce que TinyUSB voit
+ * (tud_ready : mounted ET non suspendu, le seul signal qui retombe au
+ * débranchement à chaud sur S3). Le forçage de banc (KASE_LINK_FORCE_SOURCE)
+ * gagne sur tout. Une seule règle pour le routage, le 5 V du lien TRRS et le
+ * veto de veille — jusqu'au 2026-09-19 chacun lisait sa propre source. */
+static inline bool usb_presence_brut(bool vbus_dispo, bool vbus, bool tud_pret, bool force)
+{
+    if (force) return true;
+    return vbus_dispo ? vbus : tud_pret;
+}
+
 #ifndef TEST_HOST
 /* Firmware-only: configure the VBUS sense GPIO (input + pulldown). */
 void usb_presence_init(void);
@@ -75,6 +88,31 @@ bool usb_sleep_blocked(void);
 /* Instantaneous "USB cable present" read (VBUS gpio, or tud_mounted without a
  * divider). Used by the light-sleep poll loop to wake on USB plug-in. */
 bool usb_cable_present_now(void);
+
+/* Présence brute (non débouncée) selon usb_presence_brut : pont VBUS si
+ * KASE_VBUS_SENSE, sinon tud_ready ; forcée sous KASE_LINK_FORCE_SOURCE.
+ * Inline : usb_presence.c n'est compilé que sur la gauche, le lien et la
+ * veille en ont besoin sur les deux moitiés. */
+#include "sdkconfig.h"
+#include "tinyusb.h"
+#if CONFIG_KASE_VBUS_SENSE
+#include "board.h"
+#include "driver/gpio.h"
+#ifndef BOARD_VBUS_SENSE_GPIO
+#define BOARD_VBUS_SENSE_GPIO GPIO_NUM_33
+#endif
+#endif
+static inline bool usb_presence_cable(void)
+{
+    bool vbus_dispo = false, vbus = false, force = false;
+#if CONFIG_KASE_VBUS_SENSE
+    vbus_dispo = true; vbus = gpio_get_level(BOARD_VBUS_SENSE_GPIO) != 0;
+#endif
+#if CONFIG_KASE_LINK_FORCE_SOURCE
+    force = true;   /* banc : source 5 V forcée, cf. Kconfig */
+#endif
+    return usb_presence_brut(vbus_dispo, vbus, tud_ready(), force);
+}
 
 /* usb_try_remote_wakeup() now lives in comm/usb/usb_hid.h — it must exist on
  * wired builds too, and this file is only compiled for the wireless relay. */

@@ -222,6 +222,13 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
 
 - [test:test_lost_probe_eventually_reprobes] Après une sonde perdue, la poignée
   de main 5 V re-sonde. Elle ne reste pas bloquée sur un échec.
+- [test:test_kbd_route] UNE règle de présence du câble USB (`usb_presence_brut`)
+  pour le routage USB/RF, la source du 5 V TRRS et le veto de veille : avec le
+  pont VBUS soudé (`KASE_VBUS_SENSE`) le niveau GPIO fait foi — un chargeur
+  mural n'énumère pas et fait quand même de cette moitié la source ; sans pont,
+  `tud_ready()` ; le forçage de banc (`KASE_LINK_FORCE_SOURCE`) gagne sur tout.
+  Jusqu'au 2026-09-19 chacun des trois lisait sa propre source ; le jour où le
+  pont est soudé, activer `KASE_VBUS_SENSE` suffit.
 - [smoke:Éveil oisif] La tâche du lien TRRS est ÉVÉNEMENTIELLE au repos (5 V
   mort, pas d'USB) : bloquée sur la file d'événements du pilote UART, un octet
   du pair la réveille aussitôt ; l'USB, événement humain, n'est sondé qu'à 1 s

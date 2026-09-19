@@ -34,14 +34,10 @@ void usb_presence_init(void)
 
 bool usb_presence_active(void)
 {
-#if CONFIG_KASE_VBUS_SENSE
-    bool raw = gpio_get_level(BOARD_VBUS_SENSE_GPIO) != 0;   /* VBUS divider */
-#else
-    /* No divider: tud_ready() = mounted AND not suspended. tud_mounted() alone
-     * stays true after unplug on the S3 (no disconnect event); on unplug the bus
-     * goes idle → USB suspend (~3ms) → tud_ready() drops, so we fall back to RF. */
-    bool raw = tud_ready();
-#endif
+    /* Une seule règle (usb_presence_brut) : pont VBUS si soudé, sinon
+     * tud_ready() = mounted AND not suspended — tud_mounted() seul reste vrai
+     * après un débranchement à chaud sur le S3. */
+    bool raw = usb_presence_cable();
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
     return vbus_debounce_step(&s_db, raw, now_ms, VBUS_DEBOUNCE_MS);
 }

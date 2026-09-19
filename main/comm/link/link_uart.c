@@ -125,11 +125,11 @@ static void link_task(void *arg)
         /* Présence USB, en FRONT : la machine d'états veut des événements, pas
          * un état. tud_ready(), pas tud_mounted() — sur l'ESP32-S3 mounted
          * reste vrai après un débranchement à chaud. Même leçon que la veille. */
-        bool usb_raw = tud_ready();
-#if CONFIG_KASE_LINK_FORCE_SOURCE
-        usb_raw = true;   /* banc : source forcee, cf. KASE_LINK_FORCE_SOURCE */
-#endif
-        bool usb = vbus_debounce_step(&s_usb_db, usb_raw, now, 50);
+        /* Même règle que le routage et la veille (usb_presence_brut) : pont VBUS
+         * si soudé — un chargeur mural n'énumère pas et doit quand même faire de
+         * cette moitié la source du 5 V —, sinon tud_ready(), forçage de banc
+         * compris. */
+        bool usb = vbus_debounce_step(&s_usb_db, usb_presence_cable(), now, 50);
         if (usb != s_usb_prev) {
             s_usb_prev = usb;
             apply(link_hs_step(&s_hs, usb ? LINK_HS_EV_USB_PRESENT : LINK_HS_EV_USB_GONE, now));

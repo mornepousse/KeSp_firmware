@@ -54,6 +54,18 @@ static void test_v2d_should_sleep(void)
     TEST_ASSERT(!v2d_should_sleep(true, 0, 60000),       "RF just-active: no");
 }
 
+static void test_presence_brute_vbus_prime(void)
+{
+    /* Le pont VBUS (GPIO33) soudé : c'est LUI qui dit si un câble est là — un
+     * chargeur mural n'énumère pas, l'hôte peut autosuspendre. Sans pont : ce
+     * que TinyUSB voit (tud_ready). Le forçage de banc gagne sur tout. */
+    TEST_ASSERT( usb_presence_brut(true,  true,  false, false), "VBUS haut, pas d'hote : present (chargeur)");
+    TEST_ASSERT(!usb_presence_brut(true,  false, true,  false), "VBUS bas, hote 'pret' (fantome S3) : absent");
+    TEST_ASSERT( usb_presence_brut(false, false, true,  false), "sans pont : tud_ready fait foi");
+    TEST_ASSERT(!usb_presence_brut(false, true,  false, false), "sans pont : le niveau GPIO est ignore");
+    TEST_ASSERT( usb_presence_brut(false, false, false, true),  "force (banc) : present");
+}
+
 void test_kbd_route(void)
 {
     printf("\n-- kbd_route / vbus_debounce / v2d_sleep --\n");
@@ -62,4 +74,5 @@ void test_kbd_route(void)
     test_debounce_holds_until_window();
     test_debounce_rejects_bounce();
     test_v2d_should_sleep();
+    test_presence_brute_vbus_prime();
 }

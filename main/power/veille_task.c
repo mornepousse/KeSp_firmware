@@ -18,7 +18,7 @@
 #include "esp_pm.h"
 #endif
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-#include "tinyusb.h"   /* rattrapage du veto USB : tud_ready() */
+#include "usb_presence.h"   /* rattrapage du veto USB : usb_presence_cable() */
 #endif
 #include <stdio.h>
 
@@ -86,7 +86,7 @@ static void veille_task(void *arg)
          * bus se suspend — c'est le signal qu'utilise déjà le routage USB/RF.
          * Contrepartie assumée : un hôte qui s'endort câble branché laisse
          * aussi le clavier dormir ; il se ré-énumère au réveil. */
-        veille_veto(VEILLE_VETO_USB, tud_ready());
+        veille_veto(VEILLE_VETO_USB, usb_presence_cable());   /* pont VBUS si soudé, sinon tud_ready */
 #endif
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
         uint32_t inactif = now - get_last_activity_time_ms();
