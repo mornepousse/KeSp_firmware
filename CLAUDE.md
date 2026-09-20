@@ -592,6 +592,17 @@ pins to detach bootloader functions (UART0, secondary SPI flash).
 Driven by `/tripwire:release`. Version source: the git tag only (no VERSION
 file, no manifest duplicating it).
 
+**Beta vs stable (2026-09-20).** The major number marks a compatibility
+boundary (v4 = wireless split + dongle + the current CDC protocol), not a
+promise of "no bugs" — maturity is said by the suffix:
+- `vX.Y.Z-beta.N` = beta, published as a GitHub **pre-release**; boards that
+  were not on the bench ship "build only", said so in the notes; `beta.2`,
+  `beta.3`… may follow on the same X.Y.Z;
+- `vX.Y.Z` = stable, published as **Latest**, only when the smoke test has
+  passed on every board the release concerns — no "build only" left.
+`git describe` reads `v4.2.0-beta.1-12-gabcd` between two tags, in the HB and
+in the CDC `VERSION` reply.
+
 1. Working tree clean, `./scripts/check.sh` green (all 7 boards build)
 2. Smoke test (below), then `git tag vX.Y.Z && git push && git push --tags`
 3. `scripts/build_release.sh vX.Y.Z` → `release/KaSe_vX.Y.Z_<HW>.bin` (app,
