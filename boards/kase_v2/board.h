@@ -39,6 +39,13 @@
 #define MATRIX_ROWS  5
 #define MATRIX_COLS  13
 
+/* Pin tables read by the core (matrix_scan.c, veille.c): the firmware has no
+ * matrix shape of its own, MATRIX_ROWS/MATRIX_COLS entries each. Names, not
+ * values: a board that #includes this one may override a COLSn before use. */
+#define BOARD_ROW_PINS { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 }
+#define BOARD_COL_PINS { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, \
+                         COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 }
+
 /* ── Display configuration ─────────────────────────────────── */
 #define BOARD_DISPLAY_BACKEND_OLED
 #define BOARD_DISPLAY_BUS           DISPLAY_BUS_I2C

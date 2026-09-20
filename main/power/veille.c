@@ -38,14 +38,10 @@ void veille_bilan(uint32_t *sommeils, uint32_t *dormi_ms)
 #define CONFIG_KASE_VEILLE_PROFONDE_S 14400
 #endif
 
-/* The pinout tables are sized by their initializer, not by
- * MATRIX_COLS/ROWS: the board.h files pad the tail with GPIO_NUM_NC for
- * smaller boards (Niphargus 7x4). The loops stop at the real dimensions,
- * so these entries exist without ever being read. Same reason as
- * in matrix_arm_key_wake(). */
-static const int s_cols[] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5,
-                              COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
-static const int s_rows[] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+/* The board's own pin tables: MATRIX_COLS/MATRIX_ROWS entries, no padding
+ * (the core has no matrix shape of its own since 2026-09-20). */
+static const int s_cols[] = BOARD_COL_PINS;
+static const int s_rows[] = BOARD_ROW_PINS;
 
 /* To call at STARTUP, before matrix_setup().
  *

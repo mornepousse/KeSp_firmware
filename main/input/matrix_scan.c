@@ -327,8 +327,7 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
  * high together and a held key reads across its whole row. */
 static void matrix_cols_unhold(void)
 {
-    const int cols[] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5,
-                         COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
+    const int cols[] = BOARD_COL_PINS;
     for (int c = 0; c < MATRIX_COLS; c++) gpio_hold_dis(cols[c]);
 }
 
@@ -351,16 +350,11 @@ void rtc_matrix_deinit(void)
  * BENCH-TUNE: active level is HIGH here; flip if the matrix is active-low. */
 void matrix_arm_key_wake(void)
 {
-    /* Sized by the initializer, not by MATRIX_COLS/MATRIX_ROWS: boards with
-     * fewer than 13 cols / 5 rows (e.g. Niphargus 7x4) pad the tail with
-     * GPIO_NUM_NC in board.h. The loops below still stop at MATRIX_COLS/
-     * MATRIX_ROWS, so those padding entries are declared but never read —
-     * an explicit [MATRIX_COLS]/[MATRIX_ROWS] size here would make the
-     * literal initializer overflow and warn "excess elements" on every such
-     * board. See main/input/matrix_scan.c module comment. */
-    const int cols[] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5,
-                                    COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
-    const int rows[] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+    /* The board's own tables (BOARD_ROW_PINS/BOARD_COL_PINS, exactly
+     * MATRIX_ROWS/MATRIX_COLS entries — test_board_pin_tables_match_the_geometry):
+     * the core has no matrix shape of its own since 2026-09-20. */
+    const int cols[] = BOARD_COL_PINS;
+    const int rows[] = BOARD_ROW_PINS;
 
     for (int i = 0; i < MATRIX_COLS; i++) {
         gpio_set_direction(cols[i], GPIO_MODE_OUTPUT);
@@ -378,8 +372,7 @@ void matrix_arm_key_wake(void)
 
 void matrix_disarm_key_wake(void)
 {
-    /* See matrix_arm_key_wake(): unsized on purpose, loop bound is real. */
-    const int rows[] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+    const int rows[] = BOARD_ROW_PINS;
     for (int i = 0; i < MATRIX_ROWS; i++) {
         gpio_wakeup_disable(rows[i]);
     }
@@ -420,9 +413,8 @@ void matrix_setup(void)
     static int output_gpios[MATRIX_COLS];
     static int input_gpios[MATRIX_ROWS];
 #if defined(BOARD_MATRIX_COL2ROW)
-    /* Unsized on purpose — see matrix_arm_key_wake() above. */
-    const int cols_map[] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
-    const int rows_map[] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+    const int cols_map[] = BOARD_COL_PINS;
+    const int rows_map[] = BOARD_ROW_PINS;
 
     /* Reset all matrix GPIOs to detach any function set by ROM bootloader
        (UART0 on GPIO43/44, SPI on GPIO37, etc.) */
@@ -430,8 +422,8 @@ void matrix_setup(void)
     for (int i = 0; i < MATRIX_COLS; i++) gpio_reset_pin(cols_map[i]);
     for (int i = 0; i < MATRIX_ROWS; i++) gpio_reset_pin(rows_map[i]);
 #else
-    const int cols_map[] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
-    const int rows_map[] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+    const int cols_map[] = BOARD_COL_PINS;
+    const int rows_map[] = BOARD_ROW_PINS;
 #endif
     ESP_LOGD(TAG, "Cols (outputs): ");
     for (int i = 0; i < MATRIX_COLS; i++) {
@@ -519,9 +511,8 @@ uint32_t get_last_activity_time_ms(void)
  * the scan: COL -> switch -> diode -> ROW. */
 void matrix_wake_capture(void)
 {
-    const int cols[] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5,
-                         COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
-    const int rows[] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
+    const int cols[] = BOARD_COL_PINS;
+    const int rows[] = BOARD_ROW_PINS;
     /* TWO scans, we only keep what holds on both. The GPIO wake triggers on
      * a simple edge: a glitching line (capacitive coupling from neighboring
      * columns held high, ESD, a line at threshold) wakes the board and

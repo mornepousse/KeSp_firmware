@@ -30,6 +30,7 @@
   regenerated `build_<board>/sdkconfig` (`rm` it first) — a stale one hides a
   default that stopped being read.
 - [x] Task 1 done 2026-09-20: 7/7 identical, old mechanism vs new, regenerated sdkconfigs.
+- [x] Task 2 done 2026-09-20: bench left/right/V2D (rows, columns, wake per row) OK; new reference hashes = the Task 2 build.
 
 ---
 

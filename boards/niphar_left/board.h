@@ -37,27 +37,15 @@
 #define COLS5  GPIO_NUM_11
 #define COLS6  GPIO_NUM_12
 
-/* main/input/matrix_scan.c hardcodes a fixed COLS0..COLS12 /
- * ROWS0..ROWS4 initializer (KaSe 5×13 shape) regardless of the board's
- * actual geometry: matrix_arm_key_wake()/matrix_disarm_key_wake()/matrix_setup()
- * bound their loops on MATRIX_COLS/MATRIX_ROWS (7/4 here, correct), but
- * the C initializer itself must name 13 COLS and 5 ROWS to compile — the
- * extra values (COLS7..COLS12, ROWS4) are "excess elements"
- * silently ignored by the compiler, never read at runtime.
- * GPIO_NUM_NC: no real pin exists beyond COLS6/ROWS3 on this
- * half, so there's no number to invent. Generalizing matrix_scan.c to an
- * arbitrary geometry is out of scope for task 1 (board.h only). */
-#define COLS7   GPIO_NUM_NC
-#define COLS8   GPIO_NUM_NC
-#define COLS9   GPIO_NUM_NC
-#define COLS10  GPIO_NUM_NC
-#define COLS11  GPIO_NUM_NC
-#define COLS12  GPIO_NUM_NC
-#define ROWS4   GPIO_NUM_NC
 
 /* 26 keys, rows of 7/7/6/6: two positions of the grid are empty. */
 #define MATRIX_ROWS  4
 #define MATRIX_COLS  7
+
+/* Pin tables read by the core (matrix_scan.c, veille.c): the firmware has no
+ * matrix shape of its own, MATRIX_ROWS/MATRIX_COLS entries each. */
+#define BOARD_ROW_PINS { ROWS0, ROWS1, ROWS2, ROWS3 }
+#define BOARD_COL_PINS { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6 }
 
 /* The left half is the keyboard's ONLY keymap engine: it carries the keycodes
  * for all 52 keys even though it only scans 26. Columns 0-6 = this half,

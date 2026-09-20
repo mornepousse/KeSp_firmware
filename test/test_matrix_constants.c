@@ -4,6 +4,7 @@
 /* Real prod headers (host-safe): INVALID_KEY_POS + MATRIX_ROWS/COLS via
  * matrix_scan.h, STORAGE_NAMESPACE via keyboard_config.h (pulled in by matrix_scan.h).
  * A drift in these constants now breaks the test. */
+#include "driver/gpio.h"   /* host stub: GPIO_NUM_* so the board pin tables expand */
 #include "matrix_scan.h"
 
 /* MAX_REPORT_KEYS is exposed in NO header: it's a #define duplicated
@@ -81,6 +82,18 @@ void test_fill_limit(void) {
     TEST_ASSERT_EQ(keycodes[5], 0x09, "last filled key correct");
 }
 
+/* The core reads the matrix pins from the board's tables — it has no fixed
+ * shape of its own. Until 2026-09-20 matrix_scan.c/veille.c hard-coded a
+ * COLS0..COLS12 / ROWS0..ROWS4 initializer (the KaSe 5x13) and the Niphargus
+ * boards padded it with GPIO_NUM_NC. */
+static void test_board_pin_tables_match_the_geometry(void)
+{
+    static const int rows[] = BOARD_ROW_PINS;
+    static const int cols[] = BOARD_COL_PINS;
+    TEST_ASSERT_EQ(sizeof rows / sizeof rows[0], MATRIX_ROWS, "BOARD_ROW_PINS has MATRIX_ROWS entries");
+    TEST_ASSERT_EQ(sizeof cols / sizeof cols[0], MATRIX_COLS, "BOARD_COL_PINS has MATRIX_COLS entries");
+}
+
 void test_matrix_constants(void) {
     TEST_SUITE("Matrix Constants");
     TEST_RUN(test_max_report_keys);
@@ -88,4 +101,5 @@ void test_matrix_constants(void) {
     TEST_RUN(test_report_arrays);
     TEST_RUN(test_storage_namespace);
     TEST_RUN(test_fill_limit);
+    TEST_RUN(test_board_pin_tables_match_the_geometry);
 }

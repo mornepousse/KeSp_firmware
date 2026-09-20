@@ -222,6 +222,12 @@ means a test, or a line.
   LT ([test:test_kp_key_that_resolves_an_lt_hold_is_on_the_lt_layer]): the
   key that resolves an LT as a hold is read on the LT layer from its first
   report (before: the base character was typed once, then the layer one).
+- [test:test_board_pin_tables_match_the_geometry] Matrix pins come from the
+  board's `BOARD_ROW_PINS`/`BOARD_COL_PINS` tables (exactly MATRIX_ROWS /
+  MATRIX_COLS entries); the core has no fixed matrix shape — the 5×13
+  initializer of matrix_scan.c/veille.c and the GPIO_NUM_NC padding of the
+  Niphargus boards are gone (2026-09-20). Bench: left, right and V2D, one key
+  per row and column, sleep and wake by a key on each row.
 - [test:test_take_consumes_the_signal] A matrix edge is never lost during
   reading: the signal is taken, consumed, never overwritten by the next
   read.
