@@ -3,21 +3,21 @@
 #include <stdint.h>
 #include "cadence.h"   /* KBD_CADENCE_* */
 
-/* Cadence de la tâche clavier (logique pure, testée host).
+/* Keyboard task cadence (pure logic, tested on host).
  *
- * La boucle de vTaskKeyboard n'a besoin de ses 10 ms que pour faire vivre des
- * minuteries : tap-hold et tap-dance (200 ms), leader (1000 ms), le mode test
- * matrice, et la fusion distante quand la gauche tape en USB. Au repos, rien
- * de tout ça ne court — et pourtant une boucle de 10 ms (un tick à 100 Hz)
- * réveille le processeur cent fois par seconde et interdit le light sleep
- * automatique d'ESP-IDF, qui exige CONFIG_FREERTOS_IDLE_TIME_BEFORE_SLEEP
- * (3) ticks sans personne : mesuré au banc le 2026-09-16, mode SLEEP 92 % du
- * temps oisif et light_sleep_counts = 0.
+ * vTaskKeyboard's loop only needs its 10 ms to keep timers alive: tap-hold
+ * and tap-dance (200 ms), leader (1000 ms), matrix test mode, and remote
+ * fusion when the left half types over USB. At rest, none of that is
+ * running — and yet a 10 ms loop (a tick at 100 Hz) wakes the processor a
+ * hundred times a second and prevents ESP-IDF's automatic light sleep,
+ * which requires CONFIG_FREERTOS_IDLE_TIME_BEFORE_SLEEP (3) ticks with
+ * nobody around: measured on the bench on 2026-09-16, SLEEP mode 92% of
+ * idle time and light_sleep_counts = 0.
  *
- * Un changement de matrice notifie la tâche (xTaskNotifyGive) : l'attente
- * longue ne coûte rien à la première touche, elle ne retarde que les
- * minuteries — d'où la fenêtre d'activité, plus large que la plus longue
- * d'entre elles. */
+ * A matrix change notifies the task (xTaskNotifyGive): the long wait
+ * costs nothing for the first keystroke, it only delays the
+ * timers — hence the activity window, wider than the longest
+ * of them. */
 
 
 static inline uint32_t kbd_cadence_attente_ms(uint32_t now_ms, uint32_t derniere_activite_ms,

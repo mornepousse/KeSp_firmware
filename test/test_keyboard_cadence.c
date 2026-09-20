@@ -1,6 +1,6 @@
-/* Cadence de la tâche clavier : 10 ms tant qu'une minuterie peut courir, 100 ms
- * au repos — sinon le light sleep automatique n'arrive jamais (3 ticks libres
- * exigés, la boucle en laissait 1). */
+/* Keyboard task cadence: 10 ms while a timer can still run, 100 ms
+ * at idle — otherwise automatic light sleep never happens (3 free ticks
+ * are required, the loop was leaving only 1). */
 #include "test_framework.h"
 #include "../main/input/keyboard_cadence.h"
 
@@ -20,7 +20,7 @@ static void test_actif_dans_la_fenetre(void)
 
 static void test_fenetre_couvre_le_leader(void)
 {
-    /* Le leader expire 1000 ms après sa frappe : encore cadencé à 10 ms. */
+    /* The leader expires 1000 ms after its keypress: still clocked at 10 ms. */
     TEST_ASSERT_EQ(kbd_cadence_attente_ms(11000, 10000, false, false), KBD_CADENCE_ACTIF_MS, "cadence");
 }
 
@@ -32,13 +32,13 @@ static void test_usb_et_test_matrice_restent_actifs(void)
 
 static void test_debordement_du_compteur(void)
 {
-    /* now vient de repasser par zéro, l'activité date d'avant. */
+    /* now just wrapped back to zero, the activity predates it. */
     TEST_ASSERT_EQ(kbd_cadence_attente_ms(100, 0xFFFFFFF0u, false, false), KBD_CADENCE_ACTIF_MS, "cadence");
 }
 
 void test_keyboard_cadence(void)
 {
-    TEST_SUITE("cadence de la tache clavier (tickless)");
+    TEST_SUITE("keyboard task cadence (tickless)");
     TEST_RUN(test_repos_apres_la_fenetre);
     TEST_RUN(test_actif_dans_la_fenetre);
     TEST_RUN(test_fenetre_couvre_le_leader);

@@ -76,7 +76,7 @@ static void test_hb_timeout_releases_all(void)
     /* establish link with 2 keys pressed via reconcile */
     rf_heartbeat_t h; memset(&h, 0, sizeof(h));
     rf_bitmap_set(h.bitmap, 0, 0, true);
-    rf_bitmap_set(h.bitmap, 3, 6, true);   /* derniere touche de la moitie (4x7) */
+    rf_bitmap_set(h.bitmap, 3, 6, true);   /* last key of the half (4x7) */
     hb_reconcile(&st, HB_HALF_LEFT, &h, &cb, 1000);
     TEST_ASSERT(st.link_up, "link up after hb");
 

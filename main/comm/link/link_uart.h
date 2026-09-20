@@ -1,11 +1,11 @@
-/* Transport du lien filaire TRRS (brick B2) — voir link_uart.c. */
+/* Transport for the TRRS wired link (brick B2) — see link_uart.c. */
 #pragma once
 #include <stdbool.h>
 
-/* Initialise LINK_5V_EN à BAS, l'UART1 (avec le swap si la carte l'annonce)
- * et démarre la tâche qui fait tourner la poignée de main. */
+/* Initializes LINK_5V_EN to LOW, UART1 (with the swap if the board declares
+ * it) and starts the task that runs the handshake. */
 void link_uart_start(void);
 
-/* Le 5 V est-il fermé de notre côté ? Sert de verrou à la veille : une moitié
- * en charge doit rester éveillée pour continuer à répondre aux sondes. */
+/* Is the 5 V closed on our side? Serves as a lock on sleep: a half that is
+ * charging must stay awake to keep responding to probes. */
 bool link_uart_active(void);

@@ -1,77 +1,77 @@
-/* Tap/Hold engine tests — VRAI module linké (../main/input/tap_hold.c).
- * L'horloge est contrôlable : esp_timer_get_time() (défini ici, symbole global du
- * runner) renvoie g_now_us, avancé via advance_ms() — permet de tester la borne
- * exacte du timeout, l'interruption, l'épuisement de slots, etc. sur le vrai code. */
+/* Tap/Hold engine tests — REAL linked module (../main/input/tap_hold.c).
+ * The clock is controllable: esp_timer_get_time() (defined here, a global symbol of
+ * the runner) returns g_now_us, advanced via advance_ms() — lets us test the exact
+ * timeout boundary, interruption, slot exhaustion, etc. on the real code. */
 #include "test_framework.h"
 #include "tap_hold.h"
 #include "key_definitions.h"   /* K_MT / K_LT / K_OSM, MOD_* */
 #include "keyboard_config.h"   /* LAYERS */
 #include "key_features.h"      /* osm_is_active / osm_consume (branche OSM du tap) */
 
-/* Horloge host contrôlable partagée (host_clock.c définit esp_timer_get_time) */
+/* Shared controllable host clock (host_clock.c defines esp_timer_get_time) */
 #include "host_clock.h"
 static void advance_ms(uint32_t ms) { host_clock_advance_ms(ms); }
 
-/* Globales de layer définies par key_processor.c (linké) — sauvées/restaurées
- * autour du test LT pour ne pas polluer les autres suites. */
+/* Layer globals defined by key_processor.c (linked) — saved/restored
+ * around the LT test so as not to pollute the other suites. */
 extern uint8_t current_layout;
 extern uint8_t last_layer;
 
 static void th_reset(void) { tap_hold_init(); host_clock_reset(); }
 
-/* 1. MT relâché avant le timeout → TAP : consume_tap rend la touche de tap. */
+/* 1. MT released before the timeout → TAP: consume_tap returns the tap key. */
 static void test_th_mt_tap(void) {
     th_reset();
     uint16_t mt = K_MT(MOD_LSFT, 0x04);   /* MT(Shift, A) */
-    TEST_ASSERT(tap_hold_on_press(mt, 0, 0), "MT press → tracké");
+    TEST_ASSERT(tap_hold_on_press(mt, 0, 0), "MT press → tracked");
     advance_ms(50);                        /* < 200ms */
-    TEST_ASSERT(tap_hold_on_release(0, 0), "MT release tracké");
-    TEST_ASSERT_EQ(tap_hold_consume_tap(), 0x04, "release rapide → tap = A (0x04)");
-    TEST_ASSERT_EQ(tap_hold_get_active_mods(), 0, "aucun mod hold après un tap");
+    TEST_ASSERT(tap_hold_on_release(0, 0), "MT release tracked");
+    TEST_ASSERT_EQ(tap_hold_consume_tap(), 0x04, "quick release → tap = A (0x04)");
+    TEST_ASSERT_EQ(tap_hold_get_active_mods(), 0, "no hold mod after a tap");
 }
 
-/* 2. MT tenu au-delà du timeout → HOLD : le mod devient actif ; release le retire. */
+/* 2. MT held past the timeout → HOLD: the mod becomes active; release removes it. */
 static void test_th_mt_hold_timeout(void) {
     th_reset();
     uint16_t mt = K_MT(MOD_LSFT, 0x04);
     tap_hold_on_press(mt, 0, 0);
     advance_ms(200);                       /* == TAP_HOLD_TIMEOUT_MS */
     tap_hold_tick();
-    TEST_ASSERT(tap_hold_hold_just_activated(), "tick au timeout → hold activé");
-    TEST_ASSERT_EQ(tap_hold_get_active_mods(), MOD_LSFT, "MT hold → Shift actif");
+    TEST_ASSERT(tap_hold_hold_just_activated(), "tick at timeout → hold activated");
+    TEST_ASSERT_EQ(tap_hold_get_active_mods(), MOD_LSFT, "MT hold → Shift active");
     bool is_hold = false;
-    TEST_ASSERT_EQ(tap_hold_get_resolved(0, 0, &is_hold), mt, "resolved rend le keycode MT");
+    TEST_ASSERT_EQ(tap_hold_get_resolved(0, 0, &is_hold), mt, "resolved returns the MT keycode");
     TEST_ASSERT(is_hold, "resolved → is_hold=true");
     tap_hold_on_release(0, 0);
-    TEST_ASSERT_EQ(tap_hold_get_active_mods(), 0, "release du hold → mod retiré");
+    TEST_ASSERT_EQ(tap_hold_get_active_mods(), 0, "hold release → mod removed");
 }
 
-/* 3. Borne exacte du timeout : 199ms → pas de hold ; 200ms → hold. */
+/* 3. Exact timeout boundary: 199ms → no hold; 200ms → hold. */
 static void test_th_timeout_boundary(void) {
     th_reset();
     tap_hold_on_press(K_MT(MOD_LCTL, 0x05), 0, 0);
     advance_ms(199);
     tap_hold_tick();
-    TEST_ASSERT(!tap_hold_hold_just_activated(), "199ms < timeout → pas de hold");
-    TEST_ASSERT_EQ(tap_hold_get_active_mods(), 0, "199ms → aucun mod");
+    TEST_ASSERT(!tap_hold_hold_just_activated(), "199ms < timeout → no hold");
+    TEST_ASSERT_EQ(tap_hold_get_active_mods(), 0, "199ms → no mod");
     advance_ms(1);                         /* total 200ms */
     tap_hold_tick();
     TEST_ASSERT(tap_hold_hold_just_activated(), "200ms == timeout → hold");
-    TEST_ASSERT_EQ(tap_hold_get_active_mods(), MOD_LCTL, "200ms → Ctrl actif");
+    TEST_ASSERT_EQ(tap_hold_get_active_mods(), MOD_LCTL, "200ms → Ctrl active");
     tap_hold_on_release(0, 0);
 }
 
-/* 4. Interruption (autre touche) → HOLD immédiat, sans attendre le timeout. */
+/* 4. Interruption (another key) → immediate HOLD, without waiting for the timeout. */
 static void test_th_interrupt_forces_hold(void) {
     th_reset();
     tap_hold_on_press(K_MT(MOD_LALT, 0x06), 0, 0);
-    advance_ms(10);                        /* bien avant le timeout */
+    advance_ms(10);                        /* well before the timeout */
     tap_hold_interrupt();
-    TEST_ASSERT_EQ(tap_hold_get_active_mods(), MOD_LALT, "interrupt → Alt hold immédiat");
+    TEST_ASSERT_EQ(tap_hold_get_active_mods(), MOD_LALT, "interrupt → immediate Alt hold");
     tap_hold_on_release(0, 0);
 }
 
-/* 5. LT tenu → couche active ; release → restaurée. */
+/* 5. LT held → active layer; release → restored. */
 static void test_th_lt_hold_layer(void) {
     th_reset();
     uint8_t save_cur = current_layout, save_last = last_layer;
@@ -79,26 +79,26 @@ static void test_th_lt_hold_layer(void) {
     tap_hold_on_press(K_LT(2, 0x2C), 0, 0);   /* LT(2, Space) */
     advance_ms(200);
     tap_hold_tick();
-    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 2, "LT hold → couche active 2");
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 2, "LT hold → active layer 2");
     tap_hold_on_release(0, 0);
-    TEST_ASSERT_EQ(tap_hold_get_active_layer(), -1, "release LT → plus de couche active");
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), -1, "LT release → no more active layer");
     current_layout = save_cur; last_layer = save_last;
 }
 
-/* 6. OSM tapé → consume_tap arme le one-shot mod (pas de keycode direct). */
+/* 6. OSM tapped → consume_tap arms the one-shot mod (no direct keycode). */
 static void test_th_osm_tap_arms(void) {
     th_reset();
-    (void)osm_consume();                   /* baseline OSM vide */
+    (void)osm_consume();                   /* empty OSM baseline */
     tap_hold_on_press(K_OSM(MOD_LGUI), 0, 0);
     advance_ms(30);
     tap_hold_on_release(0, 0);
-    TEST_ASSERT_EQ(tap_hold_consume_tap(), 0, "OSM tap ne rend pas de keycode direct");
-    TEST_ASSERT(osm_is_active(), "OSM tap → one-shot GUI armé");
-    (void)osm_consume();                   /* nettoie */
+    TEST_ASSERT_EQ(tap_hold_consume_tap(), 0, "OSM tap returns no direct keycode");
+    TEST_ASSERT(osm_is_active(), "OSM tap → one-shot GUI armed");
+    (void)osm_consume();                   /* cleans up */
 }
 
-/* 6b. Un tap OSM (slot 0) + un tap MT (slot 1) le même cycle : consume_tap ne
- * doit pas s'arrêter sur l'OSM (retour 0) et perdre le tap MT (audit M4). */
+/* 6b. An OSM tap (slot 0) + an MT tap (slot 1) in the same cycle: consume_tap
+ * must not stop on the armed OSM (return 0) and lose the MT tap (audit M4). */
 static void test_th_consume_osm_then_mt(void) {
     th_reset();
     (void)osm_consume();
@@ -108,104 +108,104 @@ static void test_th_consume_osm_then_mt(void) {
     tap_hold_on_release(0, 0);   /* OSM tap */
     tap_hold_on_release(0, 1);   /* MT tap */
     TEST_ASSERT_EQ(tap_hold_consume_tap(), 0x04,
-                   "consume_tap saute l'OSM armé → rend le tap MT (0x04) (M4)");
-    TEST_ASSERT(osm_is_active(), "OSM tout de même armé au passage");
+                   "consume_tap skips the armed OSM → returns the MT tap (0x04) (M4)");
+    TEST_ASSERT(osm_is_active(), "OSM still armed along the way");
     (void)osm_consume();
 }
 
-/* 7. Touche normale (non LT/MT/OSM) → non trackée. */
+/* 7. Normal key (not LT/MT/OSM) → not tracked. */
 static void test_th_ignores_normal_key(void) {
     th_reset();
-    TEST_ASSERT(!tap_hold_on_press(0x04, 0, 0), "touche normale A → non trackée");
+    TEST_ASSERT(!tap_hold_on_press(0x04, 0, 0), "normal key A → not tracked");
 }
 
-/* 8. Épuisement des slots : TAP_HOLD_MAX_PENDING pris → le suivant échoue. */
+/* 8. Slot exhaustion: TAP_HOLD_MAX_PENDING taken → the next one fails. */
 static void test_th_slot_exhaustion(void) {
     th_reset();
     for (int i = 0; i < TAP_HOLD_MAX_PENDING; i++)
-        TEST_ASSERT(tap_hold_on_press(K_MT(MOD_LSFT, 0x04), 0, i), "slot libre pris");
+        TEST_ASSERT(tap_hold_on_press(K_MT(MOD_LSFT, 0x04), 0, i), "free slot taken");
     TEST_ASSERT(!tap_hold_on_press(K_MT(MOD_LSFT, 0x04), 1, 0),
-                "au-delà de TAP_HOLD_MAX_PENDING → refusé");
+                "beyond TAP_HOLD_MAX_PENDING → refused");
     for (int i = 0; i < TAP_HOLD_MAX_PENDING; i++) tap_hold_on_release(0, i);
 }
 
-/* 9. LT avec couche HORS BORNES (>= LAYERS=10) → ignorée (sinon lecture OOB de
- *    keymaps[] + current_layout bloqué sur une couche illégale). */
+/* 9. LT with an OUT-OF-BOUNDS layer (>= LAYERS=10) → ignored (otherwise OOB read
+ *    of keymaps[] + current_layout stuck on an illegal layer). */
 static void test_th_lt_layer_out_of_bounds(void) {
     th_reset();
     uint8_t save_cur = current_layout, save_last = last_layer;
     current_layout = 0;
-    tap_hold_on_press(K_LT(15, 0x2C), 0, 0);   /* couche 15 >= LAYERS */
+    tap_hold_on_press(K_LT(15, 0x2C), 0, 0);   /* layer 15 >= LAYERS */
     advance_ms(200);
     tap_hold_tick();
     TEST_ASSERT_EQ(tap_hold_get_active_layer(), -1,
-                   "LT couche 15 (>= LAYERS) → ignorée, aucune couche active");
-    TEST_ASSERT_EQ(current_layout, 0, "current_layout non corrompu par LT hors bornes");
+                   "LT layer 15 (>= LAYERS) → ignored, no active layer");
+    TEST_ASSERT_EQ(current_layout, 0, "current_layout not corrupted by out-of-bounds LT");
     tap_hold_on_release(0, 0);
     current_layout = save_cur; last_layer = save_last;
 }
 
-/* 9 bis. CR-1 : la LT hors bornes SURVIT dans pending[] en TH_HOLD, parce que
- *        activate_hold() pose e->state = TH_HOLD AVANT de tester la borne. Le
- *        garde bloque seulement le bump d'activate_seq et le recalcul immédiat.
- *        Quand une LT valide tenue en même temps est relâchée, deactivate_hold()
- *        appelle recompute_lt_layer(), qui rebalaye pending[] et retient son
- *        PREMIER candidat via `!top`, quel que soit son activate_seq — donc
- *        l'entrée hors bornes, seule restante. current_layout part alors hors
- *        des bornes de keymaps[], et toute lecture suivante lit à côté. */
+/* 9 bis. CR-1: the out-of-bounds LT SURVIVES in pending[] in TH_HOLD, because
+ *        activate_hold() sets e->state = TH_HOLD BEFORE testing the bound. The
+ *        guard only blocks the activate_seq bump and the immediate recompute.
+ *        When a valid LT held at the same time is released, deactivate_hold()
+ *        calls recompute_lt_layer(), which re-scans pending[] and keeps its
+ *        FIRST candidate via `!top`, regardless of its activate_seq — so
+ *        the out-of-bounds entry, the only one left. current_layout then goes
+ *        out of the bounds of keymaps[], and every subsequent read reads garbage. */
 static void test_th_lt_oob_wins_recompute_after_valid_release(void) {
     th_reset();
     uint8_t save_cur = current_layout, save_last = last_layer;
     current_layout = 0;
 
-    /* Une LT valide entre en hold. */
+    /* A valid LT enters hold. */
     tap_hold_on_press(K_LT(1, 0x2C), 0, 0);
     advance_ms(200);
     tap_hold_tick();
-    TEST_ASSERT_EQ(current_layout, 1, "LT valide → couche 1 active");
+    TEST_ASSERT_EQ(current_layout, 1, "valid LT → layer 1 active");
 
-    /* Une LT hors bornes entre en hold à son tour : elle ne doit rien changer. */
+    /* An out-of-bounds LT enters hold in turn: it must change nothing. */
     tap_hold_on_press(K_LT(15, 0x2D), 0, 1);
     advance_ms(200);
     tap_hold_tick();
-    TEST_ASSERT_EQ(current_layout, 1, "LT hors bornes → ne prend pas la main");
+    TEST_ASSERT_EQ(current_layout, 1, "out-of-bounds LT → does not take over");
 
-    /* On relâche la LT VALIDE. Le recalcul ne doit pas élire l'hors-bornes. */
+    /* We release the VALID LT. The recompute must not elect the out-of-bounds one. */
     tap_hold_on_release(0, 0);
 
     TEST_ASSERT(current_layout < LAYERS,
-                "après relâchement de la LT valide, current_layout reste dans les bornes");
+                "after releasing the valid LT, current_layout stays within bounds");
     TEST_ASSERT(tap_hold_get_active_layer() < (int8_t)LAYERS,
-                "active_hold_layer reste dans les bornes");
+                "active_hold_layer stays within bounds");
 
     tap_hold_on_release(0, 1);
     current_layout = save_cur; last_layer = save_last;
 }
 
-/* 10. Deux LT tenues simultanément (bug audit E1) : relâcher la plus récente
- *     doit revenir à la couche de la LT encore tenue, PAS tout perdre ; relâcher
- *     les deux revient à la base. L'ancien code mettait active_hold_layer=-1 dès
- *     le 1er release → couche perdue, puis clavier bloqué. */
+/* 10. Two LTs held simultaneously (audit bug E1): releasing the most recent one
+ *     must revert to the layer of the LT still held, NOT lose everything;
+ *     releasing both returns to base. The old code set active_hold_layer=-1 on
+ *     the 1st release → layer lost, then keyboard stuck. */
 static void test_th_two_lt_concurrent(void) {
     th_reset();
     uint8_t save_cur = current_layout, save_last = last_layer;
     current_layout = 0;
     tap_hold_on_press(K_LT(1, 0x2C), 0, 0);   /* P1 = LT(1) */
     advance_ms(200); tap_hold_tick();
-    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "P1 tenu → couche 1");
-    tap_hold_on_press(K_LT(2, 0x2D), 0, 1);   /* P2 = LT(2), plus récent */
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "P1 held → layer 1");
+    tap_hold_on_press(K_LT(2, 0x2D), 0, 1);   /* P2 = LT(2), more recent */
     advance_ms(200); tap_hold_tick();
-    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 2, "P2 tenu → couche 2 (plus récent)");
-    tap_hold_on_release(0, 1);                 /* relâche P2 (P1 toujours tenu) */
-    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "release P2 → retour couche 1 (P1 tenu)");
-    tap_hold_on_release(0, 0);                 /* relâche P1 */
-    TEST_ASSERT_EQ(tap_hold_get_active_layer(), -1, "release P1 → plus de couche LT");
-    TEST_ASSERT_EQ(current_layout, 0, "retour à la base 0 (pas bloqué)");
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 2, "P2 held → layer 2 (more recent)");
+    tap_hold_on_release(0, 1);                 /* releases P2 (P1 still held) */
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "P2 release → back to layer 1 (P1 held)");
+    tap_hold_on_release(0, 0);                 /* releases P1 */
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), -1, "P1 release → no more LT layer");
+    TEST_ASSERT_EQ(current_layout, 0, "back to base 0 (not stuck)");
     current_layout = save_cur; last_layer = save_last;
 }
 
 void test_tap_hold(void) {
-    TEST_SUITE("Tap/Hold State Machine — module réel");
+    TEST_SUITE("Tap/Hold State Machine — real module");
     TEST_RUN(test_th_mt_tap);
     TEST_RUN(test_th_mt_hold_timeout);
     TEST_RUN(test_th_timeout_boundary);
@@ -218,5 +218,5 @@ void test_tap_hold(void) {
     TEST_RUN(test_th_consume_osm_then_mt);
     TEST_RUN(test_th_ignores_normal_key);
     TEST_RUN(test_th_slot_exhaustion);
-    tap_hold_init();   /* laisse le module propre pour les suites suivantes */
+    tap_hold_init();   /* leaves the module clean for the following suites */
 }

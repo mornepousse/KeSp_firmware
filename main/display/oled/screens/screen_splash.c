@@ -1,4 +1,4 @@
-/* screen_splash.c — Écran SPLASH : nom "KaSe" + version firmware. */
+/* screen_splash.c — SPLASH screen: "KaSe" name + firmware version. */
 #include "oled_screen.h"
 #include "lvgl.h"
 #include "esp_app_desc.h"
@@ -11,13 +11,13 @@ static lv_obj_t *label_version = NULL;
 
 static void build(lv_obj_t *parent)
 {
-    /* "KaSe" en grand, centré vers le haut (screen 128x64) */
+    /* "KaSe" in large text, centered toward the top (screen 128x64) */
     label_name = lv_label_create(parent);
     lv_obj_set_style_text_font(label_name, &lv_font_montserrat_28, 0);
     lv_label_set_text(label_name, "KaSe");
     lv_obj_align(label_name, LV_ALIGN_CENTER, 0, -12);
 
-    /* Version firmware en dessous, UI_FONT (board-defined) */
+    /* Firmware version below, UI_FONT (board-defined) */
     label_version = lv_label_create(parent);
     lv_obj_set_style_text_font(label_version, UI_FONT, 0);
     lv_label_set_text(label_version, esp_app_get_description()->version);

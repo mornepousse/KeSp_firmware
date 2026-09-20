@@ -1,5 +1,5 @@
-/* Voir mouse_buttons.h pour le raisonnement. Aucune dépendance ESP-IDF ici :
- * ce fichier est compilé tel quel par le harnais de test hôte. */
+/* See mouse_buttons.h for the reasoning. No ESP-IDF dependency here:
+ * this file is compiled as-is by the host test harness. */
 #include "mouse_buttons.h"
 
 mouse_contact_t mouse_contact_decode(int no_level, int nc_level)
@@ -15,10 +15,10 @@ bool mouse_button_next(bool prev, mouse_contact_t contact)
     switch (contact) {
     case MOUSE_CONTACT_PRESSED:  return true;
     case MOUSE_CONTACT_RELEASED: return false;
-    /* Les deux cas ambigus retiennent l'état précédent. Les garder distincts
-     * plutôt que de les fondre en `default` a un intérêt : IMPOSSIBLE signale
-     * un défaut matériel et mérite d'être compté à part par l'appelant, même
-     * si la décision est la même. */
+    /* Both ambiguous cases keep the previous state. Keeping them distinct
+     * rather than merging them into `default` has a point: IMPOSSIBLE signals
+     * a hardware fault and deserves to be counted separately by the caller,
+     * even though the decision is the same. */
     case MOUSE_CONTACT_BOUNCING:
     case MOUSE_CONTACT_IMPOSSIBLE:
     default:

@@ -1,5 +1,5 @@
-/* Backend de l'horloge host contrôlable — voir host_clock.h.
- * Définit l'unique esp_timer_get_time() du runner de test. */
+/* Controllable host clock backend — see host_clock.h.
+ * Defines the test runner's single esp_timer_get_time(). */
 #include "host_clock.h"
 #include "esp_timer.h"
 

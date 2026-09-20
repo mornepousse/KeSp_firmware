@@ -1,8 +1,8 @@
 #pragma once
 #include <stdbool.h>
-/* Fréquence dynamique (DFS) des moitiés Niphargus — voir pm_dfs.c.
- * Ne fait rien si CONFIG_PM_ENABLE n'est pas actif. */
+/* Dynamic frequency scaling (DFS) of the Niphargus halves — see pm_dfs.c.
+ * Does nothing if CONFIG_PM_ENABLE is not active. */
 void pm_dfs_init(void);
-/* À appeler sur TINYUSB_EVENT_ATTACHED / DETACHED (usb_hid.c) : verrou APB
- * tenu tant qu'un hôte est monté, l'USB a besoin de la PLL. */
+/* Call on TINYUSB_EVENT_ATTACHED / DETACHED (usb_hid.c): APB lock
+ * held as long as a host is mounted, USB needs the PLL. */
 void pm_dfs_usb_event(bool monte);

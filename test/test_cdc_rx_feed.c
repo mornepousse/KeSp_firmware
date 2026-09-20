@@ -1,28 +1,28 @@
 /*
- * test_cdc_rx_feed.c — Tests de CARACTÉRISATION pour ks_rx_feed() et ks_crc8().
+ * test_cdc_rx_feed.c — CHARACTERIZATION tests for ks_rx_feed() and ks_crc8().
  *
- * But : épingler le comportement ACTUEL du parser de frames KS binaire
- * tel qu'il est dans cdc_binary_protocol.c. Aucune correction de bug ici.
+ * Goal: pin down the CURRENT behavior of the binary KS frame parser
+ * as it stands in cdc_binary_protocol.c. No bug fixes here.
  *
- * Format frame KS (request) :
+ * KS frame format (request):
  *   [0x4B][0x53][cmd:u8][len:u16 LE][payload...][crc8]
  *
- * Stubs requis (dans test/) :
+ * Required stubs (in test/):
  *   esp_log.h, tinyusb_cdc_acm.h, tusb.h, freertos/FreeRTOS.h, task.h
- * Ces stubs sont résolus via le chemin d'inclusion CMake (test/ est le premier
- * répertoire), donc transparent pour cdc_binary_protocol.c.
+ * These stubs are resolved via the CMake include path (test/ is the first
+ * directory), so they're transparent to cdc_binary_protocol.c.
  */
 #include "test_framework.h"
-#include "tinyusb_cdc_acm.h"               /* stub : esp_err_t, tinyusb_cdcacm_itf_t */
+#include "tinyusb_cdc_acm.h"               /* stub: esp_err_t, tinyusb_cdcacm_itf_t */
 #include "../main/comm/cdc/cdc_binary_protocol.h"
 #include <string.h>
 
-/* ── Stubs requis par cdc_binary_protocol.c au link ─────────────────────── */
+/* ── Stubs required by cdc_binary_protocol.c at link time ─────────────────────── */
 
-/* TAG_CDC déclaré extern dans cdc_internal.h, défini ici pour ce TU de test. */
+/* TAG_CDC declared extern in cdc_internal.h, defined here for this test TU. */
 const char *TAG_CDC = "test_cdc";
 
-/* Capture des écritures CDC — réinitialisée avant chaque sous-test. */
+/* CDC writes capture — reset before each sub-test. */
 static uint8_t  fake_cdc_buf[256];
 static size_t   fake_cdc_pos;
 static int      fake_write_count;
@@ -45,12 +45,12 @@ esp_err_t tinyusb_cdcacm_write_flush(tinyusb_cdcacm_itf_t itf,
     return 0;
 }
 
-/* ── Handler de test enregistré via ks_register_binary_commands ─────────── */
+/* ── Test handler registered via ks_register_binary_commands ─────────── */
 
 static bool     fake_rx_called;
 static uint8_t  fake_rx_cmd;
 static uint16_t fake_rx_len;
-static uint8_t  fake_rx_payload[64]; /* suffisant pour les payloads de test */
+static uint8_t  fake_rx_payload[64]; /* enough for the test payloads */
 
 static void test_cmd_handler(uint8_t cmd_id, const uint8_t *payload, uint16_t len)
 {
@@ -68,7 +68,7 @@ static const ks_bin_cmd_entry_t test_cmd_table[] = {
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 
-/* Reset l'état du parser ET l'état de capture entre chaque cas. */
+/* Resets the parser state AND the capture state between each case. */
 static void reset_state(void)
 {
     ks_rx_reset();
@@ -82,9 +82,9 @@ static void reset_state(void)
 }
 
 /*
- * Construit un frame KS valide dans buf.
- * - payload peut être NULL si len==0 (ks_crc8 ne déréférence pas avec len=0).
- * - Retourne la taille totale de la frame (6 + len).
+ * Builds a valid KS frame into buf.
+ * - payload can be NULL if len==0 (ks_crc8 doesn't dereference with len=0).
+ * - Returns the total size of the frame (6 + len).
  */
 static size_t build_ks_frame(uint8_t *buf, uint8_t cmd,
                               const uint8_t *payload, uint16_t len)
@@ -96,28 +96,28 @@ static size_t build_ks_frame(uint8_t *buf, uint8_t cmd,
     buf[4] = (uint8_t)((len >> 8) & 0xFF);
     if (len > 0 && payload)
         memcpy(buf + 5, payload, len);
-    buf[5 + len] = ks_crc8(payload, len); /* NULL+0 → retourne 0x00, sûr */
+    buf[5 + len] = ks_crc8(payload, len); /* NULL+0 → returns 0x00, safe */
     return (size_t)(6 + len);
 }
 
-/* ══ Suite CRC-8 ═════════════════════════════════════════════════════════ */
+/* ══ CRC-8 suite ═════════════════════════════════════════════════════════ */
 
-/* Vecteur 1 : payload vide → CRC = 0x00 (init seul, boucle ne tourne pas) */
+/* Vector 1: empty payload → CRC = 0x00 (init only, loop doesn't run) */
 static void test_crc8_empty_payload(void)
 {
     TEST_ASSERT_EQ(ks_crc8(NULL, 0), 0x00,
-                   "crc8(NULL,0) = 0x00 — init 0x00, boucle ignorée");
+                   "crc8(NULL,0) = 0x00 — init 0x00, loop skipped");
 }
 
-/* Vecteur 2 : octet 0x00 → CRC = 0x00
- * (XOR puis 8 shifts sans activer le polynôme : 0 reste 0) */
+/* Vector 2: byte 0x00 → CRC = 0x00
+ * (XOR then 8 shifts without triggering the polynomial: 0 stays 0) */
 static void test_crc8_single_zero_byte(void)
 {
     uint8_t d[] = {0x00};
     TEST_ASSERT_EQ(ks_crc8(d, 1), 0x00, "crc8([0x00]) = 0x00");
 }
 
-/* Vecteur 3 : octet 0x01 → CRC = 0x31 (calculé à la main, poly 0x31 MSB-first)
+/* Vector 3: byte 0x01 → CRC = 0x31 (computed by hand, poly 0x31 MSB-first)
  * 0x01 → shift ×7 → 0x80 → MSB=1 → (0x80<<1)^0x31 = 0x00^0x31 = 0x31 */
 static void test_crc8_single_nonzero_byte(void)
 {
@@ -125,7 +125,7 @@ static void test_crc8_single_nonzero_byte(void)
     TEST_ASSERT_EQ(ks_crc8(d, 1), 0x31, "crc8([0x01]) = 0x31");
 }
 
-/* Vecteur 4 : multi-octets — adosse le vecteur publié dans
+/* Vector 4: multi-byte — backs the vector published in
  * docs/CDC_BINARY_PROTOCOL.md ([0x4B,0x53] → 0xBE) */
 static void test_crc8_multibyte_doc_vector(void)
 {
@@ -133,17 +133,17 @@ static void test_crc8_multibyte_doc_vector(void)
     TEST_ASSERT_EQ(ks_crc8(d, 2), 0xBE, "crc8([0x4B,0x53]) = 0xBE (doc)");
 }
 
-/* Vecteur 5 : déterminisme — même entrée donne toujours la même sortie */
+/* Vector 5: determinism — same input always gives the same output */
 static void test_crc8_deterministic(void)
 {
     uint8_t d[] = {0xDE, 0xAD, 0xBE, 0xEF};
     TEST_ASSERT_EQ(ks_crc8(d, 4), ks_crc8(d, 4),
-                   "crc8 déterministe sur la même donnée");
+                   "crc8 deterministic on the same data");
 }
 
-/* ══ Suite parser ks_rx_feed ════════════════════════════════════════════ */
+/* ══ ks_rx_feed parser suite ════════════════════════════════════════════ */
 
-/* Cas 1 : frame valide passée d'un coup */
+/* Case 1: valid frame passed all at once */
 static void test_valid_frame_all_at_once(void)
 {
     reset_state();
@@ -153,15 +153,15 @@ static void test_valid_frame_all_at_once(void)
     uint16_t consumed = ks_rx_feed((const char *)frame, (uint16_t)flen);
 
     TEST_ASSERT_EQ(consumed, (int)flen,
-                   "frame entière : tous les octets consommés");
+                   "whole frame: all bytes consumed");
     TEST_ASSERT(ks_process_one(),
-                "ks_process_one retourne true après frame valide");
-    TEST_ASSERT(fake_rx_called,       "handler appelé");
+                "ks_process_one returns true after a valid frame");
+    TEST_ASSERT(fake_rx_called,       "handler called");
     TEST_ASSERT_EQ(fake_rx_cmd, KS_CMD_PING,  "cmd_id = PING");
     TEST_ASSERT_EQ(fake_rx_len, 0,    "payload_len = 0");
 }
 
-/* Cas 2 : même frame livrée octet par octet */
+/* Case 2: same frame delivered byte by byte */
 static void test_valid_frame_byte_by_byte(void)
 {
     reset_state();
@@ -170,15 +170,15 @@ static void test_valid_frame_byte_by_byte(void)
 
     for (size_t i = 0; i < flen; i++) {
         uint16_t c = ks_rx_feed((const char *)(frame + i), 1);
-        TEST_ASSERT_EQ(c, 1, "chaque octet individuel est consommé (retour 1)");
+        TEST_ASSERT_EQ(c, 1, "each individual byte is consumed (returns 1)");
     }
     TEST_ASSERT(ks_process_one(),
-                "frame octet par octet : ks_process_one true");
-    TEST_ASSERT(fake_rx_called, "handler appelé après feed octet par octet");
-    TEST_ASSERT_EQ(fake_rx_cmd, KS_CMD_PING, "cmd_id correct après feed incrémental");
+                "byte-by-byte frame: ks_process_one true");
+    TEST_ASSERT(fake_rx_called, "handler called after byte-by-byte feed");
+    TEST_ASSERT_EQ(fake_rx_cmd, KS_CMD_PING, "cmd_id correct after incremental feed");
 }
 
-/* Cas 3 : frame avec payload non-vide */
+/* Case 3: frame with non-empty payload */
 static void test_frame_with_nonempty_payload(void)
 {
     reset_state();
@@ -190,41 +190,41 @@ static void test_frame_with_nonempty_payload(void)
     uint16_t consumed = ks_rx_feed((const char *)frame, (uint16_t)flen);
 
     TEST_ASSERT_EQ(consumed, (int)flen,
-                   "frame avec payload : tous octets consommés");
-    TEST_ASSERT(ks_process_one(), "frame avec payload : ks_process_one true");
+                   "frame with payload: all bytes consumed");
+    TEST_ASSERT(ks_process_one(), "frame with payload: ks_process_one true");
     TEST_ASSERT_EQ(fake_rx_len, 2, "payload_len = 2");
     TEST_ASSERT_EQ(fake_rx_payload[0], 0xAB, "payload[0] = 0xAB");
     TEST_ASSERT_EQ(fake_rx_payload[1], 0xCD, "payload[1] = 0xCD");
 }
 
-/* Cas 4 : bruit avant le magic → retour 0 immédiat (pas d'avance dans le stream) */
+/* Case 4: noise before the magic → immediate return 0 (no advance in the stream) */
 static void test_noise_before_magic_returns_zero(void)
 {
     reset_state();
 
-    /* En état IDLE, tout octet ≠ 0x4B provoque un return 0 immédiat.
-     * Le parser ne scanne PAS le buffer à la recherche du magic — c'est au
-     * caller d'avancer octet par octet. */
+    /* In IDLE state, any byte ≠ 0x4B causes an immediate return 0.
+     * The parser does NOT scan the buffer looking for the magic — it's up to the
+     * caller to advance byte by byte. */
     uint8_t noise[] = {0xFF};
     uint16_t c = ks_rx_feed((const char *)noise, 1);
     TEST_ASSERT_EQ(c, 0,
-                   "octet de bruit en IDLE : retour 0 (pas de consommation)");
+                   "noise byte in IDLE: return 0 (no consumption)");
 
-    /* Après le bruit, l'état est encore IDLE : une frame valide passe. */
+    /* After the noise, the state is still IDLE: a valid frame goes through. */
     uint8_t frame[16];
     size_t flen = build_ks_frame(frame, KS_CMD_PING, NULL, 0);
     c = ks_rx_feed((const char *)frame, (uint16_t)flen);
     TEST_ASSERT_EQ(c, (int)flen,
-                   "frame valide après bruit : consommée normalement");
+                   "valid frame after noise: consumed normally");
     TEST_ASSERT(ks_process_one(),
-                "frame valide après bruit : ks_process_one true");
+                "valid frame after noise: ks_process_one true");
 }
 
-/* Cas 5 : magic1 correct (0x4B) mais magic2 incorrect → return 0, état reset IDLE
+/* Case 5: magic1 correct (0x4B) but magic2 incorrect → return 0, state reset to IDLE
  *
- * Comportement réel : la fonction a déjà mis consumed=1 (pour le 0x4B),
- * mais retourne 0 (pas consumed). Le caller interprète ça comme "zéro octets
- * consommés en binaire" et traite 0x4B comme texte. */
+ * Actual behavior: the function has already set consumed=1 (for the 0x4B),
+ * but returns 0 (not consumed). The caller interprets this as "zero bytes
+ * consumed in binary" and treats 0x4B as text. */
 static void test_bad_magic2_returns_zero_and_resets(void)
 {
     reset_state();
@@ -233,42 +233,42 @@ static void test_bad_magic2_returns_zero_and_resets(void)
     uint8_t bad[] = {KS_MAGIC_0, KR_MAGIC_1};
     uint16_t c = ks_rx_feed((const char *)bad, 2);
     TEST_ASSERT_EQ(c, 0,
-                   "magic2 invalide : retour 0 (pas consumed)");
+                   "invalid magic2: return 0 (not consumed)");
 
-    /* L'état est revenu à IDLE : une frame valide s'en suit sans problème. */
+    /* The state has gone back to IDLE: a valid frame follows without issue. */
     uint8_t frame[16];
     size_t flen = build_ks_frame(frame, KS_CMD_PING, NULL, 0);
     c = ks_rx_feed((const char *)frame, (uint16_t)flen);
-    TEST_ASSERT_EQ(c, (int)flen, "frame après bad magic2 : consommée");
-    TEST_ASSERT(ks_process_one(),  "frame après bad magic2 : ok");
+    TEST_ASSERT_EQ(c, (int)flen, "frame after bad magic2: consumed");
+    TEST_ASSERT(ks_process_one(),  "frame after bad magic2: ok");
 }
 
-/* Cas 6 : CRC incorrect → frame rejetée, réponse KR ERR_CRC envoyée */
+/* Case 6: incorrect CRC → frame rejected, KR ERR_CRC response sent */
 static void test_bad_crc_frame_rejected(void)
 {
     reset_state();
     uint8_t frame[16];
     size_t flen = build_ks_frame(frame, KS_CMD_PING, NULL, 0);
-    /* Corrompt le dernier octet (le CRC) */
+    /* Corrupts the last byte (the CRC) */
     frame[flen - 1] ^= 0xFF;
 
     uint16_t consumed = ks_rx_feed((const char *)frame, (uint16_t)flen);
 
     TEST_ASSERT_EQ(consumed, (int)flen,
-                   "frame bad-CRC : tous les octets sont quand même consommés");
+                   "bad-CRC frame: all bytes are still consumed");
     TEST_ASSERT(!ks_process_one(),
-                "ks_process_one retourne false (frame rejetée, ready=false)");
+                "ks_process_one returns false (frame rejected, ready=false)");
 
-    /* Une réponse d'erreur KR doit avoir été envoyée via CDC. */
-    TEST_ASSERT(fake_cdc_pos > 0, "réponse KR envoyée sur la sortie CDC");
-    TEST_ASSERT_EQ(fake_cdc_buf[0], KS_MAGIC_0,     "réponse KR : magic0=0x4B");
-    TEST_ASSERT_EQ(fake_cdc_buf[1], KR_MAGIC_1,     "réponse KR : magic1=0x52 (R)");
-    TEST_ASSERT_EQ(fake_cdc_buf[2], KS_CMD_PING,    "réponse KR : cmd_id=PING");
+    /* A KR error response must have been sent over CDC. */
+    TEST_ASSERT(fake_cdc_pos > 0, "KR response sent on the CDC output");
+    TEST_ASSERT_EQ(fake_cdc_buf[0], KS_MAGIC_0,     "KR response: magic0=0x4B");
+    TEST_ASSERT_EQ(fake_cdc_buf[1], KR_MAGIC_1,     "KR response: magic1=0x52 (R)");
+    TEST_ASSERT_EQ(fake_cdc_buf[2], KS_CMD_PING,    "KR response: cmd_id=PING");
     TEST_ASSERT_EQ(fake_cdc_buf[3], KS_STATUS_ERR_CRC,
-                   "réponse KR : status=ERR_CRC (0x02)");
+                   "KR response: status=ERR_CRC (0x02)");
 }
 
-/* Cas 7 : CRC correct → frame acceptée (complément du cas 6) */
+/* Case 7: correct CRC → frame accepted (complement of case 6) */
 static void test_correct_crc_frame_accepted(void)
 {
     reset_state();
@@ -279,23 +279,23 @@ static void test_correct_crc_frame_accepted(void)
 
     ks_rx_feed((const char *)frame, (uint16_t)flen);
 
-    TEST_ASSERT(ks_process_one(),  "CRC correct : ks_process_one true");
-    TEST_ASSERT(fake_rx_called,    "CRC correct : handler appelé");
-    TEST_ASSERT_EQ(fake_rx_len, 2, "CRC correct : payload_len = 2");
-    /* Aucune réponse d'erreur ne doit avoir été envoyée. */
+    TEST_ASSERT(ks_process_one(),  "correct CRC: ks_process_one true");
+    TEST_ASSERT(fake_rx_called,    "correct CRC: handler called");
+    TEST_ASSERT_EQ(fake_rx_len, 2, "correct CRC: payload_len = 2");
+    /* No error response should have been sent. */
     TEST_ASSERT_EQ(fake_cdc_pos, 0,
-                   "CRC correct : aucune réponse d'erreur envoyée");
+                   "correct CRC: no error response sent");
 }
 
-/* Cas 8 : payload_len > KS_PAYLOAD_MAX → rejet immédiat, réponse ERR_OVERFLOW
+/* Case 8: payload_len > KS_PAYLOAD_MAX → immediate rejection, ERR_OVERFLOW response
  *
- * Comportement réel :
- *  - ks_respond_err(cmd, ERR_OVERFLOW) est appelé dès la fin du header
- *  - L'état reset à IDLE (les octets "payload" dans le buffer continuent
- *    d'être lus par la boucle, mais en état IDLE chaque octet ≠ 0x4B
- *    provoquerait un return 0 prématuré — voir note dans le rapport)
- *  - Ici on n'envoie PAS de bytes payload après le header pour éviter
- *    l'ambiguïté (voir comportement noté dans le rapport).
+ * Actual behavior:
+ *  - ks_respond_err(cmd, ERR_OVERFLOW) is called as soon as the header ends
+ *  - The state resets to IDLE (the "payload" bytes in the buffer keep
+ *    being read by the loop, but in IDLE state every byte ≠ 0x4B
+ *    would cause a premature return 0 — see note in the report)
+ *  - Here we do NOT send payload bytes after the header to avoid
+ *    the ambiguity (see behavior noted in the report).
  */
 static void test_oversized_payload_rejected(void)
 {
@@ -310,45 +310,45 @@ static void test_oversized_payload_rejected(void)
 
     uint16_t consumed = ks_rx_feed((const char *)frame, sizeof(frame));
 
-    /* Tous les octets du header (5) sont consommés. */
+    /* All header bytes (5) are consumed. */
     TEST_ASSERT_EQ(consumed, 5,
-                   "overflow : les 5 octets du header sont consommés");
+                   "overflow: the 5 header bytes are consumed");
 
-    /* Réponse d'erreur ERR_OVERFLOW envoyée. */
+    /* ERR_OVERFLOW error response sent. */
     TEST_ASSERT(fake_cdc_pos > 0,
-                "overflow : réponse KR envoyée");
-    TEST_ASSERT_EQ(fake_cdc_buf[0], KS_MAGIC_0,          "overflow : magic0");
+                "overflow: KR response sent");
+    TEST_ASSERT_EQ(fake_cdc_buf[0], KS_MAGIC_0,          "overflow: magic0");
     TEST_ASSERT_EQ(fake_cdc_buf[3], KS_STATUS_ERR_OVERFLOW,
-                   "overflow : status=ERR_OVERFLOW (0x06)");
+                   "overflow: status=ERR_OVERFLOW (0x06)");
 
-    /* Pas de frame prête. */
+    /* No frame ready. */
     TEST_ASSERT(!ks_process_one(),
-                "overflow : ks_process_one false (aucune frame prête)");
+                "overflow: ks_process_one false (no frame ready)");
 }
 
-/* Cas 9 : overflow + octet non-magic suivant → consumed = header (pas 0)
+/* Case 9: overflow + following non-magic byte → consumed = header (not 0)
  *
- * Régression : après un overflow l'état revient à IDLE ; si un octet
- * non-magic suit dans le même buffer, le parser doit refléter les octets
- * déjà consommés (le header), pas retourner 0 (ce qui ferait croire au
- * caller que rien n'a été consommé alors que l'erreur a été envoyée). */
+ * Regression: after an overflow the state goes back to IDLE; if a
+ * non-magic byte follows in the same buffer, the parser must reflect the bytes
+ * already consumed (the header), not return 0 (which would make the
+ * caller believe nothing was consumed while the error was actually sent). */
 static void test_oversized_then_garbage_consumes_header(void)
 {
     reset_state();
     uint8_t buf[] = {
         KS_MAGIC_0, KS_MAGIC_1, KS_CMD_PING,
         0x01, 0x10,   /* len = 0x1001 = 4097 > KS_PAYLOAD_MAX */
-        0xFF          /* octet non-magic après l'overflow */
+        0xFF          /* non-magic byte after the overflow */
     };
     uint16_t c = ks_rx_feed((const char *)buf, sizeof(buf));
     TEST_ASSERT_EQ(c, 5,
-                   "overflow + octet non-magic : consumed = 5 (header), pas 0");
+                   "overflow + non-magic byte: consumed = 5 (header), not 0");
 }
 
-/* Cas 10 : overflow + octet parasite + frame valide → la frame n'est PAS perdue
+/* Case 10: overflow + garbage byte + valid frame → the frame is NOT lost
  *
- * Régression : un return 0 prématuré en IDLE après l'overflow stoppait le
- * scan et faisait perdre une frame valide située plus loin dans le buffer. */
+ * Regression: a premature return 0 in IDLE after the overflow used to stop the
+ * scan and cause loss of a valid frame located further in the buffer. */
 static void test_oversized_then_garbage_then_valid_frame(void)
 {
     reset_state();
@@ -358,27 +358,27 @@ static void test_oversized_then_garbage_then_valid_frame(void)
     uint8_t buf[6 + 16];
     buf[0] = KS_MAGIC_0; buf[1] = KS_MAGIC_1; buf[2] = KS_CMD_VERSION;
     buf[3] = 0x01; buf[4] = 0x10;   /* header oversized */
-    buf[5] = 0xFF;                  /* octet parasite */
+    buf[5] = 0xFF;                  /* garbage byte */
     memcpy(buf + 6, valid, vlen);
 
     ks_rx_feed((const char *)buf, (uint16_t)(6 + vlen));
     TEST_ASSERT(ks_process_one(),
-                "frame valide après overflow+parasite : parsée (non perdue)");
+                "valid frame after overflow+garbage: parsed (not lost)");
     TEST_ASSERT(fake_rx_called,
-                "handler appelé pour la frame qui suit l'overflow");
-    TEST_ASSERT_EQ(fake_rx_cmd, KS_CMD_PING, "cmd de la frame rescapée = PING");
+                "handler called for the frame that follows the overflow");
+    TEST_ASSERT_EQ(fake_rx_cmd, KS_CMD_PING, "cmd of the rescued frame = PING");
 }
 
-/* ══ Point d'entrée de la suite ════════════════════════════════════════ */
+/* ══ Suite entry point ════════════════════════════════════════ */
 
 void test_cdc_rx_feed(void)
 {
     printf("\n--- cdc_rx_feed / ks_crc8 ---\n");
 
     /*
-     * Les tables de commandes sont statiques dans cdc_binary_protocol.c.
-     * On enregistre une seule fois pour toute la suite — ks_rx_reset()
-     * ne touche pas ces tables.
+     * The command tables are static in cdc_binary_protocol.c.
+     * We register once for the whole suite — ks_rx_reset()
+     * does not touch these tables.
      */
     ks_register_binary_commands(
         test_cmd_table,

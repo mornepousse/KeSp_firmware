@@ -1,9 +1,9 @@
-/* Tâche principale de la souris Conchodytes — voir mouse_task.c. */
+/* Main task of the Conchodytes mouse — see mouse_task.c. */
 #pragma once
 #include "esp_err.h"
 
-/* Initialise les entrées et le capteur, puis démarre la tâche de scrutin.
- * Rend ESP_OK même si le capteur manque : les clics et la molette restent
- * lisibles, et l'échec est journalisé. Ne rend une erreur que si la tâche
- * elle-même n'a pas pu démarrer. */
+/* Initializes the inputs and the sensor, then starts the polling task.
+ * Returns ESP_OK even if the sensor is missing: clicks and the wheel remain
+ * readable, and the failure is logged. Only returns an error if the task
+ * itself could not start. */
 esp_err_t mouse_task_start(void);

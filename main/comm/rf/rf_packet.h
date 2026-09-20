@@ -10,9 +10,9 @@
 #define PKT_TYPE_KEY        0x1
 #define PKT_TYPE_HEARTBEAT  0x2
 #define PKT_TYPE_TRACKPAD   0x3
-#define PKT_TYPE_MATRIX     0x4   /* fusion : demi-matrice BRUTE half→dongle (identité de moitié) */
+#define PKT_TYPE_MATRIX     0x4   /* fusion: RAW half→dongle half-matrix (half identity) */
 #define PKT_TYPE_HIDREPORT  0x5   /* keyboard-agnostic relay: final HID report */
-#define PKT_TYPE_STATUS     0x6   /* supervision du lien : batterie + qualité, sans état */
+#define PKT_TYPE_STATUS     0x6   /* link supervision: battery + quality, no state */
 #define PKT_TYPE_PAIR_ACK   0xE   /* dongle→half pairing ACK (RF-2) */
 #define PKT_TYPE_PAIR_REQ   0xF   /* half→dongle pairing request (RF-2) */
 
@@ -24,25 +24,25 @@
 #define PKT_FLAG_PRESSED    0x01   /* PKT_KEY: key is pressed (vs released) */
 #define PKT_FLAG_IS_RETRY   0x02   /* application-level retransmit */
 
-/* Géométrie de demi-matrice du protocole. DOIT correspondre aux dimensions des
- * board.h Niphargus — lien assuré par test/test_niphar_right_pins.c, qui inclut
- * les deux et casse à la moindre divergence.
+/* Protocol half-matrix geometry. MUST match the Niphargus board.h dimensions —
+ * link enforced by test/test_niphar_right_pins.c, which includes both and
+ * breaks at the slightest divergence.
  *
- * Valait 5 lignes jusqu'au 2026-09-05 : c'était la géométrie des anciennes
- * moitiés KaSe, retirées du dépôt au commit c107df77. Elle décrivait donc du
- * matériel qui n'existait plus, gaspillait un octet de bitmap par paquet, et
- * aurait laissé passer une ligne 4 inexistante sur une matrice 4×7.
+ * Was 5 rows until 2026-09-05: that was the geometry of the old KaSe halves,
+ * removed from the repo at commit c107df77. It therefore described hardware
+ * that no longer existed, wasted a bitmap byte per packet, and would have let
+ * a nonexistent row 4 through on a 4x7 matrix.
  *
- * ⚠ Changer ces valeurs change un FORMAT DE TRAME : rf_encode_heartbeat passe
- * de 9 à 8 octets et LINK_PAYLOAD_MATRIX de 7 à 6. Les deux bouts doivent être
- * reflashés ensemble. */
+ * ⚠ Changing these values changes a FRAME FORMAT: rf_encode_heartbeat goes
+ * from 9 to 8 bytes and LINK_PAYLOAD_MATRIX from 7 to 6. Both ends must be
+ * reflashed together. */
 #define RF_HALF_ROWS         4
 #define RF_HALF_COLS         7
 #define RF_HALF_BITMAP_BYTES 4     /* ceil(4*7 / 8) = 4 */
 
-/* Identité de moitié pour PKT_TYPE_MATRIX (nibble bas de l'octet 0). Le dongle,
- * hub unique de la fusion, distingue ainsi les deux émetteurs sur le slot
- * clavier. Cf. docs/superpowers/specs/2026-09-12-dongle-fusion-deux-moteurs-design.md */
+/* Half identity for PKT_TYPE_MATRIX (low nibble of byte 0). The dongle, the
+ * single fusion hub, uses it to distinguish the two transmitters on the
+ * keyboard slot. Cf. docs/superpowers/specs/2026-09-12-dongle-fusion-deux-moteurs-design.md */
 #define RF_HALF_LEFT   0
 #define RF_HALF_RIGHT  1
 
@@ -61,50 +61,50 @@ typedef struct {
     uint8_t seq;
 } rf_heartbeat_t;
 
-/* Demi-matrice brute half→dongle pour la fusion (PKT_TYPE_MATRIX). État PUR :
- * pas de batterie ni de qualité de lien — la supervision reste sur
- * PKT_TYPE_STATUS. L'identité de moitié (RF_HALF_LEFT/RIGHT) permet au dongle de
- * fusionner deux émetteurs sur un même slot clavier. */
+/* Raw half→dongle half-matrix for fusion (PKT_TYPE_MATRIX). PURE state: no
+ * battery or link quality — supervision stays on PKT_TYPE_STATUS. The half
+ * identity (RF_HALF_LEFT/RIGHT) lets the dongle merge two transmitters on the
+ * same keyboard slot. */
 typedef struct {
     uint8_t half;                          /* RF_HALF_LEFT / RF_HALF_RIGHT */
     uint8_t bitmap[RF_HALF_BITMAP_BYTES];  /* MSB-first, row*7+col */
     uint8_t seq;
 } rf_matrix_t;
 
-/* Supervision du lien clavier → dongle.
+/* Keyboard → dongle link supervision.
  *
- * Le design du dongle (docs/superpowers/specs/2026-08-19-dongle-role-niphargus-design.md,
- * §5) sépare deux fonctions que rf_heartbeat_t mélangeait :
+ * The dongle design (docs/superpowers/specs/2026-08-19-dongle-role-niphargus-design.md,
+ * §5) separates two functions that rf_heartbeat_t used to mix together:
  *
- *   - la RÉPARATION d'état passe par la réémission de PKT_TYPE_HIDREPORT
- *     lui-même, qui porte déjà l'état complet — inutile de l'emballer ailleurs ;
- *   - la SUPERVISION passe par cette trame, qui ne porte aucun état.
+ *   - state REPAIR goes through re-sending PKT_TYPE_HIDREPORT itself, which
+ *     already carries the full state — no point wrapping it elsewhere;
+ *   - SUPERVISION goes through this frame, which carries no state at all.
  *
- * Elle existe surtout pour une raison logique : le dongle ne peut pas distinguer
- * « elle ne tape pas » de « elle est morte » si elle se tait dans les deux cas.
- * Elle part au repos, ~1 fois par seconde, sur une moitié à batterie : sa taille
- * est une contrainte de conception. D'où 4 octets, contre 8 pour le heartbeat à
- * bitmap — lequel reste utilisé sur le lien droite → gauche, où il y a une vraie
- * matrice à réconcilier. */
+ * It exists mainly for a logical reason: the dongle cannot tell "it isn't
+ * typing" from "it's dead" if it stays silent in both cases. It is sent at
+ * rest, ~once a second, from a battery-powered half: its size is a design
+ * constraint. Hence 4 bytes, against 8 for the bitmap heartbeat — which is
+ * still used on the right → left link, where there is a real matrix to
+ * reconcile. */
 typedef struct {
-    uint8_t batt_dV;   /* 0..83 = 0..8,3 V ; 0 = inconnu */
-    uint8_t link_q;    /* retransmissions cumulées depuis la dernière trame */
+    uint8_t batt_dV;   /* 0..83 = 0..8.3 V; 0 = unknown */
+    uint8_t link_q;    /* cumulative retransmissions since the last frame */
     uint8_t seq;
-    bool    mode_usb;  /* fusion : la gauche annonce qu'un hôte USB la pilote →
-                        * le dongle se tait et réémet la droite. Porté par le
-                        * nibble bas de l'octet 0, rétrocompatible. */
-    uint32_t config_fp;/* fusion phase 3 : empreinte CRC-32 de la keymap de
-                        * l'émetteur, pour que le dongle détecte une divergence de
-                        * config. 0 = absente (ancien émetteur, STATUS 4 octets). */
-    uint8_t half;      /* jauge : RF_HALF_LEFT/RF_HALF_RIGHT — bit1 du nibble de
-                        * flags. 0 = gauche, donc une trame ancienne reste « gauche »
-                        * (les deux moitiés partagent le slot clavier en fusion). */
-    uint8_t charging;  /* jauge : 0 inconnu, 1 en charge probable, 2 pleine — bits
-                        * 2-3 du nibble. Déduit de la tension (pas de VBUS). */
+    bool    mode_usb;  /* fusion: left announces a USB host is driving it →
+                        * the dongle goes quiet and re-sends right instead.
+                        * Carried in the low nibble of byte 0, backward-compatible. */
+    uint32_t config_fp;/* fusion phase 3: CRC-32 fingerprint of the transmitter's
+                        * keymap, so the dongle can detect a config divergence.
+                        * 0 = absent (old transmitter, 4-byte STATUS). */
+    uint8_t half;      /* gauge: RF_HALF_LEFT/RF_HALF_RIGHT — bit1 of the flags
+                        * nibble. 0 = left, so an old frame stays "left" (both
+                        * halves share the keyboard slot in fusion). */
+    uint8_t charging;  /* gauge: 0 unknown, 1 probably charging, 2 full — bits
+                        * 2-3 of the nibble. Inferred from voltage (no VBUS). */
 } rf_status_t;
 
-/* Nibble bas de l'octet 0 de STATUS : bit0 mode USB, bit1 identité de moitié,
- * bits 2-3 état de charge. Tous à 0 = trame historique (gauche, inconnu). */
+/* Low nibble of STATUS byte 0: bit0 USB mode, bit1 half identity,
+ * bits 2-3 charge state. All 0 = legacy frame (left, unknown). */
 #define PKT_STATUS_FLAG_MODE_USB    0x1
 #define PKT_STATUS_FLAG_HALF_RIGHT  0x2
 #define PKT_STATUS_CHG_SHIFT        2
@@ -169,10 +169,10 @@ static inline uint16_t rf_encode_pair_req(uint8_t *buf, const uint8_t mac[6], ui
     return 8;
 }
 
-/* PKT_STATUS: 8 octets — type 0x6 + flags, batterie, qualité de lien, seq, puis
- * l'empreinte CRC-32 de config en little-endian (buf[4..7]). ⚠ Dimensionner les
- * buffers d'émission avec RF_STATUS_LEN : la trame est passée de 4 à 8 octets
- * (empreinte, 4f5e2b09) et des buffers restés à 4 débordaient la pile. */
+/* PKT_STATUS: 8 bytes — type 0x6 + flags, battery, link quality, seq, then the
+ * config CRC-32 fingerprint in little-endian (buf[4..7]). ⚠ Size TX buffers
+ * with RF_STATUS_LEN: the frame grew from 4 to 8 bytes (fingerprint, 4f5e2b09)
+ * and buffers left at 4 overflowed the stack. */
 #define RF_STATUS_LEN 8u
 static inline uint16_t rf_encode_status(uint8_t *buf, const rf_status_t *s)
 {
@@ -184,7 +184,7 @@ static inline uint16_t rf_encode_status(uint8_t *buf, const rf_status_t *s)
     buf[1] = s->batt_dV;
     buf[2] = s->link_q;
     buf[3] = s->seq;
-    buf[4] = (uint8_t)(s->config_fp);          /* empreinte CRC-32, little-endian */
+    buf[4] = (uint8_t)(s->config_fp);          /* CRC-32 fingerprint, little-endian */
     buf[5] = (uint8_t)(s->config_fp >> 8);
     buf[6] = (uint8_t)(s->config_fp >> 16);
     buf[7] = (uint8_t)(s->config_fp >> 24);
@@ -220,8 +220,8 @@ static inline bool rf_decode_status(const uint8_t *buf, uint16_t len, rf_status_
     out->mode_usb = (buf[0] & PKT_STATUS_FLAG_MODE_USB) != 0;
     out->half     = (buf[0] & PKT_STATUS_FLAG_HALF_RIGHT) ? RF_HALF_RIGHT : RF_HALF_LEFT;
     out->charging = (uint8_t)((buf[0] >> PKT_STATUS_CHG_SHIFT) & PKT_STATUS_CHG_MASK);
-    /* Empreinte : présente sur 8 octets, absente (0 = inconnue) sur un ancien
-     * STATUS de 4 octets — rétrocompatible. */
+    /* Fingerprint: present on 8 bytes, absent (0 = unknown) on an old
+     * 4-byte STATUS — backward-compatible. */
     out->config_fp = (len >= 8)
         ? ((uint32_t)buf[4] | ((uint32_t)buf[5] << 8) |
            ((uint32_t)buf[6] << 16) | ((uint32_t)buf[7] << 24))
@@ -270,9 +270,9 @@ static inline bool rf_decode_key(const uint8_t *buf, uint16_t len, rf_key_event_
 
 static inline bool rf_decode_heartbeat(const uint8_t *buf, uint16_t len, rf_heartbeat_t *h)
 {
-    /* Longueur derivee du symbole, pas ecrite en dur : elle valait 9 quand le
-     * bitmap faisait 5 octets, et le passage a 4 l'a rendue fausse en silence
-     * (le decodeur refusait toutes les trames que l'encodeur produisait). */
+    /* Length derived from the symbol, not hardcoded: it was 9 when the
+     * bitmap was 5 bytes, and the move to 4 silently made it wrong (the
+     * decoder rejected every frame the encoder produced). */
     if (len < 4 + RF_HALF_BITMAP_BYTES ||
         rf_packet_type(buf, len) != PKT_TYPE_HEARTBEAT) return false;
     memcpy(h->bitmap, &buf[1], RF_HALF_BITMAP_BYTES);
@@ -282,7 +282,7 @@ static inline bool rf_decode_heartbeat(const uint8_t *buf, uint16_t len, rf_hear
     return true;
 }
 
-/* Demi-matrice brute half→dongle. 6 octets : type+identité, bitmap (4), seq. */
+/* Raw half→dongle half-matrix. 6 bytes: type+identity, bitmap (4), seq. */
 static inline uint16_t rf_encode_matrix(uint8_t *buf, const rf_matrix_t *m)
 {
     if (m->half > 0x0F) return 0;
@@ -369,9 +369,9 @@ static inline void rf_bitmap_set(uint8_t *bm, uint8_t row, uint8_t col, bool val
     else     bm[idx >> 3] &= ~mask;
 }
 
-/* Empaquette une matrice locale row-major (rows×cols, cols == RF_HALF_COLS) en
- * bitmap demi-matrice. Une seule implémentation testée (test_matrix_bitmap.c) ;
- * les deux moitiés l'utilisent pour émettre leur brut. Efface d'abord bm. */
+/* Packs a local row-major matrix (rows×cols, cols == RF_HALF_COLS) into a
+ * half-matrix bitmap. One single tested implementation (test_matrix_bitmap.c);
+ * both halves use it to send their raw state. Clears bm first. */
 static inline void rf_matrix_to_bitmap(const uint8_t *state, uint8_t rows,
                                        uint8_t cols, uint8_t *bm)
 {
@@ -381,23 +381,23 @@ static inline void rf_matrix_to_bitmap(const uint8_t *state, uint8_t rows,
             if (state[(uint16_t)r * cols + c]) rf_bitmap_set(bm, r, c, true);
 }
 
-/* ── Sync auto de la keymap dongle→gauche par ACK payload (fusion, phase 3) ─────
+/* ── Auto-sync of the dongle→left keymap via ACK payload (fusion, phase 3) ─────
  *
- * La gauche est sourde en sans-fil (PTX pur, autonomie) : le dongle ne peut pas
- * lui « pousser » une keymap. Mais chaque trame de la gauche reçoit un ACK
- * matériel, et le nRF24 sait y glisser une charge utile (EN_ACK_PAY). Le dongle
- * distille donc la keymap dans les ACK des émissions normales de la gauche.
+ * Left is deaf over the air (pure PTX, for battery autonomy): the dongle
+ * cannot "push" a keymap to it. But every frame from left gets a hardware
+ * ACK, and the nRF24 can slip a payload into it (EN_ACK_PAY). So the dongle
+ * distills the keymap into the ACKs of left's normal transmissions.
  *
- * Pull piloté par la gauche : elle demande le prochain chunk manquant (REQ, en
- * uplink) ; le dongle répond BEACON (« j'ai une keymap d'empreinte fp_target en
- * n_chunks ») ou CHUNK (un morceau) dans l'ACK. Tout tient dans ≤ 32 o.
- * 40 chunks × 28 o = 1120 o = KEYMAP_BLOB_BYTES, sans chunk partiel.
+ * Pull driven by left: it asks for the next missing chunk (REQ, uplink); the
+ * dongle replies with BEACON ("I have a keymap with fingerprint fp_target in
+ * n_chunks") or CHUNK (one piece) in the ACK. Everything fits in ≤ 32 bytes.
+ * 40 chunks × 28 bytes = 1120 bytes = KEYMAP_BLOB_BYTES, no partial chunk.
  *
- * Testées host dans test/test_keymap_sync_frames.c. Design :
+ * Tested host-side in test/test_keymap_sync_frames.c. Design:
  * docs/superpowers/specs/2026-09-13-keymap-sync-ack-payload-design.md */
-#define PKT_TYPE_SYNC_BEACON 0x7   /* dongle→gauche (ACK) : une keymap est disponible */
-#define PKT_TYPE_SYNC_CHUNK  0x8   /* dongle→gauche (ACK) : un morceau de keymap */
-#define PKT_TYPE_SYNC_REQ    0x9   /* gauche→dongle (uplink) : prochain chunk voulu */
+#define PKT_TYPE_SYNC_BEACON 0x7   /* dongle→left (ACK): a keymap is available */
+#define PKT_TYPE_SYNC_CHUNK  0x8   /* dongle→left (ACK): one keymap chunk */
+#define PKT_TYPE_SYNC_REQ    0x9   /* left→dongle (uplink): next chunk wanted */
 #define SYNC_CHUNK_BYTES     28
 #define SYNC_N_CHUNKS        40    /* 1120 / 28 */
 
@@ -405,7 +405,7 @@ typedef struct { uint32_t fp_target; uint8_t n_chunks; } rf_sync_beacon_t;
 typedef struct { uint8_t idx; uint8_t data[SYNC_CHUNK_BYTES]; } rf_sync_chunk_t;
 typedef struct { uint8_t next; } rf_sync_req_t;
 
-/* BEACON : 6 octets — type, empreinte LE, nombre de chunks. */
+/* BEACON: 6 bytes — type, LE fingerprint, chunk count. */
 static inline uint16_t rf_encode_sync_beacon(uint8_t *buf, const rf_sync_beacon_t *b)
 {
     if (buf == NULL || b == NULL) return 0;
@@ -427,7 +427,7 @@ static inline bool rf_decode_sync_beacon(const uint8_t *buf, uint16_t len, rf_sy
     return true;
 }
 
-/* CHUNK : 30 octets — type, index, 28 octets de données. */
+/* CHUNK: 30 bytes — type, index, 28 bytes of data. */
 static inline uint16_t rf_encode_sync_chunk(uint8_t *buf, const rf_sync_chunk_t *c)
 {
     if (buf == NULL || c == NULL) return 0;
@@ -446,7 +446,7 @@ static inline bool rf_decode_sync_chunk(const uint8_t *buf, uint16_t len, rf_syn
     return true;
 }
 
-/* REQ : 2 octets — type, prochain chunk voulu. */
+/* REQ: 2 bytes — type, next chunk wanted. */
 static inline uint16_t rf_encode_sync_req(uint8_t *buf, const rf_sync_req_t *q)
 {
     if (buf == NULL || q == NULL) return 0;

@@ -1,70 +1,70 @@
-/* Entrées de la souris Conchodytes : décodage des clics SPDT et quadrature.
+/* Conchodytes mouse input: SPDT click decoding and quadrature.
  *
- * Ces deux logiques sont pures — des niveaux en entrée, un état en sortie — et
- * c'est délibéré : ce sont elles qui portent le raisonnement, pas le GPIO.
- * Les tester sur l'hôte permet de couvrir des cas que le banc ne produit pas à
- * la demande, en particulier la fenêtre de rebond et les transitions de
- * quadrature impossibles.
+ * Both pieces of logic are pure — input levels, an output state — and
+ * that's deliberate: they're the ones carrying the reasoning, not the GPIO.
+ * Testing them on the host lets us cover cases the bench doesn't produce on
+ * demand, in particular the bounce window and impossible quadrature
+ * transitions.
  *
- * Le comportement attendu vient d'une observation sur carte réelle du
- * 2026-08-25 : sur 24 transitions des trois clics, aucun front parasite n'a été
- * produit. La DURÉE de l'état ambigu, elle, n'est pas mesurée — la campagne
- * croyait scruter à 1 kHz alors que CONFIG_FREERTOS_HZ vaut 100 par défaut.
- * Ces tests ne dépendent d'aucune durée : ils raisonnent en nombre
- * d'échantillons, ce qui reste valable quelle que soit la cadence.
+ * The expected behavior comes from an observation on a real board on
+ * 2026-08-25: over 24 transitions of the three clicks, no spurious edge was
+ * produced. The DURATION of the ambiguous state, however, was not measured —
+ * the campaign believed it was sampling at 1 kHz while CONFIG_FREERTOS_HZ
+ * defaults to 100. These tests do not depend on any duration: they reason in
+ * number of samples, which stays valid whatever the cadence.
  */
 #include "test_framework.h"
 #include "../main/input/mouse_buttons.h"
 #include "../main/input/mouse_wheel.h"
 
-/* ── Décodage d'un contact SPDT ───────────────────────────────────────────
+/* ── Decoding an SPDT contact ───────────────────────────────────────────
  *
- * COM à la masse, NO et NC tirés chacun au 3,3 V par 10 k.
- *   repos  : NC collé sur COM -> bas ; NO ouvert -> haut
- *   appuyé : NO collé sur COM -> bas ; NC ouvert -> haut
- *   rebond : le contact mobile n'est collé sur RIEN -> les deux hauts
- *   les deux bas : électriquement impossible (les deux contacts fermés)
+ * COM to ground, NO and NC each pulled to 3.3 V by 10 k.
+ *   idle    : NC stuck to COM -> low ; NO open -> high
+ *   pressed : NO stuck to COM -> low ; NC open -> high
+ *   bounce  : the moving contact is stuck to NEITHER -> both high
+ *   both low: electrically impossible (both contacts closed)
  */
 static void test_contact_decode(void)
 {
     TEST_ASSERT_EQ(mouse_contact_decode(1, 0), MOUSE_CONTACT_RELEASED,
-                   "NO haut + NC bas = repos");
+                   "NO high + NC low = idle");
     TEST_ASSERT_EQ(mouse_contact_decode(0, 1), MOUSE_CONTACT_PRESSED,
-                   "NO bas + NC haut = appuye");
+                   "NO low + NC high = pressed");
     TEST_ASSERT_EQ(mouse_contact_decode(1, 1), MOUSE_CONTACT_BOUNCING,
-                   "les deux hauts = contact en l'air, rebond");
+                   "both high = contact in mid-air, bounce");
     TEST_ASSERT_EQ(mouse_contact_decode(0, 0), MOUSE_CONTACT_IMPOSSIBLE,
-                   "les deux bas = impossible physiquement");
+                   "both low = physically impossible");
 }
 
-/* Le cœur de l'anti-rebond : pendant la fenêtre ambiguë, on garde l'état
- * précédent. C'est ce qui supprime le double-clic sans aucun filtrage
- * temporel — pas de compteur, pas de constante à régler. */
+/* The core of the debounce: during the ambiguous window, we keep the
+ * previous state. This is what suppresses the double-click with no time
+ * filtering at all — no counter, no constant to tune. */
 static void test_bounce_keeps_previous_state(void)
 {
     TEST_ASSERT(mouse_button_next(false, MOUSE_CONTACT_BOUNCING) == false,
-                "rebond depuis relache : reste relache");
+                "bounce from released: stays released");
     TEST_ASSERT(mouse_button_next(true, MOUSE_CONTACT_BOUNCING) == true,
-                "rebond depuis appuye : reste appuye");
+                "bounce from pressed: stays pressed");
 
-    /* Idem pour l'état impossible : on ne conclut rien plutôt que d'inventer. */
+    /* Same for the impossible state: we conclude nothing rather than invent one. */
     TEST_ASSERT(mouse_button_next(false, MOUSE_CONTACT_IMPOSSIBLE) == false,
-                "etat impossible depuis relache : on ne conclut rien");
+                "impossible state from released: we conclude nothing");
     TEST_ASSERT(mouse_button_next(true, MOUSE_CONTACT_IMPOSSIBLE) == true,
-                "etat impossible depuis appuye : on ne conclut rien");
+                "impossible state from pressed: we conclude nothing");
 }
 
 static void test_button_transitions(void)
 {
-    TEST_ASSERT(mouse_button_next(false, MOUSE_CONTACT_PRESSED)  == true,  "relache -> appuye");
-    TEST_ASSERT(mouse_button_next(true,  MOUSE_CONTACT_RELEASED) == false, "appuye -> relache");
-    TEST_ASSERT(mouse_button_next(true,  MOUSE_CONTACT_PRESSED)  == true,  "appuye maintenu");
-    TEST_ASSERT(mouse_button_next(false, MOUSE_CONTACT_RELEASED) == false, "relache maintenu");
+    TEST_ASSERT(mouse_button_next(false, MOUSE_CONTACT_PRESSED)  == true,  "released -> pressed");
+    TEST_ASSERT(mouse_button_next(true,  MOUSE_CONTACT_RELEASED) == false, "pressed -> released");
+    TEST_ASSERT(mouse_button_next(true,  MOUSE_CONTACT_PRESSED)  == true,  "pressed held");
+    TEST_ASSERT(mouse_button_next(false, MOUSE_CONTACT_RELEASED) == false, "released held");
 }
 
-/* Un appui réel tel que la carte le produit : repos, quelques échantillons de
- * rebond, appui franc, rebond au relâchement, repos.
- * Un seul front descendant et un seul front montant doivent en sortir. */
+/* A real press as the board produces it: idle, a few bounce samples, a
+ * clean press, bounce on release, idle.
+ * Exactly one falling edge and one rising edge must come out of it. */
 static void test_realistic_press_produces_exactly_two_edges(void)
 {
     const mouse_contact_t sequence[] = {
@@ -81,12 +81,12 @@ static void test_realistic_press_produces_exactly_two_edges(void)
         if (suivant != etat) fronts++;
         etat = suivant;
     }
-    TEST_ASSERT_EQ(fronts, 2, "un appui = exactement deux fronts, jamais quatre");
-    TEST_ASSERT(etat == false, "on finit relache");
+    TEST_ASSERT_EQ(fronts, 2, "one press = exactly two edges, never four");
+    TEST_ASSERT(etat == false, "ends up released");
 }
 
-/* Le pire cas : un rebond qui traverse l'état appuyé sans s'y fixer. Sans le
- * maintien d'état, chaque aller-retour produirait une paire de fronts. */
+/* The worst case: a bounce that crosses the pressed state without settling
+ * there. Without the state hold, each back-and-forth would produce a pair of edges. */
 static void test_chattering_does_not_multiply_clicks(void)
 {
     const mouse_contact_t sequence[] = {
@@ -103,14 +103,14 @@ static void test_chattering_does_not_multiply_clicks(void)
         if (suivant != etat) fronts++;
         etat = suivant;
     }
-    TEST_ASSERT_EQ(fronts, 1, "six echantillons de rebond = toujours un seul front");
+    TEST_ASSERT_EQ(fronts, 1, "six bounce samples = always a single edge");
 }
 
-/* ── Quadrature de la molette ─────────────────────────────────────────────
- * L'état est (A << 1) | B. Un pas valide ne change qu'une voie à la fois. */
+/* ── Wheel quadrature ─────────────────────────────────────────────
+ * State is (A << 1) | B. A valid step changes only one channel at a time. */
 static void test_quadrature_forward(void)
 {
-    /* 00 -> 10 -> 11 -> 01 -> 00 : un sens complet. */
+    /* 00 -> 10 -> 11 -> 01 -> 00: one full direction. */
     TEST_ASSERT_EQ(mouse_wheel_step(0b00, 0b10), 1, "00->10 = +1");
     TEST_ASSERT_EQ(mouse_wheel_step(0b10, 0b11), 1, "10->11 = +1");
     TEST_ASSERT_EQ(mouse_wheel_step(0b11, 0b01), 1, "11->01 = +1");
@@ -128,12 +128,12 @@ static void test_quadrature_backward(void)
 static void test_quadrature_no_change_is_zero(void)
 {
     for (uint8_t v = 0; v < 4; v++)
-        TEST_ASSERT_EQ(mouse_wheel_step(v, v), 0, "pas de changement = pas de pas");
+        TEST_ASSERT_EQ(mouse_wheel_step(v, v), 0, "no change = no step");
 }
 
-/* Les deux voies changeant dans le même intervalle : on a raté un pas. Rendre
- * 0 plutôt qu'un sens inventé — se tromper de sens est pire que de perdre un
- * cran, parce que ça fait reculer la page au lieu de ne rien faire. */
+/* Both channels changing within the same interval: we missed a step. Return
+ * 0 rather than an invented direction — getting the direction wrong is worse
+ * than losing a notch, because it scrolls the page backward instead of doing nothing. */
 static void test_quadrature_impossible_transitions(void)
 {
     TEST_ASSERT_EQ(mouse_wheel_step(0b00, 0b11), 0, "00->11 impossible = 0");
@@ -142,8 +142,8 @@ static void test_quadrature_impossible_transitions(void)
     TEST_ASSERT_EQ(mouse_wheel_step(0b10, 0b01), 0, "10->01 impossible = 0");
 }
 
-/* Un tour complet dans un sens puis dans l'autre doit ramener le compteur à
- * zéro : la table ne doit pas être asymétrique. */
+/* A full turn in one direction then the other must bring the counter back to
+ * zero: the table must not be asymmetric. */
 static void test_quadrature_round_trip_is_neutral(void)
 {
     const uint8_t avant[]  = { 0b00, 0b10, 0b11, 0b01, 0b00 };
@@ -151,10 +151,10 @@ static void test_quadrature_round_trip_is_neutral(void)
     int total = 0;
     for (unsigned i = 0; i + 1 < sizeof(avant) / sizeof(avant[0]); i++)
         total += mouse_wheel_step(avant[i], avant[i + 1]);
-    TEST_ASSERT_EQ(total, 4, "un cycle complet en avant = +4 pas de quadrature");
+    TEST_ASSERT_EQ(total, 4, "one full forward cycle = +4 quadrature steps");
     for (unsigned i = 0; i + 1 < sizeof(arriere) / sizeof(arriere[0]); i++)
         total += mouse_wheel_step(arriere[i], arriere[i + 1]);
-    TEST_ASSERT_EQ(total, 0, "puis un cycle en arriere ramene a zero");
+    TEST_ASSERT_EQ(total, 0, "then a backward cycle brings it back to zero");
 }
 
 void test_mouse_input(void)

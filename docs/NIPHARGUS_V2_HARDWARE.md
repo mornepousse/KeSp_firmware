@@ -1,23 +1,23 @@
-# Contrat matériel — Niphargus v2, moitiés S3
+# Hardware contract — Niphargus v2, S3 halves
 
-Source de vérité : netlist du schéma `Niphargus/rili/pcb/niphar.kicad_sch`, vérifiée
-pin par pin lors de la revue du 2026-08-06 (commits `faf3e11`→`c1f9cf6`). En cas de
-doute, la netlist prime sur ce document.
+Source of truth: netlist of the schematic `Niphargus/rili/pcb/niphar.kicad_sch`, verified
+pin by pin during the 2026-08-06 review (commits `faf3e11`→`c1f9cf6`). In case of
+doubt, the netlist takes precedence over this document.
 
-## MCU : ESP32-S3-WROOM-1(U)-N16R8 — un par moitié
+## MCU: ESP32-S3-WROOM-1(U)-N16R8 — one per half
 
-> **Corrigé au bring-up du 2026-09-01.** Ce document annonçait un **N8R2**
-> (8 MB flash / 2 MB PSRAM). La première moitié gauche mise sous tension répond
-> `16 MB` de flash et `8 MB` de PSRAM embarquée à l'esptool (ESP32-S3 rev v0.2,
-> MAC `d0:cf:13:21:92:60`) : le module posé est un **N16R8**. La moitié droite
-> n'a pas encore été lue. La PSRAM reste désactivée côté firmware
-> (aucun `CONFIG_SPIRAM=y`).
+> **Corrected at bring-up on 2026-09-01.** This document previously stated an
+> **N8R2** (8 MB flash / 2 MB PSRAM). The first left half powered up reports
+> `16 MB` of flash and `8 MB` of onboard PSRAM to esptool (ESP32-S3 rev v0.2,
+> MAC `d0:cf:13:21:92:60`): the module actually fitted is an **N16R8**. The
+> right half has not been read yet. PSRAM remains disabled on the firmware
+> side (no `CONFIG_SPIRAM=y`).
 
-U6 = gauche (feuille `s3`), U5 = droite (feuille `right`). Nets de la droite suffixés `_d`/`_D`.
+U6 = left (sheet `s3`), U5 = right (sheet `right`). Right-side nets suffixed `_d`/`_D`.
 
-## Matrice — ⚠ DEUX tables distinctes (permutations de routage)
+## Matrix — ⚠ TWO distinct tables (routing permutations)
 
-| ligne | GAUCHE (U6) | DROITE (U5) |
+| row | LEFT (U6) | RIGHT (U5) |
 |---|---|---|
 | row0 | GPIO1 | GPIO2 |
 | row1 | GPIO2 | GPIO12 |
@@ -31,110 +31,113 @@ U6 = gauche (feuille `s3`), U5 = droite (feuille `right`). Nets de la droite suf
 | col5 | GPIO11 | GPIO10 |
 | col6 | GPIO12 | GPIO1 |
 
-- Chaîne électrique : **COL → switch → anode-diode-cathode → ROW** (1N4148W).
-  → le scan PILOTE les colonnes et LIT les rows.
-- **Réveil sommeil profond : EXT1 sur les ROWS** (tous en GPIO RTC ✓).
-- 100 Ω série sur chaque ligne côté MCU ; TVS SD05C côté switchs (transparent firmware).
-- 26 touches par moitié (rangées de 7/7/6/6).
+- Electrical chain: **COL → switch → anode-diode-cathode → ROW** (1N4148W).
+  → the scan DRIVES the columns and READS the rows.
+- **Deep sleep wake-up: EXT1 on the ROWS** (all on RTC-capable GPIOs ✓).
+- 100 Ω series resistor on each row on the MCU side; TVS SD05C on the switch side (transparent to firmware).
+- 26 keys per half (rows of 7/7/6/6).
 
-## Identifier les moitiés — adresse MAC
+## Identifying the halves — MAC address
 
-Les deux moitiés se programment par le **même adaptateur FTDI**, déplacé de
-l'une à l'autre, et le port reste `/dev/ttyUSB2` dans les deux cas : rien dans
-`idf.py flash` ne dit sur laquelle il écrit.
+Both halves are programmed with the **same FTDI adapter**, moved from one to
+the other, and the port stays `/dev/ttyUSB2` in both cases: nothing in
+`idf.py flash` tells you which one it is writing to.
 
-| Moitié | MAC (relevée le 2026-09-07) |
+| Half | MAC (recorded 2026-09-07) |
 |---|---|
-| gauche (maître) | `d0:cf:13:21:92:60` |
-| droite (scanner) | `80:b5:4e:eb:5e:08` |
+| left (master) | `d0:cf:13:21:92:60` |
+| right (scanner) | `80:b5:4e:eb:5e:08` |
 
-Le 2026-09-07, le firmware du maître a été écrit sur le scanner : la droite a
-cessé de scanner pour se mettre à écouter, et **rien n'a protesté** — le clavier
-avait perdu une moitié en silence. Flasher via `./scripts/flash-niphar.sh
-<left|right>`, qui lit la MAC et refuse si elle ne correspond pas.
+On 2026-09-07, the master's firmware was written to the scanner: the right
+half stopped scanning and started listening instead, and **nothing
+complained** — the keyboard had silently lost a half. Flash via
+`./scripts/flash-niphar.sh <left|right>`, which reads the MAC and refuses if
+it does not match.
 
-## Pins communs aux deux MCU
+## Pins common to both MCUs
 
-| Fonction | GPIO | Notes |
+| Function | GPIO | Notes |
 |---|---|---|
-| VBAT_SENSE (jauge) | 13 | ADC2_CH2, diviseur 1M/1M + 100nF — **ADC2 interdit si WiFi actif** (nRF24-only : OK). Batterie pleine ≈ 4,15 V ÷ 2 |
-| LCD_CS (`CS_DPL`) | 14 | écran Sharp, **actif HAUT** |
+| VBAT_SENSE (gauge) | 13 | ADC2_CH2, 1M/1M divider + 100nF — **ADC2 forbidden while WiFi is active** (nRF24-only: OK). Full battery ≈ 4.15 V ÷ 2 |
+| LCD_CS (`CS_DPL`) | 14 | Sharp display, **active HIGH** |
 | nRF24 CE / CSN | 15 / 16 | |
-| LINK_TX / LINK_RX (TRRS) | 17 / 18 | UART1. **Câble droit : TX arrive sur TX** → UNE moitié doit échanger TXD/RXD via la matrice GPIO. Ne jamais driver les deux TX sans ce swap |
-| USB D− / D+ | 19 / 20 | natif |
-| LINK_5V_EN | 21 | ON du SiP32431 (pull-down 100k = 5 V mort par défaut). Poignée de main : l'émetteur ET le récepteur doivent activer leur switch pour transférer du 5 V ; une moitié à batterie morte n'est pas réveillable par le TRRS (assumé) |
-| SPI partagé SCK / MISO / MOSI | 38 / 39 / 40 | nRF24 + écran (écran write-only) + **ESP32-P4 (Niphar_chest)** — voir ci-dessous |
+| LINK_TX / LINK_RX (TRRS) | 17 / 18 | UART1. **Straight cable: TX lands on TX** → ONE half must swap TXD/RXD via the GPIO matrix. Never drive both TX lines without this swap |
+| USB D− / D+ | 19 / 20 | native |
+| LINK_5V_EN | 21 | ON of the SiP32431 (100k pull-down = 5 V off by default). Handshake: BOTH the sender AND the receiver must enable their switch to transfer 5 V; a half with a dead battery cannot be woken via the TRRS (assumed) |
+| Shared SPI SCK / MISO / MOSI | 38 / 39 / 40 | nRF24 + display (write-only display) + **ESP32-P4 (Niphar_chest)** — see below |
 | nRF24 IRQ | 41 | |
-| TP_RDY | 42 | trackpad, gauche seulement (labels en attente à droite) |
-| I2C trackpad SDA / SCL | 47 / 48 | pull-ups 4,7k ; gauche seulement. NRST du trackpad = RC matériel, pas de GPIO |
-| Prog | 0, 43 (TX0), 44 (RX0) | connecteur 6 pins type ESP-Prog par moitié (EN/3V3/TX/GND/RX/IO0) |
-| Interdits | 3, 45, 46, 35-37 | strapping / PSRAM octale — non câblés |
+| TP_RDY | 42 | trackpad, left only (labels pending on the right) |
+| I2C trackpad SDA / SCL | 47 / 48 | 4.7k pull-ups; left only. Trackpad NRST = hardware RC, no GPIO |
+| Prog | 0, 43 (TX0), 44 (RX0) | 6-pin ESP-Prog-style connector per half (EN/3V3/TX/GND/RX/IO0) |
+| Forbidden | 3, 45, 46, 35-37 | strapping / octal PSRAM — not wired |
 
-## ⚠ Le bus SPI porte un troisième participant : l'ESP32-P4
+## ⚠ The SPI bus carries a third participant: the ESP32-P4
 
-> **Ajouté le 2026-09-05, après un diagnostic d'une heure.**
+> **Added on 2026-09-05, after an hour-long diagnosis.**
 
-Une carte **ESP32-P4** (projet Niphar_chest) est raccordée au bus SPI partagé de
-la moitié gauche — SCK/MISO/MOSI sur GPIO 38/39/40. Ce document ne la mentionnait
-nulle part, et son absence a coûté cher : un P4 **non programmé** tient ces trois
-lignes, la nRF24 devient muette, et le diagnostic accuse successivement le module
-radio, un court-circuit mécanique, puis la PSRAM octale avant de trouver la cause.
+An **ESP32-P4** board (Niphar_chest project) is connected to the shared SPI
+bus of the left half — SCK/MISO/MOSI on GPIO 38/39/40. This document did not
+mention it anywhere, and its absence was costly: an **unprogrammed** P4 holds
+these three lines, the nRF24 goes silent, and the diagnosis blames the radio
+module, then a mechanical short, then the octal PSRAM in turn before finding
+the actual cause.
 
-Signature du défaut, si ça se reproduit : les **trois lignes partagées** lisent
-`CLOUÉE À LA MASSE` au test de lignes (`CONFIG_KASE_NRF_PROBE`), pendant que
-**CSN, CE et IRQ restent libres** — ces trois-là sont propres à la radio, le P4
-n'y touche pas. Aucun pont entre elles : chacune est tirée séparément, par le
-même composant à l'autre bout.
+Fault signature, should it recur: the **three shared lines** read
+`PINNED LOW` in the line test (`CONFIG_KASE_NRF_PROBE`), while **CSN, CE and
+IRQ remain free** — those three belong to the radio alone, the P4 does not
+touch them. No bridge between them: each is pulled separately, by the same
+component at the other end.
 
-Conséquences de conception, non traitées à ce jour :
+Design consequences, not addressed as of today:
 
-- **Trois esclaves sur un bus, chacun son CS.** Le P4 doit impérativement
-  relâcher MISO hors sélection. Un esclave qui garde MISO en sortie tient le bus
-  même en fonctionnant parfaitement.
-- **Arbitrage.** Rien n'ordonne aujourd'hui les accès entre la nRF24, l'écran et
-  le P4.
-- Le P4 doit être flashé **avant** tout test radio sur la gauche.
+- **Three slaves on one bus, each with its own CS.** The P4 absolutely must
+  release MISO outside of selection. A slave that keeps MISO driven as an
+  output holds the bus even while working perfectly.
+- **Arbitration.** Nothing currently orders access between the nRF24, the
+  display and the P4.
+- The P4 must be flashed **before** any radio test on the left half.
 
-## Périphériques
+## Peripherals
 
-- **Écrans (les DEUX moitiés)** : module type nice!view (Sharp LS011B7DH03) sur
-  J4 (droite) et J12 (gauche, peuplé le 2026-09-14), 5 broches :
-  MOSI/SCK/3V3/GND/CS. Monté DEBOUT (portrait 68 × 160). CS actif haut, tenu BAS
-  dès le boot et tiré bas en veille (broches isolées par le light sleep) ; VCOM
-  logiciel à basculer (EXTCOMIN géré par le module). Protocole tranché à la
-  datasheet (lemia docs 6844/6845) : panneau 68 lignes × 160 px, mot de commande
-  brut en MSB-first (M0 = premier bit), adresse de ligne en LSB-first (rev8).
-  Pilote : `main/display/memlcd/`.
-- **Trackpad (gauche)** : Azoteq TPS43 (IQS572) en I2C + RDY obligatoire (handshake).
-- **nRF24L01+** : modules breakout 2×4, alim 3,3 V, 100 Ω série sur les 6 signaux.
+- **Displays (BOTH halves)**: nice!view-style module (Sharp LS011B7DH03) on
+  J4 (right) and J12 (left, populated 2026-09-14), 5 pins:
+  MOSI/SCK/3V3/GND/CS. Mounted UPRIGHT (portrait 68 × 160). CS active high, held
+  LOW from boot and pulled low during sleep (pins isolated by light sleep); software
+  VCOM toggling (EXTCOMIN handled by the module). Protocol settled from the
+  datasheet (lemia docs 6844/6845): 68-line × 160 px panel, raw command word
+  in MSB-first (M0 = first bit), row address in LSB-first (rev8).
+  Driver: `main/display/memlcd/`.
+- **Trackpad (left)**: Azoteq TPS43 (IQS572) over I2C + mandatory RDY (handshake).
+- **nRF24L01+**: 2×4 breakout modules, 3.3 V supply, 100 Ω series resistor on the 6 signals.
 
-## Alimentation (par moitié)
+## Power (per half)
 
-- Li-ion 16340 → DW01A+FS8205 → interrupteur (chemin batterie seul) → **HT7833** (500 mA,
-  4 µA IQ) → 3,3 V. USB 5 V → SS14 → même nœud (l'USB contourne l'interrupteur).
-- Charge TP4056 ~500 mA ; CHRG = LED ; STDBY non câblé → fin de charge par ADC.
-  **Jauge implémentée le 2026-09-14** (`power/batt_sense`) : ADC2_CH2 calibré,
-  8 lectures / 10 s + au réveil, 4,10 V lus contre 4,08 V au voltmètre. « Fin de
-  charge par ADC » = plateau ≥ 4,15 V tenu 2 min (déduit, faute de STDBY/VBUS).
-- Load-sharing AO3407 : USB présent = batterie isolée.
-- Hub CH334R (gauche) : mode sans quartz, alimenté par le 5 V USB uniquement —
-  **il n'existe pas sur batterie** (et le port 4 est non câblé).
+- Li-ion 16340 → DW01A+FS8205 → switch (battery-only path) → **HT7833** (500 mA,
+  4 µA IQ) → 3.3 V. USB 5 V → SS14 → same node (USB bypasses the switch).
+- TP4056 charging ~500 mA; CHRG = LED; STDBY not wired → end-of-charge detected via ADC.
+  **Gauge implemented on 2026-09-14** (`power/batt_sense`): calibrated ADC2_CH2,
+  8 readings / 10 s + on wake, 4.10 V read against 4.08 V on the multimeter.
+  "End-of-charge via ADC" = plateau ≥ 4.15 V held for 2 min (inferred, for lack
+  of STDBY/VBUS).
+- AO3407 load-sharing: USB present = battery isolated.
+- CH334R hub (left): crystal-less mode, powered from 5 V USB only —
+  **it does not exist on battery** (and port 4 is not wired).
 
-## Firmware : exigences non négociables
+## Firmware: non-negotiable requirements
 
-1. **Swap TX/RX** d'une moitié avant toute UART TRRS.
-2. **Watchdog** + récupération brownout : reset propre ≤ 200 ms (héritage : les v1
-   plantaient à l'ESD — le matériel est durci, le firmware doit finir le travail).
-3. Budget sommeil : viser < 50 µA par moitié, radio en power-down, scan RTC.
-4. Deux profils de pins (tables ci-dessus) sélectionnés à la compilation ou par
-   détection (ex. présence trackpad sur le bus I2C = moitié gauche).
+1. **Swap TX/RX** on one half before any TRRS UART.
+2. **Watchdog** + brownout recovery: clean reset ≤ 200 ms (legacy: the v1s
+   crashed on ESD — the hardware is hardened, the firmware must finish the job).
+3. Sleep budget: target < 50 µA per half, radio in power-down, RTC scan.
+4. Two pin profiles (tables above) selected at compile time or by
+   detection (e.g. trackpad presence on the I2C bus = left half).
 
 ---
 
-## Intégration KeSp_firmware (à faire)
+## KeSp_firmware integration (to do)
 
-Créer les définitions de board `boards/niphargus_half_left` et `boards/niphargus_half_right`
-sur le modèle de `kase_half_left`/`kase_half_right`, avec les deux tables de pins ci-dessus.
-Différences notables vs KaSe : matrice 4×7 (26 touches) en domaine RTC avec réveil EXT1
-sur les rows, radio nRF24L01+ sur SPI partagé avec l'écran (CS écran GPIO14 actif haut),
-lien filaire TRRS UART1 (swap TX/RX sur une moitié), jauge ADC2_CH2.
+Create the board definitions `boards/niphargus_half_left` and `boards/niphargus_half_right`
+on the model of `kase_half_left`/`kase_half_right`, with the two pin tables above.
+Notable differences vs KaSe: 4×7 matrix (26 keys) in the RTC domain with EXT1 wake-up
+on the rows, nRF24L01+ radio on SPI shared with the display (display CS GPIO14 active high),
+TRRS wired link UART1 (TX/RX swap on one half), ADC2_CH2 gauge.

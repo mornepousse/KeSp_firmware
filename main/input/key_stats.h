@@ -5,14 +5,14 @@
 #include <stdint.h>
 #include "keyboard_config.h"
 
-/* key_stats_total reste déclaré sur tous les rôles : le moniteur CDC l'expose,
- * et le dongle le tient à zéro (comm/rf/dongle_state.c) plutôt que d'amputer le
- * format de trame. */
+/* key_stats_total stays declared on every role: the CDC monitor exposes it,
+ * and the dongle keeps it at zero (comm/rf/dongle_state.c) rather than
+ * amputating the frame format. */
 extern uint32_t key_stats_total;
 
-/* Ni le dongle ni la souris n'ont de matrice : ni keymap, ni statistiques par
- * position, ni état de matrice. Déclarer ces symboles chez eux obligerait leur
- * carte à inventer des dimensions — c'est ce que leurs board.h ne font pas. */
+/* Neither the dongle nor the mouse has a matrix: no keymap, no per-position
+ * statistics, no matrix state. Declaring these symbols for them would force
+ * their board to invent dimensions — which their board.h does not do. */
 #if !CONFIG_KASE_NO_KEYMAP_ENGINE
 /* Key press counts per position */
 extern uint32_t key_stats[MATRIX_ROWS][MATRIX_COLS];

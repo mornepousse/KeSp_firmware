@@ -1,8 +1,8 @@
-/* Voir pmw3389.h. Porté du bring-up validé sur carte le 2026-08-25
- * (~/Documents/GitHub/Conchodytes/bringup/), lui-même dérivé du POC
- * mornepousse/Mase et de mrjohnk/PMW3389DM — avec trois corrections que ni
- * l'un ni l'autre ne portent : temporisations conformes au 3389, ordre de
- * démarrage, et le bon blob SROM. */
+/* See pmw3389.h. Ported from the bring-up validated on the board on
+ * 2026-08-25 (~/Documents/GitHub/Conchodytes/bringup/), itself derived from
+ * the mornepousse/Mase POC and from mrjohnk/PMW3389DM — with three
+ * corrections that neither one carries: timings compliant with the 3389,
+ * startup order, and the right SROM blob. */
 
 #include "pmw3389.h"
 
@@ -18,7 +18,7 @@
 
 static const char *TAG = "pmw3389";
 
-/* ── Registres, Table du §5.1, p. 20 ────────────────────────────────────── */
+/* -- Registers, Table of §5.1, p. 20 ─────────────────────────────────────── */
 #define REG_PRODUCT_ID          0x00
 #define REG_REVISION_ID         0x01
 #define REG_MOTION              0x02
@@ -29,7 +29,7 @@ static const char *TAG = "pmw3389";
 #define REG_SQUAL               0x07
 #define REG_SHUTTER_LOWER       0x0B
 #define REG_SHUTTER_UPPER       0x0C
-#define REG_RESOLUTION_L        0x0E   /* 16 bits sur le 3389, pas un Config1 */
+#define REG_RESOLUTION_L        0x0E   /* 16 bits on the 3389, not a Config1 */
 #define REG_RESOLUTION_H        0x0F
 #define REG_CONFIG2             0x10
 #define REG_SROM_ENABLE         0x13
@@ -39,25 +39,25 @@ static const char *TAG = "pmw3389";
 #define REG_MOTION_BURST        0x50
 #define REG_SROM_LOAD_BURST     0x62
 
-/* Disposition du Motion_Burst — ÉTABLIE PAR LA MESURE le 2026-08-25, faute de
- * l'avoir dans une datasheet. Ni les 20 pages du 3389 ni celles du 3360 ne la
- * décrivent ; elles ne donnent que ses temps (tSRAD_MOTBR 35 µs, tBEXIT 500 ns,
+/* Motion_Burst layout — ESTABLISHED BY MEASUREMENT on 2026-08-25, for lack of
+ * having it in a datasheet. Neither the 3389's 20 pages nor the 3360's
+ * describe it; they only give its timings (tSRAD_MOTBR 35 us, tBEXIT 500 ns,
  * Table 5, p. 16).
  *
- * Méthode : afficher les octets du burst à côté des mêmes registres lus un par
- * un, puis balayer sur un seul axe à la fois, souris soulevée au retour pour
- * que le signe ne s'annule pas.
+ * Method: display the burst bytes next to the same registers read one at a
+ * time, then sweep on a single axis at a time, mouse lifted on the return
+ * so the sign does not cancel out.
  *
- * Preuves retenues :
- *   [0]  vaut toujours la référence + 0x80 — le bit MOT, armé par le burst et
- *        effacé par la lecture suivante. Vu trois fois.
- *   [1]  constant à 0x7F.
- *   [2,3] biais de 100,0 % sur 76 échantillons d'un balayage horizontal.
- *   [4,5] biais de 99,8 % sur 71 échantillons d'un balayage vertical.
- *   [6]  même plage que SQUAL lu séparément.
- *   [8]  culmine à 0x7F — un pixel vaut au plus 127.
- *   [10] nul, comme Shutter_Upper ; [11] même plage que Shutter_Lower.
- *   [12..15] toujours nuls : le burst fait 12 octets, pas plus. */
+ * Evidence retained:
+ *   [0]  always equals the reference + 0x80 — the MOT bit, armed by the burst
+ *        and cleared by the next read. Seen three times.
+ *   [1]  constant at 0x7F.
+ *   [2,3] 100.0% bias over 76 samples of a horizontal sweep.
+ *   [4,5] 99.8% bias over 71 samples of a vertical sweep.
+ *   [6]  same range as SQUAL read separately.
+ *   [8]  peaks at 0x7F — a pixel is worth at most 127.
+ *   [10] zero, like Shutter_Upper; [11] same range as Shutter_Lower.
+ *   [12..15] always zero: the burst is 12 bytes, no more. */
 #define BURST_LEN            12
 #define BURST_MOTION          0
 #define BURST_OBSERVATION     1
@@ -72,14 +72,14 @@ static const char *TAG = "pmw3389";
 #define BURST_SHUTTER_UPPER  10
 #define BURST_SHUTTER_LOWER  11
 
-/* ── Temporisations, Table 5, p. 16 ─────────────────────────────────────────
- * Les valeurs du 3389, PAS celles du 3360. Marge volontaire au-dessus du
- * minimum : ces attentes ne sont pas dans le chemin critique, et l'expérience
- * du banc est qu'un tSRAD trop court passe puis lâche par intermittence. */
+/* -- Timings, Table 5, p. 16 -------------------------------------------------
+ * The 3389's values, NOT the 3360's. Deliberate margin above the
+ * minimum: these waits are not in the critical path, and bench experience
+ * is that a too-short tSRAD passes then fails intermittently. */
 #define T_SRAD_US   180   /* min 160 */
 #define T_SRW_US     20   /* min 20  */
 #define T_SWW_US    200   /* min 180 */
-#define T_SROM_US    15   /* entre octets du burst SROM */
+#define T_SROM_US    15   /* between SROM burst bytes */
 
 extern const unsigned short pmw3389_firmware_length;
 extern const unsigned char pmw3389_firmware_data[];
@@ -87,11 +87,11 @@ extern const unsigned char pmw3389_firmware_data[];
 static spi_device_handle_t s_dev;
 static bool s_ready;
 
-/* ── Transport ──────────────────────────────────────────────────────────────
- * CS piloté à la main, et ce n'est pas un choix de style : `tSRAD` tombe ENTRE
- * l'octet d'adresse et l'octet de donnée. Le CS matériel d'ESP-IDF le
- * relèverait au milieu de l'attente, ce qui avorte la lecture. D'où
- * `spics_io_num = -1` — même geste que comm/rf/rf_driver.c pour le nRF24. */
+/* -- Transport ----------------------------------------------------------------
+ * CS driven by hand, and this is not a style choice: `tSRAD` falls BETWEEN
+ * the address byte and the data byte. ESP-IDF's hardware CS would
+ * raise it in the middle of the wait, which aborts the read. Hence
+ * `spics_io_num = -1` — the same move as comm/rf/rf_driver.c for the nRF24. */
 
 static inline void cs_low(void)
 {
@@ -117,7 +117,7 @@ static esp_err_t xfer(const uint8_t *tx, uint8_t *rx, size_t len)
 
 static uint8_t reg_read(uint8_t addr)
 {
-    uint8_t a = addr & 0x7F;      /* MSB à 0 = lecture */
+    uint8_t a = addr & 0x7F;      /* MSB at 0 = read */
     uint8_t d = 0;
 
     cs_low();
@@ -131,7 +131,7 @@ static uint8_t reg_read(uint8_t addr)
 
 static void reg_write(uint8_t addr, uint8_t val)
 {
-    uint8_t buf[2] = { (uint8_t)(addr | 0x80), val };   /* MSB à 1 = écriture */
+    uint8_t buf[2] = { (uint8_t)(addr | 0x80), val };   /* MSB at 1 = write */
 
     cs_low();
     xfer(buf, NULL, 2);
@@ -140,16 +140,16 @@ static void reg_write(uint8_t addr, uint8_t val)
     esp_rom_delay_us(T_SWW_US);
 }
 
-/* ── Téléversement du SROM ──────────────────────────────────────────────────
- * 4094 octets à 15 µs l'octet : ~61 ms pendant lesquelles RIEN d'autre ne doit
- * toucher le bus. `spi_device_acquire_bus` le garantit face au nRF24 — une
- * trame radio au milieu corromprait le SROM, et le capteur démarrerait sur un
- * firmware invalide sans forcément le dire. */
+/* -- SROM upload --------------------------------------------------------------
+ * 4094 bytes at 15 us per byte: ~61 ms during which NOTHING else must
+ * touch the bus. `spi_device_acquire_bus` guarantees this against the
+ * nRF24 — a radio frame in the middle would corrupt the SROM, and the
+ * sensor would start on invalid firmware without necessarily saying so. */
 static esp_err_t srom_upload(void)
 {
-    reg_write(REG_CONFIG2, 0x20);        /* valeur par défaut du registre, p. 20 */
+    reg_write(REG_CONFIG2, 0x20);        /* register's default value, p. 20 */
     reg_write(REG_SROM_ENABLE, 0x1D);
-    vTaskDelay(pdMS_TO_TICKS(10));       /* plus d'une période de trame */
+    vTaskDelay(pdMS_TO_TICKS(10));       /* more than one frame period */
     reg_write(REG_SROM_ENABLE, 0x18);
 
     uint8_t burst = REG_SROM_LOAD_BURST | 0x80;
@@ -170,15 +170,15 @@ static esp_err_t srom_upload(void)
         return ESP_ERR_INVALID_RESPONSE;
     }
 
-    /* 0x00 = Rest désactivé. La gestion d'énergie viendra avec la radio ; en
-     * attendant, un capteur qui s'endort seul fausse toute mesure de banc. */
+    /* 0x00 = Rest disabled. Power management will come with the radio; in
+     * the meantime, a sensor that sleeps on its own skews every bench measurement. */
     reg_write(REG_CONFIG2, 0x00);
     return ESP_OK;
 }
 
-/* Remise à zéro du port série PUIS reset logiciel — dans cet ordre, et avant
- * la première lecture de registre. Voir le commentaire de pmw3389_init dans
- * l'en-tête : sans ça la première lecture sort décalée de deux bits. */
+/* Resetting the serial port THEN a software reset — in this order, and
+ * before the first register read. See the pmw3389_init comment in the
+ * header: without this the first read comes out shifted by two bits. */
 static void sensor_reset(void)
 {
     cs_high(); cs_low(); cs_high();
@@ -204,18 +204,18 @@ esp_err_t pmw3389_probe(uint8_t *id, uint8_t *inverse, uint8_t *revision)
     return ESP_OK;
 }
 
-/* Règle la résolution en cpi.
+/* Sets the resolution in cpi.
  *
- * ⚠ LA FORMULE N'EST PAS DANS LA DATASHEET dont on dispose. La version en
- * bibliothèque (PMW3389DM-T3QU v1.0, 07 sep 2017, 20 pages) donne le tableau
- * récapitulatif p. 20 — `0x0E Resolution_L` RW défaut 0x00, `0x0F Resolution_H`
- * RW défaut 0x42 — et « jusqu'à 16000 cpi » p. 1, mais AUCUNE description bit à
- * bit des deux registres. L'encodage retenu ici, pas de 50 cpi sur 16 bits en
- * petit-boutien, est celui des pilotes PMW3389 du domaine public. Il est donc à
- * VALIDER À L'USAGE, et `pmw3389_init()` journalise la valeur relue de la puce
- * pour qu'on puisse le confronter au réel plutôt qu'y croire.
+ * WARNING: THE FORMULA IS NOT IN THE DATASHEET available. The library
+ * version (PMW3389DM-T3QU v1.0, 07 sep 2017, 20 pages) gives the summary
+ * table p. 20 — `0x0E Resolution_L` RW default 0x00, `0x0F Resolution_H` RW
+ * default 0x42 — and "up to 16000 cpi" p. 1, but NO bit-by-bit description
+ * of the two registers. The encoding used here, a 50 cpi step over 16 bits
+ * little-endian, is the one from public-domain PMW3389 drivers. It is
+ * therefore to be VALIDATED IN USE, and `pmw3389_init()` logs the value
+ * read back from the chip so it can be checked against reality rather than believed.
  *
- * 16000 cpi max ⇒ 320 pas, qui tiennent sur 9 bits : d'où le couple L/H. */
+ * 16000 cpi max => 320 steps, which fit on 9 bits: hence the L/H pair. */
 void pmw3389_set_cpi(uint16_t cpi)
 {
     if (cpi < 50)    cpi = 50;
@@ -227,9 +227,9 @@ void pmw3389_set_cpi(uint16_t cpi)
 
 esp_err_t pmw3389_init(void)
 {
-    /* Lignes de sélection AVANT tout le reste. Le nRF24 partage le bus : son
-     * CSN doit être haut et son CE bas avant qu'un seul octet circule, sinon
-     * deux esclaves tirent MISO en même temps. */
+    /* Select lines BEFORE everything else. The nRF24 shares the bus: its
+     * CSN must be high and its CE low before a single byte circulates,
+     * otherwise two slaves drive MISO at the same time. */
     gpio_config_t sel = {
         .pin_bit_mask = (1ULL << BOARD_SNS_NCS_GPIO) |
                         (1ULL << BOARD_NRF_CSN) | (1ULL << BOARD_NRF_CE),
@@ -247,9 +247,9 @@ esp_err_t pmw3389_init(void)
     };
     ESP_ERROR_CHECK(gpio_config(&motion));
 
-    /* Le bus est partagé. Quand le relais radio sera compilé pour ce rôle, il
-     * pourra l'avoir initialisé avant nous : ESP_ERR_INVALID_STATE veut alors
-     * dire « déjà fait », et c'est bien. Toute autre erreur est réelle. */
+    /* The bus is shared. When the radio relay is compiled for this role, it
+     * may have initialized it before us: ESP_ERR_INVALID_STATE then means
+     * "already done", and that's fine. Any other error is real. */
     spi_bus_config_t bus = {
         .sclk_io_num     = BOARD_NRF_SCK,
         .mosi_io_num     = BOARD_NRF_MOSI,
@@ -263,8 +263,8 @@ esp_err_t pmw3389_init(void)
 
     spi_device_interface_config_t dev = {
         .clock_speed_hz = BOARD_SNS_CLOCK_HZ,
-        .mode           = BOARD_SNS_SPI_MODE,   /* 3 — le nRF24 est en 0 */
-        .spics_io_num   = -1,                   /* CS manuel, cf. plus haut */
+        .mode           = BOARD_SNS_SPI_MODE,   /* 3 — the nRF24 is in 0 */
+        .spics_io_num   = -1,                   /* manual CS, see above */
         .queue_size     = 1,
     };
     err = spi_bus_add_device(BOARD_NRF_SPI_HOST, &dev, &s_dev);
@@ -278,9 +278,9 @@ esp_err_t pmw3389_init(void)
     ESP_LOGI(TAG, "Product_ID=0x%02X Inverse=0x%02X Revision=0x%02X", id, inv, rev);
 
     if ((uint8_t)(id ^ inv) != 0xFF) {
-        /* Le complément ne tient pas : ce n'est pas une puce inattendue, c'est
-         * le bus qui ment. Ligne coupée, ligne collée, mauvais mode SPI, ou le
-         * nRF24 qui répond à la place du capteur. */
+        /* The complement does not hold: this is not an unexpected chip, it
+         * is the bus lying. A cut line, a stuck line, a wrong SPI mode, or
+         * the nRF24 answering in place of the sensor. */
         ESP_LOGE(TAG, "0x%02X ^ 0x%02X != 0xFF : le bus ment, pas la puce", id, inv);
         return ESP_ERR_INVALID_RESPONSE;
     }
@@ -298,10 +298,10 @@ esp_err_t pmw3389_init(void)
     vTaskDelay(pdMS_TO_TICKS(10));
     s_ready = true;
 
-    /* Le firmware ne réglait PAS la résolution : la puce restait sur ce que le
-     * reset et le SROM lui laissent, d'où un curseur beaucoup trop rapide.
-     * On relève la valeur en place AVANT de la fixer — le tableau des registres
-     * de la datasheet donne les défauts de reset, pas ce que le SROM laisse. */
+    /* The firmware did NOT set the resolution: the chip stayed on whatever
+     * the reset and the SROM leave it at, hence a cursor way too fast.
+     * The value in place is read BEFORE setting it — the datasheet's
+     * register table gives the reset defaults, not what the SROM leaves. */
     uint8_t rl = reg_read(REG_RESOLUTION_L), rh = reg_read(REG_RESOLUTION_H);
     ESP_LOGI(TAG, "resolution trouvee : L=0x%02X H=0x%02X", rl, rh);
 
@@ -318,58 +318,58 @@ esp_err_t pmw3389_read_motion(pmw3389_motion_t *out)
 {
     if (!s_ready || !out) return ESP_ERR_INVALID_STATE;
 
-    /* UNE transaction au lieu de neuf.
+    /* ONE transaction instead of nine.
      *
-     * L'ancienne version faisait une écriture puis huit lectures de registres :
-     * 230 µs + 8 × 210 µs ≈ 1,9 ms, dont l'essentiel en tSRAD (160 µs par
-     * lecture). Le burst n'en paie qu'un seul, et à 35 µs : ~90 µs au total,
-     * soit un facteur 21. Sur une souris ça n'est pas un confort — à 1,9 ms le
-     * relevé bloquait le scrutin des clics un quart du temps, et plafonnait la
-     * cadence de rapport à 500 Hz.
+     * The old version did one write then eight register reads:
+     * 230 us + 8 x 210 us ~= 1.9 ms, most of it in tSRAD (160 us per
+     * read). The burst only pays for one, and at 35 us: ~90 us total,
+     * a factor of 21. On a mouse this is not just comfort — at 1.9 ms the
+     * reading blocked click polling a quarter of the time, and capped
+     * the report rate at 500 Hz.
      *
-     * Il rend en prime un instantané COHÉRENT. Les lectures séparées
-     * échantillonnaient des trames différentes : SQUAL relevé ainsi tombait à
-     * 15-40 quand le même registre lu seul valait 80, ce qui avait un moment
-     * fait soupçonner l'optique à tort. */
+     * It also returns a COHERENT snapshot as a bonus. The separate reads
+     * sampled different frames: SQUAL read this way dropped to
+     * 15-40 when the same register read alone was worth 80, which had at
+     * one point wrongly cast suspicion on the optics. */
     uint8_t b[BURST_LEN];
 
-    /* ⚠ LE BUS EST PARTAGÉ AVEC LE nRF24, ET LES DEUX PILOTENT LEUR CS À LA
-     * MAIN (`spics_io_num = -1`). ESP-IDF ne sait donc pas où commence ni finit
-     * une transaction logique : entre l'octet d'adresse et les données, ce
-     * driver garde CS bas pendant 35 µs sans rien émettre, et le pilote se croit
-     * libre. On sérialise donc explicitement.
+    /* WARNING: THE BUS IS SHARED WITH THE nRF24, AND BOTH DRIVE THEIR CS BY
+     * HAND (`spics_io_num = -1`). ESP-IDF therefore does not know where a
+     * logical transaction starts or ends: between the address byte and the
+     * data, this driver keeps CS low for 35 us without sending anything,
+     * and the driver thinks it's free. So it is serialized explicitly.
      *
-     * ⚠ Ceci ne règle PAS la cohabitation de deux MODES SPI différents (3 ici,
-     * 0 pour la radio) : la bascule de mode a lieu au démarrage de la
-     * transaction, donc après que l'appelant a baissé son CS. C'est ce qui a
-     * tué le lien radio le 2026-08-26, et c'est corrigé côté radio par
-     * `spi_parquer_mode()` dans comm/rf/rf_driver.c — pas ici. */
+     * WARNING: this does NOT solve the coexistence of two different SPI
+     * MODES (3 here, 0 for the radio): the mode switch happens at the start
+     * of the transaction, so after the caller has already lowered its CS.
+     * That is what killed the radio link on 2026-08-26, and it is fixed on
+     * the radio side by `spi_parquer_mode()` in comm/rf/rf_driver.c — not here. */
     spi_device_acquire_bus(s_dev, portMAX_DELAY);
 
-    reg_write(REG_MOTION_BURST, 0x00);      /* arme le mode burst */
+    reg_write(REG_MOTION_BURST, 0x00);      /* arms burst mode */
 
-    uint8_t addr = REG_MOTION_BURST;        /* MSB à 0 : lecture */
+    uint8_t addr = REG_MOTION_BURST;        /* MSB at 0: read */
     cs_low();
     xfer(&addr, NULL, 1);
     esp_rom_delay_us(35);                   /* tSRAD_MOTBR, Table 5, p. 16 */
-    xfer(NULL, b, BURST_LEN);               /* les 12 octets d'affilée */
+    xfer(NULL, b, BURST_LEN);               /* the 12 bytes back to back */
     cs_high();
-    esp_rom_delay_us(5);                    /* tBEXIT = 500 ns, large */
+    esp_rom_delay_us(5);                    /* tBEXIT = 500 ns, generous */
 
-    /* ⚠ LE BIT MOT COMMANDE : sans mouvement depuis la dernière lecture, les
-     * registres Delta ne portent PAS un déplacement nul, ils portent n'importe
-     * quoi. Les lire sans regarder ce bit revient à injecter du bruit dans le
-     * curseur — c'est ce qui faisait « bouger la souris toute seule » au banc le
-     * 2026-08-26. L'octet était déjà rapatrié par le burst (offset 0), il n'était
-     * simplement pas consulté. */
+    /* WARNING: THE MOT BIT RULES: without movement since the last read, the
+     * Delta registers do NOT carry a zero displacement, they carry whatever.
+     * Reading them without checking this bit amounts to injecting noise
+     * into the cursor — that is what made the "mouse move on its own" on
+     * the bench on 2026-08-26. The byte was already fetched by the burst
+     * (offset 0), it simply was not being checked. */
     out->motion  = (b[BURST_MOTION] & 0x80) != 0;
     if (out->motion) {
         out->dx = (int16_t)(((uint16_t)b[BURST_DELTA_X_H] << 8) | b[BURST_DELTA_X_L]);
         out->dy = (int16_t)(((uint16_t)b[BURST_DELTA_Y_H] << 8) | b[BURST_DELTA_Y_L]);
 #if BOARD_SNS_ROT_180
-        /* Capteur monté à 180° : les deux axes sont retournés, on les remet
-         * d'aplomb ici. Voir BOARD_SNS_ROT_180 dans board.h — la constante passe
-         * à 0 le jour où le layout tourne l'empreinte. */
+        /* Sensor mounted at 180 degrees: both axes are flipped, they are put
+         * back upright here. See BOARD_SNS_ROT_180 in board.h — the constant
+         * goes to 0 the day the layout rotates the footprint. */
         out->dx = (int16_t)(-out->dx);
         out->dy = (int16_t)(-out->dy);
 #endif
@@ -388,5 +388,5 @@ esp_err_t pmw3389_read_motion(pmw3389_motion_t *out)
 
 bool pmw3389_motion_pending(void)
 {
-    return gpio_get_level(BOARD_SNS_MOTION_GPIO) == 0;   /* actif bas */
+    return gpio_get_level(BOARD_SNS_MOTION_GPIO) == 0;   /* active low */
 }

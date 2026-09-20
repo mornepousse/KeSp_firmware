@@ -1,77 +1,77 @@
-/* Relais HID de la souris Conchodytes vers le slot 2 du dongle.
+/* HID relay for the Conchodytes mouse to dongle slot 2.
  *
- * Le protocole n'est pas à inventer : `rf_encode_hidreport_mouse()` existe dans
- * rf_packet.h, le dongle le décode déjà (rf_rx_task.c) et appelle
- * `hid_send_mouse()`. À la perte du lien il ne relâche QUE les boutons, jamais
- * la frappe en cours (rf_slot.h). Ce module ne fait qu'émettre.
+ * The protocol needs no inventing: `rf_encode_hidreport_mouse()` already
+ * exists in rf_packet.h, the dongle already decodes it (rf_rx_task.c) and
+ * calls `hid_send_mouse()`. On link loss it releases ONLY the buttons, never
+ * the keypress in progress (rf_slot.h). This module only transmits.
  *
- * ⚠ Pourquoi un fichier séparé de kbd_relay_tx.c, qui porte pourtant déjà un
- * `kbd_relay_send_mouse()` : celui-là est soudé au clavier — il interroge
- * `kbd_active_route()`, appelle `usb_presence_poll()` et rafraîchit
- * périodiquement le dernier rapport clavier. Une souris n'a rien de tout ça, et
- * son déplacement est RELATIF donc non idempotent : le réémettre en boucle
- * ferait dériver le curseur. Ce qui est réellement commun — le driver radio et
- * l'appairage — est réutilisé, pas recopié.
+ * ⚠ Why a file separate from kbd_relay_tx.c, which already carries a
+ * `kbd_relay_send_mouse()`: that one is welded to the keyboard — it polls
+ * `kbd_active_route()`, calls `usb_presence_poll()` and periodically
+ * refreshes the last keyboard report. A mouse has none of that, and its
+ * movement is RELATIVE, hence not idempotent: re-emitting it in a loop
+ * would make the cursor drift. What is genuinely common — the radio driver
+ * and pairing — is reused, not copied.
  */
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
 
-/* Initialise la radio en PTX et restaure l'appairage depuis la NVS.
+/* Initializes the radio in PTX and restores pairing from NVS.
  *
- * ⚠ N'initialise PAS le bus SPI : le capteur l'a déjà fait dans
- * `pmw3389_init()`, qui tourne avant. Le bus est partagé, et deux appels à
- * `spi_bus_initialize` ne cohabitent pas. L'ordre compte donc, et
- * `mouse_task_start()` le garantit.
+ * ⚠ Does NOT initialize the SPI bus: the sensor already did so in
+ * `pmw3389_init()`, which runs first. The bus is shared, and two calls to
+ * `spi_bus_initialize` cannot coexist. Order matters, therefore, and
+ * `mouse_task_start()` guarantees it.
  *
- * Rend ESP_OK même si la carte n'est pas appairée — l'appairage est une
- * démarche séparée, voir `mouse_relay_pair()`. Rend une erreur seulement si la
- * radio elle-même ne répond pas. */
+ * Returns ESP_OK even if the board is not paired — pairing is a separate
+ * step, see `mouse_relay_pair()`. Returns an error only if the radio
+ * itself does not respond. */
 esp_err_t mouse_relay_init(void);
 
-/* true quand la radio répond ET que l'appairage est chargé. Faux tant que la
- * souris n'a pas été appairée : les rapports sont alors simplement jetés. */
+/* true when the radio responds AND pairing is loaded. False as long as the
+ * mouse has not been paired: reports are then simply dropped. */
 bool mouse_relay_active(void);
 
-/* Émet un rapport HID souris (6 octets, PKT_TYPE_HIDREPORT / RF_HID_SUB_MOUSE).
+/* Sends a mouse HID report (6 bytes, PKT_TYPE_HIDREPORT / RF_HID_SUB_MOUSE).
  *
- * ⚠ x, y et molette sont des `int8_t` : ±127 par rapport. Mesuré au banc le
- * 2026-08-25, le capteur produit jusqu'à 5373 comptes sur 200 ms — soit ~27 par
- * milliseconde. À 8 ms de cadence cela ferait 215 et saturerait franchement ;
- * à 1 ms cela passe. **Le choix de la cadence et celui de l'encodage sont le
- * même choix**, et il n'est pas tranché : voir la spec
+ * ⚠ x, y and wheel are `int8_t`: ±127 per report. Measured at the bench on
+ * 2026-08-25, the sensor produces up to 5373 counts over 200 ms — about 27
+ * per millisecond. At an 8 ms cadence that would be 215, a clear overflow;
+ * at 1 ms it fits. **The choice of cadence and encoding is the same
+ * choice**, and it is not settled: see the spec
  * docs/superpowers/specs/2026-08-25-conchodytes-firmware-design.md §7.
- * L'appelant est responsable de l'écrêtage ou de l'accumulation.
+ * The caller is responsible for clamping or accumulation.
  *
- * ⚠ REND l'acquittement radio (TX_DS), ET L'APPELANT DOIT LE REGARDER. Sans
- * retransmission (voir mouse_relay_init), une trame non acquittée est PERDUE.
- * Comme le déplacement est RELATIF, la jeter revient à effacer ce bout de geste :
- * le curseur parcourt moins que la main. Il ne faut pas pour autant réémettre la
- * trame telle quelle — rejouer du relatif fait avancer deux fois — mais REMETTRE
- * les comptes dans l'accumulateur, pour que la trame suivante porte la somme.
- * C'est juste par construction : une somme de déplacements est un déplacement. */
+ * ⚠ RETURNS the radio acknowledgment (TX_DS), AND THE CALLER MUST CHECK IT.
+ * Without retransmission (see mouse_relay_init), an unacknowledged frame is
+ * LOST. Since the movement is RELATIVE, dropping it erases that bit of the
+ * gesture: the cursor travels less than the hand. That said, the frame must
+ * not be re-emitted as-is — replaying a relative delta advances it twice —
+ * but the counts must be put back into the accumulator, so the next frame
+ * carries the sum. This is correct by construction: a sum of movements is a movement. */
 bool mouse_relay_send(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel);
 
-/* Compteurs d'émission depuis le démarrage : trames envoyées, et parmi elles
- * celles ACQUITTÉES au niveau radio (TX_DS du nRF24).
+/* Transmission counters since startup: frames sent, and among them those
+ * ACKNOWLEDGED at the radio level (nRF24 TX_DS).
  *
- * Un acquittement dit que quelqu'un écoute sur cette adresse et ce canal — pas
- * que le dongle a compris la trame. Mais son ABSENCE est sans ambiguïté :
- * personne n'est en face. C'est la différence entre « le dongle ne décode pas »
- * et « la souris parle dans le vide », et sans ce compteur on ne peut pas la
- * faire. `rf_driver_send()` rend déjà l'information ; elle était simplement
- * jetée. */
+ * An acknowledgment says someone is listening on this address and channel —
+ * not that the dongle understood the frame. But its ABSENCE is unambiguous:
+ * nobody is out there. That is the difference between "the dongle isn't
+ * decoding" and "the mouse is talking into the void", and without this
+ * counter that distinction cannot be made. `rf_driver_send()` already
+ * returns the information; it was simply being discarded. */
 void mouse_relay_stats(uint32_t *envoyes, uint32_t *acquittes);
 
-/* Lance l'échange d'appairage : émission de PKT_PAIR_REQ sur le rendez-vous
- * (canal 0x28, adresse "KSPR\xFF") en déclarant le slot 0x02 et le type
- * RF_DEV_MOUSE, puis attente du PKT_PAIR_ACK du dongle.
+/* Starts the pairing exchange: sends PKT_PAIR_REQ on the rendezvous
+ * (channel 0x28, address "KSPR\xFF") declaring slot 0x02 and type
+ * RF_DEV_MOUSE, then waits for the dongle's PKT_PAIR_ACK.
  *
- * La fenêtre d'appairage du dongle doit être OUVERTE — commande CDC
- * KS_CMD_RF_PAIR_START (0xB2). Sans elle le dongle ignore les requêtes.
+ * The dongle's pairing window must be OPEN — CDC command
+ * KS_CMD_RF_PAIR_START (0xB2). Without it the dongle ignores requests.
  *
- * En cas de succès, enregistre set_id / slot / MAC du dongle en NVS et rend
- * ESP_OK ; l'appairage ne devient effectif qu'au redémarrage suivant, comme
- * pour les moitiés du clavier. */
+ * On success, stores the dongle's set_id / slot / MAC in NVS and returns
+ * ESP_OK; pairing only takes effect on the next restart, as for the
+ * keyboard halves. */
 esp_err_t mouse_relay_pair(void);

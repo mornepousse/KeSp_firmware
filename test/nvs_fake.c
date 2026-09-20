@@ -1,5 +1,5 @@
-/* Implémentation RAM-backed du fake NVS.
- * Couvre exactement les primitives appelées par keymap.c :
+/* RAM-backed implementation of the fake NVS.
+ * Covers exactly the primitives called by keymap.c:
  *   nvs_flash_init, nvs_flash_erase,
  *   nvs_open, nvs_close, nvs_commit,
  *   nvs_set_blob, nvs_get_blob,
@@ -11,11 +11,11 @@
 #include <string.h>
 #include <stdint.h>
 
-/* ── Paramètres du store ─────────────────────────────────────── */
+/* ── Store parameters ─────────────────────────────────────── */
 #define NVS_MAX_ENTRIES  64
 #define NVS_NS_LEN       16
 #define NVS_KEY_LEN      16
-/* MAX_MACROS * sizeof(macro_t) ≤ 1500 ; keymaps ≤ 1300. 4096 est confortable. */
+/* MAX_MACROS * sizeof(macro_t) <= 1500; keymaps <= 1300. 4096 is comfortable. */
 #define NVS_BLOB_MAX     4096
 #define NVS_MAX_HANDLES  8
 
@@ -30,12 +30,12 @@ typedef struct {
 
 static nvs_entry_t s_store[NVS_MAX_ENTRIES];
 static int         s_entry_count;
-static int         s_fail_writes;   /* injection de faute pour nvs_set_blob */
+static int         s_fail_writes;   /* fault injection for nvs_set_blob */
 
 static char s_handle_ns[NVS_MAX_HANDLES][NVS_NS_LEN];
 static int  s_handle_used[NVS_MAX_HANDLES];
 
-/* ── API publique ────────────────────────────────────────────── */
+/* ── Public API ────────────────────────────────────────────── */
 
 void nvs_fake_reset(void)
 {
@@ -47,7 +47,7 @@ void nvs_fake_reset(void)
 
 void nvs_fake_fail_writes(int enable) { s_fail_writes = enable; }
 
-/* ── Helpers internes ────────────────────────────────────────── */
+/* ── Internal helpers ────────────────────────────────────────── */
 
 static nvs_entry_t *find_entry(const char *ns, const char *key)
 {
@@ -70,7 +70,7 @@ static nvs_entry_t *get_or_create(const char *ns, const char *key)
     return e;
 }
 
-/* ── Injection directe (pour tests de garde de taille) ──────── */
+/* ── Direct injection (for size-guard tests) ──────── */
 
 void nvs_fake_put_blob(const char *ns, const char *key,
                        const void *data, size_t size)
@@ -90,7 +90,7 @@ void nvs_fake_put_u32(const char *ns, const char *key, uint32_t value)
     e->u32_val = value;
 }
 
-/* ── Implémentations des primitives NVS ─────────────────────── */
+/* ── NVS primitive implementations ─────────────────────── */
 
 esp_err_t nvs_flash_init(void)
 {
@@ -110,7 +110,7 @@ esp_err_t nvs_open(const char *ns, nvs_open_mode_t mode, nvs_handle_t *out)
         if (!s_handle_used[i]) {
             s_handle_used[i] = 1;
             strncpy(s_handle_ns[i], ns, NVS_NS_LEN - 1);
-            *out = (nvs_handle_t)(i + 1);   /* handle 1-based */
+            *out = (nvs_handle_t)(i + 1);   /* 1-based handle */
             return ESP_OK;
         }
     }
@@ -136,7 +136,7 @@ esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key,
     int idx = (int)handle - 1;
     if (idx < 0 || idx >= NVS_MAX_HANDLES || !s_handle_used[idx])
         return ESP_FAIL;
-    if (s_fail_writes) return ESP_FAIL;   /* injection de faute (simule NVS pleine) */
+    if (s_fail_writes) return ESP_FAIL;   /* fault injection (simulates a full NVS) */
     if (length > NVS_BLOB_MAX) return ESP_FAIL;
     nvs_entry_t *e = get_or_create(s_handle_ns[idx], key);
     if (!e) return ESP_FAIL;
@@ -154,7 +154,7 @@ esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key,
         return ESP_FAIL;
     nvs_entry_t *e = find_entry(s_handle_ns[idx], key);
     if (!e) return ESP_ERR_NVS_NOT_FOUND;
-    /* out == NULL = requête de taille seulement */
+    /* out == NULL = size-only request */
     if (out == NULL) {
         *length = e->blob_size;
         return ESP_OK;

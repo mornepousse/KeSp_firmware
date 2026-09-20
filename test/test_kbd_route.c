@@ -56,14 +56,14 @@ static void test_v2d_should_sleep(void)
 
 static void test_presence_brute_vbus_prime(void)
 {
-    /* Le pont VBUS (GPIO33) soudé : c'est LUI qui dit si un câble est là — un
-     * chargeur mural n'énumère pas, l'hôte peut autosuspendre. Sans pont : ce
-     * que TinyUSB voit (tud_ready). Le forçage de banc gagne sur tout. */
-    TEST_ASSERT( usb_presence_brut(true,  true,  false, false), "VBUS haut, pas d'hote : present (chargeur)");
-    TEST_ASSERT(!usb_presence_brut(true,  false, true,  false), "VBUS bas, hote 'pret' (fantome S3) : absent");
-    TEST_ASSERT( usb_presence_brut(false, false, true,  false), "sans pont : tud_ready fait foi");
-    TEST_ASSERT(!usb_presence_brut(false, true,  false, false), "sans pont : le niveau GPIO est ignore");
-    TEST_ASSERT( usb_presence_brut(false, false, false, true),  "force (banc) : present");
+    /* The VBUS bridge (GPIO33), populated: it's the one that says whether a
+     * cable is there — a wall charger doesn't enumerate, the host can
+     * autosuspend. Without the bridge: whatever TinyUSB sees (tud_ready). The bench force override wins over everything. */
+    TEST_ASSERT( usb_presence_brut(true,  true,  false, false), "VBUS high, no host: present (charger)");
+    TEST_ASSERT(!usb_presence_brut(true,  false, true,  false), "VBUS low, host 'ready' (S3 ghost): absent");
+    TEST_ASSERT( usb_presence_brut(false, false, true,  false), "no bridge: tud_ready is authoritative");
+    TEST_ASSERT(!usb_presence_brut(false, true,  false, false), "no bridge: the GPIO level is ignored");
+    TEST_ASSERT( usb_presence_brut(false, false, false, true),  "forced (bench): present");
 }
 
 void test_kbd_route(void)

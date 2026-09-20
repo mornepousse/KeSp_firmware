@@ -1,479 +1,507 @@
-# Contrat de comportements — KeSp
+# Behaviour contract — KeSp
 
-Ce que le firmware doit faire, et ce qui le garde. À lire **avant de toucher une
-source**. Chaque comportement est tagué par sa garde : `[test:X]` (X est dans un
-fichier de test), `[smoke:X]` (X est un item de `docs/HARDWARE_SMOKE_TEST.md`,
-vérifié à la main avant chaque release), ou `[NON GARDÉ]` — l'aveu, compté dans
-`.tripwire-nongardes`, qui n'a le droit que de baisser.
+What the firmware must do, and what guards it. Read **before touching a
+source file**. Each behaviour is tagged by its guard: `[test:X]` (X is in a
+test file), `[smoke:X]` (X is an item in `docs/HARDWARE_SMOKE_TEST.md`,
+checked by hand before every release), or `[NON GARDÉ]` — the admission,
+counted in `.tripwire-nongardes`, which is only allowed to go down.
 
-Une source modifiée sans test ni ligne ici est une question sans réponse : le
-hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
+A source file modified without a test or a line here is a question left
+unanswered: the per-edit hook raises it, the Stop hook blocks. Answering it
+means a test, or a line.
 
-## Radio — lien split
+## Radio — split link
 
-- [test:test_repos_ne_reemet_pas] Au repos, le rapport HID n'est pas réémis.
-  La réémission est bornée (100 paquets/s), s'arme au changement et se tait
-  ensuite. Sans ça, la spirale de réémission saturait le lien. En fusion, la
-  même réémission bornée est armée à chaque changement de MATRICE de la gauche
-  (dernier bitmap, même vide) : une trame de changement refusée par l'ESB
-  (~1 %) est répétée 5 × à 10 ms puis silence — un appui bref n'a plus une
-  seule chance de passer (Super+Q avalé, banc 2026-09-13).
-- [test:test_rf_status_cadence] Le status RF respecte sa période : rien avant,
-  une émission à la période. Trois maillons perdaient des frappes pour la même
-  raison — une cadence qui n'attendait pas.
-- [test:test_half_tx_repeat] La droite répète chaque changement de matrice un
-  nombre BORNÉ de fois (HALF_TX_REPEATS ticks) puis se tait : une trame de
-  changement refusée par l'ESB n'est plus perdue, et le repos reste muet (R1).
-  La règle de maintien (réaffirmation à 100 ms) reste intacte derrière.
-- [smoke:NRF ne se wedge pas après 5 min] La droite a un chien de garde radio.
-  Un nRF24 figé est relancé ; il n'y a plus de mort permanente du lien.
+- [test:test_repos_ne_reemet_pas] At rest, the HID report is not
+  retransmitted. Retransmission is bounded (100 packets/s), arms on change
+  and falls silent afterwards. Without this, the retransmission spiral
+  saturated the link. In fusion, the same bounded retransmission arms on
+  every MATRIX change from the left (last bitmap, even empty): a change
+  frame refused by the ESB (~1 %) is repeated 5× at 10 ms then silence — a
+  brief keypress no longer gets only one chance to get through (Super+Q
+  swallowed, bench 2026-09-13).
+- [test:test_rf_status_cadence] The RF status respects its period: nothing
+  before, one transmission at the period. Three links were losing
+  keystrokes for the same reason — a cadence that didn't wait.
+- [test:test_half_tx_repeat] The right repeats every matrix change a
+  BOUNDED number of times (HALF_TX_REPEATS ticks) then falls silent: a
+  change frame refused by the ESB is no longer lost, and rest stays silent
+  (R1). The hold rule (reaffirmation at 100 ms) stays intact behind it.
+- [smoke:NRF doesn't wedge after 5 min] The right has a radio watchdog. A
+  frozen nRF24 is relaunched; there is no more permanent death of the link.
 
-<!-- D'autres invariants radio restent à inscrire (Mae, 2026-09-13). -->
+<!-- Other radio invariants still need to be written down (Mae, 2026-09-13). -->
 
-## Veille — réveil
+## Sleep — wake
 
-- [test:test_veille] Grâce après un réveil GPIO : pendant 300 ms
-  (VEILLE_GRACE_REVEIL_MS, entre 100 ms et 1 s) la carte ne se rendort pas,
-  même si l'inactivité — jamais rafraîchie par un réveil sans touche — dit le
-  contraire. Une touche à pré-contact lent réveille la carte avant que la
-  capture la voie (deux passes vides) ; sans grâce la boucle renvoyait dormir
-  en ~15 ms, avant que le pilote recréé ait vu la touche. Un glitch coûte
-  300 ms d'éveil, pas 15 s de radio. Tient au débordement du compteur.
-- [smoke:Première touche après veille] UN SEUL sommeil par board : le chemin
-  V2D (v2d_sleep.c, OLED + radio, sonde USB toutes les 3 s) est EXCLU des
-  boards à veille B7. Depuis l'écran de la gauche (2026-09-14) la garde
-  « sans-fil + écran » le compilait aussi sur elle : sur un réveil à capture
-  vide, V2D détruisait le pilote, coupait la radio, se rendormait, recréait
-  tout à son réveil — la touche de réveil passait dans ce trou (deux
-  matrix_setup à 30 ms d'écart au journal, 2026-09-16). Console au réveil :
-  un seul « matrix_setup ».
-- [smoke:Première touche après veille] L'instrumentation de banc du réveil
-  (chronos, lignes et masque GPIO à la sortie, échelle de relecture 150 ms,
-  dump des deux passes) est sous `CONFIG_KASE_VEILLE_DIAG` (défaut n). Hors
-  option, le réveil garde : capture, relecture unique à 5 ms, recréation du
-  pilote, réconciliation — le journal « reveil : n touche(s) capturee(s) »
-  et le bilan « reveil apres N s » restent.
-- [smoke:Première touche après veille] La touche qui réveille la carte est
-  capturée, émise et réconciliée — jamais perdue. Sous fusion, la gauche
-  émet l'appui capturé au réveil (matrix_wake_capture) et son relâchement à la
-  réconciliation, avec l'émetteur du callback : le scanner recréé ne voit pas de
-  changement, lui seul ne l'aurait jamais émis (première touche avalée, banc
-  2026-09-13). Une touche de réveil TENUE n'est jamais relâchée à tort :
-  la réconciliation attend le premier événement du pilote, pas un tick nu.
-  Un premier front lu pendant le rebond (capture vide sur réveil GPIO) est
-  relu 5 ms plus tard avant d'être déclaré fantôme — pas de rendormissement
-  qui avalerait un tap bref ; un vrai glitch (deux captures vides) reste rejeté.
-  Une capture VIDE journalise les deux passes brutes (« capture vide :
-  passe1=… passe2=… ») : rebond (une passe pleine), pré-contact ou fantôme (les
-  deux vides) se distinguent au journal — « touche de réveil perdue sur la
-  gauche, depuis toujours » (2026-09-16) se chasse avec ça, pas à l'oreille.
-  Diagnostic de banc en cours (à retirer une fois tranché) : sur capture vide,
-  relecture toutes les 10 ms pendant 150 ms, le journal dit à quel délai une
-  touche apparaît (« JAMAIS » = réveil tardif ou glitch ; 10-20 ms = lecture
-  précoce fausse ; 100 ms+ = appui suivant) — la gauche voit 4 appuis sur 5,
-  le premier, celui qui réveille, manque partout. Et un chronomètre de la
-  FENÊTRE AVEUGLE au journal (« chrono entree : radio / pilote / armement /
-  jusqu'au sommeil », « chrono sortie : sommeil -> capture ») : entre la
-  destruction du pilote et le sommeil réel, puis entre le réveil et la
-  capture, une touche n'est ni balayée ni capable de réveiller — 160 à
-  570 ms d'éveil autour d'un sommeil vus au tick, à localiser. Mesuré : entrée
-  9 ms, sortie 6-8 ms (timer), ce n'est pas là. La même ligne journalise
-  désormais les niveaux BRUTS des lignes à la toute première instruction après
-  le réveil et le registre d'état GPIO (« lignes a la sortie=0x.. ; broches
-  du reveil=0x.. ») : une ligne déclencheuse déjà basse à la sortie = réveil
-  GPIO lent ; haute mais invisible à la capture = capture fausse. Un tap léger
-  après une longue pause ne réveillait pas la gauche, une pression tenue si.
-  Mesuré le 2026-09-16 11:03 : ligne du « a » (GPIO2) déclencheuse du réveil
-  mais BASSE 7 ms après, touche lisible seulement à +36 ms — signature d'un
-  niveau à la limite du seuil (COL 3,3 V → 1N4148W → ligne ~2,6-2,7 V, seuil
-  haut S3 2,475 V). Mesuré par ADC1 (diagnostic retiré ensuite, il passait la
-  broche en analogique) : 2885 mV sur la ligne pendant un appui tenu — marge
-  réelle, hypothèse écartée. Reste observé et non expliqué par le firmware :
-  un premier appui après une longue pause vu nulle part (ni réveil, ni
-  capture, ni pilote) ; piste switch (premier contact hésitant), à départager
-  en changeant la touche de position.
-- [test:test_wake_grace] La grâce laissée au pilote recréé au réveil couvre
-  toujours son anti-rebond (debounce × intervalle + 2 balayages), plancher
-  10 ms, plafond 50 ms. Un `vTaskDelay(1)` (entre ~0 et 10 ms selon la phase)
-  relâchait à tort une touche tenue — tap de Super, Super+F perdu.
-- [test:test_veille] Le light sleep vient en 15 s (entre 5 et 20 s) : éveillée
-  et oisive la carte tire ~28 mA à 160 MHz (datasheet v2.2 table 5-9 p. 67)
-  contre 0,24 mA endormie — à 60 s, une journée de frappe entrecoupée de pauses
-  perdait ~0,2 V (2026-09-15). Le réveil sur touche est le chemin nominal, pas
-  une exception.
-- [smoke:Éveil oisif] Les moitiés tournent en fréquence dynamique
-  (CONFIG_PM_ENABLE, esp_pm) : 160 MHz tant qu'une tâche travaille, 40 MHz
-  (XTAL, PLL coupée) dès que les deux cœurs sont oisifs — 27,6 → 13,2 mA
-  (datasheet v2.2 table 5-9 p. 67). Sous DFS : la radio acquitte à ≥ 98 %,
-  l'écran se rafraîchit, la console UART0 reste lisible (esp_pm la passe sur
-  XTAL), l'UART du lien TRRS est sur XTAL, la veille et le réveil sont
-  inchangés ; un hôte USB monté tient l'APB à 80 MHz (verrou) et suspend les
-  sommeils automatiques ; un branchement USB à froid pendant l'oisiveté
-  ÉNUMÈRE (banc 2026-09-16 : cafe:4003 vu, route=USB, verrou pris — le seul
-  échec observé était un câble de charge seule). Journal au boot : « DFS
-  actif : 160 MHz en travail, 40 MHz oisif ».
-- [smoke:Éveil oisif] Au repos, le balayage de la matrice S'ARRÊTE
-  (keyboard_button en économie d'énergie : gptimer stoppé, colonnes tenues
-  hautes, interruption sur les lignes qui le relance au premier appui, premier
-  balayage < 1 ms). Sans cela le processeur sortait d'oisiveté 1000 fois par
-  seconde et le DFS ne descendait jamais. Le maintien (gpio_hold) que ce mode
-  pose sur les colonnes est LEVÉ avant toute conduite hors pilote (capture au
-  réveil, armement de veille, recréation) : sinon une touche tenue se lit sur
-  toute sa rangée. L'ISR du pilote n'est pas en IRAM (elle appelle du code
-  flash) : une touche pressée pendant une écriture NVS attend quelques ms au
-  lieu de planter. Le tick LVGL passe à 50 ms, la tâche dort jusqu'à 500 ms.
-- [smoke:Première touche après veille] Revue gauche/droite du 2026-09-16 :
-  AUCUNE statistique de frappe sur les moitiés (CONFIG_KASE_KEY_STATS=n :
-  ni comptage, ni bigrammes, ni NVS — « pas de stats sur le clavier, au mieux
-  sur le dongle » ; une écriture flash coupe le cache et arrête balayage et
-  émission — 21 sauvegardes en une matinée à gauche, zéro à droite), et la
-  gauche ÉTEINT sa radio en veille comme la droite
-  (kbd_relay_sleep_prepare / wake_restore autour du light sleep : la puce
-  repart ~5 ms avant la capture, comme la droite).
-- [smoke:Éveil oisif] Au repos, presque rien ne réveille le processeur : le
-  relais radio de la gauche passe à 100 ms (10 ms dès qu'une touche est tenue,
-  une réparation bornée en cours, une sync, ou que la gauche ÉCOUTE la droite
-  réémise en route USB — [test:test_kbd_refresh] `kbd_relay_cadence_ms` : à
-  100 ms ce tick, qui vide la FIFO de réception, avalait les appuis brefs de la
-  droite en USB (régression b545e2aa, banc 2026-09-16) ; un changement le
-  réveille aussitôt) ; la tâche de rafraîchissement de la droite à 100 ms (20 ms
-  touche tenue, notifiée par le balayage sur changement) ; le lien TRRS
-  ÉVÉNEMENTIEL au repos (voir « poignée de main 5 V ») ;
-  le verrou USB du DFS suit les événements TinyUSB, plus de poll ; le
-  battement de coeur à 10 s. Frappe, réparations (ACK ≥ 98 %) et réveil
-  inchangés — c'est le smoke DFS qui le vérifie.
-- [test:test_cadence] Toutes les cadences des moitiés vivent dans
-  `power/cadence.h` ; chaque cadence de REPOS est gardée par une
-  `_Static_assert` ≥ 30 ms (3 ticks à 100 Hz, seuil du light sleep
-  automatique) — une attente périodique plus courte ne compile pas (vérifié :
-  10 ms → « static assertion failed »). Les cadences ACTIVES restent ≤ 20 ms.
-- [test:test_keyboard_cadence] La tâche clavier tourne à 10 ms tant qu'une
-  minuterie peut courir — moins de 1,5 s depuis la dernière frappe (couvre
-  tap-hold et tap-dance 200 ms, leader 1000 ms), hôte USB présent, mode test
-  matrice — et à 100 ms au repos ; un changement de matrice la notifie, la
-  première touche n'attend jamais. À 100 Hz sa boucle de 10 ms laissait UN
-  tick libre quand le light sleep automatique en exige trois : mode SLEEP 92 %
-  du temps oisif et light_sleep_counts = 0 (banc 2026-09-16).
-- [smoke:Éveil oisif] Les moitiés DORMENT ENTRE LES TOUCHES : tickless idle
-  (CONFIG_FREERTOS_USE_TICKLESS_IDLE) + light sleep automatique d'esp_pm dès que
-  les deux cœurs sont oisifs plus de 30 ms — au repos ~9 sommeils/s (cadences
-  de 100 ms), le battement de coeur de banc en fait foi (CONFIG_PM_PROFILING :
-  « light_sleep_counts » qui grimpe, rejets à 0). En sommeil automatique les
-  broches du nRF24 sont tenues (CE bas, CSN et IRQ hauts) et l'écran suit un
-  rafraîchissement LVGL de 200 ms. La veille B7 à 15 s reste le seul chemin
-  vers l'étage long et le sommeil profond ; frappe, ACK, écran, console et
-  réveil inchangés.
-- [smoke:Éveil oisif] Le battement de coeur de la DROITE (half_link, 10 s)
-  porte les mêmes témoins de banc que celui de la gauche quand
-  CONFIG_PM_PROFILING est posé : modes et verrous esp_pm, alarmes esp_timer
-  armées, et le temps CPU par tâche si les statistiques FreeRTOS sont
-  compilées. Mesuré : la droite ne dort pas entre les touches pendant ses
-  ~10 premières secondes après un démarrage (116 réveils/s par cœur au lieu
-  de 60-80, TinyUSB hors de cause : son temps CPU ne bouge plus après l'init),
-  puis ~100 sommeils par 10 s, y compris avant sa première veille B7. Un
-  démarrage ne suit qu'un sommeil profond ou un flash : ≤ 15 s à 13 mA,
-  assumé et non poursuivi. Aucun effet hors banc.
-- [smoke:Une nuit sur batterie] Une moitié tient une nuit sur batterie : de
-  l'ordre du centième de volt perdu (244 µA), pas 0,2 V (= ~20 mA : elle n'a
-  pas dormi — 2026-09-12 gauche, 2026-09-15 encore). Pour le LIRE : chaque
-  réveil journalise « reveil apres N s de sommeil (cause=…) — cumul : n
-  sommeils, X s dormies sur Y s », et le battement de coeur porte
-  « inactif=… dormi=X s/n vetos=… » ; une nuit sans sommeil se lit sans
-  multimètre, et un refus se lit par son nom.
-- [smoke:Une nuit sur batterie] La console est VIDÉE avant `esp_light_sleep_start`
-  (`uart_wait_tx_done`, ≤ 20 ms) : la ligne « light sleep » et les chronos
-  d'entrée sortent AVANT le sommeil, plus collés au journal du réveil.
-- [smoke:Éveil oisif] UNE tâche de veille (power/veille_task.c), identique sur
-  les deux moitiés, possède l'inactivité, les vetos et le battement de coeur
-  (« HB up= inactif= dormi= vetos=… » + suffixe de rôle : route/relais à
-  gauche, lien/batt à droite). Un module qui a une raison d'empêcher la veille
-  POSE UN VETO — usb (gauche seulement : événement TinyUSB + rattrapage
-  tud_ready à 1 s), lien (5 V TRRS actif), sync (tirage de keymap), test (mode
-  test matrice) ; un module qui a quelque chose à endormir ENREGISTRE UN HOOK
-  (radio, écran, jauge), appelés dans l'ordre au sommeil et en ordre inverse
-  au réveil, tous AVANT la capture de la touche. Plus aucun module n'évalue la
-  veille, la veille n'appelle plus aucun module par son nom. Tick 1 s (la
-  veille n'arrive qu'à 15 s). « veille REFUSEE depuis N s : vetos=… » toutes
-  les 30 s quand un veto tient.
-- [smoke:Une nuit sur batterie] Le sommeil PROFOND est atteignable : un réveil
-  par timer au seuil profond (4 h moins l'étage léger) bascule en deep sleep
-  sans passer par une frappe — l'inactivité n'étant évaluée qu'éveillé, la
-  carte restait en light sleep jusqu'à une touche (« il ne part jamais en
-  deep sleep », 2026-09-15). Un réveil GPIO désarme le timer.
-- [smoke:Une nuit sur batterie] En veille, CS, SCK et MOSI de l'écran sont
-  tirés BAS (config de sommeil des GPIO), jamais flottants sur les entrées
-  CMOS du panneau — l'ESP isole ses broches en light sleep.
+- [test:test_veille] Grace period after a GPIO wake: for 300 ms
+  (VEILLE_GRACE_REVEIL_MS, between 100 ms and 1 s) the board does not go
+  back to sleep, even if inactivity — never refreshed by a wake with no key
+  — says otherwise. A key with a slow pre-contact wakes the board before
+  capture sees it (two empty passes); without the grace period the loop
+  sent it back to sleep in ~15 ms, before the recreated driver had seen the
+  key. A glitch costs 300 ms of wake time, not 15 s of radio. Holds even at
+  counter overflow.
+- [smoke:First key after sleep] ONE sleep path per board only: the V2D path
+  (v2d_sleep.c, OLED + radio, USB probe every 3 s) is EXCLUDED from the
+  B7-sleep boards. Since the left screen (2026-09-14) the "wireless +
+  screen" guard was also compiling it in on that board: on a wake with an
+  empty capture, V2D destroyed the driver, cut the radio, went back to
+  sleep, recreated everything on its next wake — the wake key fell into
+  that gap (two `matrix_setup` calls 30 ms apart in the log, 2026-09-16).
+  Console on wake: a single "matrix_setup".
+- [smoke:First key after sleep] The bench instrumentation for wake
+  (timings, GPIO lines and mask on exit, 150 ms re-read window, dump of
+  both passes) is under `CONFIG_KASE_VEILLE_DIAG` (default n). Outside that
+  option, wake keeps: capture, single re-read at 5 ms, driver recreation,
+  reconciliation — the log line "reveil : n touche(s) capturee(s)" (wake: n
+  key(s) captured) and the summary "reveil apres N s" (wake after N s)
+  remain.
+- [smoke:First key after sleep] The key that wakes the board is captured,
+  emitted and reconciled — never lost. Under fusion, the left emits the
+  press captured at wake (matrix_wake_capture) and its release at
+  reconciliation, with the callback's own emitter: the recreated scanner
+  sees no change, and on its own would never have emitted it (first key
+  swallowed, bench 2026-09-13). A wake key held DOWN is never released by
+  mistake: reconciliation waits for the driver's first event, not a bare
+  tick. A first edge read during bounce (empty capture on a GPIO wake) is
+  re-read 5 ms later before being declared a ghost — no going back to sleep
+  that would swallow a brief tap; a real glitch (two empty captures) is
+  still rejected. An EMPTY capture logs both raw passes ("capture vide :
+  passe1=… passe2=…" — empty capture: pass1=… pass2=…): bounce (one full
+  pass), slow pre-contact or ghost (both empty) can be told apart in the
+  log — "touche de réveil perdue sur la gauche, depuis toujours" (wake key
+  lost on the left, always has been) (2026-09-16) is hunted with this, not
+  by ear. Bench diagnostic in progress (to be removed once settled): on an
+  empty capture, re-read every 10 ms for 150 ms, the log says after what
+  delay a key appears ("JAMAIS" [NEVER] = late wake or glitch; 10-20 ms =
+  false early read; 100 ms+ = the next keypress) — the left sees 4 presses
+  out of 5, the first one, the one that wakes it, is missing every time.
+  And a stopwatch on the BLIND WINDOW in the log ("chrono entree : radio /
+  pilote / armement / jusqu'au sommeil" — entry timing: radio / driver /
+  arming / until sleep, "chrono sortie : sommeil -> capture" — exit timing:
+  sleep -> capture): between destroying the driver and actual sleep, then
+  between wake and capture, a key can neither be scanned nor wake the board
+  — 160 to 570 ms of wake time around a sleep seen on the tick, to be
+  pinned down. Measured: entry 9 ms, exit 6-8 ms (timer), that's not it.
+  The same log line now also logs the RAW line levels at the very first
+  instruction after wake and the GPIO state register ("lignes a la
+  sortie=0x.. ; broches du reveil=0x.." — lines on exit=0x.. ; wake
+  pins=0x..): a trigger line already low on exit = slow GPIO wake; high but
+  invisible to capture = false capture. A light tap after a long pause did
+  not wake the left, a held press did. Measured on 2026-09-16 11:03: the
+  line for "a" (GPIO2), the wake trigger, but LOW 7 ms later, the key only
+  readable at +36 ms — signature of a level right at the threshold's edge
+  (COL 3.3 V → 1N4148W → line ~2.6-2.7 V, high threshold S3 2.475 V).
+  Measured with ADC1 (diagnostic removed afterwards, it put the pin into
+  analog mode): 2885 mV on the line during a held press — real margin,
+  hypothesis ruled out. Still observed and unexplained by the firmware: a
+  first press after a long pause seen nowhere (neither wake, nor capture,
+  nor driver); switch theory (hesitant first contact), to be settled by
+  moving the key to another position.
+- [test:test_wake_grace] The grace period left to the recreated driver at
+  wake always covers its debounce (debounce × interval + 2 scans), floor
+  10 ms, ceiling 50 ms. A `vTaskDelay(1)` (between ~0 and 10 ms depending on
+  the phase) was wrongly releasing a held key — Super tapped, Super+F lost.
+- [test:test_veille] Light sleep kicks in at 15 s (between 5 and 20 s):
+  awake and idle the board draws ~28 mA at 160 MHz (datasheet v2.2 table
+  5-9 p. 67) versus 0.24 mA asleep — at 60 s, a day of typing broken up by
+  pauses lost ~0.2 V (2026-09-15). Waking on a key is the nominal path, not
+  an exception.
+- [smoke:Idle wake] The halves run at dynamic frequency (CONFIG_PM_ENABLE,
+  esp_pm): 160 MHz while a task is working, 40 MHz (XTAL, PLL off) as soon
+  as both cores are idle — 27.6 → 13.2 mA (datasheet v2.2 table 5-9 p. 67).
+  Under DFS: the radio still acks at ≥ 98 %, the screen still refreshes,
+  the UART0 console stays readable (esp_pm switches it to XTAL), the TRRS
+  link UART is on XTAL, sleep and wake are unchanged; a mounted USB host
+  holds APB at 80 MHz (a lock) and suspends automatic sleeps; a cold USB
+  plug-in during idleness DOES ENUMERATE (bench 2026-09-16: cafe:4003 seen,
+  route=USB, lock held — the only failure observed was a charge-only
+  cable). Boot log: "DFS actif : 160 MHz en travail, 40 MHz oisif" (DFS
+  active: 160 MHz while working, 40 MHz idle).
+- [smoke:Idle wake] At rest, matrix scanning STOPS (keyboard_button in
+  power-save: gptimer stopped, columns held high, an interrupt on the rows
+  restarts it on the first press, first scan < 1 ms). Without this the
+  processor left idle 1000 times a second and DFS never dropped down. The
+  hold (gpio_hold) that this mode places on the columns is LIFTED before
+  any driving outside the driver (capture at wake, sleep arming,
+  recreation): otherwise a held key reads across its whole row. The
+  driver's ISR is not in IRAM (it calls flash code): a key pressed during
+  an NVS write waits a few ms instead of crashing. The LVGL tick moves to
+  50 ms, the task sleeps for up to 500 ms.
+- [smoke:First key after sleep] Left/right review of 2026-09-16: NO
+  keystroke statistics on the halves (CONFIG_KASE_KEY_STATS=n: no
+  counting, no bigrams, no NVS — "pas de stats sur le clavier, au mieux sur
+  le dongle" [no stats on the keyboard, at best on the dongle]; a flash
+  write cuts the cache and stops scanning and transmission — 21 saves in
+  one morning on the left, zero on the right), and the left TURNS OFF its
+  radio in sleep just like the right (kbd_relay_sleep_prepare /
+  wake_restore around light sleep: the chip comes back ~5 ms before
+  capture, same as the right).
+- [smoke:Idle wake] At rest, almost nothing wakes the processor: the
+  left's radio relay drops to 100 ms (10 ms as soon as a key is held, a
+  bounded repair is in progress, a sync, or the left is LISTENING to the
+  right re-transmitted in USB route — [test:test_kbd_refresh]
+  `kbd_relay_cadence_ms`: at 100 ms this tick, which drains the receive
+  FIFO, was swallowing brief presses from the right over USB (regression
+  b545e2aa, bench 2026-09-16); a change wakes it immediately); the right's
+  refresh task at 100 ms (20 ms with a held key, notified by
+  scan-on-change); the TRRS link is EVENT-DRIVEN at rest (see "5 V
+  handshake"); the DFS USB lock follows TinyUSB events, no more polling;
+  the heartbeat at 10 s. Typing, repairs (ACK ≥ 98 %) and wake are
+  unchanged — that's what the DFS smoke test checks.
+- [test:test_cadence] All the halves' cadences live in `power/cadence.h`;
+  every REST cadence is guarded by a `_Static_assert` ≥ 30 ms (3 ticks at
+  100 Hz, the automatic light sleep threshold) — a shorter periodic wait
+  doesn't compile (verified: 10 ms → "static assertion failed"). ACTIVE
+  cadences stay ≤ 20 ms.
+- [test:test_keyboard_cadence] The keyboard task runs at 10 ms as long as a
+  timer can still fire — less than 1.5 s since the last keypress (covers
+  tap-hold and tap-dance 200 ms, leader 1000 ms), a USB host present,
+  matrix test mode — and at 100 ms at rest; a matrix change notifies it,
+  the first key never waits. At 100 Hz its 10 ms loop was leaving ONE tick
+  free when automatic light sleep requires three: SLEEP mode 92 % of idle
+  time and light_sleep_counts = 0 (bench 2026-09-16).
+- [smoke:Idle wake] The halves SLEEP BETWEEN KEYSTROKES: tickless idle
+  (CONFIG_FREERTOS_USE_TICKLESS_IDLE) + esp_pm's automatic light sleep as
+  soon as both cores are idle for more than 30 ms — at rest ~9 sleeps/s
+  (100 ms cadences), the bench heartbeat proves it (CONFIG_PM_PROFILING:
+  "light_sleep_counts" climbing, rejections at 0). In automatic sleep the
+  nRF24 pins are held (CE low, CSN and IRQ high) and the screen follows a
+  200 ms LVGL refresh. B7 sleep at 15 s remains the only path to the long
+  stage and deep sleep; typing, ACK, screen, console and wake are
+  unchanged.
+- [smoke:Idle wake] The RIGHT's heartbeat (half_link, 10 s) carries the
+  same bench indicators as the left's when CONFIG_PM_PROFILING is set:
+  esp_pm modes and locks, armed esp_timer alarms, and per-task CPU time if
+  FreeRTOS statistics are compiled in. Measured: the right does not sleep
+  between keystrokes during its ~first 10 seconds after a boot (116
+  wakes/s per core instead of 60-80, TinyUSB ruled out: its CPU time stops
+  moving after init), then ~100 sleeps per 10 s, including before its
+  first B7 sleep. A boot only follows a deep sleep or a flash: ≤ 15 s at
+  13 mA, accepted and not pursued further. No effect outside the bench.
+- [smoke:A night on battery] A half holds a night on battery: on the order
+  of a hundredth of a volt lost (244 µA), not 0.2 V (= ~20 mA: it didn't
+  sleep — 2026-09-12 left, 2026-09-15 again). To READ it: every wake logs
+  "reveil apres N s de sommeil (cause=…) — cumul : n sommeils, X s dormies
+  sur Y s" (wake after N s of sleep (cause=…) — cumulative: n sleeps, X s
+  slept out of Y s), and the heartbeat carries "inactif=… dormi=X s/n
+  vetos=…" (idle=… slept=X s/n vetoes=…); a sleepless night reads without
+  a multimeter, and a refusal reads by its name.
+- [smoke:A night on battery] The console is FLUSHED before
+  `esp_light_sleep_start` (`uart_wait_tx_done`, ≤ 20 ms): the "light sleep"
+  line and the entry timings come out BEFORE sleep, closer to the wake
+  log.
+- [smoke:Idle wake] A SINGLE sleep task (power/veille_task.c), identical on
+  both halves, owns inactivity, the vetoes and the heartbeat ("HB up=
+  inactif= dormi= vetos=…" + role suffix: route/relay on the left,
+  link/batt on the right). A module with a reason to prevent sleep POSTS A
+  VETO — usb (left only: TinyUSB event + tud_ready catch-up at 1 s), link
+  (5 V TRRS active), sync (keymap pull), test (matrix test mode); a module
+  with something to put to sleep REGISTERS A HOOK (radio, screen, gauge),
+  called in order at sleep and in reverse order at wake, all BEFORE key
+  capture. No module evaluates sleep anymore, sleep no longer calls any
+  module by name. Tick 1 s (sleep only kicks in at 15 s). "veille REFUSEE
+  depuis N s : vetos=…" (sleep REFUSED for N s: vetoes=…) every 30 s while
+  a veto holds.
+- [smoke:A night on battery] DEEP sleep is reachable: a timer wake at the
+  deep threshold (4 h minus the light stage) switches to deep sleep
+  without going through a keypress — since inactivity was only evaluated
+  while awake, the board stayed in light sleep until a key ("it never goes
+  into deep sleep", 2026-09-15). A GPIO wake disarms the timer.
+- [smoke:A night on battery] In sleep, the screen's CS, SCK and MOSI are
+  pulled LOW (GPIO sleep config), never floating on the panel's CMOS
+  inputs — the ESP isolates its pins in light sleep.
 
-## Entrées — matrice et rapport HID
+## Input — matrix and HID report
 
-- [test:test_kp_slot_recycle_ne_gele_pas_le_keycode] Un slot de touche recyclé
-  ne conserve pas le keycode du cycle précédent. Sinon une touche relâchée
-  continuait d'émettre l'ancien code.
-- [test:test_take_consumes_the_signal] Un front de matrice n'est jamais perdu
-  pendant la lecture : le signal est pris, consommé, jamais écrasé par la
-  lecture suivante.
-- [test:test_first_report_always_sent] Un rapport HID refusé par l'hôte n'est
-  pas jeté — il est renvoyé. Sinon un modificateur restait collé.
-- [test:test_th_lt_oob_wins_recompute_after_valid_release] Une LT (layer-tap)
-  hors bornes ne peut pas gagner le recalcul de couche : seul un relâchement
-  valide y participe.
+- [test:test_kp_slot_recycle_ne_gele_pas_le_keycode] A recycled key slot
+  does not keep the keycode from the previous cycle. Otherwise a released
+  key kept emitting the old code.
+- [test:test_take_consumes_the_signal] A matrix edge is never lost during
+  reading: the signal is taken, consumed, never overwritten by the next
+  read.
+- [test:test_first_report_always_sent] A HID report refused by the host is
+  not dropped — it is resent. Otherwise a modifier stayed stuck.
+- [test:test_th_lt_oob_wins_recompute_after_valid_release] An out-of-bounds
+  LT (layer-tap) cannot win the layer recompute: only a valid release
+  participates in it.
 
-## Niphargus — poignée de main 5 V
+## Niphargus — 5 V handshake
 
-- [test:test_lost_probe_eventually_reprobes] Après une sonde perdue, la poignée
-  de main 5 V re-sonde. Elle ne reste pas bloquée sur un échec.
-- [test:test_kbd_route] UNE règle de présence du câble USB (`usb_presence_brut`)
-  pour le routage USB/RF, la source du 5 V TRRS et le veto de veille : avec le
-  pont VBUS soudé (`KASE_VBUS_SENSE`) le niveau GPIO fait foi — un chargeur
-  mural n'énumère pas et fait quand même de cette moitié la source ; sans pont,
-  `tud_ready()` ; le forçage de banc (`KASE_LINK_FORCE_SOURCE`) gagne sur tout.
-  Jusqu'au 2026-09-19 chacun des trois lisait sa propre source ; le jour où le
-  pont est soudé, activer `KASE_VBUS_SENSE` suffit.
-- [smoke:Éveil oisif] La tâche du lien TRRS est ÉVÉNEMENTIELLE au repos (5 V
-  mort, pas d'USB) : bloquée sur la file d'événements du pilote UART, un octet
-  du pair la réveille aussitôt ; l'USB, événement humain, n'est sondé qu'à 1 s
-  (`LINK_REPOS_MS`). Tick de 10 ms seulement en poignée de main ou lien
-  établi. Un débordement UART (TX flottante du pair endormi) vide et repart.
-  Banc 2026-09-19 : gauche USB + TRRS → `etat=2 5V=1`, 490 sondes / 485 ACK,
-  refus de veille `lien=1` ; débranché → `etat=0 5V=0` en < 1 s.
-- [test:test_veille_veto] Registre de vetos de veille (`power/veille_veto.h`,
-  pur) : un état par nom (usb, lien, sync, test, pair), un veto posé bloque toute
-  veille, lever un veto absent est sans effet, noms bornés pour le HB (les cinq
-  tiennent dans ses 24 octets). Câblage dans la tâche de veille unique (Task 7
-  du plan structure énergie). Le veto `pair` est posé par les deux tâches
-  d'appairage actif (`kbd_pairing_task`, `half_fusion_pairing_task`) : chaque
-  tour tient la puce ~150 ms pendant 30-40 s sans qu'on tape — sans lui, à 15 s
-  d'inactivité `radio_sleep` manquait le verrou et coupait la puce sous la
-  tâche d'appairage (revue 2026-09-20).
+- [test:test_lost_probe_eventually_reprobes] After a lost probe, the 5 V
+  handshake probes again. It doesn't stay stuck on a failure.
+- [test:test_kbd_route] ONE rule for USB cable presence
+  (`usb_presence_brut`) drives USB/RF routing, the 5 V TRRS source and the
+  sleep veto: with the VBUS bridge soldered (`KASE_VBUS_SENSE`) the GPIO
+  level is authoritative — a wall charger doesn't enumerate and still
+  makes this half the source; without the bridge, `tud_ready()`; the bench
+  override (`KASE_LINK_FORCE_SOURCE`) wins over everything. Until
+  2026-09-19 each of the three read its own source; the day the bridge is
+  soldered, enabling `KASE_VBUS_SENSE` is enough.
+- [smoke:Idle wake] The TRRS link task is EVENT-DRIVEN at rest (5 V dead,
+  no USB): blocked on the UART driver's event queue, one byte from the
+  peer wakes it immediately; USB, a human event, is only polled at 1 s
+  (`LINK_REPOS_MS`). A 10 ms tick only during handshake or with the link
+  established. A UART overflow (floating TX from a sleeping peer) drains
+  and restarts. Bench 2026-09-19: left USB + TRRS → `etat=2 5V=1`, 490
+  probes / 485 ACKs, sleep refusal `lien=1`; unplugged → `etat=0 5V=0` in
+  < 1 s.
+- [test:test_veille_veto] Sleep veto registry (`power/veille_veto.h`,
+  pure): one state per name (usb, lien, sync, test, pair), a posted veto
+  blocks all sleep, lifting an absent veto has no effect, names bounded
+  for the HB (all five fit in its 24 bytes). Wired into the single sleep
+  task (Task 7 of the power structure plan). The `pair` veto is posted by
+  both active pairing tasks (`kbd_pairing_task`,
+  `half_fusion_pairing_task`): each round holds the chip for ~150 ms over
+  30-40 s with no typing — without it, at 15 s of inactivity `radio_sleep`
+  would miss the lock and cut the chip out from under the pairing task
+  (review 2026-09-20).
 
-## Niphargus — radio : une puce, un propriétaire
+## Niphargus — radio: one chip, one owner
 
-- [test:test_radio_owner] La puce nRF24 d'une moitié a UN propriétaire
-  (`comm/rf/radio_owner.c`) : un mode à la fois (PTX vers une cible, PRX à
-  l'écoute d'une cible, éteinte), idempotent, `radio_rearmer` pour réécrire le
-  mode courant (chien de garde) ; émettre en PRX est REFUSÉ (c'est
-  l'excursion) ; une excursion VIDE la FIFO de réception dans le consommateur
-  AVANT de partir et revient écouter la cible d'avant ; le réveil RÉARME le
-  mode courant (power_up ne touche pas à CE) ; le verrou est tenu pendant tout
-  le sommeil ; une puce absente au probe refuse tout sans la toucher. Vérifié
-  sur la séquence d'appels au matériel (faux enregistreur, mordant).
-- [test:test_radio_owner] Une émission dont l'état est PÉRIMÉ n'est pas émise :
-  `radio_emettre` évalue `encore_valide` UNE FOIS LE VERROU ACQUIS et rend
-  PERIME sans toucher la puce (compteur à part des refus ESB et des
-  indisponibles). C'est ce qui ferme le double appui sur appui court du
-  2026-09-20 : une RÉPÉTITION (réparation bornée, réaffirmation à 100 ms)
-  relisait l'appui pendant que le callback de scan émettait le relâchement,
-  attendait le verrou derrière lui, puis émettait l'appui périmé — P, R, P, R,
-  que la file de transitions du dongle rejouait fidèlement. Les deux moitiés
-  tiennent une génération d'état (+1 par changement, AVANT l'émission, sous
-  section critique) ; toute répétition part avec son snapshot + génération.
-  Le sommeil du propriétaire est idempotent (le profond rappelle les hooks
-  après le léger) et ne rend au réveil que le verrou qu'il a pris.
-  Côté DROITE, INDISPO (verrou manqué, puce endormie) est traité comme PERIME :
-  rien n'est parti, donc ni numéro de séquence consommé, ni « sans ACK » pour
-  l'écran, ni pas de la FSM de repli — huit verrous manqués de suite
-  basculaient la cible vers la gauche sans qu'une trame ait été refusée
-  (revue 2026-09-20). La bascule se décide sur le snapshot de la cible pris
-  sous `s_etat_mux` (avant/après le pas), pas en relisant l'état vivant du
-  propriétaire (`radio_cible` n'est plus qu'un oracle de test).
-  Le hook « relais » de la gauche (timer de rafraîchissement) est enregistré
-  AVANT celui du propriétaire : au réveil (ordre inverse) la radio est debout
-  avant que le timer ne reparte. La cadence de la tâche clavier lit la présence
-  USB par `usb_presence_cable()`, la même règle que le routage, le lien et la veille.
-- [test:test_radio_owner] Un tour d'appairage (`radio_pair_round`) vise le
-  rendez-vous, émet, écoute, puis REVIENT à la cible courante quoi qu'il
-  arrive — une carte qui resterait sur le canal de rendez-vous n'acquitterait
-  plus rien.
-- [smoke:Éveil oisif] La DROITE ne touche plus la puce : `half_link.c` ne fait
-  que des trames (demi-matrice, STATUS, repli de cible par la FSM pure) et
-  passe par radio_owner pour émettre, basculer de cible, réarmer, s'appairer,
-  dormir. Banc 2026-09-19 : ACK 100 % / 97 %, quatre réveils avec touche
-  capturée et radio réarmée, dongle débranché → « repli : bascule TX ->
-  GAUCHE » puis retour dongle et 92 → 100 % d'ACK.
-- [smoke:Fusion — moteur local dormant] La GAUCHE ne touche plus la puce :
-  `kbd_relay_tx.c` demande au propriétaire PTX vers le dongle (sans-fil) ou PRX
-  sur le lien (USB), livre ses trames (brut, HID, STATUS, REQ de sync) par
-  radio_send_ap et son annonce USB par radio_excursion_tx — qui vide la FIFO
-  des trames de la droite dans le consommateur AVANT de partir. ⚠ Le lien
-  s'écoute à l'adresse FIXE 'KaSe'.03 (celle que le dongle vise), pas à
-  l'adresse dérivée du set_id : avant le propriétaire, l'écoute partait sur la
-  mauvaise adresse et la première excursion la corrigeait par accident. Le
-  timer du relais s'arrête au sommeil par un hook local (sinon ses ticks
-  compteraient des « indisponibles » et fausseraient « dongle vu »). La
-  demi-matrice de la droite reçue en écoute USB (`s_remote_bm` + drapeau) est
-  écrite par la tâche esp_timer et lue par le scan et la tâche clavier : les
-  deux vont ensemble sous `s_left_mux`, le drapeau ne peut pas être vu avant
-  les octets (revue 2026-09-20). Banc
-  2026-09-19, quatre scénarios : batterie (98,3 % ACK gauche seule, 5 réveils
-  avec radio réarmée), USB simultané (la droite sort par la gauche), retour
-  (98,6 %), sync par ACK aller-retour (40/40, match=1 deux fois).
+- [test:test_radio_owner] A half's nRF24 chip has ONE owner
+  (`comm/rf/radio_owner.c`): one mode at a time (PTX towards a target, PRX
+  listening to a target, off), idempotent, `radio_rearmer` to rewrite the
+  current mode (watchdog); transmitting while in PRX is REFUSED (that's
+  what the excursion is for); an excursion DRAINS the receive FIFO into
+  the consumer BEFORE leaving and comes back to listen to the previous
+  target; waking RE-ARMS the current mode (power_up does not touch CE);
+  the lock is held for the whole sleep; a chip absent at probe time
+  refuses everything without touching it. Verified against the sequence
+  of calls to the hardware (fake recorder, has bite).
+- [test:test_radio_owner] A transmission whose state is STALE is not
+  sent: `radio_emettre` evaluates `encore_valide` ONCE THE LOCK IS
+  ACQUIRED and returns PERIME without touching the chip (a counter
+  separate from ESB refusals and unavailability). This is what closed the
+  double-press on a short tap of 2026-09-20: a REPEAT (bounded repair,
+  reaffirmation at 100 ms) was re-reading the press while the scan
+  callback emitted the release, waited for the lock behind it, then
+  emitted the stale press — P, R, P, R, which the dongle's transition
+  queue faithfully replayed. Both halves keep a state generation (+1 per
+  change, BEFORE transmission, under a critical section); every repeat
+  leaves with its snapshot + generation. The owner's sleep is idempotent
+  (deep sleep calls the hooks again after light sleep) and only returns at
+  wake the lock it took. On the RIGHT side, INDISPO (missed lock, chip
+  asleep) is treated like PERIME: nothing left, so no sequence number
+  consumed, no "no ACK" for the screen, no step of the fallback FSM —
+  eight missed locks in a row were switching the target to the left
+  without a single frame having been refused (review 2026-09-20). The
+  switch is decided on the target snapshot taken under `s_etat_mux`
+  (before/after the step), not by re-reading the owner's live state
+  (`radio_cible` is now nothing more than a test oracle). The left's
+  "relay" hook (refresh timer) is registered BEFORE the owner's: at wake
+  (reverse order) the radio is up before the timer starts again. The
+  keyboard task's cadence reads USB presence through
+  `usb_presence_cable()`, the same rule as routing, the link and sleep.
+- [test:test_radio_owner] A pairing round (`radio_pair_round`) targets the
+  rendezvous, transmits, listens, then RETURNS to the current target no
+  matter what — a board that stayed on the rendezvous channel would stop
+  acking anything.
+- [smoke:Idle wake] The RIGHT no longer touches the chip: `half_link.c`
+  only builds frames (half-matrix, STATUS, target fallback through the
+  pure FSM) and goes through radio_owner to transmit, switch target,
+  re-arm, pair, sleep. Bench 2026-09-19: ACK 100 % / 97 %, four wakes with
+  key captured and radio re-armed, dongle unplugged → "repli : bascule TX
+  -> GAUCHE" (fallback: switch TX -> LEFT) then dongle back and 92 → 100 %
+  ACK.
+- [smoke:Fusion — local engine dormant] The LEFT no longer touches the
+  chip: `kbd_relay_tx.c` asks the owner for PTX towards the dongle
+  (wireless) or PRX on the link (USB), delivers its frames (raw, HID,
+  STATUS, sync REQ) through radio_send_ap and its USB announcement through
+  radio_excursion_tx — which drains the right's frames from the FIFO into
+  the consumer BEFORE leaving. ⚠ The link listens on the FIXED address
+  'KaSe'.03 (the one the dongle targets), not the address derived from
+  set_id: before the owner existed, listening started on the wrong address
+  and the first excursion fixed it by accident. The relay timer stops on
+  sleep through a local hook (otherwise its ticks would count
+  "unavailable" and skew "dongle seen"). The right's half-matrix received
+  while listening over USB (`s_remote_bm` + flag) is written by the
+  esp_timer task and read by scan and the keyboard task: the two always
+  travel together under `s_left_mux`, the flag can never be seen before
+  the bytes (review 2026-09-20). Bench 2026-09-19, four scenarios: battery
+  (98.3 % ACK left alone, 5 wakes with radio re-armed), simultaneous USB
+  (the right goes out through the left), return (98.6 %), sync via
+  round-trip ACK (40/40, match=1 twice).
 
-## Fusion — routage des moteurs
+## Fusion — engine routing
 
-- [test:test_gauche_par_usb] Sans hôte USB, la gauche ne tape pas en local :
-  elle émet son brut, le dongle tape. En route RF, ses émetteurs HID USB
-  (`hid_transport.c`) se taisent — pas d'attente d'EP ni de « report not sent
-  (EP busy) » à chaque frappe vers un USB sans hôte.
-- [smoke:Fusion — moteur local dormant] Hors USB, le moteur LOCAL de la gauche
-  ne tourne pas du tout : le callback de balayage émet la matrice brute au
-  dongle, mémorise l'état, note l'activité et s'arrête (ni rapport, ni
-  tap-hold, ni combos, ni HID muet). USB branché → la route bascule et le
-  moteur reprend au balayage suivant, keymaps déjà chargées au boot. Le mode
-  test matrice (CDC) garde la main. « Ne charger le keymap local qu'avec
-  l'USB » (2026-09-16) : c'est l'exécution qu'on conditionne, pas le code.
-- [smoke:Fusion — moteur local dormant] La FUSION est la configuration PAR
-  DÉFAUT des trois cartes du Niphargus (sdkconfig.defaults.niphar_left/right,
-  dongle) : ce que `scripts/check.sh` construit au pre-push est ce qui est
-  flashé. Jusqu'au 2026-09-18 le check gardait la gauche pré-fusion
-  (HALF_LINK_RX) pendant que les cartes tournaient des builds `*_fusion` non
-  gardés.
-- [smoke:Fusion — moteur local dormant] Le chemin pré-fusion « la gauche écoute
-  la droite en direct » (HALF_LINK_RX, B3 première version) est RETIRÉ le
-  2026-09-18 : il n'était plus compilé par aucune carte. `half_link.c` ne
-  contient plus que la droite, `kbd_relay_tx.c` que la gauche ; la veille
-  n'a plus d'échelle d'#if par rôle pour la radio.
+- [test:test_gauche_par_usb] Without a USB host, the left doesn't type
+  locally: it transmits its raw data, the dongle types. On the RF route,
+  its USB HID transmitters (`hid_transport.c`) fall silent — no waiting on
+  an EP nor "report not sent (EP busy)" on every keypress towards a USB
+  with no host.
+- [smoke:Fusion — local engine dormant] Off USB, the left's LOCAL engine
+  doesn't run at all: the scan callback transmits the raw matrix to the
+  dongle, remembers the state, notes activity and stops (no report, no
+  tap-hold, no combos, no silent HID). USB plugged in → the route switches
+  and the engine resumes on the next scan, keymaps already loaded at boot.
+  Matrix test mode (CDC) keeps control. "Only load the local keymap with
+  USB" (2026-09-16): it's execution that gets conditioned, not the code.
+- [smoke:Fusion — local engine dormant] FUSION is the DEFAULT configuration
+  of the three Niphargus boards (sdkconfig.defaults.niphar_left/right,
+  dongle): what `scripts/check.sh` builds at pre-push is what gets
+  flashed. Until 2026-09-18 the check was guarding the pre-fusion left
+  (HALF_LINK_RX) while the boards were running unguarded `*_fusion`
+  builds.
+- [smoke:Fusion — local engine dormant] The pre-fusion path "the left
+  listens to the right directly" (HALF_LINK_RX, B3 first version) is
+  REMOVED on 2026-09-18: no board was compiling it in anymore.
+  `half_link.c` now only contains the right, `kbd_relay_tx.c` only the
+  left; sleep no longer has an #if ladder by role for the radio.
 
-- [test:test_fusion_file] Le moteur du dongle REJOUE chaque transition reçue,
-  dans l'ordre (`comm/rf/fusion_file.h`, file de 8 états fusionnés) : un appui
-  + relâchement tombés entre deux cycles font deux cycles, un tap joué — plus
-  de « dernier état gagne ». Un état identique au dernier poussé (réaffirmation
-  de maintien) n'est pas une transition ; pleine, la file fond les nouveaux
-  dans son dernier slot et le COMPTE : `transitions_ecrasees` (CDC
-  RF_STATUS[27..30]) ne mesure plus que ce débordement. Dongle MUET (gauche en
-  USB) : la file est VIDÉE à chaque cycle (`fusion_file_vider` : l'attente
-  part, le compteur reste, le dernier poussé est oublié) et à la reprise
-  l'état courant est repoussé une fois — sans ça, jusqu'à 7 transitions
-  périmées de la droite (tapées pendant l'USB) étaient rejouées au
-  débranchement : frappes fantômes (revue 2026-09-20). Banc 2026-09-19 : une
-  minute de frappe rapide à deux mains, 699 trames, 182 rapports, 0 écrasement
-  (536 en une soirée avec l'ancien moteur), rien de perdu à l'usage. Le dongle
-  compte les RÉ-APPUIS (même touche ré-enfoncée < 30 ms après son relâchement,
-  RF_STATUS[43..46], le dernier attribué en [47..50] : moitié, touche, délai) :
-  la signature d'une répétition périmée ou d'un rebond mécanique, désormais
-  rejoués et non plus masqués par l'échantillonnage ; l'anti-rebond des moitiés
-  passe de 3 à 5 ms (2026-09-20). Banc : 13 ré-appuis en 5000 trames avec la
-  gauche non corrigée (« ppa », « pap », « paa » — p et a sont à gauche en
-  Dvorak) ; les deux corrigées : 1697 trames de « pa » enchaînés, 0 ré-appui,
-  0 écrasement, aucun doublon à l'écran.
-  RF_STATUS[31..34] (écart moteur max) et [35..42] (USB parti/refusé,
-  reprises) restent les témoins du maillon dongle→hôte.
+- [test:test_fusion_file] The dongle's engine REPLAYS every received
+  transition, in order (`comm/rf/fusion_file.h`, an 8-state fused queue):
+  a press + release falling between two cycles make two cycles, a tap
+  played — no more "last state wins". A state identical to the last one
+  pushed (hold reaffirmation) is not a transition; when full, the queue
+  merges new ones into its last slot and COUNTS it: `transitions_ecrasees`
+  (CDC RF_STATUS[27..30]) now only measures this overflow. Dongle SILENT
+  (left on USB): the queue is DRAINED every cycle (`fusion_file_vider`:
+  the wait leaves, the counter stays, the last pushed state is forgotten)
+  and on resume the current state is pushed once more — without this, up
+  to 7 stale transitions from the right (typed during USB) were replayed
+  at unplug time: ghost keystrokes (review 2026-09-20). Bench 2026-09-19:
+  one minute of fast two-handed typing, 699 frames, 182 reports, 0
+  overwrites (536 in one evening with the old engine), nothing lost in
+  use. The dongle counts RE-PRESSES (the same key pressed again < 30 ms
+  after its release, RF_STATUS[43..46], the last one attributed in
+  [47..50]: half, key, delay): the signature of a stale repeat or a
+  mechanical bounce, now replayed and no longer masked by sampling; the
+  halves' debounce goes from 3 to 5 ms (2026-09-20). Bench: 13 re-presses
+  in 5000 frames with the left uncorrected ("ppa", "pap", "paa" — p and a
+  are on the left in Dvorak); with both corrected: 1697 frames of chained
+  "pa", 0 re-presses, 0 overwrites, no duplicate on screen.
+  RF_STATUS[31..34] (max engine gap) and [35..42] (USB sent/refused,
+  retries) remain the witnesses of the dongle→host link.
 
-## Fusion — garde-fou de sync config
+## Fusion — config-sync guard rail
 
-- [test:test_rf_status_config_fp] L'empreinte CRC-32 de la keymap voyage dans
-  PKT_TYPE_STATUS (round-trip), et vaut 0 si absente (rétrocompatible avec un
-  firmware pré-empreinte). La gauche l'annonce ; le dongle la lit.
-- [test:test_coherence_once_par_changement] Le dongle ne signale la cohérence
-  (accord ou divergence) qu'au CHANGEMENT d'empreinte, pas à chaque trame d'état
-  (~1/s) — sinon la console serait noyée.
-- [test:test_fp_match] Une empreinte nulle (« pas encore annoncée ») ne vaut
-  jamais un accord : 0 vs 0 reste incohérent.
-- [smoke:Divergence de config signalée] En sans-fil, si la keymap du dongle
-  diverge de celle de la gauche, le dongle le journalise et l'expose par CDC
-  (KS_CMD_CONFIG_COHERENCE : own_fp/left_fp/age/match) — le contrôleur peut
-  avertir. Sinon deux moteurs taperaient différemment en silence.
+- [test:test_rf_status_config_fp] The keymap's CRC-32 fingerprint travels
+  in PKT_TYPE_STATUS (round-trip), and is 0 if absent (backward-compatible
+  with a pre-fingerprint firmware). The left announces it; the dongle
+  reads it.
+- [test:test_coherence_once_par_changement] The dongle only reports
+  coherence (match or divergence) on a fingerprint CHANGE, not on every
+  state frame (~1/s) — otherwise the console would be flooded.
+- [test:test_fp_match] A null fingerprint ("not announced yet") never
+  counts as a match: 0 vs 0 stays incoherent.
+- [smoke:Config divergence reported] Over wireless, if the dongle's keymap
+  diverges from the left's, the dongle logs it and exposes it over CDC
+  (KS_CMD_CONFIG_COHERENCE: own_fp/left_fp/age/match) — the controller can
+  warn about it. Otherwise two engines would silently type differently.
 
-## Fusion — sync auto de la keymap (ACK payload)
+## Fusion — automatic keymap sync (ACK payload)
 
-- [smoke:Canal retour ACK payload] Le tirage est porté par `comm/rf/keymap_pull.c`
-  (extrait du relais le 2026-09-19, déplacement littéral) : `on_ack` décode
-  balise/chunk sous le verrou du propriétaire de la radio, `tick` enregistre en
-  NVS hors verrou et émet un REQ toutes les 100 ms via le relais, veto de veille
-  `sync` pendant. Banc : divergence → 40/40 en ~10 s → NVS → restore → 40/40 →
-  match=1.
-- [test:test_keymap_sync_frames] Les trames BEACON/CHUNK/REQ survivent à
-  l'encode/decode et tiennent dans un ACK payload nRF24 (≤ 32 o) ; la géométrie
-  40 × 28 = 1120 = keymap est verrouillée, sans chunk partiel.
-- [test:test_keymap_sync] Le réassembleur n'accepte que le prochain chunk
-  attendu ; doublons et hors-séquence sont ignorés sans rien écrire — un ACK
-  payload rejoué ne corrompt jamais la keymap en cours de réception.
-- [smoke:Canal retour ACK payload] Le PTX (gauche) lit la charge utile portée
-  par l'ACK après TX_DS, et sa FIFO RX ne s'encrasse jamais (vidée si non lue ou
-  corrompue). Sans ça, trois ACK chargés suffisent à rendre le canal retour
-  muet en silence.
-- [smoke:Sync keymap sans câble] Une divergence dongle↔gauche se résorbe SEULE
-  par radio : le dongle glisse la keymap dans les ACK des émissions normales de
-  la gauche (balise, puis chunks à la demande), la gauche réassemble, enregistre
-  en NVS et annonce la nouvelle empreinte ; `match` repasse à 1 sans brancher la
-  gauche, et la balise se tait aussitôt (coût nul une fois synchronisé). Un
-  maintien de touche garde la priorité sur le pull (jamais de touche relâchée à
-  tort pour une keymap). Le dongle ne charge une charge d'ACK qu'après une trame
-  de la GAUCHE (STATUS, SYNC_REQ, MATRIX gauche) — la droite partage le slot et
-  la consommerait à vide : la sync converge aussi sous frappe bilatérale.
+- [smoke:ACK payload return channel] The pull is carried by
+  `comm/rf/keymap_pull.c` (extracted from the relay on 2026-09-19, a
+  literal move): `on_ack` decodes beacon/chunk under the radio owner's
+  lock, `tick` saves to NVS outside the lock and sends a REQ every 100 ms
+  via the relay, with a `sync` sleep veto meanwhile. Bench: divergence →
+  40/40 in ~10 s → NVS → restore → 40/40 → match=1.
+- [test:test_keymap_sync_frames] The BEACON/CHUNK/REQ frames survive
+  encode/decode and fit in an nRF24 ACK payload (≤ 32 B); the 40 × 28 =
+  1120 = keymap geometry is locked in, with no partial chunk.
+- [test:test_keymap_sync] The reassembler only accepts the next expected
+  chunk; duplicates and out-of-sequence chunks are ignored without writing
+  anything — a replayed ACK payload never corrupts the keymap being
+  received.
+- [smoke:ACK payload return channel] The PTX (left) reads the payload
+  carried by the ACK after TX_DS, and its RX FIFO never clogs (drained if
+  unread or corrupted). Without this, three loaded ACKs are enough to
+  silently mute the return channel.
+- [smoke:Keymap sync without a cable] A dongle↔left divergence resolves ON
+  ITS OWN over radio: the dongle slips the keymap into the ACKs of the
+  left's normal transmissions (beacon, then chunks on demand), the left
+  reassembles, saves to NVS and announces the new fingerprint; `match`
+  goes back to 1 without plugging in the left, and the beacon falls
+  silent right away (zero cost once synced). A held key keeps priority
+  over the pull (never a key wrongly released for a keymap). The dongle
+  only loads an ACK payload after a frame FROM THE LEFT (STATUS, SYNC_REQ,
+  left MATRIX) — the right shares the slot and would consume it for
+  nothing: sync also converges under two-handed typing.
 
-## Batterie — jauge des moitiés
+## Battery — half gauges
 
-- [test:test_batt_calc] La tension batterie est convertie depuis le pont 1M/1M
-  (V_batt = 2 × V_adc), moyennée, et rejetée hors [2,5 V ; 4,5 V] (0 = inconnu,
-  jamais un chiffre faux) ; le SoC est une table Li-ion 16340 bornée et
-  monotone ; « pleine » exige un plateau ≥ 4,15 V tenu 2 min avec hystérésis,
-  « en charge probable » une hausse ≥ 0,1 V dans une fenêtre de 5 min — une
-  décharge ou une dérive lente ne l'est jamais ; une mesure inconnue oublie tout.
-- [test:test_rf_status_half_et_charge] STATUS porte l'identité de moitié et
-  l'état de charge dans son nibble de flags, sans changer de taille ; une trame
-  ancienne se lit gauche / inconnu (rétrocompatible).
-- [smoke:Jauge batterie] Les deux moitiés remontent une tension plausible au
-  dongle (CDC BATTERY, slots gauche/droite), la droite par un STATUS toutes les
-  30 s sans s'empêcher de dormir ; une tension inconnue s'affiche « inconnue »
-  (0xFF), jamais 0 V ; en charge, PLEINE apparaît après le plateau.
-- [test:test_batt_calc] Niveau de batterie à hystérésis (`batt_niveau_step`) :
-  FAIBLE sous 3,5 V, CRITIQUE sous 3,3 V, remontée avec 0,1 V de marge ; un
-  échantillon rejeté (0) CONSERVE le niveau (un NORMAL forcé faisait
-  FAIBLE→normale→FAIBLE, log et seuil de veille compris, le temps d'une mesure),
-  une jauge muette depuis le boot reste normale ; le journal dit « batterie :
-  FAIBLE/CRITIQUE/normale (dV) » à chaque changement.
-- [smoke:Jauge batterie] Batterie FAIBLE : la tension reste affichée telle
-  quelle (pas de clignotement : un redessin de plus pour rien), la jauge garde
-  sa lecture avec une bordure ÉPAISSIE (c'est l'alerte), et la moitié ne se déclare plus
-  SOURCE du 5 V TRRS (pas de sonde, `etat=0 5V=0` même en USB). CRITIQUE : en
-  plus, veille légère à 5 s au lieu de 15. Pas d'arrêt forcé (le DW01A coupe
-  à 2,5 V). Banc 2026-09-19 avec seuils décalés (4,4/4,3 puis 4,4/4,1 V sur
-  une cellule à 4,2 V) : CRITIQUE → « light sleep » à 5,7 s ; FAIBLE → USB +
-  TRRS branchés, 0 sonde, lien mort ; seuils réels → le même montage monte le
-  lien (36/38 ACK).
+- [test:test_batt_calc] Battery voltage is converted from the 1M/1M
+  divider (V_batt = 2 × V_adc), averaged, and rejected outside [2.5 V;
+  4.5 V] (0 = unknown, never a wrong number); SoC is a bounded, monotonic
+  Li-ion 16340 table; "full" requires a plateau ≥ 4.15 V held for 2 min
+  with hysteresis, "probably charging" a rise ≥ 0.1 V within a 5 min
+  window — a discharge or a slow drift never counts; an unknown reading
+  forgets everything.
+- [test:test_rf_status_half_et_charge] STATUS carries half identity and
+  charge state in its flags nibble, without changing size; an old frame
+  reads as left / unknown (backward-compatible).
+- [smoke:Battery gauge] Both halves report a plausible voltage to the
+  dongle (CDC BATTERY, left/right slots), the right through a STATUS every
+  30 s without stopping itself from sleeping; an unknown voltage displays
+  as "inconnue" (unknown) (0xFF), never 0 V; while charging, FULL appears
+  after the plateau.
+- [test:test_batt_calc] Battery level with hysteresis (`batt_niveau_step`):
+  LOW below 3.5 V, CRITICAL below 3.3 V, recovery with 0.1 V of margin; a
+  rejected sample (0) KEEPS the level (a forced NORMAL was causing
+  LOW→normal→LOW, log and sleep threshold included, for the duration of
+  one reading), a gauge silent since boot stays normal; the log says
+  "batterie : FAIBLE/CRITIQUE/normale (dV)" (battery: LOW/CRITICAL/normal
+  (dV)) on every change.
+- [smoke:Battery gauge] LOW battery: the voltage stays displayed as-is (no
+  blinking: one more redraw for nothing), the gauge keeps its reading with
+  a THICKENED border (that's the alert), and the half no longer declares
+  itself SOURCE of the 5 V TRRS (no probing, `etat=0 5V=0` even on USB).
+  CRITICAL: on top of that, light sleep at 5 s instead of 15. No forced
+  shutdown (the DW01A cuts at 2.5 V). Bench 2026-09-19 with shifted
+  thresholds (4.4/4.3 then 4.4/4.1 V on a 4.2 V cell): CRITICAL → "light
+  sleep" at 5.7 s; LOW → USB + TRRS plugged in, 0 probes, link dead; real
+  thresholds → the same setup brings the link up (36/38 ACK).
 
-## Écrans — Sharp memory-LCD des moitiés
+## Screens — the halves' Sharp memory-LCD
 
-- [test:test_memlcd_model] rev8 est une involution (l'adresse de ligne se lit
-  CA0 en premier, l'ESP32 émet MSB-first : une inversion fausse = écran muet
-  sans erreur) ; le tampon portrait se transpose en 68 lignes × 20 octets, 1 =
-  blanc, tampon vide = panneau blanc, pixel (0,0) → ligne 0 colonne 159 ; le
-  nom de couche se coupe en 4 caractères × 3 lignes puis « … », jamais zéro
-  ligne, NULL sûr ; le modèle ne déclenche un redessin que si un champ AFFICHÉ
-  change — chaque redessin est une transaction sur le bus partagé avec la radio.
-- [test:test_ecran_memlcd_gauche] La gauche a LE MÊME écran que la droite
-  (J12 soudé le 2026-09-14) : CS 14 actif haut, portrait 68×160, et aucun autre
-  backend (ROUND/OLED) ne peut être choisi par CMake pour cette moitié.
-- [smoke:Écrans memory-LCD] Le CS de l'écran (actif haut) est tenu BAS dès le
-  boot des deux moitiés ; le protocole suit l'app note Sharp (lemia doc 6845
-  p. 10-12) : mot de commande BRUT (M0 = premier bit clocké), adresse de ligne
-  en rev8 (CA0 en premier), 68 lignes × 20 octets (catalogue doc 6844 p. 5 :
-  160 × 68, H = sens des données) transposées depuis le portrait 68 × 160 ;
-  l'attachement du panneau attend que la radio ait créé le bus SPI (init
-  différée) ; toute transaction écran passe sous le verrou du propriétaire de
-  la radio et cède si elle est occupée ; la mire de bring-up (cadre, pavé plein
-  en HAUT-GAUCHE, damier 8 px) est nette et bien orientée ; l'image reste gelée
-  en light sleep et aucun réveil n'est dû à l'écran.
-- [smoke:Écrans memory-LCD UI] L'écran de la droite est servi à 1 s (modèle :
-  jauge 30 s, dongle vu) ; l'entretien VCOM est horodaté (~1 Hz), indépendant
-  de la cadence de la tâche qui appelle update() ; au réveil le hook écran ne
-  pose que des drapeaux (le bus SPI est encore à la radio), l'image est
-  repoussée au tick suivant de la tâche écran.
-- [smoke:Écrans memory-LCD UI] Les deux moitiés affichent en portrait : bandeau
-  (route RF/USB, ▲ « dongle vu » COLLANT — une moitié est muette au repos, un
-  indicateur daté clignoterait à chaque STATUS — qui ne tombe qu'après 3
-  émissions consécutives sans ACK, jamais sur un refus ESB isolé, et jamais
-  allumé avant le premier ACK ; jauge et tension locales, la tension
-  STABILISÉE 30 s — [test:test_memlcd_model] une valeur différente de
-  l'affichée s'affiche quand elle a tenu 30 s : l'oscillation ADC ne tient
-  jamais, une dérive lente finit toujours par tenir (une hystérésis autour de
-  l'affiché avait figé 4,2 V toute une nuit, 2026-09-15)), centre (GAUCHE : nom de couche en
-  lignes de 4 + « Ln » ; DROITE : logo Niphargus 60 px centré, généré par
-  scripts/gen_logo_memlcd.sh). PAS de batterie de l'autre moitié : décision
-  utilisateur du 2026-09-14, et le canal ACK qui l'aurait portée (trame
-  DISPLAY) a été retiré avec — l'ACK reste nu hors sync. L'écran ne se réécrit
-  que si un champ affiché change ; une image refusée par le bus occupé est
-  repoussée au tick suivant, jamais perdue ; seuil et envoi sont sous un même
-  mutex (flush LVGL et relance ne transposent jamais le même tampon en même
-  temps — sinon des lignes partent blanches : « une partie de l'écran
-  s'efface », droite, 2026-09-14).
+- [test:test_memlcd_model] rev8 is an involution (the line address reads
+  CA0 first, the ESP32 sends MSB-first: a wrong reversal = a silently
+  blank screen, no error); the portrait buffer transposes into 68 lines ×
+  20 bytes, 1 = white, an empty buffer = a white panel, pixel (0,0) → line
+  0 column 159; the layer name truncates to 4 characters × 3 lines then
+  "…", never zero lines, NULL-safe; the model only triggers a redraw if a
+  DISPLAYED field changes — every redraw is a transaction on the bus
+  shared with the radio.
+- [test:test_ecran_memlcd_gauche] The left has THE SAME screen as the
+  right (J12 soldered on 2026-09-14): CS 14 active-high, portrait 68×160,
+  and no other backend (ROUND/OLED) can be selected by CMake for this
+  half.
+- [smoke:Memory-LCD screens] The screen's CS (active-high) is held LOW
+  from boot on both halves; the protocol follows the Sharp app note
+  (lemia doc 6845 p. 10-12): RAW command word (M0 = first bit clocked),
+  line address in rev8 (CA0 first), 68 lines × 20 bytes (catalogue doc
+  6844 p. 5: 160 × 68, H = data direction) transposed from the 68 × 160
+  portrait; the panel's attachment waits for the radio to have created
+  the SPI bus (deferred init); every screen transaction goes through the
+  radio owner's lock and yields if it's busy; the bring-up test pattern
+  (frame, solid block in the TOP-LEFT, 8 px checkerboard) is crisp and
+  correctly oriented; the image stays frozen in light sleep and no wake is
+  ever caused by the screen.
+- [smoke:Memory-LCD screens UI] The right's screen is served at 1 s
+  (model: 30 s gauge, dongle seen); VCOM upkeep is timestamped (~1 Hz),
+  independent of the cadence of the task calling update(); at wake the
+  screen hook only sets flags (the SPI bus still belongs to the radio),
+  the image is pushed to the next tick of the screen task.
+- [smoke:Memory-LCD screens UI] Both halves display in portrait: a banner
+  (RF/USB route, ▲ "dongle seen" STICKY — a half is silent at rest, a
+  time-stamped indicator would blink on every STATUS — which only drops
+  after 3 consecutive transmissions with no ACK, never on a single
+  isolated ESB refusal, and never lit before the first ACK; local gauge
+  and voltage, the voltage STABILIZED over 30 s — [test:test_memlcd_model]
+  a value different from the displayed one is shown once it has held for
+  30 s: ADC oscillation never holds, a slow drift always eventually holds
+  (a hysteresis around the displayed value had frozen it at 4.2 V for a
+  whole night, 2026-09-15)), a centre section (LEFT: layer name in lines
+  of 4 + "Ln"; RIGHT: 60 px Niphargus logo, centred, generated by
+  scripts/gen_logo_memlcd.sh). NO battery reading for the other half: a
+  user decision from 2026-09-14, and the ACK channel that would have
+  carried it (DISPLAY frame) was removed along with it — the ACK stays
+  bare outside sync. The screen only rewrites if a displayed field
+  changes; an image refused because the bus is busy is pushed to the next
+  tick, never lost; threshold and send are under the same mutex (LVGL
+  flush and re-drive never transpose the same buffer at the same time —
+  otherwise lines come out blank: "une partie de l'écran s'efface" (part
+  of the screen goes blank), right, 2026-09-14).

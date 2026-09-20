@@ -1,12 +1,12 @@
-/* SROM du PMW3389DM-T3QU — blob televerse dans la puce a chaque demarrage.
+/* SROM of the PMW3389DM-T3QU — blob uploaded into the chip on every startup.
  *
- * Source : mrjohnk/PMW3389DM, Arduino Examples/PMW3389DM-polling/SROM.ino
- * 4094 octets. Ce n'est pas une table de donnees : c'est le FIRMWARE du
- * capteur. Sans lui la puce repond en SPI mais ne suit aucun deplacement.
+ * Source: mrjohnk/PMW3389DM, Arduino Examples/PMW3389DM-polling/SROM.ino
+ * 4094 bytes. This is not a data table: it is the sensor's FIRMWARE.
+ * Without it the chip responds over SPI but tracks no movement.
  *
- * ⚠ DIFFERENT de celui du PMW3360 — meme taille, mais 99,6 % des octets
- * different. Les intervertir revient a charger le firmware d'une autre puce.
- * Les symboles sont prefixes pour rendre la confusion impossible au lien.
+ * ⚠ DIFFERENT from the PMW3360's — same size, but 99.6% of the bytes
+ * differ. Swapping them amounts to loading another chip's firmware.
+ * The symbols are prefixed to make confusion impossible at link time.
  */
 #include <stdint.h>
 

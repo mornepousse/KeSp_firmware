@@ -161,9 +161,9 @@ int combo_process(const uint8_t press_row[6], const uint8_t press_col[6])
             deferred_key_t *d2 = find_deferred(configs[i].row2, configs[i].col2);
             if (d1 || d2) {
                 /* Combo triggered — consume both deferred keys.
-                 * combo_active posé ICI seulement : sinon un combo non déférable
-                 * (slots pleins, 6KRO) marquerait les touches actives → supprimées
-                 * sans jamais résoudre = perte d'entrée silencieuse (audit M3). */
+                 * combo_active is set HERE only: otherwise a non-deferrable combo
+                 * (slots full, 6KRO) would mark the keys active → suppressed
+                 * without ever resolving = silent input loss (audit M3). */
                 combo_active[i] = true;
                 if (d1) d1->active = false;
                 if (d2) d2->active = false;

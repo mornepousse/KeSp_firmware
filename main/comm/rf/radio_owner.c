@@ -1,4 +1,4 @@
-/* La puce nRF24 d'une moitié du Niphargus — et rien d'autre. Voir radio_owner.h. */
+/* The nRF24 chip of a Niphargus half — and nothing else. See radio_owner.h. */
 #include "radio_owner.h"
 #include <string.h>
 #include <stdio.h>
@@ -19,8 +19,8 @@ static void lock_give(void)        { if (s_mux) xSemaphoreGive(s_mux); }
 static void lock_create(void)      { if (!s_mux) s_mux = xSemaphoreCreateMutex(); }
 #define LOGW(...) ESP_LOGW(TAG, __VA_ARGS__)
 #else
-/* Host : le verrou est un booléen — la sémantique « tenu pendant le sommeil »
- * se teste sans FreeRTOS. */
+/* Host: the lock is a boolean — the "held during sleep" semantics
+ * is testable without FreeRTOS. */
 static bool s_tenu;
 static bool lock_take(uint32_t ms) { (void)ms; if (s_tenu) return false; s_tenu = true; return true; }
 static void lock_give(void)        { s_tenu = false; }
@@ -69,7 +69,7 @@ bool radio_presente(void) { return s_radio.present; }
 bool radio_lock(uint32_t timeout_ms) { return lock_take(timeout_ms); }
 void radio_unlock(void) { lock_give(); }
 #ifndef TEST_HOST
-/* Prêt du bus SPI à l'écran (rf_bus.h) : le même verrou. */
+/* Lending the SPI bus to the display (rf_bus.h): the same lock. */
 bool rf_bus_lock(uint32_t timeout_ms) { return lock_take(timeout_ms); }
 void rf_bus_unlock(void) { lock_give(); }
 spi_host_device_t rf_bus_host(void) { return BOARD_NRF_SPI_HOST; }
@@ -81,7 +81,7 @@ static bool meme_cible(const rf_radio_cfg_t *a, const rf_radio_cfg_t *b)
         && memcmp(a->rx_addr, b->rx_addr, sizeof a->rx_addr) == 0;
 }
 
-static void appliquer(radio_mode_t mode, const rf_radio_cfg_t *cfg)   /* verrou tenu */
+static void appliquer(radio_mode_t mode, const rf_radio_cfg_t *cfg)   /* lock held */
 {
     if (mode == RADIO_PTX) s_hw.set_ptx(&s_radio, cfg);
     else                   s_hw.rearm_rx(&s_radio, cfg);
@@ -105,15 +105,15 @@ bool radio_rearmer(void)
     return true;
 }
 radio_mode_t          radio_mode(void)  { return s_mode; }
-const rf_radio_cfg_t *radio_cible(void) { return &s_cible; }   /* tests / diagnostic seulement */
+const rf_radio_cfg_t *radio_cible(void) { return &s_cible; }   /* tests / diagnostics only */
 
 radio_tx_t radio_emettre(const uint8_t *buf, uint8_t len, uint8_t *ack, uint8_t *ack_len,
                          uint32_t timeout_ms, radio_valide_cb_t encore_valide, void *ctx)
 {
     if (ack_len) *ack_len = 0;
-    if (!s_radio.present || s_mode != RADIO_PTX) { s_indispo++; return RADIO_TX_INDISPO; }   /* en PRX : excursion */
+    if (!s_radio.present || s_mode != RADIO_PTX) { s_indispo++; return RADIO_TX_INDISPO; }   /* in PRX: excursion */
     if (!lock_take(timeout_ms)) { s_indispo++; return RADIO_TX_INDISPO; }
-    if (encore_valide && !encore_valide(ctx)) {   /* SOUS le verrou : l'état a-t-il été dépassé pendant l'attente ? */
+    if (encore_valide && !encore_valide(ctx)) {   /* UNDER the lock: was the state overtaken while waiting? */
         lock_give(); s_perimes++; return RADIO_TX_PERIME;
     }
     bool ok = (ack && ack_len) ? s_hw.send_ap(&s_radio, buf, len, ack, ack_len)
@@ -127,7 +127,7 @@ bool radio_send(const uint8_t *buf, uint8_t len, uint32_t timeout_ms)
 bool radio_send_ap(const uint8_t *buf, uint8_t len, uint8_t *ack, uint8_t *ack_len, uint32_t timeout_ms)
 { return radio_emettre(buf, len, ack, ack_len, timeout_ms, NULL, NULL) == RADIO_TX_ACK; }
 
-static void vider(radio_rx_cb_t cb, void *ctx)   /* verrou tenu, mode PRX */
+static void vider(radio_rx_cb_t cb, void *ctx)   /* lock held, PRX mode */
 {
     uint8_t b[32]; uint32_t perdues = 0;
     while (s_hw.rx_available(&s_radio)) {
@@ -146,9 +146,9 @@ void radio_rx_drain(radio_rx_cb_t cb, void *ctx)
 bool radio_excursion_tx(uint8_t canal, const uint8_t addr[5], const uint8_t *buf, uint8_t len,
                         radio_rx_cb_t cb, void *ctx)
 {
-    if (!s_radio.present || s_mode != RADIO_PRX) return false;   /* depuis PTX : radio_send */
+    if (!s_radio.present || s_mode != RADIO_PRX) return false;   /* from PTX: radio_send */
     if (!lock_take(20)) return false;
-    vider(cb, ctx);                                               /* AVANT : l'excursion finit par FLUSH_RX */
+    vider(cb, ctx);                                               /* BEFORE: the excursion ends with FLUSH_RX */
     uint8_t retour[5] = { s_cible.rx_addr[0], s_cible.rx_addr[1], s_cible.rx_addr[2], s_cible.rx_addr[3],
                           s_cible.addr_suffix };
     bool ok = s_hw.oob_tx(&s_radio, canal, addr, buf, len, s_cible.channel, retour);
@@ -167,7 +167,7 @@ bool radio_pair_round(const uint8_t rdv_addr[5], uint8_t rdv_ch, const uint8_t *
     s_hw.set_channel(&s_radio, rdv_ch);
     s_hw.send(&s_radio, req, n);
     *rx_n = s_hw.pair_listen(&s_radio, rdv_ch, rdv_addr, rx, rx_max, listen_ms);
-    appliquer(s_mode, &s_cible);      /* RETOUR à la cible, ACK ou pas */
+    appliquer(s_mode, &s_cible);      /* RETURN to the target, ACK or not */
     lock_give();
     return true;
 }
@@ -178,8 +178,8 @@ void radio_ce_gpio(int gpio) { if (lock_take(50)) { s_radio.cfg.pin_ce = gpio; s
 
 void radio_sleep(void)
 {
-    if (!s_radio.present || s_endormie) return;   /* le profond rappelle les hooks après le léger */
-    s_verrou_sommeil = lock_take(50);             /* GARDÉ pendant tout le sommeil */
+    if (!s_radio.present || s_endormie) return;   /* deep sleep calls the hooks again after light sleep */
+    s_verrou_sommeil = lock_take(50);             /* HELD for the whole sleep */
     if (!s_verrou_sommeil) LOGW("sommeil sans le verrou : une emission de plus de 50 ms le tenait");
     s_hw.power_down(&s_radio);
     s_endormie = true;
@@ -188,8 +188,8 @@ void radio_wake(void)
 {
     if (!s_radio.present || !s_endormie) return;
     s_hw.power_up(&s_radio);
-    if (s_mode != RADIO_ETEINTE) appliquer(s_mode, &s_cible);   /* power_up ne touche pas à CE */
-    if (s_verrou_sommeil) lock_give();            /* jamais rendre un verrou qu'on n'a pas pris */
+    if (s_mode != RADIO_ETEINTE) appliquer(s_mode, &s_cible);   /* power_up does not touch CE */
+    if (s_verrou_sommeil) lock_give();            /* never release a lock we did not take */
     s_verrou_sommeil = false; s_endormie = false;
 }
 void radio_stats(uint32_t *ok, uint32_t *refus, uint32_t *indispo, uint32_t *perimes)

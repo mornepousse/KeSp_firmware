@@ -31,11 +31,11 @@
  * different pad is more accessible on the bodge (nothing else depends on it). */
 #define BOARD_VBUS_SENSE_GPIO   GPIO_NUM_33
 
-/* OLED off after 30s idle (vs 60s on V2) — compromis batterie/panneau en wireless
- * MAIS assez long pour laisser apparaître l'écran TAMA (screensaver à 10s idle,
- * OLED_NAV_IDLE_MS) : doit rester > OLED_NAV_IDLE_MS sinon l'écran s'éteint avant.
- * Découplé du RF light-sleep (60s, hard-codé keyboard_task). Réveil au prochain
- * keypress (<500ms). Historique : était 5s, remonté pour voir le tama. */
+/* OLED off after 30s idle (vs 60s on V2) — battery/panel tradeoff in wireless
+ * mode BUT long enough to let the TAMA screen appear (screensaver at 10s idle,
+ * OLED_NAV_IDLE_MS): must stay > OLED_NAV_IDLE_MS or the screen turns off first.
+ * Decoupled from RF light-sleep (60s, hard-coded in keyboard_task). Wakes on
+ * next keypress (<500ms). History: was 5s, raised to let the tama show. */
 #undef BOARD_DISPLAY_SLEEP_MS
 #define BOARD_DISPLAY_SLEEP_MS  30000
 

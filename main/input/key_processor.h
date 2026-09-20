@@ -30,6 +30,6 @@ bool key_processor_has_pending_macro(void);
 /* Get and clear the pending macro index (-1 if none) */
 int16_t key_processor_consume_macro(void);
 
-/* Modificateurs (tap-hold/OSM/LM/macro/override) à OR dans l'octet modifier du
- * report HID — portés hors du tableau keycodes[] pour ne pas voler une slot (M7). */
+/* Modifiers (tap-hold/OSM/LM/macro/override) to OR into the modifier byte of
+ * the HID report — carried outside the keycodes[] array so as not to steal a slot (M7). */
 uint8_t key_processor_report_mods(void);

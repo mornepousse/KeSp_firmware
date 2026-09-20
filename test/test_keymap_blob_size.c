@@ -1,15 +1,15 @@
-/* Taille du blob de keymaps en NVS — la MEME des deux cotes.
+/* Size of the keymaps blob in NVS — the SAME on both sides.
  *
- * Le 2026-09-07 : le logiciel de remappage ecrivait 1120 octets
- * (LAYERS x ROWS x KEYMAP_COLS x 2, soit 14 colonnes sur le maitre) et le
- * firmware en relisait 560 (MATRIX_COLS, 7). La garde de taille de
- * load_keymaps rejetait donc le blob a CHAQUE demarrage et gardait les valeurs
- * d'usine : l'utilisateur remappait, et son travail disparaissait au reboot
- * suivant sans qu'aucune erreur ne soit visible.
+ * On 2026-09-07: the remapping software wrote 1120 bytes
+ * (LAYERS x ROWS x KEYMAP_COLS x 2, i.e. 14 columns on the master) and the
+ * firmware read back 560 (MATRIX_COLS, 7). load_keymaps' size guard
+ * therefore rejected the blob at EVERY boot and kept the factory values:
+ * the user remapped, and their work disappeared on the next reboot
+ * with no error visible anywhere.
  *
- * Les deux chemins passent desormais par KEYMAP_BLOB_BYTES. Ce test verrouille
- * ce qui distingue les deux formules : sur une carte maitre, ou KEYMAP_COLS
- * couvre les DEUX moities, la taille ne doit surtout pas suivre MATRIX_COLS. */
+ * Both paths now go through KEYMAP_BLOB_BYTES. This test locks in
+ * what distinguishes the two formulas: on a master board, where KEYMAP_COLS
+ * covers BOTH halves, the size must absolutely not follow MATRIX_COLS. */
 #include "test_framework.h"
 #include "../main/input/keymap.h"
 #include "../main/input/keyboard_config.h"
@@ -18,34 +18,34 @@ static void test_la_taille_suit_le_tableau_reel(void)
 {
     uint16_t km[LAYERS][MATRIX_ROWS][KEYMAP_COLS];
     TEST_ASSERT(KEYMAP_BLOB_BYTES == sizeof(km),
-                "le blob fait exactement la taille du tableau keymaps");
+                "the blob is exactly the size of the keymaps array");
 }
 
 static void test_la_taille_ne_suit_PAS_la_matrice_locale(void)
 {
-    /* LE test de ce fichier. Il ne mord que sur une carte dont la keymap
-     * couvre plus que sa propre matrice — le maitre d'un split — mais c'est
-     * precisement le seul cas ou la confusion etait possible. */
+    /* THE test of this file. It only bites on a board whose keymap
+     * covers more than its own matrix — the master of a split — but that is
+     * precisely the only case where the confusion was possible. */
     size_t selon_matrice_locale =
         (size_t)LAYERS * MATRIX_ROWS * MATRIX_COLS * sizeof(uint16_t);
     if (KEYMAP_COLS != MATRIX_COLS)
         TEST_ASSERT(KEYMAP_BLOB_BYTES != selon_matrice_locale,
-                    "la taille ne se calcule pas sur la matrice locale");
+                    "the size is not computed from the local matrix");
     else
         TEST_ASSERT(KEYMAP_BLOB_BYTES == selon_matrice_locale,
-                    "sur une carte non split, les deux coincident");
+                    "on a non-split board, the two coincide");
 }
 
 static void test_le_blob_couvre_toutes_les_couches(void)
 {
     TEST_ASSERT(KEYMAP_BLOB_BYTES ==
                     (size_t)LAYERS * MATRIX_ROWS * KEYMAP_COLS * sizeof(uint16_t),
-                "toutes les couches, toutes les rangees, toutes les colonnes");
+                "all layers, all rows, all columns");
 }
 
 void test_keymap_blob_size(void)
 {
-    printf("\n-- taille du blob de keymaps (NVS) --\n");
+    printf("\n-- size of the keymaps blob (NVS) --\n");
     test_la_taille_suit_le_tableau_reel();
     test_la_taille_ne_suit_PAS_la_matrice_locale();
     test_le_blob_couvre_toutes_les_couches();

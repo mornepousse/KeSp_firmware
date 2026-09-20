@@ -109,13 +109,13 @@ esp_err_t kbd_gpios_set_intr(const int *gpios, uint32_t gpio_num, gpio_int_type_
 {
     static bool isr_service_installed = false;
     if (!isr_service_installed) {
-        /* KaSe : flag 0, pas ESP_INTR_FLAG_IRAM. Le handler d'économie d'énergie
-         * (kbd_power_save_isr_handler) appelle gptimer_enable/start et
-         * gpio_intr_disable, qui ne sont pas en IRAM : marqué IRAM, il tournerait
-         * cache coupé pendant une écriture flash (NVS des stats) et planterait.
-         * Sans le flag, l'interruption attend la fin de l'écriture — quelques ms
-         * de latence sur une touche pressée pile à ce moment, pas un crash.
-         * Idempotent avec les autres appelants (half_link, rf_rx_task : flag 0). */
+        /* KaSe: flag 0, not ESP_INTR_FLAG_IRAM. The power-save handler
+         * (kbd_power_save_isr_handler) calls gptimer_enable/start and
+         * gpio_intr_disable, which are not in IRAM: marked IRAM, it would run
+         * with the cache cut during a flash write (stats NVS) and crash.
+         * Without the flag, the interrupt waits for the write to finish — a few
+         * ms of latency on a key pressed right at that moment, not a crash.
+         * Idempotent with the other callers (half_link, rf_rx_task: flag 0). */
         gpio_install_isr_service(0);
         isr_service_installed = true;
     }

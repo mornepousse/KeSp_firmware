@@ -1,5 +1,5 @@
-/* stub: nvs.h — builds hôte (TEST_HOST) uniquement.
- * Déclare les types et fonctions NVS primitifs. Implémentation dans nvs_fake.c. */
+/* stub: nvs.h — host builds (TEST_HOST) only.
+ * Declares the primitive NVS types and functions. Implementation in nvs_fake.c. */
 #pragma once
 #include "nvs_flash.h"
 #include <stddef.h>

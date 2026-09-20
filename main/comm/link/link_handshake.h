@@ -1,76 +1,76 @@
-/* Poignée de main du lien inter-moitiés Niphargus.
+/* Handshake of the Niphargus inter-half link.
  *
- * LINK_5V_EN pilote un load switch SiP32431 avec un pull-down 100 k : le 5 V est
- * MORT par défaut. Émetteur et récepteur doivent tous deux fermer leur switch
- * pour qu'un courant passe, donc un branchement à chaud ne peut pas produire
- * d'étincelle. Une moitié à batterie vide n'est pas réveillable par le TRRS —
- * assumé au design matériel.
+ * LINK_5V_EN drives a SiP32431 load switch with a 100k pull-down: the 5 V is
+ * DEAD by default. Both transmitter and receiver must close their switch
+ * for current to flow, so a hot-plug cannot produce a spark.
+ * A half with an empty battery cannot be woken by the TRRS —
+ * assumed in the hardware design.
  *
- * ── L'invariant de sûreté ────────────────────────────────────────────────────
+ * -- The safety invariant --------------------------------------------------
  *
- * en_5v ne passe à vrai qu'après un ÉCHANGE VÉRIFIÉ avec le pair : soit on a
- * sondé et reçu un ACK, soit on a été sondé et on a répondu. Le temps qui passe,
- * la seule présence de l'USB, ou un événement inattendu ne le lèvent jamais.
+ * en_5v only becomes true after a VERIFIED EXCHANGE with the peer: either we
+ * probed and received an ACK, or we were probed and answered. Time passing,
+ * the mere presence of USB, or an unexpected event never raise it.
  *
- * Logique pure : l'horloge et les événements sont passés en argument, aucune
- * GPIO n'est touchée ici. L'appelant traduit les actions en gpio_set_level().
+ * Pure logic: the clock and the events are passed as arguments, no
+ * GPIO is touched here. The caller translates the actions into gpio_set_level().
  */
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
 
-#define LINK_HS_PROBE_TIMEOUT_MS  200   /* attente d'un ACK après la sonde */
-#define LINK_HS_PEER_TIMEOUT_MS   500   /* silence du pair toléré, lien établi */
-/* Intervalle entre deux sondes en IDLE tant que l'USB est présent. USB_PRESENT
- * est un événement de FRONT (pas un état relu ailleurs) : sans re-sonde
- * périodique, une seule sonde perdue au boot condamnerait le lien jusqu'au
- * débranchement/rebranchement du câble. Même ordre de grandeur que
- * LINK_HS_PROBE_TIMEOUT_MS pour ne pas spammer la ligne. */
+#define LINK_HS_PROBE_TIMEOUT_MS  200   /* wait for an ACK after the probe */
+#define LINK_HS_PEER_TIMEOUT_MS   500   /* tolerated peer silence, link established */
+/* Interval between two probes in IDLE as long as USB is present. USB_PRESENT
+ * is an EDGE event (not a state re-read elsewhere): without a periodic
+ * re-probe, a single probe lost at boot would condemn the link until the
+ * cable is unplugged/replugged. Same order of magnitude as
+ * LINK_HS_PROBE_TIMEOUT_MS so as not to spam the line. */
 #define LINK_HS_REPROBE_INTERVAL_MS  300
-/* Entretien du lien en UP. Constaté au banc le 2026-09-11, à la première
- * fermeture du 5 V : le lien montait puis retombait 500 ms plus tard. En UP
- * l'émetteur ne sondait plus, le récepteur n'avait donc plus rien à acquitter,
- * et LINK_HS_PEER_TIMEOUT_MS expirait. Le design comptait sur les trames
- * MATRIX du chemin filaire pour entretenir le lien — chemin qui n'existe pas,
- * les moitiés parlent radio. Tant qu'on a du courant à donner, on le redit :
- * deux entretiens tiennent dans le délai d'expiration, une sonde perdue ne
- * rouvre pas le switch. */
+/* Keepalive of the link while UP. Observed at the bench on 2026-09-11, on the
+ * first 5 V closure: the link came up then dropped 500 ms later. While UP
+ * the transmitter no longer probed, so the receiver had nothing left to ACK,
+ * and LINK_HS_PEER_TIMEOUT_MS expired. The design relied on the MATRIX
+ * frames of the wired path to keep the link alive — a path that does not
+ * exist, the halves talk over radio. As long as we have current to give, we
+ * say it again: two keepalives fit within the expiry delay, a lost probe
+ * does not reopen the switch. */
 #define LINK_HS_KEEPALIVE_MS         200
 
 typedef enum {
-    LINK_HS_IDLE = 0,   /* 5 V mort, rien en cours */
-    LINK_HS_PROBING,    /* sonde envoyée, on attend l'ACK */
-    LINK_HS_UP,         /* pair reconnu, 5 V fermé */
+    LINK_HS_IDLE = 0,   /* 5 V dead, nothing in progress */
+    LINK_HS_PROBING,    /* probe sent, waiting for the ACK */
+    LINK_HS_UP,         /* peer recognized, 5 V closed */
 } link_hs_state_t;
 
 typedef enum {
-    LINK_HS_EV_TICK = 0,     /* passage du temps, rien d'autre */
-    LINK_HS_EV_USB_PRESENT,  /* le câble hôte vient d'apparaître */
-    LINK_HS_EV_USB_GONE,     /* le câble hôte a disparu */
-    LINK_HS_EV_PEER_ACK,     /* la moitié d'en face a répondu à la sonde */
-    LINK_HS_EV_PEER_FRAME,   /* trame valide reçue du pair (garde le lien vivant) */
-    LINK_HS_EV_PROBED,       /* le pair NOUS sonde (trame PROBE reçue et vérifiée) */
+    LINK_HS_EV_TICK = 0,     /* time passing, nothing else */
+    LINK_HS_EV_USB_PRESENT,  /* the host cable just appeared */
+    LINK_HS_EV_USB_GONE,     /* the host cable has disappeared */
+    LINK_HS_EV_PEER_ACK,     /* the half opposite has answered the probe */
+    LINK_HS_EV_PEER_FRAME,   /* valid frame received from the peer (keeps the link alive) */
+    LINK_HS_EV_PROBED,       /* the peer is probing US (PROBE frame received and verified) */
 } link_hs_event_t;
 
 typedef enum {
     LINK_HS_ACT_NONE = 0,
-    LINK_HS_ACT_SEND_PROBE,   /* émettre la sonde « t'es bien ma moitié ? » */
-    LINK_HS_ACT_ENABLE_5V,    /* fermer le load switch */
-    LINK_HS_ACT_DISABLE_5V,   /* rouvrir le load switch */
-    /* Répondre à la sonde ET fermer notre switch. Les deux vont ensemble : le
-     * contrat matériel exige que les DEUX moitiés ferment le leur pour qu'un
-     * courant passe, donc répondre sans fermer ne servirait à rien. Fermer un
-     * switch déjà fermé est sans effet, l'appelant n'a pas à s'en soucier. */
+    LINK_HS_ACT_SEND_PROBE,   /* send the "are you really my half?" probe */
+    LINK_HS_ACT_ENABLE_5V,    /* close the load switch */
+    LINK_HS_ACT_DISABLE_5V,   /* reopen the load switch */
+    /* Answer the probe AND close our switch. The two go together: the
+     * hardware contract requires BOTH halves to close theirs for current
+     * to flow, so answering without closing would be useless. Closing an
+     * already-closed switch has no effect, the caller does not need to worry about it. */
     LINK_HS_ACT_ACK_AND_ENABLE_5V,
 } link_hs_action_t;
 
 typedef struct {
     link_hs_state_t state;
-    uint32_t        since_ms;    /* entrée dans l'état courant */
-    uint32_t        last_peer_ms;/* dernier signe de vie du pair */
-    uint32_t        last_probe_ms;/* dernière sonde émise (entretien en UP) */
-    bool            usb;         /* câble hôte présent */
-    bool            en_5v;       /* état commandé du load switch */
+    uint32_t        since_ms;    /* entry into the current state */
+    uint32_t        last_peer_ms;/* last sign of life from the peer */
+    uint32_t        last_probe_ms;/* last probe sent (keepalive while UP) */
+    bool            usb;         /* host cable present */
+    bool            en_5v;       /* commanded state of the load switch */
 } link_hs_t;
 
 static inline void link_hs_init(link_hs_t *h)
@@ -88,7 +88,7 @@ static inline bool link_hs_5v_enabled(const link_hs_t *h) { return h->en_5v; }
 static inline link_hs_action_t link_hs_step(link_hs_t *h, link_hs_event_t ev,
                                             uint32_t now_ms)
 {
-    /* Perte de l'USB : on coupe partout, immédiatement. */
+    /* USB lost: cut everything, immediately. */
     if (ev == LINK_HS_EV_USB_GONE) {
         h->usb = false;
         if (h->en_5v) {
@@ -107,18 +107,18 @@ static inline link_hs_action_t link_hs_step(link_hs_t *h, link_hs_event_t ev,
         ev == LINK_HS_EV_PROBED)
         h->last_peer_ms = now_ms;
 
-    /* Le pair nous sonde : c'est un échange vérifié (la trame PROBE a passé son
-     * CRC avant d'arriver ici), donc on répond et on ferme notre côté. Traité
-     * avant le switch parce que ça vaut depuis n'importe quel état — y compris
-     * PROBING, quand les deux moitiés se sondent en même temps et resteraient
-     * sinon bloquées à s'attendre.
+    /* The peer is probing us: this is a verified exchange (the PROBE frame
+     * passed its CRC before arriving here), so we answer and close our side.
+     * Handled before the switch because it applies from any state — including
+     * PROBING, when both halves probe each other at the same time and would
+     * otherwise stay stuck waiting for each other.
      *
-     * Décision assumée (2026-08-19) : la sondée ferme TOUJOURS, même quand elle
-     * a son propre USB. Les deux rails 5 V se retrouvent alors reliés par le
-     * jack quand les deux câbles sont branchés ; la limitation de courant et le
-     * soft-start du load switch l'encaissent, mais ce n'est pas l'usage prévu —
-     * à vérifier au banc. L'alternative écartée était de ne pas fermer quand on
-     * est soi-même alimenté. */
+     * Decision made (2026-08-19): the probed half ALWAYS closes, even when it
+     * has its own USB. The two 5 V rails then end up connected through the
+     * jack when both cables are plugged in; the current limiting and the
+     * soft-start of the load switch absorb it, but this is not the intended
+     * use — to be checked at the bench. The alternative that was ruled out was
+     * to not close when we are ourselves powered. */
     if (ev == LINK_HS_EV_PROBED) {
         h->state = LINK_HS_UP;
         h->since_ms = now_ms;
@@ -128,20 +128,20 @@ static inline link_hs_action_t link_hs_step(link_hs_t *h, link_hs_event_t ev,
 
     switch (h->state) {
     case LINK_HS_IDLE:
-        /* On ne sonde que si on a du courant à donner. */
+        /* We only probe if we have current to give. */
         if (ev == LINK_HS_EV_USB_PRESENT) {
             h->state = LINK_HS_PROBING;
             h->since_ms = now_ms;
             h->last_probe_ms = now_ms;
             return LINK_HS_ACT_SEND_PROBE;
         }
-        /* USB_PRESENT est un événement de front : si une sonde s'est perdue
-         * (timeout de PROBING nous a ramenés ici avec h->usb toujours vrai),
-         * rien ne le relèvera jamais tout seul. Re-sonder périodiquement tant
-         * que l'USB reste là — sans ça, un seul ACK perdu au boot condamne le
-         * lien jusqu'au débranchement du câble. Ne PAS lever en_5v ici : ceci
-         * ne fait que renvoyer la sonde, la propriété de sûreté (5V seulement
-         * après PEER_ACK) est inchangée. */
+        /* USB_PRESENT is an edge event: if a probe was lost
+         * (a PROBING timeout brought us back here with h->usb still true),
+         * nothing will ever raise it again on its own. Re-probe periodically
+         * as long as USB stays there — without this, a single ACK lost at
+         * boot condemns the link until the cable is unplugged. Do NOT raise
+         * en_5v here: this only resends the probe, the safety property (5V
+         * only after PEER_ACK) is unchanged. */
         if (ev == LINK_HS_EV_TICK && h->usb &&
             (uint32_t)(now_ms - h->since_ms) >= LINK_HS_REPROBE_INTERVAL_MS) {
             h->state = LINK_HS_PROBING;
@@ -171,10 +171,10 @@ static inline link_hs_action_t link_hs_step(link_hs_t *h, link_hs_event_t ev,
             h->since_ms = now_ms;
             return LINK_HS_ACT_DISABLE_5V;
         }
-        /* Entretien : celui qui a du courant à donner le redit périodiquement.
-         * Le pair répond par un ACK, ce qui rafraîchit last_peer_ms des deux
-         * côtés (PROBED chez lui, PEER_ACK chez nous). Le récepteur, sans USB,
-         * ne sonde jamais — il n'a rien à donner. */
+        /* Keepalive: whoever has current to give says it again periodically.
+         * The peer answers with an ACK, which refreshes last_peer_ms on both
+         * sides (PROBED on its side, PEER_ACK on ours). The receiver, without
+         * USB, never probes — it has nothing to give. */
         if (ev == LINK_HS_EV_TICK && h->usb &&
             (uint32_t)(now_ms - h->last_probe_ms) >= LINK_HS_KEEPALIVE_MS) {
             h->last_probe_ms = now_ms;
@@ -183,14 +183,14 @@ static inline link_hs_action_t link_hs_step(link_hs_t *h, link_hs_event_t ev,
         return LINK_HS_ACT_NONE;
 
     default:
-        /* h->state hors énumération : contrat d'appel violé (struct sur pile
-         * non passée par link_hs_init(), mémoire arbitraire). Ce module est le
-         * dernier rempart avant le GPIO du load switch, et link_hs_5v_enabled()
-         * est public — un appelant qui l'interroge dans cet état ne doit
-         * jamais lire un `true` de poubelle alors qu'aucun ACT_ENABLE_5V n'a
-         * été émis. Ici, la propriété « 5 V éteint sauf preuve du contraire »
-         * prime sur le diagnostic : on retombe du côté sûr plutôt que de
-         * préserver une valeur inconnue.
+        /* h->state outside the enum: call contract violated (a struct on the
+         * stack not passed through link_hs_init(), arbitrary memory). This
+         * module is the last line of defense before the load switch's GPIO,
+         * and link_hs_5v_enabled() is public — a caller querying it in this
+         * state must never read a garbage `true` when no ACT_ENABLE_5V has
+         * been issued. Here, the property "5 V off unless proven otherwise"
+         * takes priority over diagnostics: we fall back to the safe side
+         * rather than preserve an unknown value.
          */
         h->state = LINK_HS_IDLE;
         h->en_5v = false;

@@ -1,65 +1,65 @@
-# KaSe dongle — guide d'integration soft
+# KaSe dongle — software integration guide
 
-Ce document s'adresse a l'equipe KeSp_controller (le remapping software).
-Il decrit comment detecter, dialoguer et afficher l'etat d'un dongle KaSe
-en USB, par opposition a un clavier autonome (V1/V2/V2D).
+This document is for the KeSp_controller team (the remapping software).
+It describes how to detect, talk to, and display the state of a KaSe dongle
+over USB, as opposed to a standalone keyboard (V1/V2/V2D).
 
-> Pre-requis : avoir lu `CDC_BINARY_PROTOCOL.md` pour le framing KS/KR + CRC-8.
-> Toutes les commandes ici sont des `KS_CMD_*` standards.
+> Prerequisite: read `CDC_BINARY_PROTOCOL.md` for the KS/KR framing + CRC-8.
+> All commands here are standard `KS_CMD_*`.
 
 ---
 
-## 1. Detection du role (dongle vs clavier autonome)
+## 1. Role detection (dongle vs standalone keyboard)
 
-Le firmware dongle et le firmware clavier exposent **le meme device USB** :
-HID composite (keyboard + mouse) + CDC ACM. Le VID/PID ne change pas. Pour
-distinguer les deux, le soft doit envoyer `KS_CMD_FEATURES` (0x02) au boot et
-chercher le tag `RF_DONGLE` dans la chaine retournee.
+The dongle firmware and the keyboard firmware expose **the same USB device**:
+composite HID (keyboard + mouse) + CDC ACM. The VID/PID does not change. To
+tell the two apart, the software must send `KS_CMD_FEATURES` (0x02) at boot
+and look for the `RF_DONGLE` tag in the returned string.
 
 ```
 KS [02] []  → KR [02] OK "MT,LT,LM,...,MATRIX_TEST,RF_DONGLE,RF_STATUS,RF_PAIR,BATTERY"
 ```
 
-| Tag presence | Role detecte                |
+| Tag present | Role detected                |
 |--------------|-----------------------------|
-| `RF_DONGLE`  | Dongle sans fil (split)     |
-| absent       | Clavier autonome (V1/V2/V2D)|
+| `RF_DONGLE`  | Wireless (split) dongle     |
+| absent       | Standalone keyboard (V1/V2/V2D)|
 
-Sur un clavier autonome, les commandes `RF_*` et `BATTERY` repondent
-`ERR_UNKNOWN` (status 0x01) — gerer comme tag absent.
+On a standalone keyboard, the `RF_*` and `BATTERY` commands answer
+`ERR_UNKNOWN` (status 0x01) — treat this the same as the tag being absent.
 
-**Recommandation** : cacher `paired_count`, signal_bars et batterie de l'UI
-quand le tag est absent, pour ne pas afficher des champs vides sur un V2.
+**Recommendation**: hide `paired_count`, signal bars, and battery from the UI
+when the tag is absent, so as not to display empty fields on a V2.
 
 ---
 
-## 2. Cycle de vie typique
+## 2. Typical lifecycle
 
 ```
-┌─ Le soft demarre ────────────────────────────────────────────┐
-│ 1. Ouvre /dev/ttyACM<N> (CDC ACM)                            │
-│ 2. envoie KS_CMD_PING → KR_OK pour verifier le lien CDC      │
-│ 3. envoie KS_CMD_VERSION → version dongle (ex: v3.8.0-...)   │
-│ 4. envoie KS_CMD_FEATURES → detecte tag RF_DONGLE            │
-│ 5. si dongle → envoie KS_CMD_RF_PAIR_LIST → MACs paires      │
-│ 6. lance la pompe de polling RF_STATUS (toutes les 1–2 s)    │
-│ 7. lance la pompe de polling BATTERY (toutes les 5–10 s)     │
+┌─ The software starts ─────────────────────────────────────────┐
+│ 1. Opens /dev/ttyACM<N> (CDC ACM)                             │
+│ 2. sends KS_CMD_PING → KR_OK to verify the CDC link           │
+│ 3. sends KS_CMD_VERSION → dongle version (e.g.: v3.8.0-...)   │
+│ 4. sends KS_CMD_FEATURES → detects the RF_DONGLE tag          │
+│ 5. if dongle → sends KS_CMD_RF_PAIR_LIST → paired MACs        │
+│ 6. starts the RF_STATUS polling loop (every 1-2 s)            │
+│ 7. starts the BATTERY polling loop (every 5-10 s)             │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Les commandes "lourdes" (keymap, macros, layout) restent identiques entre
-dongle et clavier autonome — c'est volontaire : le dongle stocke le keymap et
-fait tout le decoding HID. Les moities n'envoient que les bytes de matrice.
+The "heavy" commands (keymap, macros, layout) stay identical between the
+dongle and a standalone keyboard — this is intentional: the dongle stores the
+keymap and does all the HID decoding. The halves only send matrix bytes.
 
 ---
 
-## 3. Affichage du lien radio (polling RF_STATUS)
+## 3. Displaying the radio link (polling RF_STATUS)
 
-`KS_CMD_RF_STATUS` (0xB3) retourne 27 octets, idempotent, sans effet de bord.
-Cadence recommandee : **1–2 Hz** dans l'UI (la ressource est gratuite, mais
-pas la peine de saturer le CDC).
+`KS_CMD_RF_STATUS` (0xB3) returns 27 bytes, idempotent, no side effects.
+Recommended rate: **1-2 Hz** in the UI (the resource is free, but there is no
+point saturating the CDC).
 
-### Bytes de sortie (rappel)
+### Output bytes (reminder)
 
 ```
 [0]    flags         bit0=link_L_up, bit1=link_R_up
@@ -73,10 +73,10 @@ pas la peine de saturer le CDC).
 [23..26] pkt_dup_R   u32 LE
 ```
 
-### Mapping signal → barres
+### Mapping signal → bars
 
-Le firmware encode deja la qualite combinee (heartbeat age + retry count)
-dans `sig_<side>` via `rf_signal_q255()`. Le soft ne fait que mapper :
+The firmware already encodes the combined quality (heartbeat age + retry
+count) in `sig_<side>` via `rf_signal_q255()`. The software only needs to map it:
 
 ```python
 def bars(sig: int) -> int:
@@ -84,39 +84,39 @@ def bars(sig: int) -> int:
     if sig >= 140: return 3
     if sig >=  80: return 2
     if sig >=  30: return 1
-    return 0  # lien perdu, afficher icone X
+    return 0  # link lost, display an X icon
 ```
 
-### Etat des trois moities possibles
+### State of the three possible halves
 
-| Moitie         | `link_up` | `pkt_rx` | Interpretation                  |
+| Half           | `link_up` | `pkt_rx` | Interpretation                  |
 |----------------|-----------|----------|---------------------------------|
-| Non vue        | 0         | 0        | Jamais connectee (pas paire ou eteinte) |
-| Liee, sans contact | 0     | > 0      | Connue mais lien casse (pile vide, hors portee) |
-| Active         | 1         | > 0      | OK, afficher `bars(sig)`        |
+| Never seen     | 0         | 0        | Never connected (not paired, or powered off) |
+| Paired, no contact | 0     | > 0      | Known but link broken (dead battery, out of range) |
+| Active         | 1         | > 0      | OK, display `bars(sig)`        |
 
-### Compteurs `pkt_dup_*`
+### `pkt_dup_*` counters
 
-Les duplicats sont les paquets retransmis par la moitie qui ont la meme `seq`
-qu'un paquet deja accepte. C'est normal et indique la sante du lien : taux
-de duplicats stable = lien stable ; pic = perturbation radio. Le soft peut
-afficher ce ratio dans un panneau "diagnostic" mais ce n'est pas vital.
+Duplicates are packets retransmitted by the half that carry the same `seq`
+as a packet already accepted. This is normal and reflects link health: a
+stable duplicate rate = stable link; a spike = radio disturbance. The
+software may display this ratio in a "diagnostics" panel but it is not vital.
 
 ---
 
-## 4. Workflow de pairing
+## 4. Pairing workflow
 
-Le pairing est une operation utilisateur : appui sur un bouton "+ Half" dans
-le soft, qui declenche cette sequence.
+Pairing is a user-driven operation: pressing a "+ Half" button in the
+software, which triggers this sequence.
 
 ```
-soft                                  dongle              half
+software                              dongle              half
  │                                       │                  │
  │   KS_CMD_RF_PAIR_START [reset=0]      │                  │
  ├──────────────────────────────────────>│                  │
  │   KR OK [set_id_hi,set_id_lo,paired]  │                  │
  │<──────────────────────────────────────┤                  │
- │                                       │  (radio L sur    │
+ │                                       │  (radio L on     │
  │                                       │   rendezvous,    │
  │                                       │   30s window)    │
  │                                       │                  │
@@ -129,113 +129,113 @@ soft                                  dongle              half
  │<──────────────────────────────────────┤                  │
 ```
 
-**UI suggeree** :
-1. Bouton "Pair half" affiche un compte-a-rebours de 30 s
-2. Toutes les 2 s, poller `RF_PAIR_LIST` et comparer `paired_count` au precedent
-3. Si `paired_count` augmente : afficher "Half paired !" et exit
-4. Si timeout : afficher "Timeout — verifier que la moitie est en mode pairing"
+**Suggested UI**:
+1. "Pair half" button shows a 30 s countdown
+2. Every 2 s, poll `RF_PAIR_LIST` and compare `paired_count` to the previous value
+3. If `paired_count` increases: show "Half paired!" and exit
+4. On timeout: show "Timeout — check that the half is in pairing mode"
 
-**`reset = 1` vs `reset = 0`** :
-- `reset = 0` (par defaut) : ajoute aux paires existantes (max 2)
-- `reset = 1` : equivalent a `RF_PAIR_RESET` puis `PAIR_START` — utile pour
-  re-coupler from scratch (ex: nouvelle paire de moities)
+**`reset = 1` vs `reset = 0`**:
+- `reset = 0` (default): adds to the existing pairs (max 2)
+- `reset = 1`: equivalent to `RF_PAIR_RESET` followed by `PAIR_START` — useful
+  to re-pair from scratch (e.g. a new pair of halves)
 
 ---
 
-## 5. Affichage de la batterie
+## 5. Displaying the battery
 
-`KS_CMD_BATTERY` (0xB6) retourne 14 octets : 7 par moitie. Cadence
-recommandee : **5–10 s** dans l'UI (les moities n'envoient `EN_INFO_BATTERY`
-que quand la valeur change, donc poller plus vite ne sert a rien).
+`KS_CMD_BATTERY` (0xB6) returns 14 bytes: 7 per half. Recommended rate:
+**5-10 s** in the UI (the halves only send `EN_INFO_BATTERY` when the value
+changes, so polling faster serves no purpose).
 
 ```
-slot 0 (LEFT) :  [batt_dV][soc_pct][charging][age_ms u32 LE]
-slot 1 (RIGHT) : [batt_dV][soc_pct][charging][age_ms u32 LE]
+slot 0 (LEFT):  [batt_dV][soc_pct][charging][age_ms u32 LE]
+slot 1 (RIGHT): [batt_dV][soc_pct][charging][age_ms u32 LE]
 ```
 
-### Valeurs sentinelles
+### Sentinel values
 
-| Champ      | `0xFF` / `0xFFFFFFFF` signifie                  |
+| Field      | `0xFF` / `0xFFFFFFFF` means                      |
 |------------|-------------------------------------------------|
-| `batt_dV`  | jamais recu de la moitie                        |
-| `soc_pct`  | SoC inconnu (BMS pas branche / firmware ancien) |
-| `charging` | etat inconnu                                    |
-| `age_ms`   | aucun sample recu depuis le boot du dongle      |
+| `batt_dV`  | never received from the half                    |
+| `soc_pct`  | SoC unknown (BMS not connected / old firmware)  |
+| `charging` | state unknown                                   |
+| `age_ms`   | no sample received since the dongle booted      |
 
-### Regles d'affichage
+### Display rules
 
 ```python
 def render_battery(rec):
     dv, soc, chg, age = rec
     if dv == 0xFF or age == 0xFFFFFFFF:
-        return "—"             # pas de telemetrie
-    label = f"{soc}%"          # ou f"{dv/10:.1f} V"
+        return "—"             # no telemetry
+    label = f"{soc}%"          # or f"{dv/10:.1f} V"
     if chg == 1:
         label = "⚡ " + label
-    if age > 60_000:           # plus de 60 s
-        label = "(?) " + label  # potentiellement obsolete
+    if age > 60_000:           # more than 60 s
+        label = "(?) " + label  # potentially stale
     return label
 ```
 
 ---
 
-## 6. Compatibilite et evolution
+## 6. Compatibility and evolution
 
-### Garanties
+### Guarantees
 
-- Les IDs de commandes ne sont **jamais** reassignes. Un futur firmware peut
-  ajouter `KS_CMD_XXX` sur un ID libre mais ne renumerotera pas les existants.
-- Le tag `RF_DONGLE` reste le marqueur officiel du role.
-- La taille des reponses RF_STATUS/RF_PAIR_LIST/BATTERY est **fixe** et ne
-  changera pas. Toute extension future passera par un nouvel ID.
+- Command IDs are **never** reassigned. A future firmware may add
+  `KS_CMD_XXX` on a free ID but will not renumber the existing ones.
+- The `RF_DONGLE` tag remains the official marker of the role.
+- The size of the RF_STATUS/RF_PAIR_LIST/BATTERY responses is **fixed** and
+  will not change. Any future extension will go through a new ID.
 
 ### Forward compatibility
 
-Si le firmware ajoute des bits dans `RF_STATUS.flags` ou des champs apres
-`pkt_dup_right`, **le soft doit ignorer les bits/octets inconnus** et utiliser
-uniquement `len` de l'en-tete KR. Pas de hash sur le contenu.
+If a future firmware adds bits to `RF_STATUS.flags` or fields after
+`pkt_dup_right`, **the software must ignore unknown bits/bytes** and rely
+only on the `len` field of the KR header. No hashing on the content.
 
-### Reserve
+### Reserved
 
-Les IDs libres autour des commandes RF :
-- `0xB7..0xBF` : reserves pour futures diagnostics dongle/wireless
-- `0x96..0x9F` : reserves pour features generiques
+Free IDs around the RF commands:
+- `0xB7..0xBF`: reserved for future dongle/wireless diagnostics
+- `0x96..0x9F`: reserved for generic features
 
 ---
 
-## 7. Erreurs et reconnexion
+## 7. Errors and reconnection
 
-| Status      | Quand                                       | Action coter soft                       |
+| Status      | When                                        | Software-side action                    |
 |-------------|---------------------------------------------|-----------------------------------------|
-| `OK` 0x00   | Tout va bien                                | —                                       |
-| `ERR_BUSY` 0x05 | `RF_PAIR_START` quand fenetre deja ouverte | Backoff 2 s, retenter                  |
-| `ERR_UNKNOWN` 0x01 | Commande envoyee a un clavier autonome | Verifier `RF_DONGLE` dans FEATURES     |
-| `ERR_CRC` 0x02 | Mauvais CRC8 a la reception                | Reverifier le calcul CRC8 (poly 0x07)  |
+| `OK` 0x00   | Everything is fine                          | —                                       |
+| `ERR_BUSY` 0x05 | `RF_PAIR_START` while a window is already open | Back off 2 s, retry              |
+| `ERR_UNKNOWN` 0x01 | Command sent to a standalone keyboard   | Check `RF_DONGLE` in FEATURES      |
+| `ERR_CRC` 0x02 | Wrong CRC8 on receipt                     | Re-check the CRC8 computation (poly 0x07) |
 
-**Deconnexion CDC** : si le `/dev/ttyACM<N>` disparait (dongle debranche
-ou reboot), le soft doit (1) detecter via SIGIO/poll, (2) tenter de reouvrir
-periodiquement (~1 s), (3) re-jouer le workflow de section 2 a la reconnexion
-— l'etat du dongle (paires, layer, keymap) est entierement persiste en NVS,
-rien a "restaurer".
+**CDC disconnection**: if `/dev/ttyACM<N>` disappears (dongle unplugged or
+rebooted), the software should (1) detect it via SIGIO/poll, (2) periodically
+try to reopen it (~1 s), (3) replay the workflow from section 2 on
+reconnection — the dongle's state (pairs, layer, keymap) is fully persisted
+in NVS, nothing needs "restoring".
 
 ---
 
-## 8. Annexe : exemples de framing brut
+## 8. Appendix: raw framing examples
 
-Tous les exemples utilisent le CRC-8/MAXIM (polynome 0x31, init 0x00, no
-reflection) calcule uniquement sur le **payload** (pas sur cmd_id ni len).
-Un payload vide donne CRC = 0x00.
+All examples use CRC-8/MAXIM (polynomial 0x31, init 0x00, no reflection)
+computed only over the **payload** (not over cmd_id or len). An empty payload
+gives CRC = 0x00.
 
 ### Polling RF_STATUS
 
 ```
-TX (soft → dongle) :
+TX (software → dongle):
   4B 53      magic 'KS'
   B3         cmd RF_STATUS
   00 00      len = 0
-  <crc8>     CRC sur [B3, 00, 00]
+  <crc8>     CRC over [B3, 00, 00]
 
-RX (dongle → soft) :
+RX (dongle → software):
   4B 52      magic 'KR'
   B3         cmd RF_STATUS
   00         status OK
@@ -244,11 +244,11 @@ RX (dongle → soft) :
   C8 D2      sig_L=200 sig_R=210
   E8 03 00 00  hb_age_L = 1000 ms
   D0 07 00 00  hb_age_R = 2000 ms
-  ... 16 bytes restants ...
+  ... 16 remaining bytes ...
   <crc8>
 ```
 
-### Lecture pairing
+### Reading pairing
 
 ```
 TX : 4B 53  B4  00 00  <crc>
@@ -259,7 +259,7 @@ RX : 4B 52  B4  00  0D 00
      <crc>
 ```
 
-### Demarrage pairing avec reset
+### Starting pairing with reset
 
 ```
 TX : 4B 53  B2  01 00 01 <crc>     (reset = 1)
@@ -269,18 +269,18 @@ RX : 4B 52  B2  00  03 00 1A 2F 00 <crc>
 
 ---
 
-## 9. Annexe : reference rapide des IDs
+## 9. Appendix: quick ID reference
 
-| ID    | Nom               | Direction | Taille rep. | Frequence soft  |
+| ID    | Name              | Direction | Resp. size  | Software frequency |
 |-------|-------------------|-----------|-------------|-----------------|
-| 0x01  | VERSION           | get       | variable    | au connect      |
-| 0x02  | FEATURES          | get       | variable    | au connect      |
-| 0x04  | PING              | get       | 0           | heartbeat lent  |
-| 0xB2  | RF_PAIR_START     | action    | 3 bytes     | sur action user |
-| 0xB3  | RF_STATUS         | get       | 27 bytes    | 1–2 Hz          |
-| 0xB4  | RF_PAIR_LIST      | get       | 13 bytes    | 0.5 Hz pendant pairing, sinon a la demande |
-| 0xB5  | RF_PAIR_RESET     | action    | 1 byte      | sur action user |
-| 0xB6  | BATTERY           | get       | 14 bytes    | 0.1–0.2 Hz      |
+| 0x01  | VERSION           | get       | variable    | on connect      |
+| 0x02  | FEATURES          | get       | variable    | on connect      |
+| 0x04  | PING              | get       | 0           | slow heartbeat  |
+| 0xB2  | RF_PAIR_START     | action    | 3 bytes     | on user action  |
+| 0xB3  | RF_STATUS         | get       | 27 bytes    | 1-2 Hz          |
+| 0xB4  | RF_PAIR_LIST      | get       | 13 bytes    | 0.5 Hz during pairing, otherwise on demand |
+| 0xB5  | RF_PAIR_RESET     | action    | 1 byte      | on user action  |
+| 0xB6  | BATTERY           | get       | 14 bytes    | 0.1-0.2 Hz      |
 
-Pour la liste complete (keymap, macros, stats, etc.), voir
+For the full list (keymap, macros, stats, etc.), see
 `CDC_BINARY_PROTOCOL.md`.

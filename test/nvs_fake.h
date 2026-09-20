@@ -1,20 +1,20 @@
-/* Fake NVS RAM-backed pour les tests hôte.
- * Permet de tester la logique de persistance de keymap.c sans matériel. */
+/* Fake RAM-backed NVS for host tests.
+ * Lets keymap.c's persistence logic be tested without hardware. */
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
 
-/* Réinitialise entièrement le store RAM (appeler au début de chaque test). */
+/* Fully resets the RAM store (call at the start of every test). */
 void nvs_fake_reset(void);
 
-/* Injection de faute : quand enable != 0, nvs_set_blob renvoie une erreur
- * (simule NVS pleine) → teste la propagation d'erreur des save_*. */
+/* Fault injection: when enable != 0, nvs_set_blob returns an error
+ * (simulates a full NVS) → tests error propagation from save_*. */
 void nvs_fake_fail_writes(int enable);
 
-/* Injecte directement un blob dans le store, en contournant keymap.c.
- * Utile pour tester les gardes de taille (cas where stored_size != expected). */
+/* Injects a blob directly into the store, bypassing keymap.c.
+ * Useful for testing size guards (case where stored_size != expected). */
 void nvs_fake_put_blob(const char *ns, const char *key,
                        const void *data, size_t size);
 
-/* Injecte une valeur u32 (pour tester les gardes de version). */
+/* Injects a u32 value (for testing version guards). */
 void nvs_fake_put_u32(const char *ns, const char *key, uint32_t value);

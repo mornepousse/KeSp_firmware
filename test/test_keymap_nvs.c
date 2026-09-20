@@ -1,14 +1,14 @@
-/* Tests de la persistance réelle de keymap.c via le fake NVS RAM-backed.
+/* Tests of keymap.c's real persistence via the fake RAM-backed NVS.
  *
- * Ce TU linke keymap.c (le vrai code) et nvs_fake.c (primitives NVS en RAM).
- * Chaque test appelle nvs_fake_reset() pour garantir l'isolation.
+ * This TU links keymap.c (the real code) and nvs_fake.c (NVS primitives in RAM).
+ * Each test calls nvs_fake_reset() to guarantee isolation.
  *
- * Logique testée :
+ * Logic under test:
  *   save_keymaps / load_keymaps
  *   save_layout_names / load_layout_names
  *   save_macros / load_macros
  *   recalc_macros_count
- *   garde de taille de load_macros (stored_size != expected → skip)
+ *   load_macros size guard (stored_size != expected → skip)
  */
 #include "test_framework.h"
 #include "keymap.h"
@@ -36,13 +36,13 @@ static void test_keymaps_real_roundtrip(void)
     load_keymaps((uint16_t *)dst, sizeof(dst));
 
     TEST_ASSERT(memcmp(src, dst, sizeof(src)) == 0,
-                "save_keymaps puis load_keymaps produit les donnees identiques");
-    /* Verifier une cle specifique pour prouver que ce n'est pas un no-op */
+                "save_keymaps then load_keymaps produces identical data");
+    /* Check one specific key to prove this is not a no-op */
     TEST_ASSERT_EQ(dst[3][2][5], src[3][2][5],
-                   "cle specifique [3][2][5] correctement restauree");
+                   "specific key [3][2][5] correctly restored");
 }
 
-/* ── 2. load_keymaps sur NVS vide ne corrompt pas le buffer ──── */
+/* ── 2. load_keymaps on empty NVS does not corrupt the buffer ──── */
 
 static void test_load_keymaps_empty_nvs_unchanged(void)
 {
@@ -56,15 +56,15 @@ static void test_load_keymaps_empty_nvs_unchanged(void)
     uint16_t sentinel[LAYERS][MATRIX_ROWS][MATRIX_COLS];
     memset(sentinel, 0xAB, sizeof(sentinel));
     TEST_ASSERT(memcmp(buf, sentinel, sizeof(buf)) == 0,
-                "load_keymaps sur NVS vide : buffer inchange");
+                "load_keymaps on empty NVS: buffer unchanged");
 }
 
-/* ── 2b. load_keymaps : blob stocké de MAUVAISE taille → garde → défauts (E3) ── */
+/* ── 2b. load_keymaps: stored blob of the WRONG size → guard → defaults (E3) ── */
 
 static void test_load_keymaps_size_guard(void)
 {
     nvs_fake_reset();
-    /* Blob "keymaps" plus petit que la taille attendue (config d'un autre build). */
+    /* "keymaps" blob smaller than the expected size (config from another build). */
     uint8_t fake_blob[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
     nvs_fake_put_blob(STORAGE_NAMESPACE, "keymaps", fake_blob, sizeof(fake_blob));
 
@@ -75,7 +75,7 @@ static void test_load_keymaps_size_guard(void)
     uint16_t sentinel[LAYERS][MATRIX_ROWS][MATRIX_COLS];
     memset(sentinel, 0xAB, sizeof(sentinel));
     TEST_ASSERT(memcmp(buf, sentinel, sizeof(buf)) == 0,
-                "load_keymaps taille incorrecte → défauts préservés (pas de remplissage partiel)");
+                "load_keymaps wrong size → defaults preserved (no partial fill)");
 }
 
 /* ── 3. Round-trip layout_names ─────────────────────────────── */
@@ -102,11 +102,11 @@ static void test_layout_names_real_roundtrip(void)
 
     for (int i = 0; i < LAYERS; i++) {
         TEST_ASSERT(strcmp(src[i], dst[i]) == 0,
-                    "save_layout_names puis load : nom de couche identique");
+                    "save_layout_names then load: layer name identical");
     }
 }
 
-/* load_layout_names : blob de MAUVAISE taille → garde → défauts (M10, miroir E3). */
+/* load_layout_names: blob of the WRONG size → guard → defaults (M10, mirrors E3). */
 static void test_load_layout_names_size_guard(void)
 {
     nvs_fake_reset();
@@ -120,29 +120,29 @@ static void test_load_layout_names_size_guard(void)
     char sentinel[LAYERS][MAX_LAYOUT_NAME_LENGTH];
     memset(sentinel, 0xAB, sizeof(sentinel));
     TEST_ASSERT(memcmp(buf, sentinel, sizeof(buf)) == 0,
-                "load_layout_names taille incorrecte → défauts préservés (garde)");
+                "load_layout_names wrong size → defaults preserved (guard)");
 }
 
-/* ── 4. Structure macro_t reelle (steps[] present et bien place) */
+/* ── 4. Real macro_t layout (steps[] present and correctly placed) */
 
 static void test_macro_t_struct_layout(void)
 {
     TEST_ASSERT_EQ(offsetof(macro_t, name), 0,
-                   "name au debut de macro_t (offset 0)");
+                   "name at the start of macro_t (offset 0)");
     TEST_ASSERT_EQ(offsetof(macro_t, steps), (size_t)MAX_MACRO_NAME_LENGTH,
-                   "steps[] immediatement apres name[MAX_MACRO_NAME_LENGTH]");
+                   "steps[] immediately after name[MAX_MACRO_NAME_LENGTH]");
     TEST_ASSERT_EQ(sizeof(((macro_t *)0)->steps),
                    MACRO_MAX_STEPS * sizeof(macro_step_t),
-                   "steps[] = MACRO_MAX_STEPS entrees de 2 octets");
+                   "steps[] = MACRO_MAX_STEPS entries of 2 bytes");
     size_t min_size = sizeof(char[MAX_MACRO_NAME_LENGTH])
                     + sizeof(macro_step_t[MACRO_MAX_STEPS])
                     + sizeof(uint8_t[6])
                     + sizeof(uint16_t);
     TEST_ASSERT(sizeof(macro_t) >= min_size,
-                "sizeof(macro_t) >= somme des champs declares");
+                "sizeof(macro_t) >= sum of declared fields");
 }
 
-/* ── 5. Round-trip macros (vraie struct avec steps[]) ───────── */
+/* ── 5. Round-trip macros (real struct with steps[]) ───────── */
 
 static void test_macros_real_roundtrip(void)
 {
@@ -167,14 +167,14 @@ static void test_macros_real_roundtrip(void)
     load_macros(dst, MAX_MACROS);
 
     TEST_ASSERT(memcmp(src, dst, sizeof(src)) == 0,
-                "save_macros puis load_macros : contenu identique (inclus steps[])");
+                "save_macros then load_macros: identical content (including steps[])");
     TEST_ASSERT_EQ(dst[0].steps[0].keycode, 0x04,
                    "macro[0].steps[0].keycode = 'A' (0x04)");
     TEST_ASSERT_EQ(dst[1].steps[0].modifier, 0x02,
                    "macro[1].steps[0].modifier = LSHIFT (0x02)");
 }
 
-/* ── 6. macros_count persiste a travers save/load ─────────── */
+/* ── 6. macros_count survives save/load ─────────── */
 
 static void test_macros_count_persisted(void)
 {
@@ -190,41 +190,41 @@ static void test_macros_count_persisted(void)
 
     macros_count = 99;
     TEST_ASSERT_EQ((int)macros_count, 99,
-                   "macros_count = 99 (sentinelle avant load)");
+                   "macros_count = 99 (sentinel before load)");
     load_macros(buf, MAX_MACROS);
     TEST_ASSERT_EQ((int)macros_count, 3,
-                   "macros_count restaure = 3 apres load");
+                   "macros_count restored = 3 after load");
 }
 
-/* ── 7. Garde de taille : blob de mauvaise taille → pas de load */
+/* ── 7. Size guard: wrong-size blob → no load */
 
 static void test_macro_size_guard_skips_load(void)
 {
     nvs_fake_reset();
 
-    /* Sentinelle dans macros_list[0] */
+    /* Sentinel in macros_list[0] */
     macros_list[0].name[0] = '\xCC';
 
-    /* Blob de taille incorrecte (100 octets != MAX_MACROS * sizeof(macro_t)) */
+    /* Wrong-size blob (100 bytes != MAX_MACROS * sizeof(macro_t)) */
     uint8_t fake_blob[100] = {0};
     nvs_fake_put_blob(STORAGE_NAMESPACE, "macros", fake_blob, sizeof(fake_blob));
 
     load_macros(macros_list, MAX_MACROS);
 
     TEST_ASSERT(macros_list[0].name[0] == '\xCC',
-                "load_macros : blob taille incorrecte → donnees inchangees (garde active)");
+                "load_macros: wrong-size blob → data unchanged (guard active)");
 }
 
-/* 7b. Garde de version : un blob de BONNE taille mais version périmée (struct
- * réordonné sans changer de taille) → défauts préservés (M11). */
+/* 7b. Version guard: a blob of the RIGHT size but a stale version (struct
+ * reordered without changing size) → defaults preserved (M11). */
 static void test_load_macros_version_guard(void)
 {
     nvs_fake_reset();
     macro_t src[MAX_MACROS];
     memset(src, 0, sizeof(src));
     src[0].name[0] = 'x';
-    save_macros(src, MAX_MACROS);                                  /* écrit blob + version courante */
-    nvs_fake_put_u32(STORAGE_NAMESPACE, "macros_ver", 0xDEAD);     /* force une version périmée */
+    save_macros(src, MAX_MACROS);                                  /* writes blob + current version */
+    nvs_fake_put_u32(STORAGE_NAMESPACE, "macros_ver", 0xDEAD);     /* force a stale version */
 
     macro_t dst[MAX_MACROS];
     memset(dst, 0xAB, sizeof(dst));
@@ -233,10 +233,10 @@ static void test_load_macros_version_guard(void)
     macro_t sentinel[MAX_MACROS];
     memset(sentinel, 0xAB, sizeof(sentinel));
     TEST_ASSERT(memcmp(dst, sentinel, sizeof(dst)) == 0,
-                "load_macros : version périmée (bonne taille) → défauts préservés (M11)");
+                "load_macros: stale version (right size) → defaults preserved (M11)");
 }
 
-/* ── 8. recalc_macros_count : compte le dernier nom non-vide ── */
+/* ── 8. recalc_macros_count: counts the last non-empty name ── */
 
 static void test_recalc_macros_count(void)
 {
@@ -249,16 +249,16 @@ static void test_recalc_macros_count(void)
     macros_count = 0;
     recalc_macros_count();
     TEST_ASSERT_EQ((int)macros_count, 4,
-                   "recalc: dernier nom non-vide a index 3 → count = 4");
+                   "recalc: last non-empty name at index 3 → count = 4");
 
     memset(macros_list, 0, sizeof(macros_list));
     macros_count = 99;
     recalc_macros_count();
     TEST_ASSERT_EQ((int)macros_count, 0,
-                   "recalc: tous vides → count = 0");
+                   "recalc: all empty → count = 0");
 }
 
-/* ── save_keymaps propage l'échec NVS (E4) ─────────────────────── */
+/* ── save_keymaps propagates the NVS failure (E4) ─────────────────────── */
 
 static void test_save_keymaps_propagates_error(void)
 {
@@ -266,10 +266,10 @@ static void test_save_keymaps_propagates_error(void)
     uint16_t buf[LAYERS][MATRIX_ROWS][MATRIX_COLS];
     memset(buf, 0, sizeof(buf));
     TEST_ASSERT(save_keymaps((uint16_t *)buf, sizeof(buf)),
-                "save_keymaps sans faute → true (persisté)");
-    nvs_fake_fail_writes(1);   /* simule NVS pleine */
+                "save_keymaps with no fault → true (persisted)");
+    nvs_fake_fail_writes(1);   /* simulate a full NVS */
     TEST_ASSERT(!save_keymaps((uint16_t *)buf, sizeof(buf)),
-                "save_keymaps avec NVS pleine → false (échec propagé, pas de faux OK)");
+                "save_keymaps with full NVS → false (failure propagated, no false OK)");
     nvs_fake_fail_writes(0);
 }
 
@@ -277,7 +277,7 @@ static void test_save_keymaps_propagates_error(void)
 
 void test_keymap_nvs(void)
 {
-    TEST_SUITE("Keymap NVS — persistance reelle (keymap.c + fake NVS RAM)");
+    TEST_SUITE("Keymap NVS — real persistence (keymap.c + fake RAM NVS)");
     TEST_RUN(test_keymaps_real_roundtrip);
     TEST_RUN(test_load_keymaps_empty_nvs_unchanged);
     TEST_RUN(test_load_keymaps_size_guard);

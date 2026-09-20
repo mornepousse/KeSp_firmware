@@ -1,6 +1,6 @@
 # KaSe Binary CDC Protocol
 
-Protocol binaire pour la communication entre KaSe_soft et le firmware. Coexiste avec le protocole ASCII legacy — le firmware auto-detecte le mode par le premier octet.
+Binary protocol for communication between KaSe_soft and the firmware. Coexists with the legacy ASCII protocol — the firmware auto-detects the mode from the first byte.
 
 ## Frame Format
 
@@ -80,9 +80,9 @@ def crc8(data: bytes) -> int:
 
 ## Backward Compatibility
 
-Si le premier octet recu n'est pas `0x4B`, le firmware bascule en mode texte ASCII legacy. Aucune commande texte ne commence par `KS`, donc pas d'ambiguïte.
+If the first byte received is not `0x4B`, the firmware falls back to legacy ASCII text mode. No text command starts with `KS`, so there is no ambiguity.
 
-L'ancienne version de KaSe_soft continue de fonctionner pour l'OTA et toutes les commandes texte.
+The old version of KaSe_soft continues to work for OTA and all text commands.
 
 ---
 
@@ -91,58 +91,58 @@ L'ancienne version de KaSe_soft continue de fonctionner pour l'OTA et toutes les
 ### System (0x01–0x0F)
 
 #### PING (0x04)
-Teste la connexion.
+Tests the connection.
 - Request: `KS 04 0000 00`
 - Response: `KR 04 00 0000 00`
 
 #### VERSION (0x01)
-Retourne la version firmware.
-- Request: payload vide
-- Response: payload = version string UTF-8 (ex: `v3.2-87-gd34c39f`)
+Returns the firmware version.
+- Request: empty payload
+- Response: payload = UTF-8 version string (e.g.: `v3.2-87-gd34c39f`)
 
 #### FEATURES (0x02)
-Liste des features supportees.
-- Request: payload vide
-- Response: payload = liste CSV (ex: `MT,LT,LM,OSM,OSL,CAPS_WORD,...`)
+List of supported features.
+- Request: empty payload
+- Response: payload = CSV list (e.g.: `MT,LT,LM,OSM,OSL,CAPS_WORD,...`)
 
 #### DFU (0x03)
-Reboot en mode DFU. Reponse OK envoyee avant reboot.
-- Request: payload vide
-- Response: OK puis reboot
+Reboots into DFU mode. OK response sent before reboot.
+- Request: empty payload
+- Response: OK then reboot
 
 ---
 
 ### Keymap (0x10–0x1F)
 
 #### LAYER_INDEX (0x14)
-Retourne le layer actif.
-- Request: payload vide
+Returns the active layer.
+- Request: empty payload
 - Response: `[layer:u8]`
 
 #### KEYMAP_CURRENT (0x12)
-Keymap du layer actif.
-- Request: payload vide
+Keymap of the active layer.
+- Request: empty payload
 - Response: `[layer:u8][keycodes: ROWS*COLS * u16 LE]`
 
 #### KEYMAP_GET (0x13)
-Keymap d'un layer specifique.
+Keymap of a specific layer.
 - Request: `[layer:u8]`
 - Response: `[layer:u8][keycodes: ROWS*COLS * u16 LE]`
-- Erreur: `ERR_RANGE` si layer >= LAYERS
+- Error: `ERR_RANGE` if layer >= LAYERS
 
 #### SETKEY (0x11)
-Modifie une touche. Sauvegarde immediate en NVS.
+Modifies a key. Saved to NVS immediately.
 - Request: `[layer:u8][row:u8][col:u8][value:u16 LE]`
 - Response: OK
-- Note: coordonnees natives du board (chaque variante a son propre layout)
+- Note: native board coordinates (each variant has its own layout)
 
 #### SETLAYER (0x10)
-Remplace un layer entier. Sauvegarde immediate.
+Replaces an entire layer. Saved immediately.
 - Request: `[layer:u8][keycodes: ROWS*COLS * u16 LE]`
 - Response: OK
 
 #### LAYER_NAME (0x15)
-Nom d'un layer.
+Name of a layer.
 - Request: `[layer:u8]`
 - Response: `[layer:u8][name bytes]`
 
@@ -151,33 +151,33 @@ Nom d'un layer.
 ### Layout (0x20–0x2F)
 
 #### LIST_LAYOUTS (0x21)
-Tous les noms de layers.
-- Request: payload vide
+All layer names.
+- Request: empty payload
 - Response: `[count:u8][{idx:u8, name_len:u8, name[]}...]`
 
 #### SET_LAYOUT_NAME (0x20)
-Renomme un layer. Sauvegarde immediate.
+Renames a layer. Saved immediately.
 - Request: `[layer:u8][name bytes]`
 - Response: OK
 
 #### GET_LAYOUT_JSON (0x22)
-JSON de la disposition physique du clavier.
-- Request: payload vide
-- Response: payload = JSON brut (peut depasser 4KB, envoye en streaming)
+JSON of the keyboard's physical layout.
+- Request: empty payload
+- Response: payload = raw JSON (may exceed 4KB, sent as a stream)
 
 ---
 
 ### Macros (0x30–0x3F)
 
 #### LIST_MACROS (0x30)
-Liste toutes les macros configurees.
-- Request: payload vide
+Lists all configured macros.
+- Request: empty payload
 - Response:
 ```
 [count:u8]
 {
   [idx:u8]
-  [keycode:u16 LE]       — keycode macro (MACRO_1 + idx*0x100)
+  [keycode:u16 LE]       — macro keycode (MACRO_1 + idx*0x100)
   [name_len:u8][name[]]
   [keys_len:u8][keys[]]  — legacy simultaneous keys
   [step_count:u8]         — sequence steps
@@ -186,18 +186,18 @@ Liste toutes les macros configurees.
 ```
 
 #### MACRO_ADD (0x31)
-Ajoute une macro legacy (touches simultanees).
+Adds a legacy macro (simultaneous keys).
 - Request: `[slot:u8][name_len:u8][name...][keys: 6 bytes]`
 - Response: OK
 
 #### MACRO_ADD_SEQ (0x32)
-Ajoute une macro sequence.
+Adds a sequence macro.
 - Request: `[slot:u8][name_len:u8][name...][step_count:u8][{kc:u8,mod:u8}...]`
 - Response: OK
-- Note: `kc=0xFF` + `mod=N` = delay de N*10ms
+- Note: `kc=0xFF` + `mod=N` = delay of N*10ms
 
 #### MACRO_DELETE (0x33)
-Supprime une macro.
+Deletes a macro.
 - Request: `[slot:u8]`
 - Response: OK
 
@@ -206,15 +206,15 @@ Supprime une macro.
 ### Statistics (0x40–0x4F)
 
 #### KEYSTATS_BIN (0x40)
-Compteurs de touches par position (format binaire structure).
-- Request: payload vide
+Key counters per position (structured binary format).
+- Request: empty payload
 - Response: `[rows:u8][cols:u8][counts: rows*cols * u32 LE]`
-- Note: coordonnees V2
+- Note: V2 coordinates
 
 #### KEYSTATS_TEXT (0x41)
-Compteurs de touches par position (format texte lisible).
-- Request: payload vide
-- Response: payload = texte UTF-8 multi-lignes
+Key counters per position (human-readable text format).
+- Request: empty payload
+- Response: payload = multi-line UTF-8 text
 ```
 Key Statistics - Total: 12345, Max: 678
 R0:   123   456   789 ...
@@ -223,13 +223,13 @@ R1:    42    99   301 ...
 ```
 
 #### KEYSTATS_RESET (0x42)
-Remet les compteurs a zero.
-- Request: payload vide
+Resets the counters to zero.
+- Request: empty payload
 - Response: OK
 
 #### BIGRAMS_BIN (0x43)
-Top 256 bigrammes tries par frequence (format binaire structure).
-- Request: payload vide
+Top 256 bigrams sorted by frequency (structured binary format).
+- Request: empty payload
 - Response:
 ```
 [module_id:u8]
@@ -240,9 +240,9 @@ Top 256 bigrammes tries par frequence (format binaire structure).
 ```
 
 #### BIGRAMS_TEXT (0x44)
-Top 20 bigrammes (format texte lisible).
-- Request: payload vide
-- Response: payload = texte UTF-8 multi-lignes
+Top 20 bigrams (human-readable text format).
+- Request: empty payload
+- Response: payload = multi-line UTF-8 text
 ```
 Bigram Statistics - Total: 5678, Max: 42
   R1C3 -> R0C5 : 42
@@ -251,8 +251,8 @@ Bigram Statistics - Total: 5678, Max: 42
 ```
 
 #### BIGRAMS_RESET (0x45)
-Remet les bigrammes a zero.
-- Request: payload vide
+Resets the bigrams to zero.
+- Request: empty payload
 - Response: OK
 
 ---
@@ -260,18 +260,18 @@ Remet les bigrammes a zero.
 ### Tap Dance (0x50–0x5F)
 
 #### TD_LIST (0x51)
-Liste les tap dances configures.
-- Request: payload vide
+Lists the configured tap dances.
+- Request: empty payload
 - Response: `[count:u8][{idx:u8, a1:u8, a2:u8, a3:u8, a4:u8}...]`
 - a1=1-tap, a2=2-taps, a3=3-taps, a4=hold (HID keycodes)
 
 #### TD_SET (0x50)
-Configure un tap dance.
+Configures a tap dance.
 - Request: `[index:u8][a1:u8][a2:u8][a3:u8][a4:u8]`
 - Response: OK
 
 #### TD_DELETE (0x52)
-Supprime un tap dance.
+Deletes a tap dance.
 - Request: `[index:u8]`
 - Response: OK
 
@@ -280,18 +280,18 @@ Supprime un tap dance.
 ### Combos (0x60–0x6F)
 
 #### COMBO_LIST (0x61)
-Liste les combos configures.
-- Request: payload vide
+Lists the configured combos.
+- Request: empty payload
 - Response: `[count:u8][{idx:u8, row1:u8, col1:u8, row2:u8, col2:u8, result:u8}...]`
 
 #### COMBO_SET (0x60)
-Configure un combo.
+Configures a combo.
 - Request: `[index:u8][row1:u8][col1:u8][row2:u8][col2:u8][result:u8]`
 - Response: OK
-- Note: positions en coordonnees V1 internes
+- Note: positions in internal V1 coordinates
 
 #### COMBO_DELETE (0x62)
-Supprime un combo.
+Deletes a combo.
 - Request: `[index:u8]`
 - Response: OK
 
@@ -300,18 +300,18 @@ Supprime un combo.
 ### Leader Key (0x70–0x7F)
 
 #### LEADER_LIST (0x71)
-Liste les sequences leader.
-- Request: payload vide
+Lists the leader sequences.
+- Request: empty payload
 - Response: `[count:u8][{idx:u8, seq_len:u8, seq[], result:u8, result_mod:u8}...]`
 
 #### LEADER_SET (0x70)
-Configure une sequence leader.
+Configures a leader sequence.
 - Request: `[index:u8][seq_len:u8][seq...][result:u8][result_mod:u8]`
 - Response: OK
-- La sequence est une suite de HID keycodes (max 4), result_mod = modifier mask
+- The sequence is a series of HID keycodes (max 4), result_mod = modifier mask
 
 #### LEADER_DELETE (0x72)
-Supprime une sequence leader.
+Deletes a leader sequence.
 - Request: `[index:u8]`
 - Response: OK
 
@@ -320,8 +320,8 @@ Supprime une sequence leader.
 ### Bluetooth (0x80–0x8F)
 
 #### BT_QUERY (0x80)
-Etat complet du Bluetooth.
-- Request: payload vide
+Full Bluetooth state.
+- Request: empty payload
 - Response:
 ```
 [active_slot:u8]
@@ -332,23 +332,23 @@ Etat complet du Bluetooth.
 ```
 
 #### BT_SWITCH (0x81)
-Change de slot BT.
+Switches BT slot.
 - Request: `[slot:u8]` (0-2)
-- Response: OK (note: la reconnexion peut prendre ~3s)
+- Response: OK (note: reconnection can take ~3s)
 
 #### BT_PAIR (0x82)
-Active le mode pairing (advertising non-dirige).
-- Request: payload vide
+Enables pairing mode (undirected advertising).
+- Request: empty payload
 - Response: OK
 
 #### BT_DISCONNECT (0x83)
-Deconnecte l'appareil actuel.
-- Request: payload vide
+Disconnects the current device.
+- Request: empty payload
 - Response: OK
 
 #### BT_NEXT (0x84) / BT_PREV (0x85)
-Slot suivant/precedent.
-- Request: payload vide
+Next/previous slot.
+- Request: empty payload
 - Response: OK
 
 ---
@@ -356,32 +356,32 @@ Slot suivant/precedent.
 ### Features (0x90–0x9F)
 
 #### AUTOSHIFT_TOGGLE (0x90)
-Bascule l'auto-shift on/off.
-- Request: payload vide
-- Response: `[enabled:u8]` (0 ou 1, etat apres toggle)
+Toggles auto-shift on/off.
+- Request: empty payload
+- Response: `[enabled:u8]` (0 or 1, state after toggling)
 
 #### KO_SET (0x91)
-Configure un key override.
+Configures a key override.
 - Request: `[index:u8][trigger_key:u8][trigger_mod:u8][result_key:u8][result_mod:u8]`
 - Response: OK
 
 #### KO_LIST (0x92)
-Liste les key overrides.
-- Request: payload vide
+Lists the key overrides.
+- Request: empty payload
 - Response: `[count:u8][{idx:u8, trigger_key:u8, trigger_mod:u8, result_key:u8, result_mod:u8}...]`
 
 #### KO_DELETE (0x93)
-Supprime un key override.
+Deletes a key override.
 - Request: `[index:u8]`
 - Response: OK
 
 #### WPM_QUERY (0x94)
-Mots par minute actuels.
-- Request: payload vide
+Current words per minute.
+- Request: empty payload
 - Response: `[wpm:u16 LE]`
 
 #### TRILAYER_SET (0x95)
-Configure le tri-layer.
+Configures the tri-layer.
 - Request: `[layer1:u8][layer2:u8][result:u8]`
 - Response: OK
 
@@ -390,8 +390,8 @@ Configure le tri-layer.
 ### Tamagotchi (0xA0–0xAF)
 
 #### TAMA_QUERY (0xA0)
-Etat complet du tamagotchi.
-- Request: payload vide
+Full tamagotchi state.
+- Request: empty payload
 - Response:
 ```
 [enabled:u8]
@@ -407,18 +407,18 @@ Etat complet du tamagotchi.
 ```
 
 #### TAMA_ENABLE (0xA1) / TAMA_DISABLE (0xA2)
-Active/desactive le tamagotchi.
-- Request: payload vide
+Enables/disables the tamagotchi.
+- Request: empty payload
 - Response: OK
 
 #### TAMA_FEED (0xA3) / TAMA_PLAY (0xA4) / TAMA_SLEEP (0xA5) / TAMA_MEDICINE (0xA6)
-Actions directes sur le pet.
-- Request: payload vide
+Direct actions on the pet.
+- Request: empty payload
 - Response: OK
 
 #### TAMA_SAVE (0xA7)
-Force la sauvegarde en NVS.
-- Request: payload vide
+Forces a save to NVS.
+- Request: empty payload
 - Response: OK
 
 ---
@@ -426,23 +426,23 @@ Force la sauvegarde en NVS.
 ### Diagnostics (0xB0–0xBF)
 
 #### MATRIX_TEST (0xB0)
-Toggle le mode test matrice. En mode test, le clavier arrete d'envoyer les rapports HID et envoie a la place des evenements de changement d'etat des touches via des frames KR non-sollicitees.
+Toggles matrix test mode. In test mode, the keyboard stops sending HID reports and instead sends key state change events via unsolicited KR frames.
 
-- Request: payload vide (toggle on/off)
+- Request: empty payload (toggle on/off)
 - Response: `[enabled:u8][rows:u8][cols:u8]`
-  - `enabled`: 1 = mode test actif, 0 = mode normal
-  - `rows`, `cols`: dimensions de la matrice
+  - `enabled`: 1 = test mode active, 0 = normal mode
+  - `rows`, `cols`: matrix dimensions
 
-**Evenements (firmware → host, non-sollicites) :**
+**Events (firmware → host, unsolicited):**
 
-Quand le mode test est actif, chaque changement d'etat d'une touche genere une frame :
+When test mode is active, every key state change generates a frame:
 ```
 KR [0xB0] [OK] [3 bytes] [row:u8][col:u8][state:u8] [crc]
 ```
-- `row`, `col`: position dans la matrice
-- `state`: 1 = presse, 0 = relache
+- `row`, `col`: position in the matrix
+- `state`: 1 = pressed, 0 = released
 
-**Flux typique :**
+**Typical flow:**
 ```
 Host                          Firmware
  │                               │
@@ -465,210 +465,210 @@ Host                          Firmware
  │<──────────────────────────────┤
 ```
 
-**Usage** : equivalent du [QMK Key Tester](https://config.qmk.fm/#/test). Permet de verifier que chaque touche physique fonctionne et d'identifier les colonnes/rows defectueuses.
+**Usage**: equivalent to the [QMK Key Tester](https://config.qmk.fm/#/test). Lets you verify that each physical key works and identify faulty columns/rows.
 
 #### NVS_RESET (0xB1)
-Efface les configurations sauvegardees en NVS et reboot avec les valeurs par defaut.
+Erases the configurations saved in NVS and reboots with default values.
 
-- Request: `[mask:u8]` — bitmask de ce qu'il faut effacer
-- Response: OK puis reboot
+- Request: `[mask:u8]` — bitmask of what to erase
+- Response: OK then reboot
 
-**Bitmask :**
+**Bitmask:**
 
-| Bit | Valeur | Donnees effacees |
+| Bit | Value | Data erased |
 |-----|--------|------------------|
-| 0 | 0x01 | Keymaps + noms de layers |
+| 0 | 0x01 | Keymaps + layer names |
 | 1 | 0x02 | Macros |
-| 2 | 0x04 | Statistiques (keystats + bigrams) |
+| 2 | 0x04 | Statistics (keystats + bigrams) |
 | 3 | 0x08 | Tap Dance, Combos, Leader, Key Override |
-| 4 | 0x10 | Bluetooth (slots, etat) |
+| 4 | 0x10 | Bluetooth (slots, state) |
 | 5 | 0x20 | Tamagotchi |
-| all | 0xFF | Tout effacer |
+| all | 0xFF | Erase everything |
 
-**Exemples :**
-- `KS [B1] [01] [crc]` → efface keymaps uniquement, reboot
-- `KS [B1] [09] [crc]` → efface keymaps + features avancees, reboot
-- `KS [B1] [FF] [crc]` → factory reset complet, reboot
+**Examples:**
+- `KS [B1] [01] [crc]` → erases keymaps only, reboot
+- `KS [B1] [09] [crc]` → erases keymaps + advanced features, reboot
+- `KS [B1] [FF] [crc]` → full factory reset, reboot
 
-**Usage** : utile apres un changement de board variant (V2 ↔ V2D) ou quand les keymaps NVS ne correspondent plus au layout physique.
+**Usage**: useful after a board variant change (V2 ↔ V2D) or when the NVS keymaps no longer match the physical layout.
 
 ---
 
 ### Dongle / Wireless (0xB2–0xB6, dongle role only)
 
-Ces commandes ne sont exposees que sur le firmware dongle (`CONFIG_KASE_DEVICE_ROLE_DONGLE`). Pour detecter le role coter soft, lire la liste de features (KS_CMD_FEATURES) et chercher le tag `RF_DONGLE`. Si absent, le device est un clavier autonome (V1/V2/V2D) — les commandes ci-dessous repondent `ERR_UNKNOWN`.
+These commands are only exposed on the dongle firmware (`CONFIG_KASE_DEVICE_ROLE_DONGLE`). To detect the role on the software side, read the feature list (KS_CMD_FEATURES) and look for the `RF_DONGLE` tag. If absent, the device is a standalone keyboard (V1/V2/V2D) — the commands below answer `ERR_UNKNOWN`.
 
-Tous les champs multi-octets sont little-endian sauf mention contraire.
+All multi-byte fields are little-endian unless stated otherwise.
 
 ---
 
 #### RF_PAIR_START (0xB2)
-Ouvre une fenetre de pairing de 30 secondes pour accueillir une moitie. Le dongle bascule la radio gauche sur l'adresse/canal de rendezvous et attend un `rf_pair_req`. La reponse part immediatement (non bloquante) ; l'echange continue dans `rf_rx_task`.
+Opens a 30-second pairing window to welcome a half. The dongle switches the left radio to the rendezvous address/channel and waits for an `rf_pair_req`. The response is sent immediately (non-blocking); the exchange continues in `rf_rx_task`.
 
 - Request: `[reset:u8]`
-  - `reset = 0` : ajoute la prochaine moitie aux pairs existants
-  - `reset = 1` : efface d'abord toutes les paires NVS, puis ouvre la fenetre
+  - `reset = 0`: adds the next half to the existing pairs
+  - `reset = 1`: first erases all NVS pairs, then opens the window
 - Response: `[set_id_hi:u8][set_id_lo:u8][paired_count:u8]`
-  - `set_id` : identifiant 16-bit du set (derive d'eFuse) — utile pour afficher coter soft
-  - `paired_count` : nombre de moities couplees actuellement (0..2)
-- Erreur: `ERR_BUSY` si une fenetre est deja ouverte ou si la radio gauche n'est pas presente
+  - `set_id`: 16-bit set identifier (derived from eFuse) — useful to display on the software side
+  - `paired_count`: number of halves currently paired (0..2)
+- Error: `ERR_BUSY` if a window is already open or if the left radio is not present
 
-Pour savoir si le pairing a abouti, poller `RF_PAIR_LIST` apres ~5–30 s : `paired_count` augmente quand une nouvelle moitie a complete l'echange.
+To find out whether pairing succeeded, poll `RF_PAIR_LIST` after ~5-30 s: `paired_count` increases when a new half has completed the exchange.
 
 ---
 
 #### RF_STATUS (0xB3)
-Snapshot complet de l'etat du lien radio pour les deux moities. Idempotent, sans effet de bord — peut etre poll a 1–2 Hz pour piloter un indicateur de barres dans le soft.
+Full snapshot of the radio link state for both halves. Idempotent, no side effects — can be polled at 1-2 Hz to drive a signal-bar indicator in the software.
 
-- Request: payload vide
-- Response: `51 bytes` (27 à l'origine, puis 31, 35, 43, 47 ; un client qui ne lit que les premiers octets reste juste)
+- Request: empty payload
+- Response: `51 bytes` (27 originally, then 31, 35, 43, 47; a client that only reads the first bytes stays correct)
 
-| Offset | Type   | Champ           | Description                                                |
+| Offset | Type   | Field           | Description                                                |
 |-------:|--------|-----------------|------------------------------------------------------------|
-| 0      | u8     | `flags`         | bit0=link_left_up, bit1=link_right_up, bits2-7=reserves    |
-| 1      | u8     | `sig_left`      | qualite 0..255 (rf_signal_q255 — 0 = down/timeout)         |
-| 2      | u8     | `sig_right`     | idem droite                                                |
-| 3..6   | u32 LE | `hb_age_left`   | ms depuis le dernier heartbeat de la moitie gauche         |
-| 7..10  | u32 LE | `hb_age_right`  | idem droite                                                |
-| 11..14 | u32 LE | `pkt_rx_left`   | nombre total de paquets acceptes (incremente sur succes)   |
-| 15..18 | u32 LE | `pkt_rx_right`  | idem droite                                                |
-| 19..22 | u32 LE | `pkt_dup_left`  | nombre de duplicats rejetes (seq deja vue)                 |
-| 23..26 | u32 LE | `pkt_dup_right` | idem droite                                                |
-| 27..30 | u32 LE | `transitions_ecrasees` | fusion : trames ayant changé l'état d'une moitié avant que le moteur ait joué le changement précédent (tap potentiellement perdu/fondu) ; 0 hors fusion |
-| 31..34 | u32 LE | `gap_moteur_max_ms` | fusion : plus long écart entre deux tours du moteur depuis la dernière lecture (remis à 0 à chaque lecture) |
-| 35..36 | u16 LE | `kb_usb_ok` | rapports clavier USB partis (saturé à 65535) |
-| 37..38 | u16 LE | `kb_usb_refuses` | rapports clavier USB refusés (point d'accès muet 2,5 ms) |
-| 39..40 | u16 LE | `reprises` | bus USB suspendu à l'envoi : réveils distants demandés |
-| 41..42 | u16 LE | `reprises_ratees` | idem, bus toujours suspendu 100 ms après |
-| 43..46 | u32 LE | `reappuis` | fusion : ré-appuis d'une même touche < 30 ms après son relâchement (répétition périmée émise par une moitié, ou rebond mécanique plus long que l'anti-rebond) — 0 attendu depuis le 2026-09-20 |
-| 47 | u8 | `reappui_half` | dernier ré-appui : moitié (1 gauche, 2 droite) |
-| 48 | u8 | `reappui_key` | dernier ré-appui : touche, `row*7+col` (coordonnées de la moitié) |
-| 49..50 | u16 LE | `reappui_ms` | dernier ré-appui : délai après le relâchement, ms |
+| 0      | u8     | `flags`         | bit0=link_left_up, bit1=link_right_up, bits2-7=reserved    |
+| 1      | u8     | `sig_left`      | quality 0..255 (rf_signal_q255 — 0 = down/timeout)         |
+| 2      | u8     | `sig_right`     | same, right side                                           |
+| 3..6   | u32 LE | `hb_age_left`   | ms since the last heartbeat from the left half             |
+| 7..10  | u32 LE | `hb_age_right`  | same, right side                                           |
+| 11..14 | u32 LE | `pkt_rx_left`   | total number of accepted packets (incremented on success)  |
+| 15..18 | u32 LE | `pkt_rx_right`  | same, right side                                           |
+| 19..22 | u32 LE | `pkt_dup_left`  | number of rejected duplicates (seq already seen)           |
+| 23..26 | u32 LE | `pkt_dup_right` | same, right side                                           |
+| 27..30 | u32 LE | `transitions_ecrasees` | fusion: frames that changed a half's state before the engine had played the previous change (tap potentially lost/merged); 0 outside fusion |
+| 31..34 | u32 LE | `gap_moteur_max_ms` | fusion: longest gap between two engine cycles since the last read (reset to 0 on each read) |
+| 35..36 | u16 LE | `kb_usb_ok` | USB keyboard reports sent (saturates at 65535) |
+| 37..38 | u16 LE | `kb_usb_refuses` | USB keyboard reports refused (endpoint silent for 2.5 ms) |
+| 39..40 | u16 LE | `reprises` | USB bus suspended on send: remote wake-ups requested |
+| 41..42 | u16 LE | `reprises_ratees` | same, bus still suspended 100 ms later |
+| 43..46 | u32 LE | `reappuis` | fusion: re-presses of the same key < 30 ms after its release (stale repeat emitted by a half, or mechanical bounce longer than the debounce) — 0 expected since 2026-09-20 |
+| 47 | u8 | `reappui_half` | last re-press: half (1 left, 2 right) |
+| 48 | u8 | `reappui_key` | last re-press: key, `row*7+col` (half's coordinates) |
+| 49..50 | u16 LE | `reappui_ms` | last re-press: delay after release, ms |
 
-**Mapping recommande pour 4 barres de signal :**
+**Recommended mapping for 4 signal bars:**
 ```
-sig >= 200 → 4 barres
-sig >= 140 → 3 barres
-sig >=  80 → 2 barres
-sig >=  30 → 1 barre
-sig <   30 → 0 barre / lien casse
+sig >= 200 → 4 bars
+sig >= 140 → 3 bars
+sig >=  80 → 2 bars
+sig >=  30 → 1 bar
+sig <   30 → 0 bars / link broken
 ```
 
-**Detection de moitie absente** : si `link_<side>_up = 0` ET `pkt_rx_<side> == 0`, la moitie n'a jamais ete vue depuis le boot. Si `link_<side>_up = 0` ET `pkt_rx_<side> > 0`, la moitie a perdu le lien apres avoir fonctionne.
+**Detecting a missing half**: if `link_<side>_up = 0` AND `pkt_rx_<side> == 0`, the half has never been seen since boot. If `link_<side>_up = 0` AND `pkt_rx_<side> > 0`, the half lost the link after having worked.
 
 ---
 
 #### CONFIG_COHERENCE (0x17)
-Garde-fou de sync fusion. En mode sans-fil, c'est le dongle qui execute le moteur keymap avec SA config ; si elle diverge de celle reglee sur la gauche, il tape autre chose en silence. La gauche annonce l'empreinte CRC-32 de sa keymap par RF (champ `config_fp` de la trame d'etat) ; le dongle la compare a la sienne et expose le resultat ici. Le soft peut poller a 1 Hz et avertir l'utilisateur d'une divergence. Idempotent, sans effet de bord. Hors fusion : tous champs a 0, `match=0`.
+Fusion sync guard rail. In wireless mode, it is the dongle that runs the keymap engine with ITS OWN config; if it diverges from the one set on the left half, it silently types something else. The left half broadcasts the CRC-32 fingerprint of its keymap over RF (the `config_fp` field of the state frame); the dongle compares it to its own and exposes the result here. The software can poll at 1 Hz and warn the user of a divergence. Idempotent, no side effects. Outside fusion: all fields at 0, `match=0`.
 
-- Request: payload vide
+- Request: empty payload
 - Response: `13 bytes`
 
-| Offset | Type   | Champ     | Description                                                        |
+| Offset | Type   | Field     | Description                                                        |
 |-------:|--------|-----------|-------------------------------------------------------------------|
-| 0..3   | u32 LE | `own_fp`  | empreinte CRC-32 de la keymap du dongle (0 = hors fusion)         |
-| 4..7   | u32 LE | `left_fp` | derniere empreinte annoncee par la gauche (0 = jamais annoncee)   |
-| 8..11  | u32 LE | `age_ms`  | ms depuis cette annonce (0xFFFFFFFF = jamais)                     |
-| 12     | u8     | `match`   | 1 = coherent (empreintes egales et non nulles), 0 sinon           |
+| 0..3   | u32 LE | `own_fp`  | CRC-32 fingerprint of the dongle's keymap (0 = outside fusion)    |
+| 4..7   | u32 LE | `left_fp` | last fingerprint broadcast by the left half (0 = never broadcast) |
+| 8..11  | u32 LE | `age_ms`  | ms since that broadcast (0xFFFFFFFF = never)                      |
+| 12     | u8     | `match`   | 1 = consistent (fingerprints equal and non-zero), 0 otherwise     |
 
-**Lecture** : `match=1` → les deux moteurs tapent pareil. `match=0` avec `left_fp != 0` → **divergence** — elle se resorbe SEULE : le dongle glisse sa keymap dans les ACK payloads des emissions normales de la gauche (sync auto, phase 3), et `match` repasse a 1 en quelques secondes sans brancher la gauche. Le soft n'a donc rien a faire d'autre que poller : `match` revenu a 1 EST l'accuse de reception de bout en bout de la sync. Une divergence qui PERSISTE (> ~1 min avec la gauche allumee en sans-fil) signale un vrai probleme (gauche hors de portee, ou en mode USB — elle ne synchronise qu'en route RF). `left_fp = 0` ou `age_ms` eleve → la gauche n'a pas (ou plus) annonce : etat inconnu, pas forcement une divergence. L'empreinte d'un seul appareil se lit aussi par `CONFIG_FINGERPRINT` (0x16) sur chacun.
+**Reading it**: `match=1` → both engines type the same thing. `match=0` with `left_fp != 0` → **divergence** — it resolves ON ITS OWN: the dongle slips its keymap into the ACK payloads of the left half's normal transmissions (auto-sync, phase 3), and `match` goes back to 1 within a few seconds without plugging in the left half. The software therefore has nothing else to do but poll: `match` back at 1 IS the end-to-end acknowledgment of the sync. A divergence that PERSISTS (> ~1 min with the left half powered on wirelessly) signals a real problem (left half out of range, or in USB mode — it only syncs over the RF route). `left_fp = 0` or a high `age_ms` → the left half has not (or no longer) broadcast: unknown state, not necessarily a divergence. A single device's fingerprint can also be read via `CONFIG_FINGERPRINT` (0x16) on each one.
 
 ---
 
 #### RF_PAIR_LIST (0xB4)
-Liste des MACs des moities actuellement couplees (lecture NVS namespace `rf`).
+List of MAC addresses of the currently paired halves (read from NVS namespace `rf`).
 
-- Request: payload vide
+- Request: empty payload
 - Response: `13 bytes`
 
-| Offset | Type    | Champ           | Description                                  |
+| Offset | Type    | Field           | Description                                  |
 |-------:|---------|-----------------|----------------------------------------------|
 | 0      | u8      | `paired_count`  | 0..2                                         |
-| 1..6   | u8[6]   | `mac_left`      | MAC WiFi STA de la moitie gauche (ou zeros)  |
-| 7..12  | u8[6]   | `mac_right`     | idem droite                                  |
+| 1..6   | u8[6]   | `mac_left`      | WiFi STA MAC of the left half (or zeros)     |
+| 7..12  | u8[6]   | `mac_right`     | same, right side                             |
 
-Si `mac_<side>` vaut `00:00:00:00:00:00`, le slot est libre.
+If `mac_<side>` is `00:00:00:00:00:00`, the slot is free.
 
 ---
 
 #### RF_PAIR_RESET (0xB5)
-Efface toutes les paires (NVS namespace `rf` purgee). Les moities couplees expireront leur heartbeat et ne pourront pas se reconnecter sans re-pairing. Utile pour migrer un dongle vers un autre set de moities, ou pour debug.
+Erases all pairs (NVS namespace `rf` purged). Paired halves will time out their heartbeat and will not be able to reconnect without re-pairing. Useful for migrating a dongle to another set of halves, or for debugging.
 
-- Request: payload vide
-- Response: `[paired_count:u8]` — 0 apres reset
-- Erreur: `ERR_UNKNOWN` si l'ecriture NVS echoue
+- Request: empty payload
+- Response: `[paired_count:u8]` — 0 after reset
+- Error: `ERR_UNKNOWN` if the NVS write fails
 
-Le dongle continue de tourner ; la radio garde sa config courante. Pour repeupler les paires, appeler `RF_PAIR_START` avec `reset = 0`.
+The dongle keeps running; the radio keeps its current config. To repopulate the pairs, call `RF_PAIR_START` with `reset = 0`.
 
 ---
 
 #### BATTERY (0xB6)
-Derniere mesure de batterie cachee pour chaque moitie. Les moities n'emettent `EN_INFO_BATTERY` que lorsque la valeur change (rate-limited), donc l'`age_ms` peut grandir legitimement entre deux samples.
+Last cached battery measurement for each half. The halves only send `EN_INFO_BATTERY` when the value changes (rate-limited), so `age_ms` can legitimately grow between two samples.
 
-- Request: payload vide
-- Response: `14 bytes` — 2 enregistrements de 7 octets chacun
+- Request: empty payload
+- Response: `14 bytes` — 2 records of 7 bytes each
 
-Format d'un enregistrement (slot 0 = LEFT, slot 1 = RIGHT) :
+Format of a record (slot 0 = LEFT, slot 1 = RIGHT):
 
-| Offset | Type   | Champ      | Description                                      |
-|-------:|--------|------------|--------------------------------------------------|
-| 0      | u8     | `batt_dV`  | Tension × 10 (volts × 10). `0xFF` = jamais vu    |
-| 1      | u8     | `soc_pct`  | State of charge 0..100, DERIVE de la tension par le dongle (table Li-ion 16340 : 3,3 V→0, 3,5→15, 3,7→40, 3,9→70, 4,15→100). `0xFF` = inconnu |
-| 2      | u8     | `charging` | Etat DEDUIT (pas de VBUS sur les moities) : 0 = decharge/inconnu, 1 = en charge probable (tension qui monte de >= 0,1 V), 2 = pleine (plateau >= 4,15 V tenu >= 2 min). `0xFF` = tension inconnue |
-| 3..6   | u32 LE | `age_ms`   | ms depuis la derniere mise a jour. `0xFFFFFFFF` = jamais recu |
+| Offset | Type   | Field      | Description                                      |
+|-------:|--------|------------|---------------------------------------------------|
+| 0      | u8     | `batt_dV`  | Voltage × 10 (volts × 10). `0xFF` = never seen    |
+| 1      | u8     | `soc_pct`  | State of charge 0..100, DERIVED from voltage by the dongle (Li-ion 16340 table: 3.3 V→0, 3.5→15, 3.7→40, 3.9→70, 4.15→100). `0xFF` = unknown |
+| 2      | u8     | `charging` | INFERRED state (no VBUS on the halves): 0 = discharging/unknown, 1 = probably charging (voltage rising by >= 0.1 V), 2 = full (plateau >= 4.15 V held >= 2 min). `0xFF` = voltage unknown |
+| 3..6   | u32 LE | `age_ms`   | ms since the last update. `0xFFFFFFFF` = never received |
 
-**Regles d'affichage coter soft :**
-- Si `batt_dV == 0xFF` OU `soc_pct == 0xFF` → afficher "—" / placeholder
-- Si `age_ms > 60000` (1 minute) → griser la valeur (potentiellement obsolete)
-- Si `age_ms == 0xFFFFFFFF` → la moitie ne supporte pas encore la telemetrie batterie (firmware ancien ou pile de batterie pas encore branchee)
+**Display rules on the software side:**
+- If `batt_dV == 0xFF` OR `soc_pct == 0xFF` → show "—" / placeholder
+- If `age_ms > 60000` (1 minute) → gray out the value (potentially stale)
+- If `age_ms == 0xFFFFFFFF` → the half does not yet support battery telemetry (old firmware or battery not yet connected)
 
 ---
 
 #### MONITOR (0xB7)
-Snapshot consolide de l'etat live du clavier (et de ses moities sans fil). Concu pour piloter un tableau de bord de monitoring dans KaSe_soft. Idempotent, sans effet de bord — poll recommande a **1–2 Hz**.
+Consolidated snapshot of the keyboard's live state (and its wireless halves). Designed to drive a monitoring dashboard in KaSe_soft. Idempotent, no side effects — polling recommended at **1-2 Hz**.
 
-- Request: payload vide (`KS [B7] 0000 00`)
-- Response: `28 bytes` — toujours OK, sentinelles pour les champs sans source disponible
+- Request: empty payload (`KS [B7] 0000 00`)
+- Response: `28 bytes` — always OK, sentinels for fields with no available source
 
-| Offset | Type   | Champ          | Description                                                       |
+| Offset | Type   | Field          | Description                                                       |
 |-------:|--------|----------------|-------------------------------------------------------------------|
-| 0      | u8     | `fmt`          | = `0x01` — version du format, permet evolution future             |
-| 1      | u8     | `flags`        | bitmask (voir ci-dessous)                                         |
-| 2      | u32 LE | `uptime_s`     | Secondes depuis le boot                                           |
-| 6      | u16 LE | `heap_free_kb` | Heap libre en KB (sature a 0xFFFF)                                |
-| 8      | i8     | `temp_c`       | Temperature interne degC ; `INT8_MIN` (−128) = pas de capteur     |
-| 9      | u8     | `layer_idx`    | Index du layer actif                                              |
-| 10     | u8     | `wpm`          | Mots par minute courants (sature a 255)                           |
-| 11     | u32 LE | `keys_total`   | Nombre total de touches pressees, cumul a vie (restaure depuis NVS `key_stats_tot` au boot) |
-| 15     | u8     | `sig_left`     | Qualite du lien RF gauche 0..255 (0 si `has_rf=0`)                |
-| 16     | u8     | `sig_right`    | Idem droite                                                       |
-| 17     | u16 LE | `hb_age_L_ms`  | ms depuis le dernier heartbeat de la moitie gauche (tronque a u16, sature a 0xFFFF — RF_STATUS utilise u32 pour ces champs) |
-| 19     | u16 LE | `hb_age_R_ms`  | Idem droite (meme troncature u16/0xFFFF)                          |
-| 21     | u8     | `batt_L_dV`    | Tension batterie gauche x10. `0xFF` = inconnu (0 si `has_rf=0`)   |
-| 22     | u8     | `batt_L_soc`   | State of charge gauche 0..100 %. `0xFF` = inconnu                 |
-| 23     | u8     | `batt_L_chg`   | 0 = decharge, 1 = en charge. `0xFF` = inconnu                     |
-| 24     | u8     | `batt_R_dV`    | Tension batterie droite x10. `0xFF` = inconnu (0 si `has_rf=0`)   |
-| 25     | u8     | `batt_R_soc`   | State of charge droite 0..100 %. `0xFF` = inconnu                 |
-| 26     | u8     | `batt_R_chg`   | 0 = decharge, 1 = en charge. `0xFF` = inconnu                     |
-| 27     | u8     | `bt_slot`      | Slot Bluetooth actif (0–2 ; `BT_MAX_DEVICES = 3`)                 |
+| 0      | u8     | `fmt`          | = `0x01` — format version, allows for future evolution            |
+| 1      | u8     | `flags`        | bitmask (see below)                                               |
+| 2      | u32 LE | `uptime_s`     | Seconds since boot                                                |
+| 6      | u16 LE | `heap_free_kb` | Free heap in KB (saturates at 0xFFFF)                             |
+| 8      | i8     | `temp_c`       | Internal temperature in °C; `INT8_MIN` (−128) = no sensor         |
+| 9      | u8     | `layer_idx`    | Index of the active layer                                         |
+| 10     | u8     | `wpm`          | Current words per minute (saturates at 255)                       |
+| 11     | u32 LE | `keys_total`   | Total number of keys pressed, lifetime cumulative (restored from NVS `key_stats_tot` at boot) |
+| 15     | u8     | `sig_left`     | Quality of the left RF link 0..255 (0 if `has_rf=0`)              |
+| 16     | u8     | `sig_right`    | Same, right side                                                  |
+| 17     | u16 LE | `hb_age_L_ms`  | ms since the last heartbeat from the left half (truncated to u16, saturates at 0xFFFF — RF_STATUS uses u32 for these fields) |
+| 19     | u16 LE | `hb_age_R_ms`  | Same, right side (same u16/0xFFFF truncation)                     |
+| 21     | u8     | `batt_L_dV`    | Left battery voltage x10. `0xFF` = unknown (0 if `has_rf=0`)      |
+| 22     | u8     | `batt_L_soc`   | Left state of charge 0..100%. `0xFF` = unknown                    |
+| 23     | u8     | `batt_L_chg`   | 0 = discharging, 1 = charging. `0xFF` = unknown                   |
+| 24     | u8     | `batt_R_dV`    | Right battery voltage x10. `0xFF` = unknown (0 if `has_rf=0`)     |
+| 25     | u8     | `batt_R_soc`   | Right state of charge 0..100%. `0xFF` = unknown                   |
+| 26     | u8     | `batt_R_chg`   | 0 = discharging, 1 = charging. `0xFF` = unknown                   |
+| 27     | u8     | `bt_slot`      | Active Bluetooth slot (0-2; `BT_MAX_DEVICES = 3`)                 |
 
-Note batterie : sur le dongle, les champs batterie sont relayes tels quels depuis le cache (meme source que BATTERY 0xB6) → `0xFF` = inconnu / jamais vu. Sur un clavier autonome (`has_rf=0`) ces offsets valent 0. Cote soft : traiter `batt_*_dV` (ou `_soc`) == `0xFF`, et 0 quand `has_rf=0`, comme "pas de donnee" (afficher "—").
+Battery note: on the dongle, the battery fields are relayed as-is from the cache (same source as BATTERY 0xB6) → `0xFF` = unknown / never seen. On a standalone keyboard (`has_rf=0`) these offsets are 0. On the software side: treat `batt_*_dV` (or `_soc`) == `0xFF`, and 0 when `has_rf=0`, as "no data" (display "—").
 
-**Flags (offset 1) :**
+**Flags (offset 1):**
 
-| Bit | Masque | Constante    | Signification                       |
+| Bit | Mask | Constant     | Meaning                              |
 |-----|--------|--------------|-------------------------------------|
-| 0   | 0x01   | `HAS_RF`     | Firmware role dongle avec radio RF  |
-| 1   | 0x02   | `LINK_L`     | Moitie gauche connectee             |
-| 2   | 0x04   | `LINK_R`     | Moitie droite connectee             |
-| 3   | 0x08   | `USB`        | Lien USB actif                      |
-| 4   | 0x10   | `BT_CONN`    | Bluetooth connecte                  |
+| 0   | 0x01   | `HAS_RF`     | Dongle-role firmware with RF radio  |
+| 1   | 0x02   | `LINK_L`     | Left half connected                 |
+| 2   | 0x04   | `LINK_R`     | Right half connected                |
+| 3   | 0x08   | `USB`        | USB link active                     |
+| 4   | 0x10   | `BT_CONN`    | Bluetooth connected                 |
 
-**Clavier autonome (sans dongle) :** `has_rf = 0`, les offsets 15..26 (signal RF, heartbeat, batterie) valent zero. Le soft detecte la presence RF via le flag `HAS_RF` (et/ou le tag `RF_DONGLE` dans la reponse FEATURES).
+**Standalone keyboard (no dongle):** `has_rf = 0`, offsets 15..26 (RF signal, heartbeat, battery) are zero. The software detects RF presence via the `HAS_RF` flag (and/or the `RF_DONGLE` tag in the FEATURES response).
 
-**Temperature :** `temp_c = INT8_MIN` (−128) signifie que le capteur n'est pas disponible.
+**Temperature:** `temp_c = INT8_MIN` (−128) means the sensor is not available.
 
-**Exemple de parsing Python :**
+**Python parsing example:**
 
 ```python
 import struct
@@ -774,38 +774,38 @@ public class MonitorSnapshot
 }
 ```
 
-**Usage dashboard recommande :** timer 1–2 Hz → `KS [B7] 0000 00` → `Parse(response.Payload)` → mettre a jour les bindings WPF. Pas de gestion d'erreur necessaire (la commande retourne toujours OK).
+**Recommended dashboard usage:** 1-2 Hz timer → `KS [B7] 0000 00` → `Parse(response.Payload)` → update the WPF bindings. No error handling needed (the command always returns OK).
 
 ---
 
 #### TRACKPAD_GET (0xB8)
 Returns the active trackpad acceleration config (dongle only).
 
-- Request: payload vide
+- Request: empty payload
 - Response: `7 bytes`
 
-| Offset | Type   | Champ      | Description                                      |
+| Offset | Type   | Field      | Description                                      |
 |-------:|--------|------------|--------------------------------------------------|
-| 0      | u8     | `fmt`      | = `0x01` — version du format                     |
-| 1      | u16 LE | `base`     | Gain de base x100 (ex. 90 = 0.90x)               |
-| 3      | u16 LE | `accel`    | Coefficient d'acceleration (ajoute par unite de vitesse / 100) |
-| 5      | u16 LE | `gain_max` | Gain maximum x100 (ex. 300 = 3.00x)              |
+| 0      | u8     | `fmt`      | = `0x01` — format version                        |
+| 1      | u16 LE | `base`     | Base gain x100 (e.g. 90 = 0.90x)                 |
+| 3      | u16 LE | `accel`    | Acceleration coefficient (added per unit of speed / 100) |
+| 5      | u16 LE | `gain_max` | Maximum gain x100 (e.g. 300 = 3.00x)             |
 
-Les gains sont exprimes en centièmes : 100 = 1.00x, 90 = 0.90x, 300 = 3.00x. La courbe appliquee est : `gain = clamp(base + accel * speed / 100, base, gain_max)`.
+Gains are expressed in hundredths: 100 = 1.00x, 90 = 0.90x, 300 = 3.00x. The applied curve is: `gain = clamp(base + accel * speed / 100, base, gain_max)`.
 
-Defauts usine : `base=90, accel=40, gain_max=300`.
+Factory defaults: `base=90, accel=40, gain_max=300`.
 
 ---
 
 #### TRACKPAD_SET (0xB9)
-Modifie la config d'acceleration trackpad, l'applique immediatement et la persiste en NVS (dongle only).
+Modifies the trackpad acceleration config, applies it immediately, and persists it to NVS (dongle only).
 
 - Request: `6 bytes` — `[base:u16 LE][accel:u16 LE][gain_max:u16 LE]`
-- Response: `7 bytes` — echo de la config appliquee (meme format que TRACKPAD_GET)
-- Erreur: `ERR_INVALID` si payload < 6 octets
-- Erreur: `ERR_RANGE` si hors bornes (`base < 1`, `base > gain_max`, `gain_max > 1000`, `accel > 1000`)
+- Response: `7 bytes` — echo of the applied config (same format as TRACKPAD_GET)
+- Error: `ERR_INVALID` if payload < 6 bytes
+- Error: `ERR_RANGE` if out of bounds (`base < 1`, `base > gain_max`, `gain_max > 1000`, `accel > 1000`)
 
-**Exemple :** activer une courbe agressive (base=80, accel=60, gain_max=400) :
+**Example:** enabling an aggressive curve (base=80, accel=60, gain_max=400):
 ```python
 import struct
 payload = struct.pack("<HHH", 80, 60, 400)   # 6 bytes
@@ -817,23 +817,23 @@ ser.write(ks_frame(0xB9, payload))
 ### OTA (0xF0–0xFF)
 
 #### OTA_START (0xF0)
-Demarre une mise a jour firmware.
+Starts a firmware update.
 - Request: `[firmware_size:u32 LE]`
-- Response: `[chunk_size:u16 LE]` (toujours 4096)
-- Erreur: `ERR_RANGE` si taille = 0 ou > 2MB
+- Response: `[chunk_size:u16 LE]` (always 4096)
+- Error: `ERR_RANGE` if size = 0 or > 2MB
 
 #### OTA_DATA (0xF1)
-Envoie un chunk de firmware. Repeter jusqu'a completion.
+Sends a firmware chunk. Repeat until completion.
 - Request: payload = raw firmware bytes (max chunk_size)
 - Response: `[received:u32 LE][total:u32 LE]`
-- Quand received == total: firmware valide, reponse OK puis reboot
-- Chaque chunk est CRC-protege par la frame KS
+- When received == total: firmware validated, OK response then reboot
+- Each chunk is CRC-protected by the KS frame
 
 #### OTA_ABORT (0xF2)
-Annule l'OTA en cours.
-- Request: payload vide
+Cancels the ongoing OTA.
+- Request: empty payload
 - Response: OK
-- Erreur: `ERR_INVALID` si aucun OTA en cours
+- Error: `ERR_INVALID` if no OTA is in progress
 
 ### OTA Flow
 
@@ -853,14 +853,14 @@ Host                          Firmware
  │                               │
  │  KS [F1] [last chunk]        │
  ├──────────────────────────────>│
- │  KR [F1] OK [total][total]   │  ← firmware valide
+ │  KR [F1] OK [total][total]   │  ← firmware validated
  │<──────────────────────────────┤
  │                               │  reboot
 ```
 
 ---
 
-## Exemple Python complet
+## Full Python example
 
 ```python
 import serial, struct
@@ -918,7 +918,7 @@ print(f"BT: slot={slot} init={init} conn={conn} pairing={pairing}")
 ser.close()
 ```
 
-## Exemple C# (KaSe_soft)
+## C# example (KaSe_soft)
 
 ```csharp
 byte[] KsFrame(byte cmdId, byte[] payload = null) {
@@ -951,4 +951,4 @@ source ~/esp/esp-idf/export.sh
 python3 scripts/test_binary_protocol.py /dev/ttyACM0
 ```
 
-32 tests couvrant toutes les commandes, gestion d'erreurs, et coexistence legacy.
+32 tests covering all commands, error handling, and legacy coexistence.

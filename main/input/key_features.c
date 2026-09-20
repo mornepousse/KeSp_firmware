@@ -75,17 +75,17 @@ void caps_word_process(uint8_t *keycode, uint8_t *modifier)
 /* ── Repeat Key ──────────────────────────────────────────────────── */
 
 static uint8_t last_keycode = 0;
-static uint8_t last_mods    = 0;   /* mod d'un Modified Key, 0 sinon */
+static uint8_t last_mods    = 0;   /* mod of a Modified Key, 0 otherwise */
 
 void repeat_key_record(uint8_t keycode)
 {
     repeat_key_record_mk(keycode, 0);
 }
 
-/* Enregistre la touche ET le mod qu'un Modified Key lui attachait : après
- * « ! » (Shift+1), Repeat doit redonner « ! », pas « 1 ». Une touche normale
- * passe 0 — ses mods physiques ne sont PAS mémorisés, le comportement d'avant
- * est inchangé. */
+/* Records the key AND the mod a Modified Key attached to it: after
+ * "!" (Shift+1), Repeat must give back "!", not "1". A normal key
+ * passes 0 — its physical mods are NOT remembered, previous behavior
+ * is unchanged. */
 void repeat_key_record_mk(uint8_t keycode, uint8_t mk_mods)
 {
     if (keycode != 0 && keycode < HID_KEY_CONTROL_LEFT) {

@@ -1,5 +1,5 @@
 /* Binary command handlers for all KaSe CDC commands */
-#include "veille_task.h"   /* pur hors CONFIG_KASE_VEILLE (veto/hook : appels sous #if) */
+#include "veille_task.h"   /* pure outside CONFIG_KASE_VEILLE (veto/hook: calls under #if) */
 #include "cdc_binary_cmds.h"
 #include "cdc_internal.h"
 #include "ks_monitor.h"
@@ -70,19 +70,19 @@ static void bin_cmd_dfu(uint8_t cmd, const uint8_t *p, uint16_t l)
     reboot_to_dfu();
 }
 
-/* ── Bloc CLAVIER — pas compilé sur le dongle ────────────────────────────────
- * Tout ce qui suit, jusqu'au bloc OTA, manipule une keymap, une matrice, des
- * statistiques de frappe ou des macros. Le dongle du Niphargus n'a rien de tout
- * cela : il reçoit du HID déjà fini
+/* ── KEYBOARD block — not built on the dongle ────────────────────────────────
+ * Everything below, up to the OTA block, deals with a keymap, a matrix,
+ * keystroke stats, or macros. The Niphargus dongle has none of that:
+ * it receives HID that is already finished
  * (docs/superpowers/specs/2026-08-19-dongle-role-niphargus-design.md).
  *
- * Ces fonctions étaient jusqu'ici compilées puis simplement non enregistrées
- * dans la table. Le dispatcher répondait bien KS_STATUS_ERR_UNKNOWN — le
- * comportement était juste — mais le code restait là, et surtout il forçait le
- * dongle à déclarer une matrice 5×14 et une keymap de 70 touches pour compiler
- * un moteur qu'il ne fait pas tourner. C'est cette dépendance-là qu'on coupe :
- * une carte ne doit pas avoir à mentir sur son matériel pour que le firmware
- * compile. */
+ * These functions used to be compiled but simply left unregistered
+ * in the table. The dispatcher would correctly reply KS_STATUS_ERR_UNKNOWN —
+ * the behavior was correct — but the code stayed there, and worse, it forced
+ * the dongle to declare a 5×14 matrix and a 70-key keymap just to compile
+ * an engine it never runs. This is the dependency we are cutting:
+ * a board should not have to lie about its hardware for the firmware
+ * to compile. */
 #if !CONFIG_KASE_NO_KEYMAP_ENGINE
 
 /* ── Keymap ─────────────────────────────────────────────────────── */
@@ -139,12 +139,12 @@ static void bin_cmd_keymap_get(uint8_t cmd, const uint8_t *p, uint16_t l)
     ks_respond_end();
 }
 
-/* CONFIG_FINGERPRINT: réponse [crc32:u32 LE] sur le blob keymap vivant.
+/* CONFIG_FINGERPRINT: response [crc32:u32 LE] on the live keymap blob.
  *
- * Sync fusion (phase 3) : le contrôleur lit l'empreinte de la gauche ET du dongle
- * ; égales = configs identiques. Calculée sur keymaps[] en RAM (ce que le moteur
- * exécute réellement), pas sur la NVS. Étendra plus tard aux macros/combos si
- * besoin ; la keymap est la part qui change le rendu au clavier. */
+ * Fusion sync (phase 3): the controller reads the fingerprint of the left half AND the dongle
+ * ; equal = identical configs. Computed on keymaps[] in RAM (what the engine
+ * actually runs), not on NVS. Will extend later to macros/combos if
+ * needed; the keymap is the part that changes what renders on the keyboard. */
 static void bin_cmd_config_fp(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
     (void)p; (void)l;
@@ -341,13 +341,13 @@ static void bin_cmd_bt_prev(uint8_t cmd, const uint8_t *p, uint16_t l)
 
 /* ── Tamagotchi ─────────────────────────────────────────────────── */
 
-/* TAMA retiré — commandes conservées pour la compat protocole (controller
- * KaSe_soft partage les IDs) mais SANS effet. QUERY renvoie "désactivé" + des
- * stats à zéro (même taille de payload qu'avant : 22 octets). */
+/* TAMA removed — commands kept for protocol compat (the KaSe_soft
+ * controller shares the IDs) but with NO effect. QUERY returns "disabled" +
+ * zeroed stats (same payload size as before: 22 bytes). */
 static void bin_cmd_tama_query(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
     (void)p; (void)l;
-    uint8_t buf[22] = {0};   /* enabled=0, state=0, toutes stats à 0 */
+    uint8_t buf[22] = {0};   /* enabled=0, state=0, all stats at 0 */
     ks_respond(cmd, KS_STATUS_OK, buf, sizeof(buf));
 }
 
@@ -403,16 +403,16 @@ static void bin_cmd_keystats_bin(uint8_t cmd, const uint8_t *p, uint16_t l)
     uint8_t hdr[2] = { (uint8_t)MATRIX_ROWS, (uint8_t)MATRIX_COLS };
     ks_respond_write(hdr, 2);
 
-    /* MATRIX_COLS et non KEYMAP_COLS : key_stats est dimensionne sur la matrice
-     * BALAYEE ([MATRIX_ROWS][MATRIX_COLS]), pas sur la keymap. Boucler sur
-     * KEYMAP_COLS lisait sept mots au-dela de chaque rangee et ecrivait le
-     * double de la taille annoncee juste au-dessus — le compilateur l'a
-     * signale (« iteration 7 invokes undefined behavior »).
+    /* MATRIX_COLS, not KEYMAP_COLS: key_stats is sized on the SCANNED
+     * matrix ([MATRIX_ROWS][MATRIX_COLS]), not on the keymap. Looping on
+     * KEYMAP_COLS read seven words past each row and wrote
+     * double the size announced just above — the compiler flagged
+     * it ("iteration 7 invokes undefined behavior").
      *
-     * Etendre les statistiques aux 52 touches supposerait de redimensionner
-     * key_stats ET de decider ce qu'on compte pour une moitie droite dont les
-     * appuis arrivent par radio : c'est une decision a part, pas un effet de
-     * bord de l'elargissement de la keymap. */
+     * Extending the stats to the 52 keys would mean resizing
+     * key_stats AND deciding what to count for a right half whose
+     * keystrokes arrive over radio: that's a separate decision, not a side
+     * effect of widening the keymap. */
     for (int r = 0; r < MATRIX_ROWS; r++) {
         for (int c = 0; c < MATRIX_COLS; c++) {
             uint8_t b[4];
@@ -768,9 +768,9 @@ static void bin_cmd_macro_add(uint8_t cmd, const uint8_t *p, uint16_t l)
     uint8_t nlen = p[1];
     if (l < (uint16_t)(2 + nlen + 6)) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
 
-    /* Nom tronqué à MAX_MACRO_NAME_LENGTH-1, mais les keys sont lues à l'offset
-     * du nlen ORIGINAL (là où l'hôte les a mises) : clamper nlen avant l'offset
-     * décalait la lecture des keys dans le nom (données incohérentes) — audit M13. */
+    /* Name truncated to MAX_MACRO_NAME_LENGTH-1, but the keys are read at the
+     * ORIGINAL nlen offset (where the host put them): clamping nlen before the
+     * offset shifted the key read into the name (inconsistent data) — audit M13. */
     uint8_t name_len = (nlen < MAX_MACRO_NAME_LENGTH) ? nlen : (uint8_t)(MAX_MACRO_NAME_LENGTH - 1);
     memcpy(macros_list[slot].name, p + 2, name_len);
     macros_list[slot].name[name_len] = '\0';
@@ -795,7 +795,7 @@ static void bin_cmd_macro_add_seq(uint8_t cmd, const uint8_t *p, uint16_t l)
     if (step_count > MACRO_MAX_STEPS) step_count = MACRO_MAX_STEPS;
     if (l < (uint16_t)(2 + nlen + 1 + step_count * 2)) { ks_respond_err(cmd, KS_STATUS_ERR_INVALID); return; }
 
-    /* idem macro_add (M13) : nom tronqué mais offset steps au nlen original. */
+    /* same as macro_add (M13): name truncated but steps offset at original nlen. */
     uint8_t name_len = (nlen < MAX_MACRO_NAME_LENGTH) ? nlen : (uint8_t)(MAX_MACRO_NAME_LENGTH - 1);
     memcpy(macros_list[slot].name, p + 2, name_len);
     macros_list[slot].name[name_len] = '\0';
@@ -907,7 +907,7 @@ static void bin_cmd_layout_json(uint8_t cmd, const uint8_t *p, uint16_t l)
     ks_respond_end();
 }
 
-#endif /* !CONFIG_KASE_NO_KEYMAP_ENGINE — fin du bloc clavier */
+#endif /* !CONFIG_KASE_NO_KEYMAP_ENGINE — end of the keyboard block */
 
 /* ── OTA ────────────────────────────────────────────────────────── */
 
@@ -978,7 +978,7 @@ static void bin_cmd_ota_abort(uint8_t cmd, const uint8_t *p, uint16_t l)
     }
 }
 
-/* ── Test matrice — pas de matrice sur le dongle ───────────────── */
+/* ── Matrix test — no matrix on the dongle ───────────────── */
 #if !CONFIG_KASE_NO_KEYMAP_ENGINE
 
 /* MATRIX_TEST: toggle test mode on/off.
@@ -993,7 +993,7 @@ static void bin_cmd_matrix_test(uint8_t cmd, const uint8_t *p, uint16_t l)
     if (matrix_test_mode)
         matrix_test_last_activity_ms = esp_timer_get_time() / 1000;
 #if CONFIG_KASE_VEILLE
-    veille_veto(VEILLE_VETO_TEST, matrix_test_mode);   /* pas de veille en test matrice */
+    veille_veto(VEILLE_VETO_TEST, matrix_test_mode);   /* no sleep during matrix test */
 #endif
     uint8_t resp[3] = { matrix_test_mode ? 1 : 0, MATRIX_ROWS, MATRIX_COLS };
     ks_respond(cmd, KS_STATUS_OK, resp, 3);
@@ -1104,9 +1104,9 @@ static void bin_cmd_monitor(uint8_t cmd, const uint8_t *p, uint16_t l)
     ks_respond(cmd, KS_STATUS_OK, buf, KS_MONITOR_SIZE);
 }
 
-/* Les commandes de réglage du trackpad ont été retirées avec le moteur : elles
- * étaient dongle-only du temps où il appliquait la gestuelle. Elles reviendront
- * avec le driver, côté moitié gauche, en phase 2 du Niphargus. */
+/* The trackpad tuning commands were removed along with the engine: they
+ * were dongle-only back when it applied the gesture logic. They will come
+ * back with the driver, on the left half side, in Niphargus phase 2. */
 
 #if CONFIG_KASE_HAS_RF_RX
 /* RF_PAIR_START: payload [reset:u8]. Opens a 30 s pairing window asynchronously
@@ -1134,13 +1134,13 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     { KS_CMD_VERSION,           bin_cmd_version },
     { KS_CMD_FEATURES,          bin_cmd_features },
     { KS_CMD_DFU,               bin_cmd_dfu },
-    /* ── Commandes CLAVIER — non enregistrées sur le dongle ──────────────────
-     * Le dongle du Niphargus reçoit du HID déjà fini et ne porte plus de moteur
-     * keymap (docs/superpowers/specs/2026-08-19-dongle-role-niphargus-design.md).
-     * Ces commandes n'y ont donc plus de sens. Plutôt que de les bouchonner et
-     * de faire semblant, on ne les enregistre pas : le dispatcher répond alors
-     * KS_STATUS_ERR_UNKNOWN, ce qui dit franchement au logiciel de contrôle que
-     * cet appareil ne fait pas ça. Un rejet muet serait pire que le défaut. */
+    /* ── KEYBOARD commands — not registered on the dongle ──────────────────
+     * The Niphargus dongle receives HID that is already finished and no longer
+     * carries a keymap engine (docs/superpowers/specs/2026-08-19-dongle-role-niphargus-design.md).
+     * These commands therefore no longer make sense on it. Rather than stub
+     * them and pretend, we don't register them: the dispatcher then replies
+     * KS_STATUS_ERR_UNKNOWN, which tells the control software plainly that
+     * this device doesn't do that. A silent rejection would be worse than the default. */
 #if !CONFIG_KASE_NO_KEYMAP_ENGINE
     /* Keymap */
     { KS_CMD_LAYER_INDEX,       bin_cmd_layer_index },
@@ -1204,13 +1204,13 @@ static const ks_bin_cmd_entry_t bin_cmd_table[] = {
     { KS_CMD_KO_SET,            bin_cmd_ko_set },
     { KS_CMD_KO_LIST,           bin_cmd_ko_list },
     { KS_CMD_KO_DELETE,         bin_cmd_ko_delete },
-    /* Test matrice : le dongle n'a plus de matrice à tester. */
+    /* Matrix test: the dongle no longer has a matrix to test. */
     { KS_CMD_MATRIX_TEST,       bin_cmd_matrix_test },
-    /* Trackpad : les commandes de réglage d'accélération sont retirées. Elles
-     * étaient dongle-only du temps où il appliquait la gestuelle ; il ne le fait
-     * plus, et la moitié gauche qui le fera n'existe pas encore en matériel.
-     * Elles reviendront avec le driver trackpad, en phase 2 — les réenregistrer
-     * maintenant reviendrait à annoncer une fonction sans implémentation. */
+    /* Trackpad: the acceleration tuning commands are removed. They were
+     * dongle-only back when it applied the gesture logic; it no longer does
+     * that, and the left half that will do it doesn't exist in hardware yet.
+     * They will come back with the trackpad driver, in phase 2 — re-registering
+     * them now would amount to announcing a function with no implementation. */
 #endif /* !CONFIG_KASE_NO_KEYMAP_ENGINE */
     /* Diagnostics */
     { KS_CMD_NVS_RESET,         bin_cmd_nvs_reset },

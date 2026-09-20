@@ -1,15 +1,15 @@
-/* Contrat de brochage — Niphargus moitié DROITE (U5).
+/* Pinout contract — Niphargus RIGHT half (U5).
  *
- * Recopié à la main de docs/NIPHARGUS_V2_HARDWARE.md (netlist vérifiée le
- * 2026-08-06). Les deux moitiés ont des tables DIFFÉRENTES : ce sont des
- * permutations de routage, pas une symétrie. Aucune compilation ne détecte une
- * inversion, et les cartes ne sont pas arrivées — ce test est la seule barrière
- * avant le banc. Si le contrat change, c'est CE fichier qu'on met à jour en
- * premier, puis board.h.
+ * Copied by hand from docs/NIPHARGUS_V2_HARDWARE.md (netlist verified on
+ * 2026-08-06). The two halves have DIFFERENT tables: these are
+ * routing permutations, not a symmetry. No compilation detects an
+ * inversion, and the boards haven't arrived yet — this test is the only barrier
+ * before the bench. If the contract changes, THIS file is the one updated
+ * first, then board.h.
  */
 #include "test_framework.h"
 
-/* ESP-IDF définit GPIO_NUM_* comme un enum ; sur host on les stube. */
+/* ESP-IDF defines GPIO_NUM_* as an enum; on host we stub them. */
 #ifndef GPIO_NUM_0
 #define GPIO_NUM_0  0
 #define GPIO_NUM_1  1
@@ -44,29 +44,29 @@
 #include "../boards/niphar_right/board.h"
 #include "../main/comm/rf/rf_packet.h"
 
-/* Garde de compilation : le trackpad est GAUCHE uniquement (Azoteq TPS43,
- * I2C + RDY, cf. docs/NIPHARGUS_V2_HARDWARE.md). Une macro
- * BOARD_HAS_TRACKPAD_LOCAL égarée ici décrirait un périphérique qui n'existe
- * pas sur cette moitié — on fait planter la compilation plutôt que de
- * laisser passer silencieusement. */
+/* Compile-time guard: the trackpad is LEFT only (Azoteq TPS43,
+ * I2C + RDY, see docs/NIPHARGUS_V2_HARDWARE.md). A stray
+ * BOARD_HAS_TRACKPAD_LOCAL macro here would describe a peripheral that doesn't
+ * exist on this half — we make compilation fail rather than
+ * let it pass silently. */
 #ifdef BOARD_HAS_TRACKPAD_LOCAL
 #error "le trackpad est sur la gauche uniquement : BOARD_HAS_TRACKPAD_LOCAL n'a rien à faire dans boards/niphar_right/board.h"
 #endif
 
-/* GPIO non câblés : strapping et PSRAM octale. Aucun pin du board ne doit
- * tomber dedans. */
+/* Unwired GPIO: strapping and octal PSRAM. No board pin should
+ * fall on these. */
 static int is_forbidden(int gpio)
 {
     return gpio == 3 || gpio == 45 || gpio == 46 ||
            gpio == 35 || gpio == 36 || gpio == 37;
 }
 
-/* GPIO déjà engagés à autre chose que la matrice/périphériques du board :
- * USB D-/D+ (19/20, NIPHARGUS_V2_HARDWARE.md:41) et le connecteur de prog
- * (0, 43, 44, :47). COLS6 = GPIO1 et ROWS0 = GPIO2 étant déjà à un chiffre
- * des numéros de radio, un second contrôle ici couvre les pins engagés que
- * test_right_no_forbidden_gpio ne voit pas (pas dans la liste des non
- * câblés). */
+/* GPIO already committed to something other than the board's matrix/peripherals:
+ * USB D-/D+ (19/20, NIPHARGUS_V2_HARDWARE.md:41) and the programming
+ * connector (0, 43, 44, :47). Since COLS6 = GPIO1 and ROWS0 = GPIO2 are already
+ * one digit away from the radio numbers, a second check here covers committed
+ * pins that test_right_no_forbidden_gpio doesn't see (not in the unwired
+ * list). */
 static int is_reserved(int gpio)
 {
     return gpio == 19 || gpio == 20 ||
@@ -75,53 +75,53 @@ static int is_reserved(int gpio)
 
 static void test_right_matrix_table(void)
 {
-    /* Table DROITE du contrat — différente de la gauche, ce n'est PAS une
-     * symétrie : sur les 11 pins de la matrice, une seule coïncide entre
-     * les deux moitiés (col3 = GPIO9) ; les 10 autres diffèrent. */
-    TEST_ASSERT_EQ(ROWS0, 2,  "droite row0 = GPIO2");
-    TEST_ASSERT_EQ(ROWS1, 12, "droite row1 = GPIO12");
-    TEST_ASSERT_EQ(ROWS2, 4,  "droite row2 = GPIO4");
-    TEST_ASSERT_EQ(ROWS3, 5,  "droite row3 = GPIO5");
+    /* RIGHT table of the contract — different from the left, this is NOT a
+     * symmetry: of the matrix's 11 pins, only one coincides between
+     * the two halves (col3 = GPIO9); the other 10 differ. */
+    TEST_ASSERT_EQ(ROWS0, 2,  "right row0 = GPIO2");
+    TEST_ASSERT_EQ(ROWS1, 12, "right row1 = GPIO12");
+    TEST_ASSERT_EQ(ROWS2, 4,  "right row2 = GPIO4");
+    TEST_ASSERT_EQ(ROWS3, 5,  "right row3 = GPIO5");
 
-    TEST_ASSERT_EQ(COLS0, 6,  "droite col0 = GPIO6");
-    TEST_ASSERT_EQ(COLS1, 7,  "droite col1 = GPIO7");
-    TEST_ASSERT_EQ(COLS2, 8,  "droite col2 = GPIO8");
-    TEST_ASSERT_EQ(COLS3, 9,  "droite col3 = GPIO9");
-    TEST_ASSERT_EQ(COLS4, 11, "droite col4 = GPIO11");
-    TEST_ASSERT_EQ(COLS5, 10, "droite col5 = GPIO10");
-    TEST_ASSERT_EQ(COLS6, 1,  "droite col6 = GPIO1");
+    TEST_ASSERT_EQ(COLS0, 6,  "right col0 = GPIO6");
+    TEST_ASSERT_EQ(COLS1, 7,  "right col1 = GPIO7");
+    TEST_ASSERT_EQ(COLS2, 8,  "right col2 = GPIO8");
+    TEST_ASSERT_EQ(COLS3, 9,  "right col3 = GPIO9");
+    TEST_ASSERT_EQ(COLS4, 11, "right col4 = GPIO11");
+    TEST_ASSERT_EQ(COLS5, 10, "right col5 = GPIO10");
+    TEST_ASSERT_EQ(COLS6, 1,  "right col6 = GPIO1");
 }
 
 static void test_right_matrix_geometry(void)
 {
-    TEST_ASSERT_EQ(MATRIX_ROWS, 4, "4 rangées");
-    TEST_ASSERT_EQ(MATRIX_COLS, 7, "7 colonnes");
+    TEST_ASSERT_EQ(MATRIX_ROWS, 4, "4 rows");
+    TEST_ASSERT_EQ(MATRIX_COLS, 7, "7 columns");
 }
 
 static void test_right_peripheral_pins(void)
 {
-    TEST_ASSERT_EQ(BOARD_NRF_SCK,  38, "SPI SCK partagé");
-    TEST_ASSERT_EQ(BOARD_NRF_MISO, 39, "SPI MISO partagé");
-    TEST_ASSERT_EQ(BOARD_NRF_MOSI, 40, "SPI MOSI partagé");
+    TEST_ASSERT_EQ(BOARD_NRF_SCK,  38, "shared SPI SCK");
+    TEST_ASSERT_EQ(BOARD_NRF_MISO, 39, "shared SPI MISO");
+    TEST_ASSERT_EQ(BOARD_NRF_MOSI, 40, "shared SPI MOSI");
     TEST_ASSERT_EQ(BOARD_NRF_CE,   15, "nRF24 CE");
     TEST_ASSERT_EQ(BOARD_NRF_CSN,  16, "nRF24 CSN");
     TEST_ASSERT_EQ(BOARD_NRF_IRQ,  41, "nRF24 IRQ");
 
     TEST_ASSERT_EQ(BOARD_LINK_TX,    17, "TRRS TX (UART1)");
     TEST_ASSERT_EQ(BOARD_LINK_RX,    18, "TRRS RX (UART1)");
-    TEST_ASSERT_EQ(BOARD_LINK_5V_EN, 21, "ON du SiP32431");
+    TEST_ASSERT_EQ(BOARD_LINK_5V_EN, 21, "SiP32431 ON");
 
-    TEST_ASSERT_EQ(BOARD_VBAT_SENSE_GPIO, 13, "jauge ADC2_CH2");
+    TEST_ASSERT_EQ(BOARD_VBAT_SENSE_GPIO, 13, "ADC2_CH2 gauge");
 }
 
 static void test_right_display_pins(void)
 {
-    /* Sharp LS011B7DH03 : CS ACTIF HAUT, write-only, LSB-first. */
-    TEST_ASSERT_EQ(BOARD_LCD_CS_GPIO, 14, "CS de l'écran Sharp");
-    TEST_ASSERT_EQ(BOARD_LCD_CS_ACTIVE_HIGH, 1, "CS actif HAUT, pas bas");
-    /* L'écran partage le SPI de la nRF24. */
-    TEST_ASSERT_EQ(BOARD_NRF_SCK,  38, "SPI SCK partagé écran + radio");
-    TEST_ASSERT_EQ(BOARD_NRF_MOSI, 40, "SPI MOSI partagé écran + radio");
+    /* Sharp LS011B7DH03: CS ACTIVE HIGH, write-only, LSB-first. */
+    TEST_ASSERT_EQ(BOARD_LCD_CS_GPIO, 14, "Sharp screen's CS");
+    TEST_ASSERT_EQ(BOARD_LCD_CS_ACTIVE_HIGH, 1, "CS active HIGH, not low");
+    /* The screen shares the nRF24's SPI. */
+    TEST_ASSERT_EQ(BOARD_NRF_SCK,  38, "shared SPI SCK screen + radio");
+    TEST_ASSERT_EQ(BOARD_NRF_MOSI, 40, "shared SPI MOSI screen + radio");
 }
 
 static void test_right_no_forbidden_gpio(void)
@@ -136,13 +136,13 @@ static void test_right_no_forbidden_gpio(void)
         BOARD_LCD_CS_GPIO,
     };
     for (unsigned i = 0; i < sizeof(pins) / sizeof(pins[0]); i++)
-        TEST_ASSERT(!is_forbidden(pins[i]), "aucun pin sur un GPIO non câblé");
+        TEST_ASSERT(!is_forbidden(pins[i]), "no pin on an unwired GPIO");
 }
 
 static void test_right_no_reserved_gpio(void)
 {
-    /* USB D-/D+ et connecteur de prog : engagés ailleurs, pas dans la liste
-     * des non-câblés donc invisibles à test_right_no_forbidden_gpio. */
+    /* USB D-/D+ and programming connector: committed elsewhere, not in the
+     * unwired list so invisible to test_right_no_forbidden_gpio. */
     const int pins[] = {
         ROWS0, ROWS1, ROWS2, ROWS3,
         COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6,
@@ -153,17 +153,17 @@ static void test_right_no_reserved_gpio(void)
         BOARD_LCD_CS_GPIO,
     };
     for (unsigned i = 0; i < sizeof(pins) / sizeof(pins[0]); i++)
-        TEST_ASSERT(!is_reserved(pins[i]), "aucun pin sur l'USB natif ou le connecteur de prog");
+        TEST_ASSERT(!is_reserved(pins[i]), "no pin on the native USB or the programming connector");
 }
 
 static void test_right_no_pin_used_twice(void)
 {
-    /* Une permutation ratée produit typiquement un doublon — sur TOUS les
-     * pins du board (matrice + SPI + nRF + lien + jauge + écran), pas
-     * seulement la matrice : COLS6 = GPIO1 et ROWS0 = GPIO2 sont à un
-     * chiffre des numéros de radio (CE=15/CSN=16), une faute de frappe qui
-     * poserait BOARD_NRF_CE sur GPIO12 ne serait pas vue si on ne regardait
-     * que la matrice. */
+    /* A botched permutation typically produces a duplicate — across ALL the
+     * board's pins (matrix + SPI + nRF + link + gauge + screen), not
+     * just the matrix: COLS6 = GPIO1 and ROWS0 = GPIO2 are one digit
+     * away from the radio numbers (CE=15/CSN=16), a typo that would
+     * put BOARD_NRF_CE on GPIO12 wouldn't be seen if we only looked
+     * at the matrix. */
     const int pins[] = {
         ROWS0, ROWS1, ROWS2, ROWS3,
         COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6,
@@ -176,65 +176,65 @@ static void test_right_no_pin_used_twice(void)
     const unsigned n = sizeof(pins) / sizeof(pins[0]);
     for (unsigned i = 0; i < n; i++)
         for (unsigned j = i + 1; j < n; j++)
-            TEST_ASSERT(pins[i] != pins[j], "aucun GPIO en double sur tout le board");
+            TEST_ASSERT(pins[i] != pins[j], "no duplicate GPIO across the whole board");
 }
 
 static void test_right_does_not_swap_the_link_uart(void)
 {
-    /* C'est la GAUCHE qui swappe. Si les deux swappent, ou aucune, deux TX se
-     * retrouvent en conflit sur le même fil. */
-    TEST_ASSERT_EQ(BOARD_LINK_SWAP_TX_RX, 0, "la droite ne swappe pas");
+    /* It's the LEFT that swaps. If both swap, or neither, two TX end up
+     * conflicting on the same wire. */
+    TEST_ASSERT_EQ(BOARD_LINK_SWAP_TX_RX, 0, "the right does not swap");
 }
 
-/* Les consommateurs de la pile RF (comm/rf/kbd_relay_tx.c) construisent leur
- * config depuis BOARD_NRF_SPI_SCK, BOARD_NRF_CSN_GPIO... Ces noms different de
- * ceux du contrat materiel (BOARD_NRF_SCK, BOARD_NRF_CSN), et kbd_relay_tx.c
- * fournit un bloc de repli — GPIO 35/36/37, interdits ici — sous
+/* RF stack consumers (comm/rf/kbd_relay_tx.c) build their
+ * config from BOARD_NRF_SPI_SCK, BOARD_NRF_CSN_GPIO... These names differ from
+ * those of the hardware contract (BOARD_NRF_SCK, BOARD_NRF_CSN), and kbd_relay_tx.c
+ * provides a fallback block — GPIO 35/36/37, forbidden here — under
  * `#ifndef BOARD_NRF_SPI_HOST`.
  *
- * Les board.h Niphargus DEFINISSENT BOARD_NRF_SPI_HOST : le garde est donc
- * faux, le bloc de repli entier est saute, et les alias ne sont definis nulle
- * part. Le mode de defaillance n'est pas un mauvais brochage silencieux mais
- * une erreur de compilation, le jour ou un consommateur de la pile RF sera
- * compile pour une moitie. C'est moins grave, ca reste a fermer.
+ * The Niphargus board.h files DEFINE BOARD_NRF_SPI_HOST: the guard is therefore
+ * false, the entire fallback block is skipped, and the aliases are defined
+ * nowhere. The failure mode isn't a silent bad pinout but
+ * a compile error, the day an RF stack consumer gets
+ * compiled for a half. That's less serious, it still needs closing.
  *
- * boards/conchodytes/board.h a du ajouter ce bloc d'alias pour la meme raison,
- * en documentant le piege. Les deux moities l'avaient oublie. Ce test
- * verrouille l'equivalence : un alias absent ne compile pas, un alias qui
- * derive echoue ici — pas au banc, six mois plus tard.
+ * boards/conchodytes/board.h had to add this alias block for the same reason,
+ * documenting the trap. Both halves had forgotten it. This test
+ * locks in the equivalence: a missing alias doesn't compile, a drifting alias
+ * fails here — not on the bench, six months later.
  *
- * On n'asserte volontairement NI canal NI suffixe d'adresse : contrairement a
- * la souris qui n'a qu'un lien, une moitie en a deux (PRX vers l'autre moitie,
- * PTX vers le dongle). Le choix des canaux appartient a B3/B4. */
+ * We deliberately assert NEITHER channel NOR address suffix: unlike
+ * the mouse which has only one link, a half has two (PRX toward the other half,
+ * PTX toward the dongle). Channel choice belongs to B3/B4. */
 static void test_right_radio_pin_aliases(void)
 {
-    TEST_ASSERT_EQ(BOARD_NRF_SPI_SCK,  BOARD_NRF_SCK,  "alias SCK  == pin brute");
-    TEST_ASSERT_EQ(BOARD_NRF_SPI_MISO, BOARD_NRF_MISO, "alias MISO == pin brute");
-    TEST_ASSERT_EQ(BOARD_NRF_SPI_MOSI, BOARD_NRF_MOSI, "alias MOSI == pin brute");
-    TEST_ASSERT_EQ(BOARD_NRF_CSN_GPIO, BOARD_NRF_CSN,  "alias CSN  == pin brute");
-    TEST_ASSERT_EQ(BOARD_NRF_CE_GPIO,  BOARD_NRF_CE,   "alias CE   == pin brute");
-    TEST_ASSERT_EQ(BOARD_NRF_IRQ_GPIO, BOARD_NRF_IRQ,  "alias IRQ  == pin brute");
+    TEST_ASSERT_EQ(BOARD_NRF_SPI_SCK,  BOARD_NRF_SCK,  "alias SCK  == raw pin");
+    TEST_ASSERT_EQ(BOARD_NRF_SPI_MISO, BOARD_NRF_MISO, "alias MISO == raw pin");
+    TEST_ASSERT_EQ(BOARD_NRF_SPI_MOSI, BOARD_NRF_MOSI, "alias MOSI == raw pin");
+    TEST_ASSERT_EQ(BOARD_NRF_CSN_GPIO, BOARD_NRF_CSN,  "alias CSN  == raw pin");
+    TEST_ASSERT_EQ(BOARD_NRF_CE_GPIO,  BOARD_NRF_CE,   "alias CE   == raw pin");
+    TEST_ASSERT_EQ(BOARD_NRF_IRQ_GPIO, BOARD_NRF_IRQ,  "alias IRQ  == raw pin");
 }
 
-/* La geometrie de demi-matrice du protocole RF doit correspondre a celle du
- * board. rf_packet.h le dit lui-meme — « must match board.h half dimensions » —
- * mais rien ne le verifiait, et la valeur y est restee celle des anciennes
- * moities KaSe (5x7), retirees du depot au commit c107df77. Elle decrivait donc
- * du materiel qui n'existe plus.
+/* The RF protocol's half-matrix geometry must match the
+ * board's. rf_packet.h says so itself — "must match board.h half dimensions" —
+ * but nothing verified it, and the value there remained that of the old
+ * KaSe halves (5x7), removed from the repo at commit c107df77. It therefore
+ * described hardware that no longer exists.
  *
- * Consequences concretes : un octet de bitmap gaspille par paquet, et une
- * validation `row < RF_HALF_ROWS` qui accepterait une ligne 4 inexistante sur
- * une matrice 4x7. Sans impact vivant tant que heartbeat.c n'est pas compile,
- * mais B3 va s'appuyer sur ce contrat — mieux vaut le rendre vrai avant.
+ * Concrete consequences: one wasted bitmap byte per packet, and a
+ * `row < RF_HALF_ROWS` validation that would accept a nonexistent row 4 on
+ * a 4x7 matrix. No live impact as long as heartbeat.c isn't compiled,
+ * but B3 will rely on this contract — better to make it true beforehand.
  *
- * Ce test lie les deux : toute divergence future casse ici. */
+ * This test ties the two together: any future divergence breaks here. */
 static void test_right_rf_geometry_matches_board(void)
 {
-    TEST_ASSERT_EQ(RF_HALF_ROWS, MATRIX_ROWS, "geometrie RF : lignes == board.h");
-    TEST_ASSERT_EQ(RF_HALF_COLS, MATRIX_COLS, "geometrie RF : colonnes == board.h");
-    /* Le bitmap doit couvrir exactement la matrice, sans octet mort. */
+    TEST_ASSERT_EQ(RF_HALF_ROWS, MATRIX_ROWS, "RF geometry: rows == board.h");
+    TEST_ASSERT_EQ(RF_HALF_COLS, MATRIX_COLS, "RF geometry: columns == board.h");
+    /* The bitmap must cover exactly the matrix, with no dead byte. */
     TEST_ASSERT_EQ(RF_HALF_BITMAP_BYTES, (MATRIX_ROWS * MATRIX_COLS + 7) / 8,
-                   "bitmap = ceil(lignes*colonnes/8)");
+                   "bitmap = ceil(rows*cols/8)");
 }
 
 void test_niphar_right_pins(void)

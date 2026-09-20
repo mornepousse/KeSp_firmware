@@ -1,250 +1,279 @@
 # KaSe firmware — Claude Code instructions
 
-Firmware ESP32-S3 pour clavier split-ergo custom (KaSe V1/V2/V2D).
-Distribué via binaires GitLab Releases. Build via ESP-IDF 5.5.
+ESP32-S3 firmware for a custom split-ergo keyboard (KaSe V1/V2/V2D).
+Distributed via GitLab Releases binaries. Built with ESP-IDF 5.5.
+
+## Language
+
+Everything in the repository is in **English** since 2026-09-20: code comments,
+Markdown docs, the behaviour contract, agent definitions, commit messages. The
+firmware's log strings are still French and get translated in a separate pass
+together with the docs that quote them (they change the binaries, comments
+don't). Two deliberate exceptions: the historical plans and specs under
+`docs/superpowers/` and the two July audits in `docs/` stay in French (they are
+records of executed work, not operating docs), and identifiers were not renamed
+by the translation (many function and variable names are still French —
+`veille_veto_poser`, `radio_emettre`, `s_etat_mux` — rename per module, with
+the docs and tests that quote them, never in bulk). The translation of the
+comments was verified by rebuilding the 7 boards to byte-identical binaries
+(app descriptor masked): a comment-only change must keep the line count of
+its file, because `assert`/`__LINE__` bake line numbers into the image.
 
 ## Repo
-- **Référence** : https://github.com/mornepousse/KeSp_firmware (remote `github`)
-  — c'est le dépôt qui fait foi.
-- **Miroir** : https://gitlab.com/harrael/KeSp_firmware (remote `origin`).
-  GitLab pousse vers GitHub par un miroir côté serveur, vérifié le 2026-09-05 :
-  un `git push origin` suffit, GitHub suit en quelques secondes. Inutile de
-  pousser sur `github` en plus — le second push perd la course contre le miroir
-  et se fait rejeter.
-  ⚠ Le miroir ne peut pas rembobiner GitHub. Si `github/<branche>` prend de
-  l'avance par un push direct, le miroir se bloque **en silence** sur cette
-  branche : c'est arrivé sur `main`, resté deux commits en arrière côté GitLab.
-  Réalignement par avance rapide, pas par force.
-- **Local** : `~/Documents/GitHub/KeSp_firmware-gitlab/`
-- **Related** : https://gitlab.com/harrael/KeSp_controller (remapping software)
+- **Reference**: https://github.com/mornepousse/KeSp_firmware (remote `github`)
+  — this is the repo of record.
+- **Mirror**: https://gitlab.com/harrael/KeSp_firmware (remote `origin`).
+  GitLab pushes to GitHub via a server-side mirror, verified on 2026-09-05:
+  a single `git push origin` is enough, GitHub catches up within seconds. No
+  need to also push to `github` — the second push loses the race against the
+  mirror and gets rejected.
+  ⚠ The mirror cannot rewind GitHub. If `github/<branch>` gets ahead via a
+  direct push, the mirror gets stuck **silently** on that branch: it happened
+  on `main`, which stayed two commits behind on the GitLab side. Realign by
+  fast-forward, not by force.
+- **Local**: `~/Documents/GitHub/KeSp_firmware-gitlab/`
+- **Related**: https://gitlab.com/harrael/KeSp_controller (remapping software)
 
 ## Versioning
 
-Source de vérité : tag git `vX.Y.Z`. Lu par ESP-IDF via `git describe --tags`
-au build. Pas de fichier VERSION.
+Source of truth: git tag `vX.Y.Z`. Read by ESP-IDF via `git describe --tags`
+at build time. No VERSION file.
 
-Pour cut une release :
-1. `git commit` les changements
+To cut a release:
+1. `git commit` the changes
 2. `git tag vX.Y.Z`
 3. `git push && git push --tags`
-4. Build les 7 boards + merge full binaries
+4. Build the 7 boards + merge full binaries
 5. `glab release create vX.Y.Z <files...>`
 
-Entre deux releases : `cheni vX.Y.Z-N-gHASH-dirty` via `git describe`.
+Between two releases: `cheni vX.Y.Z-N-gHASH-dirty` via `git describe`.
 
-## Périmètre — anciennes halves retirées, Niphargus à venir
+## Scope — old halves removed, Niphargus coming
 
-Les moitiés split de première génération (`kase_half_left` / `kase_half_right`,
-e-ink SSD1681, ESP-NOW) ont été retirées au commit `c107df77` : elles visaient un
-matériel qui n'existe plus.
+The first-generation split halves (`kase_half_left` / `kase_half_right`,
+e-ink SSD1681, ESP-NOW) were removed at commit `c107df77`: they targeted
+hardware that no longer exists.
 
-Le clavier split est redessiné sous le nom **Niphargus** — matériel dans
-`~/Documents/GitHub/rili` (KiCad), **firmware ici**. Deux moitiés ESP32-S3 +
-nRF24L01+, matrice 4×7, trackpad Azoteq TPS43 à gauche, Sharp Memory LCD sur
-LES DEUX moitiés (portrait 68 × 160), lien filaire TRRS. Pas de WiFi ni de BLE :
-config et mises à jour par USB.
+The split keyboard is being redesigned under the name **Niphargus** —
+hardware in `~/Documents/GitHub/rili` (KiCad), **firmware here**. Two
+ESP32-S3 halves + nRF24L01+, 4×7 matrix, Azoteq TPS43 trackpad on the left,
+Sharp Memory LCD on BOTH halves (portrait 68 × 160), wired TRRS link. No
+WiFi or BLE: config and updates over USB.
 
-Architecture actée : la **moitié gauche est le maître en toutes circonstances**
-(elle porte le seul moteur keymap et le trackpad) ; la droite est un scanner. Le
-dongle garde sa radio 1 pour le clavier — la radio 2 appartient à la souris
-**Conchodytes** (`~/Documents/GitHub/Conchodytes`).
+Architecture decided: the **left half is the master under all
+circumstances** (it carries the only keymap engine and the trackpad); the
+right is a scanner. The dongle keeps its radio 1 for the keyboard — radio 2
+belongs to the **Conchodytes** mouse (`~/Documents/GitHub/Conchodytes`).
 
-Design complet : `docs/superpowers/specs/2026-08-19-niphargus-firmware-design.md`.
+Full design: `docs/superpowers/specs/2026-08-19-niphargus-firmware-design.md`.
 
-**État au 2026-09-06** — les deux moitiés fonctionnent et tapent ensemble :
-brochage vérifié à la netlist sur les deux, lien radio inter-moitiés prouvé
-(canal 0x4F, adresse KaSe.03), fusion des keymaps, relais vers le dongle. Le
-risque R1 du design est levé (0 perte, 0,4 retransmission/paquet).
-**Alimentation batterie réparée le 2026-09-07** : les deux moitiés fonctionnent
-en autonomie, sans aucun câble, et tapent ensemble par radio. C'est le mode
-nominal du clavier.
-**Full RF le 2026-09-07** : la gauche écoute la droite en PRX sur le canal du
-lien ET relaie le HID fini au dongle, par excursion PRX→PTX→PRX. Le routage
-reste USB-first — USB branché → HID par USB, sur batterie → radio.
-**Fusion par défaut depuis le 2026-09-18** : `KASE_DONGLE_FUSION=y` dans les
-defaults des trois cartes (gauche, droite, dongle) — le pre-push garde ce qui
-est flashé. Le chemin pré-fusion `HALF_LINK_RX` (la gauche écoute la droite en
-direct) est retiré. Les dossiers `build_*_fusion` n'existent plus : les
-binaires sortent de `build_niphar_left`, `build_niphar_right`, `build_kase_dongle`.
+**Status as of 2026-09-06** — both halves work and type together: pinout
+checked against the netlist on both, inter-half radio link proven (channel
+0x4F, address KaSe.03), keymap fusion, relay to the dongle. Design risk R1
+is cleared (0 loss, 0.4 retransmission/packet).
+**Battery power fixed on 2026-09-07**: both halves run standalone, with no
+cable at all, and type together over radio. This is the keyboard's nominal
+mode.
+**Full RF on 2026-09-07**: the left listens to the right in PRX on the link
+channel AND relays the finished HID to the dongle, via a PRX→PTX→PRX
+excursion. Routing stays USB-first — USB plugged in → HID over USB, on
+battery → radio.
+**Fusion by default since 2026-09-18**: `KASE_DONGLE_FUSION=y` in the
+defaults of all three boards (left, right, dongle) — pre-push keeps what is
+flashed. The pre-fusion path `HALF_LINK_RX` (the left listening to the right
+directly) is removed. The `build_*_fusion` folders no longer exist:
+binaries come out of `build_niphar_left`, `build_niphar_right`,
+`build_kase_dongle`.
 
-⚠ **Une puce, un propriétaire.** La radio de chaque moitié appartient à
-`comm/rf/radio_owner.c` (2026-09-19) et à lui seul : un mode à la fois (PTX
-vers une cible, PRX à l'écoute d'une cible, éteinte), un verrou sur toute
-transaction, l'excursion qui **vide la FIFO dans le consommateur avant** de
-partir, le réveil qui **réarme** le mode, le prêt du bus à l'écran. `half_link.c`
-(la droite) et `kbd_relay_tx.c` (la gauche) sont des politiques : elles ne
-voient ni `rf_driver` ni mutex, elles demandent `radio_mode_set`, `radio_send`,
-`radio_excursion_tx`, `radio_pair_round`. Le propriétaire parle au matériel par
-une table d'opérations : les invariants sont **testés host contre un faux
-enregistreur** (`test_radio_owner`, la séquence d'appels est l'oracle).
-Historique : deux modules qui initialisaient la puce chacun de leur côté ont
-fait écouter la gauche sur le mauvais canal **trois fois**, en silence
-(`rf_claim_chip` le dit désormais tout haut) ; et le refactor a révélé que
-l'écoute USB de la gauche partait sur l'adresse dérivée du set_id et n'était
-« corrigée » que par la restauration de la première excursion — le
-propriétaire restaure fidèlement, donc la cible doit être juste dès le départ
-(`'KaSe'.03`). Toute nouvelle écriture de config de la puce passe par
-`radio_mode_set`/`radio_rearmer`, jamais par `rf_driver_*` depuis une politique.
+⚠ **One chip, one owner.** Each half's radio belongs to
+`comm/rf/radio_owner.c` (2026-09-19) and to it alone: one mode at a time
+(PTX toward a target, PRX listening to a target, off), a lock on every
+transaction, the excursion that **drains the FIFO into the consumer before**
+leaving, the wake-up that **re-arms** the mode, the bus loan to the screen.
+`half_link.c` (the right) and `kbd_relay_tx.c` (the left) are policies: they
+see neither `rf_driver` nor a mutex, they request `radio_mode_set`,
+`radio_send`, `radio_excursion_tx`, `radio_pair_round`. The owner talks to
+the hardware through a table of operations: the invariants are **tested
+host-side against a fake recorder** (`test_radio_owner`, the call sequence
+is the oracle). History: two modules that each initialized the chip on
+their own side made the left listen on the wrong channel **three times**,
+silently (`rf_claim_chip` now says so out loud); and the refactor revealed
+that the left's USB listening was leaving on the address derived from
+set_id and was only "corrected" by the restore of the first excursion — the
+owner restores faithfully, so the target must be right from the start
+(`'KaSe'.03`). Any new chip config write goes through
+`radio_mode_set`/`radio_rearmer`, never through `rf_driver_*` from a
+policy.
 
-⚠ **« Émettre sur changement » et « relâcher sur silence » ne composent pas.**
-Ce couple a produit trois pannes distinctes le 2026-09-08, à trois maillons de
-la chaîne. Qui n'émet que sur changement se tait pendant qu'une touche est
-simplement TENUE ; qui relâche sur silence la lâche alors. Remède unique : muet
-au repos, entretenu tant que quelque chose est tenu. Les constantes qui lient un
-émetteur à la patience de son auditeur sont dans `comm/rf/rf_slot.h`
-(`RF_STATUS_PERIOD_MS`, `RF_LINK_LOST_MS`) — c'est un contrat entre deux
-firmwares, pas un nombre que chacun choisit dans son coin.
+⚠ **"Emit on change" and "release on silence" don't compose.** This pairing
+produced three distinct failures on 2026-09-08, at three links in the
+chain. Whatever only emits on change goes quiet while a key is simply HELD;
+whatever releases on silence then drops it. The one remedy: silent at rest,
+kept alive as long as something is held. The constants that tie a
+transmitter to its listener's patience live in `comm/rf/rf_slot.h`
+(`RF_STATUS_PERIOD_MS`, `RF_LINK_LOST_MS`) — this is a contract between two
+firmwares, not a number each one picks on its own.
 
-⚠ **Un acquittement ESB ne prouve pas la réception logicielle.** Le nRF24 répond
-de lui-même dès que canal et adresse concordent. Une excursion qui vidait la
-FIFO au retour détruisait des paquets déjà acquittés : la droite lisait 100 % de
-succès pendant que la gauche perdait 5 % des trames. Vider la FIFO AVANT
-d'émettre, jamais après.
+⚠ **An ESB acknowledgment does not prove software reception.** The nRF24
+answers on its own as soon as channel and address match. An excursion that
+drained the FIFO on return was destroying packets already acknowledged: the
+right was reading 100% success while the left was losing 5% of frames.
+Drain the FIFO BEFORE transmitting, never after.
 
-**B7 fait le 2026-09-08** — veille hybride (`main/power/veille.c`) : light sleep
-après **15 s** (60 s jusqu'au 2026-09-15 : éveillée et oisive la carte tire ~28 mA
-à 160 MHz, table 5-9 p. 67, soit cent fois le sommeil — une journée de frappe
-perdait 0,2 V ; ~244 µA endormie, état conservé, réveil ~1 ms), deep sleep après 4 h (~12 µA,
-réveil EXT1, redémarrage en 704 ms). Seuils réglables par Kconfig — éprouver
-EXT1 avec le défaut de 4 h demanderait d'attendre quatre heures.
+**B7 done on 2026-09-08** — hybrid sleep (`main/power/veille.c`): light
+sleep after **15 s** (60 s until 2026-09-15: awake and idle the board draws
+~28 mA at 160 MHz, table 5-9 p. 67, i.e. a hundred times the sleep draw — a
+day of typing lost 0.2 V; ~244 µA asleep, state retained, ~1 ms wake-up),
+deep sleep after 4 h (~12 µA, EXT1 wake-up, 704 ms restart). Thresholds
+tunable via Kconfig — testing EXT1 with the 4 h default would mean waiting
+four hours.
 
-**Éveil oisif dompté le 2026-09-16** (`main/power/pm_dfs.c`, tickless) : DFS
-160/40 MHz, balayage arrêté au repos (keyboard_button en économie d'énergie),
-cadences des tâches à 100 ms au repos, stats coupées, et light sleep
-automatique entre les touches (`CONFIG_FREERTOS_USE_TICKLESS_IDLE`, ~9
-sommeils/s). Le HB de banc (`CONFIG_PM_PROFILING=y`) imprime `esp_pm_dump_locks`
-— lire `light_sleep_counts` avant de croire qu'on dort.
-**La veille est UNE tâche** (`power/veille_task.c`, 2026-09-19), la même sur
-les deux moitiés : inactivité, **vetos** nommés (usb, lien, sync, test — un
-module pose le sien, comme un verrou esp_pm), **hooks** sommeil/réveil
-(radio, écran, jauge — appelés en ordre inverse au réveil, avant la capture),
-battement de coeur `HB … vetos=…`. Ne jamais ré-évaluer la veille dans la
-tâche d'un module ; un nouveau blocage = un veto, un nouveau périphérique = un
-hook. Le hook de réveil d'un module ne doit PAS toucher le bus SPI (la radio
-tient le verrou jusqu'à son propre hook).
-⚠ **Tickless : à 100 Hz une boucle de 10 ms laisse UN tick libre, le sommeil
-en exige TROIS** (`FREERTOS_IDLE_TIME_BEFORE_SLEEP`). La tâche clavier à 10 ms
-donnait « mode SLEEP 92 % » et zéro sommeil réel — un mode oisif n'est pas un
-sommeil. Toute nouvelle attente périodique < 30 ms sur les moitiés tue le
-tickless en silence.
-⚠ **Ralentir un tick change ce qu'il vide.** Le tick du relais de la gauche
-passé à 100 ms au repos a fait perdre les touches de la droite en mode USB :
-c'est lui qui vide la FIFO nRF24 (3 trames) des trames réémises par le dongle,
-et appui + relâchement tombaient dans le même tour. Avant de ralentir une
-cadence, lister ce que le tick consomme, pas seulement ce qu'il émet
-(`kbd_relay_cadence_ms`, testée).
-⚠ Un « l'USB ne bascule pas » était un câble de charge seule : vérifier
-`lsusb` (cafe:4003) avant d'incriminer le DFS — le branchement à froid énumère.
+**Idle wake tamed on 2026-09-16** (`main/power/pm_dfs.c`, tickless): DFS
+160/40 MHz, scanning stopped at rest (keyboard_button in power-saving
+mode), task cadences at 100 ms at rest, stats disabled, and automatic light
+sleep between keystrokes (`CONFIG_FREERTOS_USE_TICKLESS_IDLE`, ~9
+sleeps/s). The bench HB (`CONFIG_PM_PROFILING=y`) prints
+`esp_pm_dump_locks` — read `light_sleep_counts` before believing it's
+sleeping.
+**Sleep is ONE task** (`power/veille_task.c`, 2026-09-19), the same on both
+halves: inactivity, named **vetoes** (usb, link, sync, test — a module sets
+its own, like an esp_pm lock), sleep/wake **hooks** (radio, screen, gauge —
+called in reverse order on wake, before capture), heartbeat
+`HB … vetos=…`. Never re-evaluate sleep inside a module's own task; a new
+blocker = a veto, a new peripheral = a hook. A module's wake hook must NOT
+touch the SPI bus (the radio holds the lock until its own hook).
+⚠ **Tickless: at 100 Hz a 10 ms loop leaves ONE free tick, sleep requires
+THREE** (`FREERTOS_IDLE_TIME_BEFORE_SLEEP`). The 10 ms keyboard task was
+reporting "mode SLEEP 92 %" with zero actual sleep — an idle mode is not a
+sleep. Any new periodic wait < 30 ms on the halves kills tickless silently.
+⚠ **Slowing down a tick changes what it drains.** The left relay's tick,
+slowed to 100 ms at rest, caused right-half keystrokes to be lost in USB
+mode: it's the one draining the nRF24 FIFO (3 frames) of frames re-sent by
+the dongle, and press + release were falling in the same round. Before
+slowing a cadence, list what the tick consumes, not just what it emits
+(`kbd_relay_cadence_ms`, tested).
+⚠ A "USB won't switch" turned out to be a charge-only cable: check `lsusb`
+(cafe:4003) before blaming DFS — a cold plug-in enumerates.
 
-⚠ **Le sommeil profond n'était PAS atteignable** (corrigé le 2026-09-15) :
-l'inactivité n'est évaluée qu'éveillé et la carte reste bloquée en light sleep
-jusqu'à une touche, qui remet le compteur à zéro. Un réveil par TIMER au seuil
-profond bascule en deep sleep ; un réveil GPIO le désarme. Et une nuit à 0,2 V
-perdus (~20 mA) est indiscernable d'une nuit à 244 µA sans chiffre : chaque
-réveil journalise la durée dormie, les deux moitiés portent un battement de
-coeur `inactif=… dormi=X s/n`. Lire ça avant de sortir le multimètre.
+⚠ **Deep sleep was NOT reachable** (fixed on 2026-09-15): inactivity is
+only evaluated while awake, and the board stays stuck in light sleep until
+a key press, which resets the counter to zero. A TIMER wake at the deep
+threshold switches to deep sleep; a GPIO wake disarms it. And a night
+losing 0.2 V (~20 mA) is indistinguishable from a night at 244 µA without a
+number: every wake-up logs the duration slept, both halves carry a
+heartbeat `inactif=… dormi=X s/n` (idle=… slept=X s/n). Read that before
+reaching for the multimeter.
 
-⚠ **L'ULP est exclu par la mesure** : 170 µA à lui seul (ESP32-S3 datasheet v2.2,
-table 5-10, p. 68), contre 50 µA de cible. Le « scan RTC » du design ne peut pas
-tenir — et il est inutile : le montage COL → interrupteur → diode → ROW permet de
-tenir les colonnes hautes et de réveiller sur n'importe quelle ligne.
+⚠ **The ULP is ruled out by measurement**: 170 µA on its own (ESP32-S3
+datasheet v2.2, table 5-10, p. 68), against a 50 µA target. The design's
+"RTC scan" cannot hold — and it's unnecessary: the COL → switch → diode →
+ROW wiring lets the columns be held high and wakes on any row.
 
-⚠ **La radio est éteinte dès l'étage léger** — écouter coûte 13,1 mA (nRF24L01+
-PS v1.0, table 4, p. 14) et le nRF24 n'a pas de mode d'écoute basse
-consommation. Une moitié endormie n'entend PAS l'autre : après une longue
-absence, la première frappe doit être sur la gauche. Au réveil, la réception
-doit être RÉARMÉE (`rf_driver_power_up` ne touche pas à CE), sinon la gauche
-repart alimentée mais sourde.
+⚠ **The radio is turned off as early as the light stage** — listening
+costs 13.1 mA (nRF24L01+ PS v1.0, table 4, p. 14) and the nRF24 has no
+low-power listening mode. A sleeping half does NOT hear the other: after a
+long absence, the first keystroke must be on the left. On wake, reception
+must be RE-ARMED (`rf_driver_power_up` does not touch CE), otherwise the
+left comes back powered but deaf.
 
-⚠ **`rtc_gpio_hold_en()` survit au redémarrage**, pas seulement au sommeil.
-Sans `veille_liberer_gpio()` au boot, les colonnes restent figées et toute la
-matrice lit n'importe quoi — `gpio_reset_pin()` ne défait pas un maintien RTC.
+⚠ **`rtc_gpio_hold_en()` survives a restart**, not just sleep. Without
+`veille_liberer_gpio()` at boot, the columns stay frozen and the whole
+matrix reads garbage — `gpio_reset_pin()` does not undo an RTC hold.
 
-⚠ **L'horodatage des journaux ESP n'est pas du temps réel** : il suit le tick
-FreeRTOS, qui s'arrête en light sleep. Le compteur `up` du heartbeat, adossé à
-`esp_timer` et donc au RTC, est le seul témoin fiable de la durée d'un sommeil.
+⚠ **ESP log timestamps are not real time**: they follow the FreeRTOS tick,
+which stops during light sleep. The heartbeat's `up` counter, backed by
+`esp_timer` and therefore the RTC, is the only reliable witness of a
+sleep's duration.
 
-**B2 lien filaire TRRS le 2026-09-11** : transport UART1 (`comm/link/link_uart.c`),
-poignée de main sonde/ACK et pilotage du load switch 5 V — le lien monte, les
-deux switches ferment, il tient. ⚠ La **charge** de l'autre moitié n'est PAS
-validée, et c'est électrique : le firmware n'offre le 5 V que si un HÔTE énumère
-(`tud_ready`), or on charge sur un chargeur mural qui n'énumère pas. Le vrai
-signal est VBUS, qui suppose le pont GPIO33 peuplé. `KASE_LINK_FORCE_SOURCE` force
-la source pour éprouver l'électrique au banc.
+**B2 wired TRRS link on 2026-09-11**: UART1 transport
+(`comm/link/link_uart.c`), probe/ACK handshake and 5 V load switch control
+— the link comes up, both switches close, it holds. ⚠ **Charging** the
+other half is NOT validated, and it's electrical: the firmware only offers
+5 V if a HOST enumerates (`tud_ready`), but charging happens on a wall
+charger that doesn't enumerate. The real signal is VBUS, which requires the
+GPIO33 bridge to be populated. `KASE_LINK_FORCE_SOURCE` forces the source
+to test the electrical side at the bench.
 
-⚠ **Un slot de rapport se recycle : effacer `keycodes[i]` en tête de chaque slot.**
-`build_keycode_report` reconstruit `current_press` à neuf, mais cinq branches
-(touche de couche, tap-hold tenu, combo différé, leader, keycode avancé sans
-sortie HID) posaient `extra_keycodes[i]` sans remettre `keycodes[i]` à zéro. Ça
-tenait tant qu'un slot gardait le même type de touche — mais la fusion distante
-REPACKE les slots (`matrix_apply_remote` tasse le distant après la frontière
-locale), et une touche absorbée héritait alors du keycode du chiffre qu'elle
-remplaçait : la touche se répétait à l'infini sous un MO distant tenu. Verrouillé
-par `test_kp_slot_recycle_ne_gele_pas_le_keycode`.
+⚠ **A report slot gets recycled: clear `keycodes[i]` at the top of every
+slot.** `build_keycode_report` rebuilds `current_press` from scratch, but
+five branches (layer key, held tap-hold, deferred combo, leader, advanced
+keycode with no HID output) were setting `extra_keycodes[i]` without
+resetting `keycodes[i]` to zero. This held up as long as a slot kept the
+same key type — but remote fusion REPACKS the slots (`matrix_apply_remote`
+compacts the remote side after the local boundary), and an absorbed key
+would then inherit the keycode of the digit it replaced: the key would
+repeat forever under a held remote MO. Locked down by
+`test_kp_slot_recycle_ne_gele_pas_le_keycode`.
 
-**Écrans faits le 2026-09-14** (`main/display/memlcd/`) : Sharp LS011B7DH03
-(module nice!view) sur les deux moitiés, SPI partagé avec le nRF24 (CS GPIO14
-actif haut, prêté par `rf_bus_lock`). Bandeau (route, ▲ dongle vu, jauge),
-couche en lignes de 4 à gauche, logo Niphargus généré (`scripts/gen_logo_memlcd.sh`)
-à droite. Pas de « batterie de l'autre moitié » (décision utilisateur ; le canal
-ACK qui l'aurait portée a été retiré).
-⚠ Le panneau est **68 lignes × 160 px** (catalogue Sharp : « 160 × 68 », H =
-sens des données), le portrait est une transposition ; le **mot de commande
-part BRUT** (M0 = premier bit clocké en MSB-first), seule l'adresse de ligne
-passe par rev8 — un écran write-only ne renvoie rien, une hypothèse fausse fait
-du silence, pas une erreur. Datasheets dans lemia (docs 6844, 6845).
-⚠ **Batterie du Niphargus** (`main/power/batt_sense.c`, ADC2 GPIO13, 1M/1M) :
-la droite remonte un STATUS toutes les 30 s ; la tension AFFICHÉE est
-stabilisée 30 s (une hystérésis autour de l'affiché avait figé 4,2 V une nuit).
-**Niveaux de batterie (2026-09-19)** : `batt_niveau_step` (pur, hystérésis
-0,1 V) — FAIBLE < 3,5 V : bordure de jauge épaissie, plus de 5 V pour le TRRS ;
-CRITIQUE < 3,3 V : veille légère à 5 s. Pas de clignotement, pas d'arrêt forcé
-(le DW01A coupe à 2,5 V). Éprouver au banc en décalant `BATT_FAIBLE_DV` /
-`BATT_CRITIQUE_DV` au-dessus de la tension réelle — sans le commiter.
-**Le moteur du dongle rejoue chaque transition** (`comm/rf/fusion_file.h`,
-2026-09-19) : file de 8 états fusionnés, plus de « dernier état gagne » ;
-`transitions_ecrasees` ne compte plus que le débordement (0 en une minute de
-frappe rapide, 536 par soirée avant). Plus aucun `[NON GARDÉ]` au contrat.
-**Une règle de présence USB** (`usb_presence_brut`) pour le routage, le 5 V
-TRRS et le veto de veille : pont VBUS si `KASE_VBUS_SENSE`, sinon `tud_ready`.
+**Screens done on 2026-09-14** (`main/display/memlcd/`): Sharp LS011B7DH03
+(nice!view module) on both halves, SPI shared with the nRF24 (CS GPIO14
+active-high, borrowed via `rf_bus_lock`). Status bar (route, ▲ dongle seen,
+gauge), layer as rows of 4 on the left, generated Niphargus logo
+(`scripts/gen_logo_memlcd.sh`) on the right. No "other half's battery"
+(user decision; the ACK channel that would have carried it was removed).
+⚠ The panel is **68 lines × 160 px** (Sharp catalog: "160 × 68", H = data
+direction), portrait is a transposition; the **command word goes out RAW**
+(M0 = first bit clocked MSB-first), only the line address goes through
+rev8 — a write-only screen returns nothing, a wrong assumption produces
+silence, not an error. Datasheets in lemia (docs 6844, 6845).
+⚠ **Niphargus battery** (`main/power/batt_sense.c`, ADC2 GPIO13, 1M/1M):
+the right reports a STATUS every 30 s; the DISPLAYED voltage is stabilized
+over 30 s (a hysteresis around the displayed value once froze 4.2 V for a
+whole night).
+**Battery levels (2026-09-19)**: `batt_niveau_step` (pure, 0.1 V
+hysteresis) — LOW < 3.5 V: thickened gauge border, no more 5 V for the
+TRRS; CRITICAL < 3.3 V: light sleep at 5 s. No blinking, no forced shutdown
+(the DW01A cuts at 2.5 V). Test at the bench by shifting `BATT_FAIBLE_DV` /
+`BATT_CRITIQUE_DV` above the real voltage — without committing it.
+**The dongle's engine replays every transition** (`comm/rf/fusion_file.h`,
+2026-09-19): a queue of 8 fused states, no more "last state wins";
+`transitions_ecrasees` now only counts overflow (0 in a minute of fast
+typing, 536 per evening before). No more `[NON GARDÉ]` in the contract.
+**A single USB presence rule** (`usb_presence_brut`) for routing, the 5 V
+TRRS and the sleep veto: VBUS bridge if `KASE_VBUS_SENSE`, otherwise
+`tud_ready`.
 
-Reste ouvert (2026-09-19) :
-- le driver du trackpad (matériel). Sa logique pure — parseur de trame
-  IQS5xx, mapping gestes→HID, config d'accel — existe et est testée
-  (`periph/trackpad/`) ; manquent le bring-up I2C+RDY côté GAUCHE et le
-  branchement sur le relais souris ;
-- la **mesure au multimètre** de chaque moitié (éveillée oisive attendue
-  ~1-3 mA après DFS + tickless, endormie ~250 µA, en frappe) — tout le travail
-  d'autonomie du 16 au 19 est prouvé par les journaux, pas encore chiffré ;
-- la **première touche légère perdue sur la gauche** après une longue pause :
-  réveil GPIO reçu, lignes déjà basses 13 ms plus tard, touche jamais vue en
-  156 ms, l'appui suivant sur la même ligne est capturé — contact < 13 ms,
-  piste switch (instrumentation de `veille.c`/`matrix_scan.c` sous
-  `KASE_VEILLE_DIAG`, à activer dans le sdkconfig du build de banc).
-Brochage : `docs/NIPHARGUS_V2_HARDWARE.md` (source de vérité, vérifié à la netlist).
+Open items (2026-09-19):
+- the trackpad driver (hardware). Its pure logic — IQS5xx frame parser,
+  gesture→HID mapping, accel config — exists and is tested
+  (`periph/trackpad/`); missing: the I2C+RDY bring-up on the LEFT side and
+  the hookup to the mouse relay;
+- the **multimeter measurement** of each half (awake-idle expected
+  ~1-3 mA after DFS + tickless, asleep ~250 µA, while typing) — all the
+  battery-life work from the 16th to the 19th is proven by the logs, not
+  yet measured;
+- the **light first key lost on the left** after a long pause: GPIO
+  wake-up received, lines already low 13 ms later, key never seen within
+  156 ms, the next press on the same line is captured — contact < 13 ms,
+  switch lead (instrumentation of `veille.c`/`matrix_scan.c` under
+  `KASE_VEILLE_DIAG`, to be enabled in the bench build's sdkconfig).
+Pinout: `docs/NIPHARGUS_V2_HARDWARE.md` (source of truth, checked against
+the netlist).
 
 ## Board variants
 
-- **V1** : round SPI display (GC9A01), LED strip, pinout historique
-- **V2** : OLED I2C (SSD1306), pinout production
-- **V2D** : V2 + overrides GPIO pour prototype (COLS7/8 sur GPIO21/4 au lieu de UART0)
-- **dongle** : récepteur USB, deux radios nRF24 (slot 1 clavier, slot 2 souris),
-  ni matrice ni moteur keymap — il relaie du HID déjà fini
-- **niphar_left** : moitié GAUCHE du Niphargus, le maître. Matrice 4×7, seul
-  moteur keymap du clavier, `KEYMAP_COLS = 14` pour couvrir les deux moitiés,
-  trackpad (driver à écrire), relais vers le dongle
-- **niphar_right** : moitié DROITE, un scanner. Matrice 4×7 avec une table de
-  brochage DIFFÉRENTE de la gauche (permutations de routage), émission de sa
-  demi-matrice par radio, ni keymap ni HID. Ses colonnes sont **en miroir** de
-  celles de la gauche (même PCB retourné) : la conversion est au maître, via
-  `BOARD_REMOTE_COLS_MIRRORED` et `half_col_to_keymap()`. Elle émet sur
-  changement, et **réaffirme les maintiens toutes les 100 ms** — le callback de
-  scan ne se déclenchant que sur changement, une touche tenue ne produirait plus
-  rien et la gauche la relâcherait au bout de 250 ms
-- **conchodytes** : souris (PMW3389), slot 2 du dongle
+- **V1**: round SPI display (GC9A01), LED strip, legacy pinout
+- **V2**: I2C OLED (SSD1306), production pinout
+- **V2D**: V2 + GPIO overrides for prototype (COLS7/8 on GPIO21/4 instead
+  of UART0)
+- **dongle**: USB receiver, two nRF24 radios (slot 1 keyboard, slot 2
+  mouse), neither matrix nor keymap engine — it relays already-finished HID
+- **niphar_left**: LEFT half of the Niphargus, the master. 4×7 matrix, the
+  keyboard's only keymap engine, `KEYMAP_COLS = 14` to cover both halves,
+  trackpad (driver to write), relay to the dongle
+- **niphar_right**: RIGHT half, a scanner. 4×7 matrix with a pinout table
+  DIFFERENT from the left (routing permutations), sends its half-matrix
+  over radio, neither keymap nor HID. Its columns are **mirrored**
+  relative to the left's (same PCB flipped over): the conversion happens
+  at the master, via `BOARD_REMOTE_COLS_MIRRORED` and
+  `half_col_to_keymap()`. It emits on change, and **reaffirms holds every
+  100 ms** — since the scan callback only fires on change, a held key
+  would otherwise produce nothing more and the left would release it
+  after 250 ms
+- **conchodytes**: mouse (PMW3389), dongle slot 2
 
-Chaque variant sous `boards/<name>/` avec `board.h`, `board_keymap.c`,
-`board_layout.c`. V2D inherit de V2 via `#include "../kase_v2/board.h"`.
+Each variant lives under `boards/<name>/` with `board.h`, `board_keymap.c`,
+`board_layout.c`. V2D inherits from V2 via `#include "../kase_v2/board.h"`.
 
 ## Build system
 
@@ -255,49 +284,51 @@ idf.py -B build_kase_v2       -DBOARD=kase_v2       -DSDKCONFIG=build_kase_v2/sd
 idf.py -B build_kase_v2_debug -DBOARD=kase_v2_debug -DSDKCONFIG=build_kase_v2_debug/sdkconfig build
 ```
 
-Paramètre CMake : `-DBOARD=<name>` (pas `-DBOARD_VARIANT`). Chaque board a son
-propre dossier build (`build_kase_<name>/`) **et son propre `sdkconfig`** via
-`-DSDKCONFIG=build_kase_<name>/sdkconfig` — c'est ce qui évite la fuite de
-config entre boards (cf. Workflow anti-régression). 7 boards au total : V1, V2,
-V2D, dongle, niphar_left, niphar_right, conchodytes. Pour tout vérifier d'un coup :
-`./scripts/check.sh`.
+CMake parameter: `-DBOARD=<name>` (not `-DBOARD_VARIANT`). Each board has
+its own build folder (`build_kase_<name>/`) **and its own `sdkconfig`** via
+`-DSDKCONFIG=build_kase_<name>/sdkconfig` — this is what avoids config
+leakage between boards (see Anti-regression workflow). 7 boards total: V1,
+V2, V2D, dongle, niphar_left, niphar_right, conchodytes. To check
+everything at once: `./scripts/check.sh`.
 
-**ccache** : `check.sh` exporte `IDF_CCACHE_ENABLE=1` — les 7 boards partagent
-la plupart des composants, donc après le 1er board les suivants réutilisent les
-objets compilés (gros gain sur le build full + pre-push). Pour tes builds
-interactifs, ajoute `export IDF_CCACHE_ENABLE=1` à ton shell (ou source-le avant
-`idf.py`). Stats : `ccache -s`.
+**ccache**: `check.sh` exports `IDF_CCACHE_ENABLE=1` — the 7 boards share
+most of their components, so after the 1st board the rest reuse the
+compiled objects (big win on the full build + pre-push). For your
+interactive builds, add `export IDF_CCACHE_ENABLE=1` to your shell (or
+source it before `idf.py`). Stats: `ccache -s`.
 
-**Component manager** : `check.sh` exporte aussi `IDF_COMPONENT_CHECK_NEW_VERSION=0`.
-Sans ça, le manager 2.2.2 (2026-09-18) interroge le registre à chaque
-configuration et évalue les manifestes de LVGL 9 contre notre sdkconfig LVGL 8 →
-`MissingKconfigError: LV_USE_LIBJPEG_TURBO`, fatal. Pour un `idf.py` à la main
-hors `check.sh`, exporter la même variable.
+**Component manager**: `check.sh` also exports
+`IDF_COMPONENT_CHECK_NEW_VERSION=0`. Without it, the 2.2.2 manager
+(2026-09-18) queries the registry on every configure and evaluates LVGL 9's
+manifests against our LVGL 8 sdkconfig → `MissingKconfigError:
+LV_USE_LIBJPEG_TURBO`, fatal. For a manual `idf.py` outside `check.sh`,
+export the same variable.
 
-**Important** : avec `-DSDKCONFIG=build_kase_<name>/sdkconfig`, chaque board a
-son sdkconfig isolé dans son dossier build — plus de fuite de config entre
-boards. Le `sdkconfig` historique à la racine reste celui d'un build legacy
-sans `-DSDKCONFIG` ; ne pas mélanger les deux modes sur un même board.
+**Important**: with `-DSDKCONFIG=build_kase_<name>/sdkconfig`, each board
+has its sdkconfig isolated in its build folder — no more config leakage
+between boards. The legacy `sdkconfig` at the root remains that of a
+legacy build without `-DSDKCONFIG`; do not mix the two modes on the same
+board.
 
 ## Flash
 
-**App only** (NVS préservée) :
+**App only** (NVS preserved):
 ```bash
 idf.py -B build_v<N> -p /dev/ttyUSB0 flash
 # ou: esptool.py write_flash 0x20000 build_v<N>/KeSp.bin
 ```
 
-**Full flash** (erase + bootloader + partition table + app + storage) :
+**Full flash** (erase + bootloader + partition table + app + storage):
 ```bash
 esptool.py --chip esp32s3 -p /dev/ttyUSB0 erase_flash
 esptool.py --chip esp32s3 -p /dev/ttyUSB0 write_flash 0x0 kase_<board>_full.bin
 ```
 
-Requis après changement de partition table (ex: NVS resize).
+Required after a partition table change (e.g. NVS resize).
 
 ## Partition table
 
-`partitions.csv` — 16MB flash :
+`partitions.csv` — 16MB flash:
 - `nvs`      : 0x9000  + 0x10000 (64KB) — config, keymaps, stats
 - `otadata`  : 0x19000 + 0x2000
 - `phy_init` : 0x1B000 + 0x1000
@@ -305,8 +336,8 @@ Requis après changement de partition table (ex: NVS resize).
 - `ota_0`    : 0x220000 + 0x200000 (2MB)
 - `storage`  : 0x420000 + 0xF0000 (LittleFS)
 
-NVS DOIT rester à 64KB — stocke ~21KB de bigrams + keymaps + macros + etc.
-Ne pas réduire sans retirer les bigrams d'abord.
+NVS MUST stay at 64KB — stores ~21KB of bigrams + keymaps + macros + etc.
+Do not shrink it without removing the bigrams first.
 
 ## Architecture
 
@@ -319,15 +350,15 @@ main/
 │   │   ├── cdc_binary_protocol.c # Frame parser, CRC
 │   │   ├── cdc_binary_cmds.c    # All command handlers
 │   │   └── cdc_ota.c            # OTA binary helpers
-│   ├── rf/               # nRF24 — relais dongle, lien inter-moitiés
-│   │   ├── rf_driver.c          # SPI + ESB, registres nRF24 (matériel)
-│   │   ├── radio_owner.c        # la puce des moitiés : UN propriétaire (mode, verrou, excursion, sommeil)
-│   │   ├── keymap_pull.c        # gauche : tirage de la keymap du dongle par ACK payload
-│   │   ├── rf_packet.h          # trames + géométrie de demi-matrice (4×7)
-│   │   ├── rf_slot.h            # slots dongle + PLAN DE CANAUX 2,4 GHz
-│   │   ├── kbd_relay_tx.c       # la GAUCHE : brut → dongle, écoute USB de la droite, sync keymap
-│   │   ├── half_link.c          # la DROITE : demi-matrice → dongle, repli vers la gauche
-│   │   └── rf_probe.c           # diagnostic de banc (NRF_PROBE), test de lignes
+│   ├── rf/               # nRF24 — dongle relay, inter-half link
+│   │   ├── rf_driver.c          # SPI + ESB, nRF24 registers (hardware)
+│   │   ├── radio_owner.c        # the halves' chip: ONE owner (mode, lock, excursion, sleep)
+│   │   ├── keymap_pull.c        # left: pulling the keymap from the dongle via ACK payload
+│   │   ├── rf_packet.h          # frames + half-matrix geometry (4×7)
+│   │   ├── rf_slot.h            # dongle slots + 2.4 GHz CHANNEL PLAN
+│   │   ├── kbd_relay_tx.c       # the LEFT: raw → dongle, listens for the right's USB, keymap sync
+│   │   ├── half_link.c          # the RIGHT: half-matrix → dongle, fallback to the left
+│   │   └── rf_probe.c           # bench diagnostic (NRF_PROBE), line test
 │   ├── ble/              # Bluetooth LE HID
 │   │   └── hid_bluetooth_manager.c
 │   ├── usb/              # USB HID + CDC TinyUSB init
@@ -346,34 +377,34 @@ main/
 │   ├── status_display.c  # Coordinator
 │   ├── oled/             # I2C OLED (V2/V2D)
 │   ├── round/            # SPI GC9A01 (V1)
-│   ├── memlcd/           # Sharp memory-LCD des moitiés Niphargus (68×160 portrait)
-│   └── assets/           # images LVGL (logo Niphargus généré par scripts/gen_logo_memlcd.sh)
-├── power/                # veille_task.c (UNE tâche : vetos, hooks, HB), veille.c (séquence B7),
-│                         # cadence.h (toutes les cadences, _Static_assert), pm_dfs.c, batt_sense.c
+│   ├── memlcd/           # Sharp memory-LCD for the Niphargus halves (68×160 portrait)
+│   └── assets/           # LVGL images (Niphargus logo generated by scripts/gen_logo_memlcd.sh)
+├── power/                # veille_task.c (ONE task: vetoes, hooks, HB), veille.c (B7 sequence),
+│                         # cadence.h (all the cadences, _Static_assert), pm_dfs.c, batt_sense.c
 └── led/                  # WS2812 strip anim (V1 only)
 
 boards/
 ├── kase_v1/   kase_v2/   kase_v2_debug/   kase_dongle/
-├── niphar_left/   niphar_right/   # Niphargus split (cartes fabriquées, en service)
+├── niphar_left/   niphar_right/   # Niphargus split (boards manufactured, in service)
 └── kase_layout.inc  # Layout JSON shared V2/V2D
 ```
 
 ## CDC protocol — binary only, no ASCII
 
-Frame format KS (request) / KR (response) avec CRC-8 :
+Frame format KS (request) / KR (response) with CRC-8:
 ```
 KS: [0x4B][0x53][cmd:u8][len:u16 LE][payload...][crc8]
 KR: [0x4B][0x52][cmd:u8][status:u8][len:u16 LE][payload...][crc8]
 ```
 
-Voir `docs/CDC_BINARY_PROTOCOL.md` pour la doc complète et
-`main/comm/cdc/cdc_binary_protocol.h` pour les IDs (KS_CMD_*).
+See `docs/CDC_BINARY_PROTOCOL.md` for the full doc and
+`main/comm/cdc/cdc_binary_protocol.h` for the IDs (KS_CMD_*).
 
-**Jamais d'ajout de commande ASCII** — le protocole texte a été retiré en v3.7.
+**Never add an ASCII command** — the text protocol was removed in v3.7.
 
 ## Keycodes (16-bit)
 
-Encoding dans `main/input/key_definitions.h`. Ranges :
+Encoding in `main/input/key_definitions.h`. Ranges:
 - `0x00-0xFF` : HID standard
 - `0x0100-0x0A00` : MO(layer)
 - `0x0B00-0x1400` : TO(layer)
@@ -385,14 +416,15 @@ Encoding dans `main/input/key_definitions.h`. Ranges :
 - `0x6000-0x6FFF` : TD(index)
 - `0x7000-0x7FFF` : LM(layer, mods)
 
-## NVS — données persistées
+## NVS — persisted data
 
-Namespace : `"storage"` (défini `STORAGE_NAMESPACE`).
-Clés :
-- `keymaps`, `layout_names` — ⚠ la taille du blob suit `KEYMAP_COLS`, qui vaut
-  14 sur la moitié gauche du Niphargus contre 7 ailleurs. `load_keymaps` refuse
-  un blob de taille différente et garde les défauts compile-time : un changement
-  de dimension invalide donc les keymaps stockées, avec un avertissement.
+Namespace: `"storage"` (defined as `STORAGE_NAMESPACE`).
+Keys:
+- `keymaps`, `layout_names` — ⚠ the blob size follows `KEYMAP_COLS`, which
+  is 14 on the Niphargus left half versus 7 elsewhere. `load_keymaps`
+  rejects a blob of a different size and keeps the compile-time defaults:
+  a dimension change therefore invalidates the stored keymaps, with a
+  warning.
 - `macros`
 - `key_stats`, `key_stats_tot`, `bigram_stats`, `bigram_total`
 - `td_configs`, `td_count`
@@ -401,140 +433,144 @@ Clés :
 - `ko_cfg`, `ko_cnt`
 - `bt_slots`, `bt_active`, `bt_enabled`
 
-**Jamais** d'erase NVS au boot sans raison explicite (safe mode préserve
-les données depuis v3.7.8).
+**Never** erase NVS at boot without an explicit reason (safe mode has
+preserved the data since v3.7.8).
 
 ## Safe boot
 
-RTC memory tracking du nombre de boots consécutifs (`BOOT_CRASH_MAGIC`).
-Si > 3 → `safe_mode = true` : skip display/BLE/NVS config loads. USB HID
-basique reste fonctionnel. NVS NON effacée.
+RTC memory tracking of the number of consecutive boots (`BOOT_CRASH_MAGIC`).
+If > 3 → `safe_mode = true`: skip display/BLE/NVS config loads. Basic USB
+HID stays functional. NVS NOT erased.
 
-## Conventions C
+## C conventions
 
-- **Pas de `malloc` dans les hot paths** (scan, HID send, callbacks ISR).
-  Buffers statiques ou pile.
-- **`IRAM_ATTR`** pour les ISR / callbacks gptimer.
-- **Pas de `ESP_LOGI`** dans les callbacks de scan matrice (trop lent).
-  Utiliser `ESP_LOGD` avec niveau défini à NONE en prod.
-- **Mutex LVGL** : tout accès LVGL doit être entouré de
+- **No `malloc` in hot paths** (scan, HID send, ISR callbacks). Static or
+  stack buffers.
+- **`IRAM_ATTR`** for ISR / gptimer callbacks.
+- **No `ESP_LOGI`** in matrix scan callbacks (too slow). Use `ESP_LOGD`
+  with the level set to NONE in production.
+- **LVGL mutex**: every LVGL access must be wrapped in
   `lvgl_port_lock()` / `lvgl_port_unlock()`.
-- **`lv_obj_is_valid()`** avant d'accéder à un objet LVGL après un
-  potentiel `display_clear_screen()`.
-- **NVS writes** via `nvs_save_blob_with_total()` pour éviter les
-  corruptions si la struct change.
+- **`lv_obj_is_valid()`** before accessing an LVGL object after a possible
+  `display_clear_screen()`.
+- **NVS writes** via `nvs_save_blob_with_total()` to avoid corruption if
+  the struct changes.
 
 ## Tests
 
-Tests host-side dans `test/` (CMake standalone). Pas de tests embedded
-sur le target. Exécution : `cd test/build && ./test_runner`.
+Host-side tests in `test/` (standalone CMake). No embedded tests on
+target. Run with: `cd test/build && ./test_runner`.
 
-Les tests doivent être parallel-safe : pas d'état global muté, pas de
-chemins temp partagés. Mocks NVS via fake implementations dans le test.
+Tests must be parallel-safe: no mutated global state, no shared temp
+paths. NVS mocks via fake implementations in the test.
 
-## Workflow anti-régression (OBLIGATOIRE)
+## Anti-regression workflow (MANDATORY)
 
-Source unique de vérité : `scripts/check.sh` (scaffold tripwire v0.13.0 ;
-`--host-only`/`--board` sont des alias conservés de `--fast`/`--variant`,
-déclarés dans `.tripwire-divergences`).
-- `./scripts/check.sh --fast` — tests host CMake (~secondes)
-- `./scripts/check.sh --variant <name>` — fast + build d'un board
-- `./scripts/check.sh` — fast + les 7 boards (sdkconfig isolé par board)
-- Skip-si-déjà-vert : état inchangé depuis le dernier vert → sortie immédiate ;
-  `--force` pour relancer quand même.
-- Sur rouge : le détail de la commande fautive est dans
-  `.git/tripwire/last-fail.log` — le lire au lieu de relancer le build.
-- **Sans `idf.py` dans le PATH** (hors devshell Nix), la phase de build se
-  **saute en l'annonçant** au lieu de rendre rouge : un rouge qui veut dire
-  « toolchain absente » est indiscernable d'un rouge qui veut dire « code
-  cassé », et finit par ne plus être lu. Pour un check complet, lancer
-  `./scripts/check.sh` dans le devshell.
+Single source of truth: `scripts/check.sh` (tripwire scaffold v0.13.0;
+`--host-only`/`--board` are aliases kept from `--fast`/`--variant`,
+declared in `.tripwire-divergences`).
+- `./scripts/check.sh --fast` — host CMake tests (~seconds)
+- `./scripts/check.sh --variant <name>` — fast + build of one board
+- `./scripts/check.sh` — fast + all 7 boards (sdkconfig isolated per board)
+- Skip-if-already-green: unchanged state since the last green → immediate
+  exit; `--force` to rerun anyway.
+- On red: the failing command's detail is in
+  `.git/tripwire/last-fail.log` — read it instead of rerunning the build.
+- **Without `idf.py` in the PATH** (outside the Nix devshell), the build
+  phase **skips itself while announcing it** instead of turning red: a red
+  that means "toolchain missing" is indistinguishable from a red that
+  means "code broken", and ends up not being read anymore. For a full
+  check, run `./scripts/check.sh` inside the devshell.
 
-**Activation des hooks git (une fois par clone)** :
+**Enabling git hooks (once per clone)**:
 ```bash
 ./scripts/install-hooks.sh   # ou: git config core.hooksPath scripts/hooks
 ```
-`pre-push` lance le check complet et bloque le push si rouge. WIP : `git push --no-verify`.
+`pre-push` runs the full check and blocks the push if red. WIP:
+`git push --no-verify`.
 
-**Hooks Claude Code** (`.claude/settings.json`, automatiques). Échelle de
-gravité : **pendant → informe, à la conclusion → bloque, au push → bloque.**
-- `PostToolUse` sur édition de `.c/.h` dans `main/`, `boards/`, `test/` →
-  `check.sh --fast`, en **avis non bloquant**. Il signale le rouge sans
-  interrompre : la norme TDD impose d'écrire l'assertion rouge AVANT
-  l'implémentation, et bloquer là ferait sonner l'alarme à chaque pas correct.
-  Un avis n'est pas à ignorer pour autant.
-- `Stop` → `check.sh --fast` et il **bloque** : on ne conclut pas un tour sur du
-  rouge. Le build des 7 boards n'est PAS relancé à chaque fin de tour, il reste
-  garanti au pre-push.
-- `pre-push` → check complet, **bloquant**.
+**Claude Code hooks** (`.claude/settings.json`, automatic). Severity
+scale: **during → informs, at wrap-up → blocks, on push → blocks.**
+- `PostToolUse` on editing `.c/.h` in `main/`, `boards/`, `test/` →
+  `check.sh --fast`, as a **non-blocking notice**. It flags red without
+  interrupting: the TDD standard requires writing the red assertion
+  BEFORE the implementation, and blocking there would sound the alarm on
+  every correct step. A notice is still not to be ignored.
+- `Stop` → `check.sh --fast` and it **blocks**: a turn is not concluded on
+  red. The 7-board build is NOT rerun at the end of every turn, it stays
+  guaranteed at pre-push.
+- `pre-push` → full check, **blocking**.
 
-Un rouge de Stop ou de pre-push ne s'ignore jamais et ne se contourne pas par
-`--no-verify` sans raison écrite.
+A red from Stop or pre-push is never ignored and never bypassed with
+`--no-verify` without a written reason.
 
-Board courant (lu par `cc_session_start.sh`) : `echo kase_v1 > .kase-board`.
+Current board (read by `cc_session_start.sh`): `echo kase_v1 > .kase-board`.
 
-**Divergences déclarées** : `.tripwire-divergences` (committé) liste les écarts
-assumés au scaffold standard. Une ligne `fichier<TAB>motif<TAB>pourquoi` ;
-`check.sh` rend rouge la disparition d'un motif déclaré. Le fichier hôte doit
-être **suivi par git** : un fichier gitignoré ne change pas l'empreinte du
-skip-si-déjà-vert, donc sa perte peut passer sous un « déjà vert — skip ».
-**Limite** : un écart non déclaré n'est protégé par rien et le prochain
-re-scaffold l'effacera — toute divergence délibérée se déclare au moment où on
-l'introduit.
+**Declared divergences**: `.tripwire-divergences` (committed) lists the
+deviations accepted from the standard scaffold. One line
+`file<TAB>pattern<TAB>why`; `check.sh` turns red if a declared pattern
+disappears. The host file must be **tracked by git**: a gitignored file
+doesn't change the skip-if-already-green fingerprint, so its loss can slip
+under an "already green — skip". **Limitation**: an undeclared deviation
+is protected by nothing and the next re-scaffold will erase it — every
+deliberate divergence is declared at the moment it is introduced.
 
-**Contrat de comportements** : `COMPORTEMENTS.md` (committé) liste ce que le
-firmware doit faire, chaque comportement tagué par ce qui le garde — `[test:X]`,
-`[smoke:X]` (item de `docs/HARDWARE_SMOKE_TEST.md`, vérifié à la main avant
-chaque release), ou `[NON GARDÉ]` (compté dans `.tripwire-nongardes`, ratchet
-strict au push). **Le lire avant de toucher une source.** Une source modifiée
-sans test ni contrat touché est une question sans réponse : le hook par
-édition la pose, le Stop bloque. Y répondre = un test, ou une ligne au contrat.
-Un `[NON GARDÉ]` est une réponse honnête, pas une échappatoire gratuite.
+**Behaviour contract**: `COMPORTEMENTS.md` (committed) lists what the
+firmware must do, each behaviour tagged by what guards it — `[test:X]`,
+`[smoke:X]` (an item from `docs/HARDWARE_SMOKE_TEST.md`, checked by hand
+before every release), or `[NON GARDÉ]` (counted in
+`.tripwire-nongardes`, a strict ratchet at push time). **Read it before
+touching a source file.** A source modified with neither a test nor the
+contract touched is an unanswered question: the per-edit hook raises it,
+Stop blocks it. Answering it means a test, or a line in the contract. A
+`[NON GARDÉ]` is an honest answer, not a free pass.
 
-**Jamais** builder deux boards dans le même `build/` avec le `sdkconfig` racine
-(fuite de config). Toujours `-B build_<board> -DSDKCONFIG=build_<board>/sdkconfig`.
+**Never** build two boards in the same `build/` with the root `sdkconfig`
+(config leakage). Always `-B build_<board>
+-DSDKCONFIG=build_<board>/sdkconfig`.
 
-### Norme TDD — nouvelle logique pure
-Toute nouvelle fonction de logique pure (keymap, layers, combo, tap-hold,
-parsing CDC, encoding keycodes…) : test host écrit **d'abord**, ajouté à
-`test/CMakeLists.txt` + déclaré dans `test/test_main.c`. Le test doit être rouge
-avant l'implémentation, vert après, et parallel-safe. Invoquer l'agent
-`kase-test-author`.
+### TDD standard — new pure logic
+Every new pure-logic function (keymap, layers, combo, tap-hold, CDC
+parsing, keycode encoding…): a host test written **first**, added to
+`test/CMakeLists.txt` + declared in `test/test_main.c`. The test must be
+red before the implementation, green after, and parallel-safe. Invoke the
+`kase-test-author` agent.
 
-### Économie de modèles (subagents)
-Le pipeline check.sh permet de descendre en gamme SANS risque d'hallucination,
-mais seulement là où un oracle rattrape l'erreur :
-- **Modèle économique (haiku) OK** : transcription de code déjà spécifié,
-  refactors mécaniques, extraction citée (`fichier:ligne` obligatoire) — le
-  check, la compilation ou le recoupement des citations attrapent la dérive.
-- **Jamais en dessous de sonnet** : review, audit, debug, **et l'écriture
-  d'assertions de test** — une assertion tautologique ou un verdict halluciné
-  passent l'oracle mécanique au vert. Le jugement ne descend pas en gamme.
-- Toute tâche économique DOIT finir par `./scripts/check.sh --fast` vert, et
-  un test rewiré/écrit DOIT prouver qu'il mord (bug transitoire → rouge → revert).
+### Model economy (subagents)
+The check.sh pipeline allows dropping to a cheaper model tier WITHOUT risk
+of hallucination, but only where an oracle catches the error:
+- **Economy model (haiku) OK**: transcription of already-specified code,
+  mechanical refactors, cited extraction (`file:line` mandatory) — the
+  check, the compilation, or cross-checking the citations catch drift.
+- **Never below sonnet**: review, audit, debug, **and writing test
+  assertions** — a tautological assertion or a hallucinated verdict pass
+  the mechanical oracle as green. Judgment does not drop a tier.
+- Every economy-tier task MUST end with `./scripts/check.sh --fast` green,
+  and a rewired/written test MUST prove it bites (transient bug → red →
+  revert).
 
-### Quand invoquer les agents kase-*
+### When to invoke the kase-* agents
 - `kase-firmware-debugger` → backtrace / boot loop / crash.
-- `kase-test-author` → ajout de logique pure (cf. norme TDD).
-- `kase-code-reviewer` → avant un merge / release.
-Les autres (`cdc-protocol`, `board-variant`, `release-manager`, `maintainer`,
-`security-auditor`) : à la demande ponctuelle.
+- `kase-test-author` → adding pure logic (see TDD standard).
+- `kase-code-reviewer` → before a merge / release.
+The others (`cdc-protocol`, `board-variant`, `release-manager`,
+`maintainer`, `security-auditor`): on an ad-hoc basis.
 
-### Avant un merge vers main / release
-Dérouler `docs/HARDWARE_SMOKE_TEST.md` sur les boards concernés.
+### Before a merge to main / release
+Run through `docs/HARDWARE_SMOKE_TEST.md` on the boards concerned.
 
-## Dépendances ESP-IDF
+## ESP-IDF dependencies
 
-Managed via `main/idf_component.yml` :
+Managed via `main/idf_component.yml`:
 - `espressif/esp_tinyusb`
 - `lvgl/lvgl: ^8`
 - `espressif/esp_lvgl_port`
 - `espressif/esp_lcd_gc9a01`
 - `joltwallet/littlefs`
-- `espressif/keyboard_button` (local dans `components/`)
+- `espressif/keyboard_button` (local in `components/`)
 - `espressif/led_strip`
 
-Lock : `dependencies.lock` (tracké git). Pour mettre à jour :
+Lock: `dependencies.lock` (tracked in git). To update:
 ```bash
 rm dependencies.lock && rm -rf managed_components/
 idf.py reconfigure
@@ -542,21 +578,20 @@ idf.py reconfigure
 
 ## Hardware specifics
 
-**USB** : ESP32-S3 OTG Full-Speed only (12 Mbps, max packet 64 bytes).
-Pas de High-Speed possible.
+**USB**: ESP32-S3 OTG Full-Speed only (12 Mbps, max packet 64 bytes). No
+High-Speed possible.
 
-**Console UART désactivée** (`CONFIG_ESP_CONSOLE_NONE=y`) — libère
-GPIO43/44/16 pour le scan matrice sur V2 (qui utilise UART0).
+**Console UART disabled** (`CONFIG_ESP_CONSOLE_NONE=y`) — frees up
+GPIO43/44/16 for matrix scanning on V2 (which uses UART0).
 
-**GPIO reset** : `matrix_setup()` fait `gpio_reset_pin()` sur toutes les
-pins matrice pour détacher les fonctions bootloader (UART0, SPI flash
-secondaire).
+**GPIO reset**: `matrix_setup()` calls `gpio_reset_pin()` on all matrix
+pins to detach bootloader functions (UART0, secondary SPI flash).
 
 ## Release workflow
 
-1. Bump version via tag git `vX.Y.Z`
-2. `./scripts/check.sh` doit être vert (les 7 boards build)
-3. Merge binaries avec `esptool.py merge_bin` pour les `_full.bin`
+1. Bump the version via git tag `vX.Y.Z`
+2. `./scripts/check.sh` must be green (all 7 boards build)
+3. Merge binaries with `esptool.py merge_bin` for the `_full.bin` files
 4. `glab release create vX.Y.Z <files...>` (app + full)
 
-Voir `docs/` pour protocoles et keycodes détaillés.
+See `docs/` for detailed protocols and keycodes.

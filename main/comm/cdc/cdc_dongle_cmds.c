@@ -17,8 +17,8 @@
 #include "cdc_binary_protocol.h"
 #include "rf_rx_task.h"
 #include "rf_pairing.h"
-#include "dongle_engine.h"   /* fusion : cohérence de config gauche↔dongle */
-#include "hid_transport.h"   /* compteurs d'envoi USB (RF_STATUS) */
+#include "dongle_engine.h"   /* fusion: left<->dongle config coherence */
+#include "hid_transport.h"   /* USB send counters (RF_STATUS) */
 
 #include <string.h>
 #include <stdint.h>
@@ -47,31 +47,31 @@ static inline void put_u32_le(uint8_t *p, uint32_t v)
 /* ── KS_CMD_RF_STATUS ───────────────────────────────────────────────
  * Request: no payload.
  * Response (51 bytes):
- *   [0]    flags         bit0=lien clavier, bit1=lien souris,
- *                        bit2=radio 1 PRESENTE, bit3=radio 2 PRESENTE,
+ *   [0]    flags         bit0=keyboard link, bit1=mouse link,
+ *                        bit2=radio 1 PRESENT, bit3=radio 2 PRESENT,
  *                        bits4-7=rsvd
- *                        (présence = le module a répondu au probe SPI ; une
- *                         radio absente n'écoutera jamais, ce qu'aucun bit
- *                         de lien ne permettait de distinguer)
+ *                        (present = the module answered the SPI probe; an
+ *                         absent radio will never listen, which no link
+ *                         bit could distinguish)
  *   [1]    sig_left      rf_signal_q255(link_up,age,link_q) — 0..255, 0=down
  *   [2]    sig_right     idem for the right half
- *   [3..6]   age_kbd     u32 LE ms depuis le dernier paquet du clavier
- *   [7..10]  age_mouse   idem souris
- *   [11..14] pkt_rx_kbd  u32 LE paquets acceptés du clavier
- *   [15..18] pkt_rx_mouse idem souris
- *   [19..22] pkt_dup_kbd u32 LE doublons rejetés du clavier
- *   [23..26] pkt_dup_mouse idem souris
- *   [27..30] transitions_ecrasees u32 LE (fusion) : trames qui ont changé
- *            l'état d'une moitié avant que le moteur ait joué le changement
- *            précédent — chacune est un tap potentiellement perdu ou fondu.
- *            0 hors fusion.
- *   [31..34] gap_moteur_max_ms u32 LE (fusion) : plus long écart entre deux
- *            tours du moteur depuis la dernière lecture (remis à 0). Un tap de
- *            70 ms n'est écrasé que si le moteur a dormi 70 ms.
- *   [35..36] kb_usb_ok u16 LE, [37..38] kb_usb_refuses u16 LE : rapports
- *            clavier USB partis / refusés (point d'accès muet) ;
- *   [39..40] reprises u16 LE, [41..42] reprises_ratees u16 LE : bus suspendu
- *            à l'envoi → réveil distant demandé / toujours suspendu 100 ms après.
+ *   [3..6]   age_kbd     u32 LE ms since the last keyboard packet
+ *   [7..10]  age_mouse   idem for the mouse
+ *   [11..14] pkt_rx_kbd  u32 LE accepted keyboard packets
+ *   [15..18] pkt_rx_mouse idem for the mouse
+ *   [19..22] pkt_dup_kbd u32 LE rejected keyboard duplicates
+ *   [23..26] pkt_dup_mouse idem for the mouse
+ *   [27..30] transitions_ecrasees u32 LE (fusion): frames that changed a
+ *            half's state before the engine had played the previous change
+ *            — each one is a tap potentially lost or merged.
+ *            0 outside fusion.
+ *   [31..34] gap_moteur_max_ms u32 LE (fusion): longest gap between two
+ *            engine rounds since the last read (reset to 0). A 70 ms tap is
+ *            only overwritten if the engine slept for 70 ms.
+ *   [35..36] kb_usb_ok u16 LE, [37..38] kb_usb_refuses u16 LE: USB keyboard
+ *            reports sent / refused (silent access point);
+ *   [39..40] reprises u16 LE, [41..42] reprises_ratees u16 LE: bus suspended
+ *            on send -> remote wake requested / still suspended 100 ms later.
  */
 static void bin_cmd_rf_status(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
@@ -157,11 +157,11 @@ static void bin_cmd_rf_pair_reset(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
     (void)p; (void)l;
 
-    /* Le code d'erreur remonte dans la charge utile : sans console, un
-     * KS_STATUS_ERR_UNKNOWN nu ne dit rien de ce que la NVS reproche.
-     * Constaté au banc le 2026-08-26 — cette commande echouait, le dongle
-     * n'enregistrait aucun appairage, et il n'y avait aucun moyen de savoir
-     * pourquoi depuis l'exterieur. */
+    /* The error code is carried back in the payload: without a console, a
+     * bare KS_STATUS_ERR_UNKNOWN says nothing about what the NVS is
+     * complaining about. Observed at the bench on 2026-08-26 — this command
+     * was failing, the dongle recorded no pairing, and there was no way to
+     * know why from the outside. */
     esp_err_t e = rf_pairing_reset_dongle();
     if (e != ESP_OK) {
         uint8_t err[4];
@@ -205,16 +205,16 @@ static void bin_cmd_battery(uint8_t cmd, const uint8_t *p, uint16_t l)
 }
 
 /* ── KS_CMD_CONFIG_COHERENCE ────────────────────────────────────────
- * Garde-fou de sync (fusion) : en sans-fil, le dongle tape avec SA keymap. Si
- * elle diverge de celle réglée sur la gauche, il tape autre chose en silence.
- * La gauche annonce son empreinte par RF (STATUS/config_fp) ; le dongle la
- * compare et l'expose ici au contrôleur, qui peut avertir l'utilisateur.
+ * Sync safeguard (fusion): wirelessly, the dongle types with ITS OWN keymap. If
+ * it diverges from the one set on the left half, it silently types something else.
+ * The left half announces its fingerprint over RF (STATUS/config_fp); the dongle
+ * compares it and exposes it here to the controller, which can warn the user.
  * Request: no payload.
  * Response (13 bytes):
- *   [0..3]   own_fp   u32 LE — empreinte de la keymap du dongle (0 = hors fusion)
- *   [4..7]   left_fp  u32 LE — dernière empreinte annoncée par la gauche (0 = jamais)
- *   [8..11]  age_ms   u32 LE — ancienneté de l'annonce (0xFFFFFFFF = jamais)
- *   [12]     match    u8 — 1 = cohérent (égales et non nulles), 0 sinon
+ *   [0..3]   own_fp   u32 LE — fingerprint of the dongle's keymap (0 = outside fusion)
+ *   [4..7]   left_fp  u32 LE — last fingerprint announced by the left half (0 = never)
+ *   [8..11]  age_ms   u32 LE — age of the announcement (0xFFFFFFFF = never)
+ *   [12]     match    u8 — 1 = coherent (equal and non-zero), 0 otherwise
  */
 static void bin_cmd_config_coherence(uint8_t cmd, const uint8_t *p, uint16_t l)
 {

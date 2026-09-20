@@ -1,8 +1,8 @@
-/* Layout physique du dongle en mode FUSION — redirigé vers la GAUCHE.
+/* Physical layout of the dongle in FUSION mode — redirected to the LEFT half.
  *
- * Même logique que board_keymap.c : une seule géométrie 2D, celle de la gauche
- * (boards/niphar_layout.inc). Le `#include "../niphar_layout.inc"` interne se
- * résout relativement à niphar_left/board_layout.c, donc pointe bien vers
- * boards/niphar_layout.inc quel que soit l'incluant. Compilé uniquement sous
+ * Same logic as board_keymap.c: a single 2D geometry, the left half's
+ * (boards/niphar_layout.inc). The internal `#include "../niphar_layout.inc"`
+ * resolves relative to niphar_left/board_layout.c, so it correctly points to
+ * boards/niphar_layout.inc regardless of the includer. Compiled only under
  * KASE_DONGLE_FUSION (CMake). */
 #include "../niphar_left/board_layout.c"

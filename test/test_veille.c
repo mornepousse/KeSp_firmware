@@ -1,26 +1,26 @@
-/* Choix du niveau de veille (logique pure) — brick B7.
+/* Choice of sleep level (pure logic) — brick B7.
  *
- * Deux etages, et chacun paie sa place :
+ * Two tiers, and each pays its way:
  *
- *   LEGERE  — CPU en light sleep, etat conserve, reveil en ~1 ms sur la matrice
- *             locale. 240 uA (ESP32-S3 datasheet v2.2, table 5-10, p. 68) plus
- *             4 uA pour le HT7833. Sur une 16340 de ~650 mAh, quatre heures a
- *             ce regime coutent 1 mAh : l'etage est quasiment gratuit, et c'est
- *             ce qui permet de le tenir des heures plutot que des minutes.
+ *   LIGHT  — CPU in light sleep, state kept, wakeup in ~1 ms on the local
+ *             matrix. 240 uA (ESP32-S3 datasheet v2.2, table 5-10, p. 68) plus
+ *             4 uA for the HT7833. On a ~650 mAh 16340, four hours at
+ *             this rate cost 1 mAh: the tier is almost free, and that's
+ *             what makes it possible to hold it for hours rather than minutes.
  *
- *   PROFONDE — deep sleep, 8 uA, reveil par EXT1 sur les lignes. La RAM est
- *             perdue : le reveil est un redemarrage complet, mesure a 683 ms
- *             au banc. On ne l'atteint donc qu'apres des heures d'absence, ou
- *             ce delai ne se remarque pas.
+ *   DEEP — deep sleep, 8 uA, wakeup via EXT1 on the lines. RAM is
+ *             lost: waking up is a full restart, measured at 683 ms
+ *             on the bench. So it's only reached after hours of absence, where
+ *             this delay goes unnoticed.
  *
- * L'ULP est exclu : 170 uA (meme table), soit plus de trois fois la cible de
- * 50 uA a lui seul. Le « scan RTC » annonce dans le design ne peut pas tenir.
+ * The ULP is excluded: 170 uA (same table), more than three times the target of
+ * 50 uA by itself alone. The "RTC scan" announced in the design cannot hold.
  *
- * ⚠ La radio est eteinte des l'etage LEGERE — ecouter coute 13,1 mA
- * (nRF24L01+ PS v1.0, table 4, p. 14), deux ordres de grandeur au-dessus de
- * tout budget de veille. Une moitie endormie n'entend donc PAS l'autre : le
- * reveil se fait sur sa propre matrice. C'est une contrainte de la puce, pas
- * un choix d'implementation.
+ * ⚠ The radio is off from the LIGHT tier onward — listening costs 13.1 mA
+ * (nRF24L01+ PS v1.0, table 4, p. 14), two orders of magnitude above
+ * any sleep budget. A sleeping half therefore does NOT hear the other: the
+ * wakeup happens on its own matrix. This is a constraint of the chip, not
+ * an implementation choice.
  */
 #include "test_framework.h"
 #include "../main/power/veille.h"
@@ -31,73 +31,73 @@
 static void test_activite_recente_ne_dort_pas(void)
 {
     TEST_ASSERT(veille_niveau(0, false, LEGERE, PROFONDE) == VEILLE_AUCUNE,
-                "on vient de taper");
+                "just typed");
     TEST_ASSERT(veille_niveau(LEGERE - 1, false, LEGERE, PROFONDE) == VEILLE_AUCUNE,
-                "juste avant le seuil : toujours eveille");
+                "just before the threshold: still awake");
 }
 
 static void test_etage_leger(void)
 {
     TEST_ASSERT(veille_niveau(LEGERE, false, LEGERE, PROFONDE) == VEILLE_LEGERE,
-                "au seuil : light sleep");
+                "at threshold: light sleep");
     TEST_ASSERT(veille_niveau(PROFONDE - 1, false, LEGERE, PROFONDE) == VEILLE_LEGERE,
-                "jusqu'a la derniere milliseconde avant le sommeil profond");
+                "up to the last millisecond before deep sleep");
 }
 
 static void test_etage_profond(void)
 {
     TEST_ASSERT(veille_niveau(PROFONDE, false, LEGERE, PROFONDE) == VEILLE_PROFONDE,
-                "au seuil : deep sleep");
+                "at threshold: deep sleep");
     TEST_ASSERT(veille_niveau(0xFFFFFFFFu, false, LEGERE, PROFONDE) == VEILLE_PROFONDE,
-                "et bien au-dela");
+                "and well beyond");
 }
 
 static void test_le_blocage_prime_sur_tout(void)
 {
-    /* LE test de ce fichier. Un verrou — USB branche, touche tenue, mise a jour
-     * en cours — doit interdire TOUTE veille, y compris apres des heures. Se
-     * tromper ici endort un clavier en pleine utilisation. */
+    /* THE test of this file. A lock — USB plugged in, key held, update
+     * in progress — must forbid ALL sleep, even after hours. Getting
+     * this wrong puts a keyboard to sleep while it's in active use. */
     TEST_ASSERT(veille_niveau(LEGERE, true, LEGERE, PROFONDE) == VEILLE_AUCUNE,
-                "bloque : pas de light sleep");
+                "blocked: no light sleep");
     TEST_ASSERT(veille_niveau(PROFONDE * 2, true, LEGERE, PROFONDE) == VEILLE_AUCUNE,
-                "bloque : pas de deep sleep non plus, meme apres huit heures");
+                "blocked: no deep sleep either, even after eight hours");
 }
 
 static void test_les_seuils_sont_ordonnes(void)
 {
-    /* Un profond plus court que le leger rendrait l'etage leger inatteignable,
-     * et le clavier passerait directement au redemarrage de 683 ms. */
+    /* A deep threshold shorter than the light one would make the light tier
+     * unreachable, and the keyboard would jump straight to the 683 ms restart. */
     TEST_ASSERT(VEILLE_LEGERE_MS < VEILLE_PROFONDE_MS,
-                "le seuil leger vient avant le profond");
+                "the light threshold comes before the deep one");
     TEST_ASSERT(VEILLE_PROFONDE_MS >= 3600000u,
-                "le sommeil profond n'arrive pas avant une heure d'absence");
-    /* Eveillee et oisive, la carte tire ~28 mA (160 MHz) contre 0,24 mA
-     * endormie : chaque seconde d'attente vaut cent secondes de sommeil. A
-     * 60 s, une journee de frappe perdait ~0,2 V (2026-09-15). Le leger doit
-     * rester COURT — et pas nul non plus : une pause de frappe de quelques
-     * secondes ne doit pas endormir la carte a chaque respiration. */
+                "deep sleep doesn't arrive before an hour of absence");
+    /* Awake and idle, the board draws ~28 mA (160 MHz) versus 0.24 mA
+     * asleep: every second of waiting is worth a hundred seconds of sleep. At
+     * 60 s, a day of typing used to lose ~0.2 V (2026-09-15). The light tier must
+     * stay SHORT — but not zero either: a typing pause of a few
+     * seconds should not put the board to sleep on every breath. */
     TEST_ASSERT(VEILLE_LEGERE_MS <= 20000u,
-                "le light sleep vient en 20 s au plus : eveillee, la carte coute 100 fois le sommeil");
+                "light sleep comes within 20 s at most: awake, the board costs 100 times the sleep");
     TEST_ASSERT(VEILLE_LEGERE_MS >= 5000u,
-                "mais pas avant 5 s : une respiration entre deux mots n'est pas une pause");
+                "but not before 5 s: a breath between two words is not a pause");
 }
 
-/* Grace apres un reveil : un reveil GPIO n'est PAS une activite (un glitch ne
- * doit pas acheter des secondes de radio), mais il n'est pas non plus un
- * rendormissement immediat. Une touche a pre-contact lent reveille la carte
- * avant que sa capture la voie (deux passes vides, banc 2026-09-16) ; sans
- * grace, la boucle relisait une inactivite ancienne et renvoyait dormir en
- * ~15 ms, AVANT que le pilote recree ait vu la touche — perdue. 300 ms d'eveil
- * suffisent au pilote (debounce 3 ms) et coutent ~2 uAh par glitch. */
+/* Grace period after a wakeup: a GPIO wakeup is NOT activity (a glitch must
+ * not buy seconds of radio time), but it's not an immediate
+ * fall-back-asleep either. A key with a slow pre-contact wakes the board
+ * before its capture sees it (two empty passes, bench 2026-09-16); without
+ * grace, the loop re-read a stale inactivity value and sent it back to sleep in
+ * ~15 ms, BEFORE the re-created driver had seen the key — lost. 300 ms of wakefulness
+ * is enough for the driver (3 ms debounce) and costs ~2 uAh per glitch. */
 static void test_grace_apres_reveil(void)
 {
-    TEST_ASSERT(veille_en_grace(1000, 1000, VEILLE_GRACE_REVEIL_MS), "a l'instant du reveil : en grace");
-    TEST_ASSERT(veille_en_grace(1299, 1000, VEILLE_GRACE_REVEIL_MS), "299 ms apres : encore en grace");
-    TEST_ASSERT(!veille_en_grace(1300, 1000, VEILLE_GRACE_REVEIL_MS), "300 ms apres : la grace est finie");
-    TEST_ASSERT(!veille_en_grace(5000, 0, VEILLE_GRACE_REVEIL_MS), "jamais reveille (0) : pas de grace");
-    TEST_ASSERT(veille_en_grace(50, 0xFFFFFFF0u, VEILLE_GRACE_REVEIL_MS), "debordement du compteur (reveil 16 ms avant le passage a zero, now = 50) : 66 ms ecoulees, en grace");
+    TEST_ASSERT(veille_en_grace(1000, 1000, VEILLE_GRACE_REVEIL_MS), "at the moment of wakeup: in grace");
+    TEST_ASSERT(veille_en_grace(1299, 1000, VEILLE_GRACE_REVEIL_MS), "299 ms after: still in grace");
+    TEST_ASSERT(!veille_en_grace(1300, 1000, VEILLE_GRACE_REVEIL_MS), "300 ms after: grace is over");
+    TEST_ASSERT(!veille_en_grace(5000, 0, VEILLE_GRACE_REVEIL_MS), "never woken (0): no grace");
+    TEST_ASSERT(veille_en_grace(50, 0xFFFFFFF0u, VEILLE_GRACE_REVEIL_MS), "counter overflow (wakeup 16 ms before wraparound, now = 50): 66 ms elapsed, in grace");
     TEST_ASSERT(VEILLE_GRACE_REVEIL_MS >= 100 && VEILLE_GRACE_REVEIL_MS <= 1000,
-                "entre 100 ms (pilote + rebond long) et 1 s (un glitch ne doit pas couter plus)");
+                "between 100 ms (driver + long bounce) and 1 s (a glitch must not cost more)");
 }
 
 void test_veille(void)

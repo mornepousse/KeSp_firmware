@@ -11,21 +11,21 @@
 
 #include "kbd_relay_tx.h"
 #include "rf_driver.h"
-#include "radio_owner.h"   /* la puce a un propriétaire : ce module est une politique */
+#include "radio_owner.h"   /* the chip has an owner: this module is a policy */
 #if CONFIG_KASE_DONGLE_FUSION
-#include "half_link.h"   /* excursion (RX) ; HALF_LINK_TIMEOUT_MS (fusion) */
+#include "half_link.h"   /* excursion (RX); HALF_LINK_TIMEOUT_MS (fusion) */
 #endif
 #include "rf_packet.h"
 #include "rf_slot.h"
 #include "rf_pairing.h"
 #include "usb_presence.h"   /* route poll + kbd_active_route (USB-first auto-switch) */
-#include "keymap.h"         /* keymaps[], KEYMAP_BLOB_BYTES — empreinte de config */
-#include "config_sync.h"    /* config_fp_crc32 — empreinte annoncée dans le STATUS */
+#include "keymap.h"         /* keymaps[], KEYMAP_BLOB_BYTES — config fingerprint */
+#include "config_sync.h"    /* config_fp_crc32 — fingerprint announced in STATUS */
 #if CONFIG_KASE_DONGLE_FUSION
-#include "keymap_pull.h"    /* tirage de la keymap du dongle par ACK payload */
+#include "keymap_pull.h"    /* pull of the dongle's keymap via ACK payload */
 #endif
 #if CONFIG_KASE_BATT_SENSE
-#include "batt_sense.h"     /* jauge : tension + état de charge dans STATUS */
+#include "batt_sense.h"     /* gauge: voltage + charge state in STATUS */
 #define KBD_BATT_DV()  batt_sense_dv()
 #define KBD_BATT_CHG() batt_sense_charging()
 #else
@@ -39,7 +39,7 @@
 #include "esp_system.h"     /* esp_restart */
 #include "esp_timer.h"
 #if CONFIG_KASE_VEILLE
-#include "veille_task.h"   /* hook radio, veto sync, suffixe HB */
+#include "veille_task.h"   /* radio hook, sync veto, HB suffix */
 #endif
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
@@ -54,11 +54,11 @@ static const char *TAG = "kbd_relay";
  * mouse is relative (non-idempotent) so it is NOT refreshed.
  * KBD_RELAY_REFRESH_MS / KBD_RELAY_REPOS_MS : kbd_relay_tx.h (cadence pure). */
 
-/* Répétitions du dernier rapport après un changement, à KBD_RELAY_REFRESH_MS
- * d'intervalle. 5 × 10 ms = 50 ms d'auto-réparation : un key-up perdu cinq fois
- * de suite alors que chaque émission bénéficie déjà des 15 retransmissions ESB
- * n'arrive pas en pratique. Au-delà, le lien redevient silencieux — c'est ce qui
- * rend vraie la prémisse « émissions événementielles » du design. */
+/* Repeats of the last report after a change, at KBD_RELAY_REFRESH_MS
+ * intervals. 5 x 10 ms = 50 ms of self-healing: a key-up lost five times in
+ * a row when each transmission already benefits from the 15 ESB
+ * retransmissions does not happen in practice. Beyond that, the link goes
+ * silent again — this is what makes the design's "event-driven emission" premise true. */
 #define KBD_RELAY_REPEATS     5
 
 /* ── Fallback NRF pin config ────────────────────────────────────────────────
@@ -84,31 +84,31 @@ static const char *TAG = "kbd_relay";
 
 /* ── Module state ───────────────────────────────────────────────────────── */
 
-/* La puce (verrou, mode PTX/PRX, cible, sommeil) est à radio_owner.c. Ici :
- * quoi émettre, vers qui, et l'écoute de la droite en mode USB. */
+/* The chip (lock, PTX/PRX mode, target, sleep) lives in radio_owner.c. Here:
+ * what to transmit, to whom, and listening to the right half in USB mode. */
 #if CONFIG_KASE_DONGLE_FUSION
-/* Cible dongle (canal/adresse dérivés du set_id) : PTX sans fil ; en USB la
- * puce passe en PRX sur le lien (KaSe.03) — radio_mode() dit où on en est. */
+/* Dongle target (channel/address derived from set_id): wireless PTX; over
+ * USB the chip switches to PRX on the link (KaSe.03) — radio_mode() says where we stand. */
 static rf_radio_cfg_t s_kbd_cfg;
-/* Dernière demi-matrice de la DROITE reçue (réémise par le dongle) en mode USB.
- * Le moteur de la gauche la lit via kbd_relay_remote_pressed() pour la fusionner
- * dans les colonnes hautes — chemin maître, étape 4b. */
+/* Last half-matrix of the RIGHT half received (re-emitted by the dongle) in
+ * USB mode. The left half's engine reads it via kbd_relay_remote_pressed()
+ * to merge it into the high columns — master path, step 4b. */
 static uint8_t          s_remote_bm[RF_HALF_BITMAP_BYTES];
 static volatile bool    s_remote_changed;
 static uint32_t         s_remote_ms;
-/* Dernière demi-matrice LOCALE émise au dongle + quand. Le rafraîchissement
- * réaffirme les maintiens (sinon le dongle relâche la gauche sur silence — même
- * piège que half_link côté droite). */
+/* Last LOCAL half-matrix sent to the dongle + when. The refresh reaffirms
+ * held keys (otherwise the dongle releases the left half on silence — the
+ * same trap as half_link on the right side). */
 static uint8_t          s_last_left_bm[RF_HALF_BITMAP_BYTES];
 static uint32_t         s_last_left_ms;
-/* Génération de l'état local : +1 à chaque CHANGEMENT, sous s_left_mux, AVANT
- * l'émission. Une répétition (réparation bornée, réaffirmation à 100 ms)
- * snapshotte état + génération et n'est émise par le propriétaire que si la
- * génération n'a pas bougé quand il acquiert le verrou (radio_emettre PERIME).
- * Sans ça : le timer relisait l'appui pendant que le callback de scan émettait
- * le relâchement, attendait le verrou derrière lui, puis émettait l'appui
- * périmé — P, R, P, R : un double appui sur appui court, que la file de
- * transitions du dongle rejouait fidèlement (banc 2026-09-20). */
+/* Generation of the local state: +1 on every CHANGE, under s_left_mux,
+ * BEFORE transmission. A repeat (bounded repair, 100 ms reaffirmation)
+ * snapshots state + generation and is only transmitted by the owner if the
+ * generation has not moved by the time it acquires the lock (radio_emettre
+ * STALE). Without this: the timer would re-read the press while the scan
+ * callback transmitted the release, wait for the lock behind it, then
+ * transmit the stale press — P, R, P, R: a double press on a short tap,
+ * which the dongle's transition queue faithfully replayed (bench 2026-09-20). */
 static volatile uint32_t s_last_left_gen;
 static portMUX_TYPE      s_left_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool gen_valide(void *ctx) { return s_last_left_gen == *(const uint32_t *)ctx; }
@@ -116,53 +116,53 @@ static bool gen_valide(void *ctx) { return s_last_left_gen == *(const uint32_t *
 static bool s_paired = false;
 
 
-/* Dernier rapport clavier, pour le rafraîchissement périodique. */
+/* Last keyboard report, for the periodic refresh. */
 static uint8_t s_last_mod;
 static uint8_t s_last_kb[6];
-static kbd_refresh_t s_refresh;   /* répétition bornée — voir kbd_relay_tx.h */
+static kbd_refresh_t s_refresh;   /* bounded repeat — see kbd_relay_tx.h */
 static esp_timer_handle_t s_refresh_timer;   /* periodic refresh; stopped during sleep */
 
-/* Bilan du chemin radio. Sans lui, une frappe perdue en mode RF est
- * INDISCERNABLE. Trois issues : remis (ACK), refusé par le propriétaire (verrou
- * pris sous 20 ms, ou puce en PRX / endormie — l'émission n'a pas eu lieu),
- * refusé par l'ESB (MAX_RT). */
+/* Radio path tally. Without it, a keystroke lost in RF mode is
+ * INDISTINGUISHABLE. Three outcomes: delivered (ACK), refused by the owner
+ * (lock held under 20 ms, or chip in PRX / asleep — transmission never
+ * happened), refused by the ESB (MAX_RT). */
 static uint32_t s_tx_remis, s_tx_sans_mutex, s_tx_refuses;
 
-/* Date de la DERNIÈRE émission, tous types confondus, et compteur de la trame
- * d'état. Un rapport HID entretient le lien aussi bien qu'une trame de
- * supervision : inutile d'en ajouter pendant la frappe. */
+/* Timestamp of the LAST transmission, of any kind, and the status frame
+ * counter. A HID report keeps the link alive just as well as a supervision
+ * frame: no point adding one while typing. */
 static uint32_t s_derniere_emission_ms;
-static uint8_t  s_sans_ack_ecran = 3;   /* émissions consécutives sans ACK : « dongle vu » pour l'écran (3 = pas encore vu) */
+static uint8_t  s_sans_ack_ecran = 3;   /* consecutive transmissions without ACK: "dongle seen" for the screen (3 = not seen yet) */
 static uint8_t  s_status_seq;
 
 #if CONFIG_KASE_DONGLE_FUSION
-/* Le tirage de keymap par ACK payload est dans keymap_pull.c. */
-/* Émission brute d'une demi-matrice SANS armer la réémission — voir plus bas.
- * Retourne true si la trame est partie. */
+/* The keymap pull via ACK payload lives in keymap_pull.c. */
+/* Raw transmission of a half-matrix WITHOUT arming the re-emission — see
+ * below. Returns true if the frame went out. */
 static bool send_matrix_frame(uint8_t half, const uint8_t *bitmap, radio_valide_cb_t encore_valide, void *ctx);
 #endif
 
-/* Émission vers le dongle. `encore_valide` (ou NULL) : pour une RÉPÉTITION,
- * le propriétaire l'évalue sous le verrou et n'émet pas un état périmé.
- * Retourne true si la trame est PARTIE (acquittée ou refusée). */
+/* Transmission to the dongle. `encore_valide` (or NULL): for a REPEAT, the
+ * owner evaluates it under the lock and does not transmit a stale state.
+ * Returns true if the frame WENT OUT (acknowledged or refused). */
 static bool kbd_tx_emettre(const uint8_t *buf, uint8_t len, radio_valide_cb_t encore_valide, void *ctx)
 {
     if (!radio_presente()) return false;
     if (radio_mode() != RADIO_PTX) {
-        /* Route USB : la puce écoute la droite, le callback de scan n'émet pas
-         * en principe (route-gated). Si on arrive ici, c'est un croisement de
-         * route : compté, pas émis. */
+        /* USB route: the chip is listening to the right half, the scan
+         * callback normally does not transmit (route-gated). If we get here,
+         * it's a route crossing: counted, not transmitted. */
         s_tx_sans_mutex++;
         return false;
     }
     {
-        /* Canal retour ACK payload (sync auto keymap) : on récupère ce que le
-         * dongle a glissé dans l'ACK. */
+        /* ACK payload return channel (auto keymap sync): retrieve what the
+         * dongle slipped into the ACK. */
         uint8_t ack[32];
         uint8_t ack_n = 0;
         radio_tx_t r = radio_emettre(buf, len, ack, &ack_n, 20, encore_valide, ctx);
-        if (r == RADIO_TX_PERIME) return false;   /* l'état a changé pendant l'attente : le nouveau est déjà parti */
-        if (r == RADIO_TX_INDISPO) {              /* rien n'est parti : verrou pris, puce endormie */
+        if (r == RADIO_TX_PERIME) return false;   /* state changed during the wait: the new one already went out */
+        if (r == RADIO_TX_INDISPO) {              /* nothing went out: lock held, chip asleep */
             s_tx_sans_mutex++;
             ESP_LOGW(TAG, "rapport ABANDONNE (radio indisponible) — remis %u, perdus %u+%u",
                      (unsigned)s_tx_remis, (unsigned)s_tx_sans_mutex, (unsigned)s_tx_refuses);
@@ -170,16 +170,16 @@ static bool kbd_tx_emettre(const uint8_t *buf, uint8_t len, radio_valide_cb_t en
         }
         bool ok = (r == RADIO_TX_ACK);
 #if CONFIG_KASE_DONGLE_FUSION
-        keymap_pull_on_ack(ack, ack_n);   /* balise ou chunk glissé dans l'ACK */
+        keymap_pull_on_ack(ack, ack_n);   /* beacon or chunk slipped into the ACK */
 #endif
         if (ok) s_tx_remis++; else s_tx_refuses++;
         s_derniere_emission_ms = (uint32_t)(esp_timer_get_time() / 1000);
         if (ok) s_sans_ack_ecran = 0; else if (s_sans_ack_ecran < 255) s_sans_ack_ecran++;
-        /* Trace par rapport, en DEBUG : c'est elle qui a montré, le 2026-09-11,
-         * que la gauche émettait correctement la touche de réveil — et qu'un
-         * pouce Super capturé restait collé. Une ligne par envoi est trop pour
-         * l'usage courant ; à réactiver par le niveau de log quand une frappe
-         * se perd sans qu'on sache où. */
+        /* Per-report trace, at DEBUG level: this is what showed, on
+         * 2026-09-11, that the left half was correctly transmitting the
+         * wake key — and that a captured Super thumb stayed stuck. One line
+         * per send is too much for everyday use; re-enable via the log
+         * level when a keystroke gets lost without knowing where. */
         if (buf[0] == (PKT_TYPE_HIDREPORT << 4) && buf[1] == RF_HID_SUB_KBD)
             ESP_LOGD(TAG, "TX kbd mod=%02X kc=%02X %02X -> %s", buf[2], buf[3], buf[4],
                      ok ? "ok" : "REFUSE");
@@ -196,11 +196,11 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len) { (void)kbd_tx_emettr
  * keyboard-state refresh. Polling here keeps the debounce + cached route fresh
  * even when idle. Only transmits over RF when RF is the active path — when USB is
  * plugged we must NOT relay (the dongle would type a duplicate on its own host). */
-/* Période du timer de rafraîchissement : 10 ms tant qu'il y a quelque chose à
- * répéter (touche tenue, réparation bornée, pull de sync), 100 ms au repos.
- * À 10 ms permanents, le processeur sortait d'oisiveté 100 fois par seconde
- * pour un memcmp et un poll de route — et à chaque fois le DFS remontait la PLL.
- * La route (débounce 50 ms) et l'annonce USB (200 ms) tiennent à 100 ms. */
+/* Refresh timer period: 10 ms as long as there is something to repeat (held
+ * key, bounded repair, sync pull), 100 ms at rest. At a permanent 10 ms, the
+ * processor left idle 100 times per second for a memcmp and a route poll —
+ * and each time the DFS raised the PLL back up. The route (50 ms debounce)
+ * and the USB announcement (200 ms) hold fine at 100 ms. */
 static uint32_t s_periode_ms;
 static void kbd_relay_timer_set(uint32_t ms)
 {
@@ -218,18 +218,18 @@ static void kbd_relay_refresh_cb(void *arg)
 #if CONFIG_KASE_DONGLE_FUSION
     tenu = (s_last_left_bm[0] | s_last_left_bm[1] | s_last_left_bm[2] | s_last_left_bm[3]) != 0;
     sync = keymap_pull_en_cours();
-    ecoute_usb = (radio_mode() == RADIO_PRX);   /* route USB : ce tick vide la FIFO des trames de la droite */
+    ecoute_usb = (radio_mode() == RADIO_PRX);   /* USB route: this tick drains the FIFO of right-half frames */
 #else
-    for (int i = 0; i < 6; i++) if (s_last_kb[i]) tenu = true;   /* rapport HID tenu (V2D) */
+    for (int i = 0; i < 6; i++) if (s_last_kb[i]) tenu = true;   /* held HID report (V2D) */
     if (s_last_mod) tenu = true;
 #endif
     kbd_relay_timer_set(kbd_relay_cadence_ms(reparation, tenu, sync, ecoute_usb));
 }
 #if CONFIG_KASE_DONGLE_FUSION
-/* La demi-matrice de la droite est écrite ici (tâche esp_timer, via le
- * propriétaire) et lue par le callback de scan et la tâche clavier : les
- * quatre octets et le drapeau vont ensemble sous s_left_mux — le drapeau ne
- * doit pas pouvoir être vu avant les octets. */
+/* The right half's half-matrix is written here (esp_timer task, via the
+ * owner) and read by the scan callback and the keyboard task: the four
+ * bytes and the flag travel together under s_left_mux — the flag must not
+ * be visible before the bytes. */
 static void remote_poser(const uint8_t *bm)
 {
     taskENTER_CRITICAL(&s_left_mux);
@@ -239,17 +239,17 @@ static void remote_poser(const uint8_t *bm)
     }
     taskEXIT_CRITICAL(&s_left_mux);
 }
-/* Silence de la droite ou sortie de l'écoute : relâcher ce qu'elle tenait
- * (une moitié muette ne laisse pas une touche collée) ; sans effet si rien
- * n'était tenu. */
+/* Right half goes silent or listening stops: release what it was holding
+ * (a mute half must not leave a stuck key); no effect if nothing was
+ * held. */
 static void remote_relacher(void)
 {
     static const uint8_t rien[RF_HALF_BITMAP_BYTES];
     remote_poser(rien);
 }
-/* Consommateur des trames de la droite (réémises par le dongle sur KaSe.03),
- * appelé par le propriétaire sous son verrou : vidange périodique et vidange
- * AVANT chaque excursion. */
+/* Consumer of the right half's frames (re-emitted by the dongle on
+ * KaSe.03), called by the owner under its lock: periodic drain and drain
+ * BEFORE each excursion. */
 static void kbd_relay_rx_droite(const uint8_t *rb, uint16_t rn, void *ctx)
 {
     uint32_t now = *(uint32_t *)ctx;
@@ -264,22 +264,22 @@ static void kbd_relay_refresh_body(void)
 {
     usb_presence_poll(s_paired);
 #if CONFIG_KASE_DONGLE_FUSION
-    /* Fusion phase 2 : bascule dynamique de la radio selon la route.
-     *  - USB : la gauche tape en local. Elle passe sa radio en PRX sur le lien
-     *    (KaSe.03) pour ÉCOUTER la droite réémise par le dongle, et ANNONCE son
-     *    mode au dongle par excursion. (Sur secteur : écouter est gratuit.)
-     *  - sans-fil : radio en PTX vers le dongle (autonomie : elle n'écoute pas).
-     * Le propriétaire (radio_owner) tient le mode et le verrou ; ici on ne fait
-     * que demander PRX(lien) ou PTX(dongle) selon la route. Le callback de scan
-     * n'émet qu'en mode sans-fil (route-gated) — et en PRX le propriétaire
-     * refuserait de toute façon. */
+    /* Fusion phase 2: dynamic radio switch depending on the route.
+     *  - USB: the left half types locally. It switches its radio to PRX on
+     *    the link (KaSe.03) to LISTEN to the right half re-emitted by the
+     *    dongle, and ANNOUNCES its mode to the dongle by excursion. (Listening
+     *    is free on mains power.)
+     *  - wireless: radio in PTX towards the dongle (battery: it doesn't listen).
+     * The owner (radio_owner) holds the mode and the lock; here we only request
+     * PRX(link) or PTX(dongle) depending on the route. The scan callback only
+     * transmits in wireless mode (route-gated) — and in PRX the owner would refuse anyway. */
     if (kbd_active_route() == KBD_OUT_USB) {
         if (radio_mode() != RADIO_PRX) {
-            /* Le lien est à adresse FIXE 'KaSe'.03 (c'est ce que le dongle vise
-             * en réémettant la droite), pas l'adresse dérivée du set_id : avant
-             * le propriétaire, l'écoute partait sur la mauvaise adresse et la
-             * première excursion la « corrigeait » en restaurant 'KaSe'.03 —
-             * ça marchait par accident (constaté le 2026-09-19). */
+            /* The link uses the FIXED address 'KaSe'.03 (what the dongle
+             * targets when re-emitting the right half), not the address
+             * derived from set_id: before the owner existed, listening
+             * started on the wrong address and the first excursion fixed
+             * it by restoring 'KaSe'.03 — it worked by accident (found on 2026-09-19). */
             rf_radio_cfg_t link = s_kbd_cfg;
             memcpy(link.rx_addr, "KaSe", 4);
             link.channel     = RF_CH_HALF_LINK;
@@ -289,22 +289,22 @@ static void kbd_relay_refresh_body(void)
                      RF_CH_HALF_LINK, RF_ADDR_HALF_LINK);
         }
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-        /* Réémissions de la droite (heartbeats) : le propriétaire lit la FIFO et
-         * nous livre les trames ; on mémorise sa demi-matrice, le moteur de la
-         * gauche la lit via kbd_relay_remote_pressed (étape 4b). */
+        /* Right-half re-emissions (heartbeats): the owner reads the FIFO
+         * and hands us the frames; we remember its half-matrix, the left
+         * half's engine reads it via kbd_relay_remote_pressed (step 4b). */
         radio_rx_drain(kbd_relay_rx_droite, &now);
-        /* Silence de la droite → relâcher ce qu'elle tenait (même prudence que le
-         * dongle : une moitié muette ne laisse pas une touche collée). */
+        /* Right half goes silent -> release what it was holding (same
+         * caution as the dongle: a mute half must not leave a stuck key). */
         {
             if ((uint32_t)(now - s_remote_ms) >= HALF_LINK_TIMEOUT_MS) remote_relacher();
         }
-        /* Annonce du mode au dongle par excursion : le propriétaire VIDE la FIFO
-         * dans notre consommateur AVANT de partir (l'excursion finit par un
-         * FLUSH_RX) et revient écouter KaSe.03. */
+        /* Announce the mode to the dongle by excursion: the owner DRAINS the
+         * FIFO into our consumer BEFORE leaving (the excursion ends with a
+         * FLUSH_RX) and comes back to listen on KaSe.03. */
         if ((uint32_t)(now - s_derniere_emission_ms) >= 200u) {
-            /* config_fp reste 0 ici : en USB le dongle se tait, la cohérence
-             * des moteurs est sans objet. Buffer à RF_STATUS_LEN quand même —
-             * rf_encode_status écrit 8 octets dans tous les cas. */
+            /* config_fp stays 0 here: over USB the dongle is silent, engine
+             * consistency is moot. Buffer at RF_STATUS_LEN regardless —
+             * rf_encode_status writes 8 bytes in every case. */
             rf_status_t st = { .batt_dV = KBD_BATT_DV(), .half = RF_HALF_LEFT, .charging = KBD_BATT_CHG(), .link_q = 0, .seq = __atomic_fetch_add(&s_status_seq, 1, __ATOMIC_RELAXED),
                                .mode_usb = true };
             uint8_t sb[RF_STATUS_LEN];
@@ -313,16 +313,16 @@ static void kbd_relay_refresh_body(void)
                                s_kbd_cfg.rx_addr[2], s_kbd_cfg.rx_addr[3],
                                s_kbd_cfg.addr_suffix };
             bool ok = radio_excursion_tx(s_kbd_cfg.channel, dst, sb, (uint8_t)sn, kbd_relay_rx_droite, &now);
-            if (ok) s_sans_ack_ecran = 0; else if (s_sans_ack_ecran < 255) s_sans_ack_ecran++;                  /* « dongle vu » aussi en mode USB */
+            if (ok) s_sans_ack_ecran = 0; else if (s_sans_ack_ecran < 255) s_sans_ack_ecran++;                  /* "dongle seen" in USB mode too */
             s_derniere_emission_ms = now;
         }
         return;
     }
-    /* Retour au mode sans-fil : rebasculer la radio en PTX vers le dongle. */
+    /* Back to wireless mode: switch the radio back to PTX towards the dongle. */
     if (radio_mode() == RADIO_PRX) {
         if (radio_mode_set(RADIO_PTX, &s_kbd_cfg)) {
-            /* On quitte l'écoute : relâcher le distant, sinon une touche de la
-             * droite resterait figée dans la fusion locale jusqu'au retour USB. */
+            /* Leaving listening mode: release the remote, otherwise a right
+             * half key would stay frozen in the local fusion until the next USB return. */
             remote_relacher();
             ESP_LOGW(TAG, "fusion : retour emission PTX vers le dongle");
         }
@@ -330,12 +330,12 @@ static void kbd_relay_refresh_body(void)
 #endif
     if (kbd_active_route() != KBD_OUT_RF) return;
 #if CONFIG_KASE_DONGLE_FUSION
-    /* Fusion, mode sans-fil : RÉAFFIRMER la matrice locale tant qu'une touche est
-     * tenue. matrix_scan n'émet que sur CHANGEMENT ; sans ce rafraîchissement une
-     * touche gauche tenue ne produit plus rien et le dongle relâche la moitié
-     * gauche après HALF_LINK_TIMEOUT_MS (« la touche gauche se relâche seule »,
-     * banc 2026-09-13). Même règle que la droite (half_link_tx_refresh) : muet au
-     * repos (bitmap vide → autonomie), entretenu sur maintien. */
+    /* Fusion, wireless mode: REAFFIRM the local matrix as long as a key is
+     * held. matrix_scan only transmits on CHANGE; without this refresh a
+     * held left key produces nothing more and the dongle releases the left
+     * half after HALF_LINK_TIMEOUT_MS ("the left key releases itself",
+     * bench 2026-09-13). Same rule as the right half (half_link_tx_refresh):
+     * mute at rest (empty bitmap -> autonomy), kept alive while held. */
     {
         uint8_t bm[RF_HALF_BITMAP_BYTES]; uint32_t gen, dernier;
         taskENTER_CRITICAL(&s_left_mux);
@@ -344,8 +344,8 @@ static void kbd_relay_refresh_body(void)
         bool tenu = (bm[0] | bm[1] | bm[2] | bm[3]) != 0;
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
         if (tenu && (uint32_t)(now - dernier) >= 100u) {
-            /* Réaffirmation : une RÉPÉTITION — périmée si l'état a changé
-             * entre ce snapshot et le verrou (le changement est déjà parti). */
+            /* Reaffirmation: a REPEAT — stale if the state changed between
+             * this snapshot and the lock (the change already went out). */
             if (send_matrix_frame(RF_HALF_LEFT, bm, gen_valide, &gen)) {
                 taskENTER_CRITICAL(&s_left_mux);
                 if (s_last_left_gen == gen) s_last_left_ms = now;
@@ -356,20 +356,20 @@ static void kbd_relay_refresh_body(void)
     }
 #endif
 #if CONFIG_KASE_DONGLE_FUSION
-    /* Sync auto (phase 3), APRÈS la réaffirmation des maintiens : un maintien
-     * garde la priorité, le pull se met en pause pendant et reprend après —
-     * jamais une touche relâchée à tort pour une keymap (la panne du 2026-09-13). */
+    /* Auto sync (phase 3), AFTER reaffirming held keys: a held key keeps
+     * priority, the pull pauses during it and resumes after — never a key
+     * wrongly released for a keymap (the 2026-09-13 outage). */
     if (keymap_pull_tick(kbd_tx_locked)) return;
 #endif
-    /* Réémission bornée : sans changement récent, on se tait. usb_presence_poll
-     * ci-dessus reste appelé à chaque tick — c'est lui qui garde le routage
-     * frais, il ne doit pas dépendre de l'activité clavier. */
+    /* Bounded re-emission: with no recent change, we stay silent.
+     * usb_presence_poll above is still called on every tick — it keeps
+     * routing fresh, it must not depend on keyboard activity. */
     if (kbd_refresh_step(&s_refresh)) {
 #if CONFIG_KASE_DONGLE_FUSION
-        /* Fusion : ce qui se répète, c'est le DERNIER BITMAP — même vide, un
-         * relâchement perdu se répare ainsi aussi, sans violer « muet au repos »
-         * puisque c'est borné. Jamais un rapport HID ici. Snapshot + génération :
-         * périmée si un changement passe entre ici et le verrou. */
+        /* Fusion: what repeats is the LAST BITMAP — even empty, a lost
+         * release is repaired this way too, without violating "mute at
+         * rest" since it is bounded. Never a HID report here. Snapshot +
+         * generation: stale if a change slips in between here and the lock. */
         uint8_t bm[RF_HALF_BITMAP_BYTES]; uint32_t gen;
         taskENTER_CRITICAL(&s_left_mux);
         memcpy(bm, s_last_left_bm, RF_HALF_BITMAP_BYTES); gen = s_last_left_gen;
@@ -383,23 +383,23 @@ static void kbd_relay_refresh_body(void)
         return;
     }
 
-    /* Supervision. Le dongle relâche les touches d'un slot muet depuis
-     * RF_LINK_LOST_MS — protection contre un clavier disparu, sans quoi une
-     * touche resterait collée chez l'hôte. Or la réémission ci-dessus est
-     * BORNÉE : une touche simplement MAINTENUE ne produit aucun changement,
-     * donc plus aucun rapport, et le dongle la relâchait au bout de ~2 s.
-     * Backspace remontait toute seule, constaté au banc le 2026-09-08.
+    /* Supervision. The dongle releases the keys of a mute slot after
+     * RF_LINK_LOST_MS — protection against a vanished keyboard, without
+     * which a key would stay stuck at the host. But the re-emission above
+     * is BOUNDED: a simply HELD key produces no change, hence no more
+     * reports, and the dongle would release it after ~2 s. Backspace kept
+     * repeating on its own, found at the bench on 2026-09-08.
      *
-     * On ne s'annonce que si rien d'autre n'est parti depuis RF_STATUS_PERIOD_MS :
-     * pendant la frappe, les rapports HID suffisent, et le repos reste à une
-     * seule trame par seconde — négligeable pour R1. */
+     * We only announce ourselves if nothing else has gone out since
+     * RF_STATUS_PERIOD_MS: while typing, the HID reports suffice, and at
+     * rest it stays at one frame per second — negligible for R1. */
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
     if (!rf_status_doit_emettre(now, s_derniere_emission_ms, RF_STATUS_PERIOD_MS))
         return;
-    /* Garde-fou de sync (fusion) : on annonce l'empreinte de NOTRE keymap. Le
-     * dongle, qui tape en sans-fil avec la SIENNE, compare et signale une
-     * divergence — sinon deux moteurs taperaient différemment en silence.
-     * Calculée à la volée (1/s ici) : pas de cache, donc jamais périmée. */
+    /* Sync guard (fusion): we announce the fingerprint of OUR keymap. The
+     * dongle, which types wirelessly with ITS OWN, compares and flags a
+     * divergence — otherwise two engines would type differently in
+     * silence. Computed on the fly (1/s here): no cache, so never stale. */
     rf_status_t st = { .batt_dV = KBD_BATT_DV(), .half = RF_HALF_LEFT, .charging = KBD_BATT_CHG(), .link_q = 0, .seq = __atomic_fetch_add(&s_status_seq, 1, __ATOMIC_RELAXED),
                        .config_fp = config_fp_crc32((const uint8_t *)keymaps,
                                                     KEYMAP_BLOB_BYTES) };
@@ -434,9 +434,9 @@ static rf_radio_cfg_t kbd_nrf_cfg(void)
  * keyboard, awaits PKT_PAIR_ACK, saves the assigned set_id/slot to NVS, then
  * reboots so kbd_relay_init() comes up paired (relay active). Runs only while
  * unpaired; the dongle's pairing window must be open (KS_CMD_RF_PAIR_START). */
-/* Inutile quand le lien inter-moitiés tient la radio : l'appairage actif
- * suppose d'écouter le canal de rendez-vous, donc d'abandonner l'écoute de la
- * droite. Compilée hors de ce cas, elle serait une fonction statique morte. */
+/* Useless when the inter-half link holds the radio: active pairing requires
+ * listening on the rendezvous channel, hence giving up listening to the
+ * right half. Compiled out of that case, it would be a dead static function. */
 static void kbd_pairing_task(void *arg)
 {
     (void)arg;
@@ -451,11 +451,11 @@ static void kbd_pairing_task(void *arg)
      * each candidate GPIO as CE: the one that lets a REQ reach the dongle (ACK
      * comes back) is the real CE. Logs the winner so it can be set in board.h.
      * Only cfg.pin_ce changes (a GPIO toggled directly) — no SPI re-init. */
-    /* La broche CE du board.h passe TOUJOURS en premier : sur une carte dont le
-     * brochage est verifie a la netlist, c'est la bonne, et le balayage n'a
-     * aucune raison d'etre. Il ne suivait pas cette regle et la liste ci-dessous
-     * ne contient meme pas le CE du Niphargus (GPIO15) — l'appairage ne pouvait
-     * donc jamais aboutir sur cette carte. */
+    /* board.h's CE pin ALWAYS goes first: on a board whose pinout is
+     * verified against the netlist, it is the right one, and the scan has
+     * no reason to exist. It did not follow that rule, and the list below
+     * did not even contain the Niphargus CE (GPIO15) — pairing could
+     * therefore never succeed on that board. */
     static const int ce_cand[] = {
         BOARD_NRF_CE_GPIO,
 #if CONFIG_KASE_RF_CE_SCAN
@@ -467,8 +467,8 @@ static void kbd_pairing_task(void *arg)
     int win_ce = -1;
 
 #if CONFIG_KASE_VEILLE
-    /* Chaque tour tient la puce ~150 ms et personne ne tape pendant l'appairage :
-     * sans veto, à 15 s d'inactivité radio_sleep coupait la puce sous cette tâche. */
+    /* Each round holds the chip ~150 ms and nobody types during pairing:
+     * without a veto, at 15 s of inactivity radio_sleep would cut the chip out from under this task. */
     veille_veto(VEILLE_VETO_PAIR, true);
 #endif
     for (unsigned ci = 0; ci < sizeof(ce_cand) / sizeof(ce_cand[0]) && !acked; ci++) {
@@ -478,7 +478,7 @@ static void kbd_pairing_task(void *arg)
         gpio_set_direction(ce, GPIO_MODE_OUTPUT);
         gpio_set_level(ce, 0);
 #if CONFIG_KASE_RF_CE_SCAN
-        radio_ce_gpio(ce);   /* banc V2D : la broche CE incertaine — essayer chaque candidate */
+        radio_ce_gpio(ce);   /* V2D bench: the CE pin is uncertain — try each candidate */
 #endif
         for (int i = 0; i < 12 && !acked; i++) {        /* ~3 s per candidate */
             uint8_t rxb[32]; uint16_t n = 0;
@@ -521,22 +521,22 @@ void kbd_relay_init(void)
     rf_apply_set_id(&nrf_cfg, set_id, slot);
 
 #if CONFIG_KASE_VEILLE
-    /* Veille (B7) : le timer de rafraîchissement s'arrête et repart avec la
-     * carte ; la puce elle-même est au hook du propriétaire. Enregistré AVANT
-     * le propriétaire : les hooks se réveillent en ordre inverse, la radio est
-     * donc debout avant que le timer ne reparte (sinon son premier tick pouvait
-     * tomber sur une puce encore endormie : « radio indisponible » pour rien). */
+    /* Sleep (B7): the refresh timer stops and restarts with the board; the
+     * chip itself is on the owner's hook. Registered BEFORE the owner: hooks
+     * wake up in reverse order, so the radio is up before the timer starts
+     * again (otherwise its first tick could land on a still-sleeping chip:
+     * "radio unavailable" for nothing). */
     static const veille_hook_t hook = { "relais", kbd_relay_sleep_prepare, kbd_relay_wake_restore };
     veille_hook_enregistrer(&hook);
 #endif
-    /* Le propriétaire initialise la puce en PTX vers le dongle et enregistre
-     * lui-même son hook de veille (power-down, verrou gardé ; réveil réarmé). */
+    /* The owner initializes the chip in PTX towards the dongle and registers
+     * its own sleep hook itself (power-down, lock kept; re-armed on wake). */
     if (!radio_owner_init(&nrf_cfg, NULL)) {
         ESP_LOGE(TAG, "NRF PTX init failed — wireless relay disabled");
         return;   /* s_paired stays false */
     }
 #if CONFIG_KASE_DONGLE_FUSION
-    s_kbd_cfg = nrf_cfg;   /* cible dongle mémorisée pour rebasculer en PTX (fusion phase 2) */
+    s_kbd_cfg = nrf_cfg;   /* dongle target remembered to switch back to PTX (fusion phase 2) */
 #endif
 
     if (set_id == 0 || set_id == 0xFFFF) {
@@ -554,8 +554,8 @@ void kbd_relay_init(void)
 
     /* Periodic keyboard-state refresh: self-heals lost key-ups over the lossy
      * link (no heartbeat reconciliation on the HIDREPORT path). Streams only
-     * après un changement seulement (kbd_refresh_arm), pour un nombre borné de
-     * ticks : un clavier au repos est réellement silencieux. */
+     * after a change (kbd_refresh_arm), for a bounded number of ticks: a
+     * keyboard at rest is genuinely silent. */
     const esp_timer_create_args_t ta = {
         .callback = kbd_relay_refresh_cb, .name = "kbd_refresh",
     };
@@ -564,8 +564,8 @@ void kbd_relay_init(void)
 }
 
 #if CONFIG_KASE_VEILLE
-/* Suffixe de rôle du battement de coeur (veille_task.h) : la gauche dit sa
- * route et l'état du relais — la bascule USB → RF se lit là. */
+/* Role suffix of the heartbeat (veille_task.h): the left half states its
+ * route and the relay's state — the USB -> RF switch reads there. */
 const char *veille_hb_suffixe(void)
 {
     static char buf[32];
@@ -577,9 +577,9 @@ const char *veille_hb_suffixe(void)
 #endif
 
 #if CONFIG_KASE_DONGLE_FUSION
-/* Fusion phase 2 (4b) : le moteur de la gauche lit la demi-matrice de la droite
- * réémise par le dongle (reçue en écoute USB) — équivalent de
- * ce que faisait le maître pré-fusion en écoutant la droite en direct. */
+/* Fusion phase 2 (4b): the left half's engine reads the right half's
+ * half-matrix re-emitted by the dongle (received while listening over
+ * USB) — equivalent to what the pre-fusion master did by listening to the right half directly. */
 bool kbd_relay_remote_pressed(uint8_t row, uint8_t col)
 {
     taskENTER_CRITICAL(&s_left_mux);
@@ -588,7 +588,7 @@ bool kbd_relay_remote_pressed(uint8_t row, uint8_t col)
     return p;
 }
 
-/* L'état distant a-t-il changé depuis le dernier appel ? Consomme le drapeau. */
+/* Has the remote state changed since the last call? Consumes the flag. */
 bool kbd_relay_remote_changed(void)
 {
     taskENTER_CRITICAL(&s_left_mux);
@@ -599,12 +599,12 @@ bool kbd_relay_remote_changed(void)
 }
 #endif
 
-/* ── Veille : le relais dort avec la carte ───────────────────────────────── */
+/* ── Sleep: the relay sleeps with the board ────────────────────────────── */
 
-/* La puce est éteinte et réarmée par le hook du propriétaire (radio_owner) ;
- * ici seulement le timer de rafraîchissement : arrêté au sommeil — sinon ses
- * ticks compteraient des « indisponibles » pendant que la puce dort et
- * fausseraient « dongle vu » —, relancé en cadence rapide au réveil. */
+/* The chip is powered off and re-armed by the owner's hook (radio_owner);
+ * here only the refresh timer: stopped on sleep — otherwise its ticks
+ * would count "unavailable" while the chip sleeps and skew "dongle seen" —,
+ * restarted at fast cadence on wake. */
 void kbd_relay_sleep_prepare(void)
 {
     if (s_refresh_timer) esp_timer_stop(s_refresh_timer);
@@ -612,7 +612,7 @@ void kbd_relay_sleep_prepare(void)
 
 void kbd_relay_wake_restore(void)
 {
-    s_periode_ms = 0;                              /* le timer a été arrêté : forcer le redémarrage */
+    s_periode_ms = 0;                              /* the timer was stopped: force a restart */
     kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);
 }
 
@@ -623,8 +623,8 @@ bool kbd_relay_active(void)
 
 bool kbd_relay_dongle_vu(void)
 {
-    /* Collant (muette au repos), tolérant aux ~1 % de refus ESB : tombe après
-     * 3 émissions consécutives sans ACK, jamais sur un refus isolé. */
+    /* Sticky (mute at rest), tolerant of ~1% ESB refusals: drops after
+     * 3 consecutive transmissions without ACK, never on an isolated refusal. */
     return s_sans_ack_ecran < 3;
 }
 
@@ -633,7 +633,7 @@ void kbd_relay_send_kbd(uint8_t modifier, const uint8_t kb[6])
     s_last_mod = modifier;
     memcpy(s_last_kb, kb, 6);
     kbd_refresh_arm(&s_refresh, KBD_RELAY_REPEATS);
-    kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);   /* un changement réveille la cadence rapide */
+    kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);   /* a change wakes the fast cadence */
     uint8_t buf[9];
     rf_encode_hidreport_kbd(buf, modifier, kb);
     kbd_tx_locked(buf, 9);
@@ -647,29 +647,29 @@ void kbd_relay_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
 }
 
 #if CONFIG_KASE_DONGLE_FUSION
-/* Fusion : la moitié n'envoie plus de HID fini, elle émet sa demi-matrice BRUTE
- * au dongle, qui fusionne les deux moitiés et fait tourner le moteur. Même
- * chemin d'émission que send_kbd (kbd_tx_locked : excursion ou direct).
+/* Fusion: the half no longer sends a finished HID report, it transmits its
+ * RAW half-matrix to the dongle, which merges the two halves and runs the
+ * engine. Same transmission path as send_kbd (kbd_tx_locked: excursion or direct).
  *
- * ⚠ Réaffirmation des maintiens : comme partout dans cette chaîne, « émettre sur
- * changement » ne compose pas avec « relâcher sur silence » (cf. CLAUDE.md et
- * half_link). Le dongle relâche une moitié muette après HALF_LINK_TIMEOUT_MS, donc
- * un maintien doit être ré-émis périodiquement. La cadence de rafraîchissement de
- * la matrice est une pièce du BANC (elle se règle contre le timeout réel du
- * dongle) — voir docs/superpowers/plans/2026-09-13-dongle-fusion-runtime.md. */
+ * ⚠ Reaffirmation of held keys: as everywhere in this chain, "emit on
+ * change" does not compose with "release on silence" (see CLAUDE.md and
+ * half_link). The dongle releases a mute half after HALF_LINK_TIMEOUT_MS, so
+ * a held key must be re-emitted periodically. The matrix refresh cadence is
+ * a BENCH setting (tuned against the dongle's real timeout) — see
+ * docs/superpowers/plans/2026-09-13-dongle-fusion-runtime.md. */
 static bool send_matrix_frame(uint8_t half, const uint8_t *bitmap, radio_valide_cb_t encore_valide, void *ctx)
 {
     rf_matrix_t m;
     m.half = half;
     memcpy(m.bitmap, bitmap, RF_HALF_BITMAP_BYTES);
-    m.seq = __atomic_fetch_add(&s_status_seq, 1, __ATOMIC_RELAXED);   /* réutilise le compteur de séquence du relais */
+    m.seq = __atomic_fetch_add(&s_status_seq, 1, __ATOMIC_RELAXED);   /* reuses the relay's sequence counter */
     uint8_t buf[8];
     uint16_t n = rf_encode_matrix(buf, &m);
     uint32_t refus_avant = s_tx_refuses;
     bool partie = n && kbd_tx_emettre(buf, (uint8_t)n, encore_valide, ctx);
-    /* Diagnostic permanent (rare, ~1 % au banc) : QUELLE trame l'ESB a refusée
-     * après ses 15 retransmissions. C'est cette trame-là que la réémission
-     * bornée ci-dessous répète — sans elle, un appui bref était perdu. */
+    /* Permanent diagnostic (rare, ~1% at the bench): WHICH frame the ESB
+     * refused after its 15 retransmissions. This is the very frame the
+     * bounded re-emission below repeats — without it, a brief press was lost. */
     if (s_tx_refuses != refus_avant)
         ESP_LOGW(TAG, "MATRIX refusee bm=%02X%02X%02X%02X — repetee par la reemission bornee",
                  bitmap[0], bitmap[1], bitmap[2], bitmap[3]);
@@ -678,23 +678,23 @@ static bool send_matrix_frame(uint8_t half, const uint8_t *bitmap, radio_valide_
 
 void kbd_relay_send_matrix(uint8_t half, const uint8_t *bitmap)
 {
-    /* CHANGEMENT : l'état et sa génération sont posés AVANT l'émission — une
-     * répétition qui relirait l'ancien état pendant cet envoi se verra périmée. */
+    /* CHANGE: the state and its generation are set BEFORE transmission — a
+     * repeat that reread the old state during this send will come out stale. */
     taskENTER_CRITICAL(&s_left_mux);
     memcpy(s_last_left_bm, bitmap, RF_HALF_BITMAP_BYTES);
     s_last_left_ms = (uint32_t)(esp_timer_get_time() / 1000);
     s_last_left_gen++;
     taskEXIT_CRITICAL(&s_left_mux);
     (void)send_matrix_frame(half, bitmap, NULL, NULL);
-    /* Réémission BORNÉE armée au changement — KBD_RELAY_REPEATS × 10 ms, puis
-     * silence. Une trame de CHANGEMENT refusée par l'ESB n'avait qu'une seule
-     * chance : la réaffirmation à 100 ms ne couvre que les maintiens, donc un
-     * appui bref perdu n'était jamais réparé (Super tenu + Q : Q jamais arrivé
-     * à l'hôte, une trame refusée sur le créneau — banc 2026-09-13). Même
-     * mécanisme que le chemin HID pré-fusion (test_repos_ne_reemet_pas) ; le
-     * dongle déduplique par contenu, les répétitions sont gratuites pour lui.
-     * Les répétitions passent par send_matrix_frame : elles ne se réarment pas. */
+    /* BOUNDED re-emission armed on change — KBD_RELAY_REPEATS x 10 ms, then
+     * silence. A CHANGE frame refused by the ESB had only one chance: the
+     * 100 ms reaffirmation only covers held keys, so a lost brief press was
+     * never repaired (Super held + Q: Q never reached the host, a frame
+     * refused in that slot — bench 2026-09-13). Same mechanism as the
+     * pre-fusion HID path (test_repos_ne_reemet_pas); the dongle deduplicates
+     * by content, so repeats are free for it. Repeats go through
+     * send_matrix_frame: they do not re-arm themselves. */
     kbd_refresh_arm(&s_refresh, KBD_RELAY_REPEATS);
-    kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);   /* un changement réveille la cadence rapide */
+    kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);   /* a change wakes the fast cadence */
 }
 #endif

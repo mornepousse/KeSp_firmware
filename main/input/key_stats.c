@@ -49,7 +49,7 @@ static int16_t last_key_idx = -1;
 void key_stats_record_press(uint8_t row, uint8_t col)
 {
 #if defined(CONFIG_KASE_KEY_STATS) && !CONFIG_KASE_KEY_STATS
-    (void)row; (void)col; return;   /* pas de stats sur les moitiés (Kconfig) */
+    (void)row; (void)col; return;   /* no stats on the halves (Kconfig) */
 #endif
     if (row >= MATRIX_ROWS || col >= MATRIX_COLS) return;
 
@@ -120,7 +120,7 @@ void reset_bigram_stats(void)
 void save_key_stats(void)
 {
 #if defined(CONFIG_KASE_KEY_STATS) && !CONFIG_KASE_KEY_STATS
-    return;   /* jamais d'écriture NVS de stats sur une moitié */
+    return;   /* never write stats to NVS on a half */
 #endif
     esp_err_t err = nvs_save_blob_with_total(STORAGE_NAMESPACE, "key_stats", key_stats,
                                               sizeof(key_stats), "key_stats_tot", key_stats_total);
@@ -136,7 +136,7 @@ void save_key_stats(void)
 void load_key_stats(void)
 {
 #if defined(CONFIG_KASE_KEY_STATS) && !CONFIG_KASE_KEY_STATS
-    return;   /* rien à charger : une moitié ne compte pas */
+    return;   /* nothing to load: a half doesn't count */
 #endif
     nvs_load_blob_with_total(STORAGE_NAMESPACE, "key_stats", key_stats,
                               sizeof(key_stats), "key_stats_tot", &key_stats_total);
@@ -149,26 +149,26 @@ void load_key_stats(void)
     key_stats_last_save_tick = xTaskGetTickCount();
 }
 
-/* Persistance des bigrams retirée — les compteurs vivent en RAM, le temps d'une
+/* Bigram persistence removed — the counters live in RAM, for the duration of a
  * session.
  *
- * Le blob fait 8450 octets (uint16_t[NUM_KEYS][NUM_KEYS]) et son écriture partait
- * de key_stats_check_save(), appelée par la tâche d'affichage. Or une écriture
- * NVS désactive le cache d'instructions le temps de l'opération flash : tout code
- * exécuté depuis la flash s'arrête, quelle que soit sa priorité. Le tick de scan
- * y survit (le callback gptimer est IRAM_ATTR) mais le traitement des touches et
- * l'envoi HID, non. C'était le seul chemin par lequel l'affichage — pourtant en
- * priorité 2, sous le scan (5), l'envoi HID (4) et le traitement (3) — pouvait
- * voler du temps à la frappe.
+ * The blob is 8450 bytes (uint16_t[NUM_KEYS][NUM_KEYS]) and its write started
+ * from key_stats_check_save(), called by the display task. But an NVS write
+ * disables the instruction cache for the duration of the flash operation: all
+ * code running from flash stops, regardless of its priority. The scan tick
+ * survives it (the gptimer callback is IRAM_ATTR) but key processing and
+ * HID sending do not. This was the only path by which the display — despite
+ * being priority 2, below the scan (5), HID sending (4) and processing (3) —
+ * could steal time from typing.
  *
- * Ce qui reste : le comptage, reset_bigram_stats(), et les commandes CDC
- * KS_CMD_BIGRAMS_BIN / _TEXT / _RESET, qui répondent sur la session courante.
- * Ce qui est perdu : les statistiques repartent de zéro à chaque redémarrage. */
+ * What remains: the counting, reset_bigram_stats(), and the CDC commands
+ * KS_CMD_BIGRAMS_BIN / _TEXT / _RESET, which answer on the current session.
+ * What is lost: statistics start over from zero on every restart. */
 void save_bigram_stats(void) {}
 
-/* Pendant de save_bigram_stats() : rien à recharger. Ne PAS relire l'ancien blob
- * NVS — plus personne ne l'écrivant, il resterait figé à jamais et masquerait le
- * comptage de la session. */
+/* Counterpart of save_bigram_stats(): nothing to reload. Do NOT re-read the old
+ * NVS blob — since nobody writes it anymore, it would stay frozen forever and
+ * mask the session's counting. */
 void load_bigram_stats(void) {}
 
 void key_stats_check_save(void)
@@ -182,9 +182,9 @@ void key_stats_check_save(void)
     if (diff >= KEY_STATS_SAVE_THRESHOLD || (diff > 0 && elapsed >= pdMS_TO_TICKS(KEY_STATS_SAVE_INTERVAL_MS)))
         save_key_stats();
 
-    /* Les bigrams ne sont plus persistés (voir save_bigram_stats). Le blob de
-     * key_stats reste écrit ici : il fait NUM_KEYS entrées et non NUM_KEYS², donc
-     * une écriture bien plus courte. */
+    /* Bigrams are no longer persisted (see save_bigram_stats). The key_stats
+     * blob is still written here: it has NUM_KEYS entries, not NUM_KEYS², so
+     * a much shorter write. */
 }
 #else
 void save_key_stats(void)    {}

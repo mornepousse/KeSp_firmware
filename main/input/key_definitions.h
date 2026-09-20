@@ -281,7 +281,7 @@
 #define K_INT7                        K_KANJI7
 #define K_INT8                        K_KANJI8
 #define K_BT_SEND                     K_KANJI9
-// le dernier : HID_KEY_GUI_RIGHT  0xE7
+// the last one: HID_KEY_GUI_RIGHT  0xE7
 
 // Momentary layer
 static const uint16_t MO_L0  = 0x0100;
@@ -308,7 +308,7 @@ static const uint16_t TO_L8  = 0x1300;
 static const uint16_t TO_L9 = 0x1400;
 
 
-// simple macro ex : CTRL +V
+// simple macro e.g. CTRL+V
 #define MACRO_1                       0x1500
 #define MACRO_2                       0x1600
 #define MACRO_3                       0x1700
@@ -424,38 +424,38 @@ static const uint16_t TO_L9 = 0x1400;
 #define K_IS_SEC(kc)                 (((kc) & 0xFF00) == K_SEC_BASE)
 #define K_SEC_TYPE(kc)               ((kc) & 0xFF)
 
-/* ── Modified Key (MK) — 0x8000-0x8FFF : une pression envoie mod + touche ────
+/* ── Modified Key (MK) — 0x8000-0x8FFF: one press sends mod + key ────
  *
- * HID ne connaît pas « ! » : 1 et ! sont la même touche (0x1E), c'est l'OS qui
- * tranche selon Shift. Poser « ! » directement sur une touche — le besoin de
- * tout clavier sans rangée de chiffres — demande donc d'envoyer Shift et 0x1E
- * DANS LE MÊME RAPPORT. QMK appelle ça KC_EXLM = LSFT(KC_1).
+ * HID has no "!": 1 and ! are the same key (0x1E), it's the OS that
+ * decides based on Shift. Putting "!" directly on a key — the need on
+ * any keyboard without a number row — therefore requires sending Shift and 0x1E
+ * IN THE SAME REPORT. QMK calls this KC_EXLM = LSFT(KC_1).
  *
- * Ce n'est PAS un tap-hold : immédiat, sans timer, aucun passage par
- * tap_hold.c. Un tap sur MT(Shift, 1) donnerait « 1 » ; un tap sur K_EXLM
- * donne « ! ». Même forme d'encodage que MT, pour qu'un lecteur qui connaît
- * l'un lise l'autre. Le nibble mod porte les quatre mods GAUCHES seulement
- * (LCTL/LSFT/LALT/LGUI), même contrainte que MT ; le champ kc fait 8 bits,
- * donc K_MT(mod, K_MK(...)) est impossible — limite documentée, pas contournée.
+ * This is NOT a tap-hold: immediate, no timer, never goes through
+ * tap_hold.c. A tap on MT(Shift, 1) would give "1"; a tap on K_EXLM
+ * gives "!". Same encoding shape as MT, so that a reader who knows
+ * one can read the other. The mod nibble carries only the four LEFT mods
+ * (LCTL/LSFT/LALT/LGUI), same constraint as MT; the kc field is 8 bits,
+ * so K_MT(mod, K_MK(...)) is impossible — a documented limit, not worked around.
  *
- * ⚠ Le mod va dans l'OCTET MODIFIER du rapport, jamais dans keycodes[] : y
- * pousser 0xE1 volerait une slot et se perdrait quand les six sont pleines.
- * C'est le bug M7 corrigé au commit bffdf4ec, et l'erreur la plus naturelle à
- * commettre ici. Verrouillé par test/test_keycode_report.c (test_modified_key).
+ * ⚠ The mod goes in the report's MODIFIER BYTE, never in keycodes[]: pushing
+ * 0xE1 there would steal a slot and get lost once all six are full.
+ * This is bug M7, fixed in commit bffdf4ec, and the most natural mistake to
+ * make here. Locked down by test/test_keycode_report.c (test_modified_key).
  *
- * ⚠ Plage ≥ 0x8000 : detect_internal_function prenait un int16_t, ce qui
- * rendait ces keycodes négatifs — ils étaient rejetés par accident, pas par
- * conception. Passé en uint16_t avec cette plage. */
+ * ⚠ Range ≥ 0x8000: detect_internal_function used to take an int16_t, which
+ * made these keycodes negative — they were rejected by accident, not by
+ * design. Switched to uint16_t with this range. */
 #define K_MK_BASE                    0x8000
 #define K_MK(mod, kc)               (K_MK_BASE | (((mod) & 0x0F) << 8) | ((kc) & 0xFF))
 #define K_IS_MK(kc)                 (((kc) & 0xF000) == K_MK_BASE)
 #define K_MK_MOD(kc)                (((kc) >> 8) & 0x0F)
 #define K_MK_KEY(kc)                ((kc) & 0xFF)
 
-/* Symboles shiftés, disposition US. Les seize premiers sont ceux qu'une keymap
- * de mai 2026 utilisait déjà sans qu'ils existent. Une autre disposition se
- * traite par les mêmes K_MK(MOD_LSFT, kc) avec d'autres kc.
- * Pas de K_LT / K_GT pour < et > : K_LT(layer, kc) est déjà le Layer-Tap. */
+/* Shifted symbols, US layout. The first sixteen are the ones a keymap from
+ * May 2026 was already using before they existed. A different layout is
+ * handled by the same K_MK(MOD_LSFT, kc) with other kc values.
+ * No K_LT / K_GT for < and > : K_LT(layer, kc) is already the Layer-Tap. */
 #define K_EXLM  K_MK(MOD_LSFT, K_1)      /* ! */
 #define K_AT    K_MK(MOD_LSFT, K_2)      /* @ */
 #define K_HASH  K_MK(MOD_LSFT, K_3)      /* # */
@@ -478,7 +478,7 @@ static const uint16_t TO_L9 = 0x1400;
 #define K_RABK  K_MK(MOD_LSFT, K_DOT)    /* > */
 #define K_QUES  K_MK(MOD_LSFT, K_SLSH)   /* ? */
 
-/* Display: cycle l'écran OLED de repos (HOME→STATS→TAMA) — 0x3F00 (libre) */
+/* Display: cycle the idle OLED screen (HOME→STATS→TAMA) — 0x3F00 (free) */
 #define K_DISP_NEXT                  0x3F00
 
 /* Layer-Tap: hold = activate layer, tap = send keycode */

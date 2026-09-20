@@ -2,46 +2,46 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include "rf_packet.h"   /* bitmap de demi-matrice + ses accesseurs */
+#include "rf_packet.h"   /* half-matrix bitmap + its accessors */
 
-/* Lien radio inter-moitiés du Niphargus — brick B3.
+/* Niphargus inter-half radio link — brick B3.
  *
- * La moitié DROITE émet sa demi-matrice, la GAUCHE l'écoute. La droite n'a ni
- * moteur keymap ni sortie HID : la spec la décrit comme « un scanner qui
- * remonte sa matrice brute ». La gauche fusionne ce qu'elle reçoit avec son
- * propre balayage — colonnes 0-6 pour elle, 7-13 pour la droite, d'où
- * KEYMAP_COLS = 2 × MATRIX_COLS sur le maître.
+ * The RIGHT half transmits its half-matrix, the LEFT listens to it. The right
+ * has neither a keymap engine nor HID output: the spec describes it as "a
+ * scanner that reports its raw matrix". The left fuses what it receives with
+ * its own scan — columns 0-6 for itself, 7-13 for the right, hence
+ * KEYMAP_COLS = 2 × MATRIX_COLS on the master.
  *
- * Canal 0x4F (2479 MHz), adresse KaSe.03 — voir le plan de canaux dans
- * rf_slot.h. Trame : PKT_TYPE_HEARTBEAT, qui porte déjà le bitmap de
- * demi-matrice, la jauge batterie et un numéro de séquence.
+ * Channel 0x4F (2479 MHz), address KaSe.03 — see the channel plan in
+ * rf_slot.h. Frame: PKT_TYPE_HEARTBEAT, which already carries the
+ * half-matrix bitmap, the battery gauge and a sequence number.
  *
- * ⚠ Ce module ne traite PAS le risque R1 — la gauche ne peut pas écouter
- * pendant qu'elle émet vers le dongle. La bascule PRX/PTX est l'étape
- * suivante ; on prouve d'abord que le lien porte, sinon un échec de bascule
- * serait indiscernable d'un lien qui ne marche pas. */
+ * ⚠ This module does NOT address risk R1 — the left cannot listen
+ * while it transmits to the dongle. The PRX/PTX switch is the next
+ * step; we first prove the link carries, otherwise a switch failure
+ * would be indistinguishable from a link that doesn't work. */
 
-/* ── État de la moitié distante, vu par le maître (logique pure) ────────────
+/* ── State of the remote half, as seen by the master (pure logic) ───────────
  *
- * Testée host dans test/test_half_state.c, sur le modèle des inlines de
+ * Tested on host in test/test_half_state.c, modeled on the inlines of
  * comm/usb/usb_presence.h.
  *
- * L'état est ABSOLU, pas différentiel : chaque trame porte la matrice entière,
- * donc une trame perdue se rattrape à la suivante sans accumulation ni dérive.
- * C'est ce qui rend le lien tolérant aux pertes que R1 mesure.
+ * The state is ABSOLUTE, not differential: every frame carries the entire
+ * matrix, so a lost frame is caught up by the next one with no accumulation
+ * or drift. This is what makes the link tolerant to the losses R1 measures.
  *
- * ⚠ Le repli sur silence est la partie dangereuse. Une moitié qui sort de
- * portée ou dont la pile meurt laisserait l'hôte sur le dernier état reçu — et
- * si c'était « Maj enfoncée », il le reste. On relâche donc au bout d'un
- * silence, mais UNIQUEMENT ce que cette moitié tenait : rf_slot.h prévient
- * qu'un relâchement mal ciblé serait pire que le mal. */
+ * ⚠ The fallback on silence is the dangerous part. A half that goes out of
+ * range or whose battery dies would leave the host on the last state received —
+ * and if that was "Shift held", it stays held. So we release after a
+ * silence, but ONLY what that half was holding: rf_slot.h warns
+ * that a mistargeted release would be worse than the disease. */
 typedef struct {
-    uint8_t  bitmap[RF_HALF_BITMAP_BYTES];  /* dernier état reçu */
-    uint32_t derniere_ms;                   /* quand il l'a été */
-    bool     vivant;                        /* false = silence déjà constaté */
+    uint8_t  bitmap[RF_HALF_BITMAP_BYTES];  /* last state received */
+    uint32_t derniere_ms;                   /* when it was received */
+    bool     vivant;                        /* false = silence already observed */
 } half_state_t;
 
-/* Une trame vient d'arriver : elle remplace l'état précédent. */
+/* A frame just arrived: it replaces the previous state. */
 static inline void half_state_recu(half_state_t *st, const uint8_t *bitmap,
                                    uint32_t now_ms)
 {
@@ -50,10 +50,10 @@ static inline void half_state_recu(half_state_t *st, const uint8_t *bitmap,
     st->vivant = true;
 }
 
-/* Appelé périodiquement. Retourne true UNE SEULE FOIS, au moment où le silence
- * dépasse le délai : c'est le signal « relâche ce que cette moitié tenait ».
- * Les appels suivants retournent false tant qu'aucune trame n'est revenue —
- * sinon le moteur relâcherait à chaque cycle des touches déjà relâchées. */
+/* Called periodically. Returns true EXACTLY ONCE, the moment the silence
+ * exceeds the delay: that's the signal "release what this half was holding".
+ * Subsequent calls return false as long as no frame has come back —
+ * otherwise the engine would release, every cycle, keys already released. */
 static inline bool half_state_timeout(half_state_t *st, uint32_t now_ms,
                                       uint32_t delai_ms)
 {
@@ -64,47 +64,47 @@ static inline bool half_state_timeout(half_state_t *st, uint32_t now_ms,
     return true;
 }
 
-/* La touche (row, col) de la moitié distante est-elle enfoncée ? Coordonnées
- * LOCALES à cette moitié ; le décalage vers les colonnes 7-13 de la keymap est
- * la responsabilité de l'appelant. */
+/* Is the (row, col) key of the remote half pressed? Coordinates are
+ * LOCAL to that half; the offset toward keymap columns 7-13 is
+ * the caller's responsibility. */
 static inline bool half_state_pressed(const half_state_t *st, uint8_t row,
                                       uint8_t col)
 {
     return rf_bitmap_get(st->bitmap, row, col);
 }
 
-/* ── Géométrie : où ranger les colonnes de la moitié distante ───────────────
+/* ── Geometry: where to place the remote half's columns ────────────────────
  *
- * Testée host dans test/test_half_col_map.c.
+ * Tested on host in test/test_half_col_map.c.
  *
- * Les deux moitiés sont le même PCB retourné : la colonne 0 de la gauche est sa
- * touche la plus à GAUCHE, donc par symétrie la colonne 0 de la droite est sa
- * touche la plus à DROITE. Un simple décalage `col + 7` range alors la moitié
- * droite à l'envers — on tape la rangée de repos et il sort « ;lkjh ».
+ * Both halves are the same PCB flipped over: column 0 of the left is its
+ * LEFTMOST key, so by symmetry column 0 of the right is its
+ * RIGHTMOST key. A plain `col + 7` offset would then place the right
+ * half backwards — typing the home row produces ";lkjh".
  *
- * Le miroir est une propriété du CÂBLAGE, pas du protocole : la droite émet ses
- * coordonnées physiques et n'a pas à savoir où elle est posée. La conversion
- * appartient donc au maître, et le drapeau vient de son board.h
- * (BOARD_REMOTE_COLS_MIRRORED). */
+ * The mirroring is a property of the WIRING, not the protocol: the right
+ * emits its physical coordinates and doesn't need to know where it's placed.
+ * The conversion therefore belongs to the master, and the flag comes from its
+ * board.h (BOARD_REMOTE_COLS_MIRRORED). */
 static inline uint8_t half_col_to_keymap(uint8_t col, uint8_t cols, bool miroir)
 {
     return miroir ? (uint8_t)(2u * cols - 1u - col)
                   : (uint8_t)(col + cols);
 }
 
-/* ── Fusion de DEUX demi-matrices au dongle (brick « dongle fusion ») ────────
+/* ── Fusion of TWO half-matrices at the dongle ("dongle fusion" brick) ──────
  *
- * Testée host dans test/test_fuse_halves.c. Design :
+ * Tested on host in test/test_fuse_halves.c. Design:
  * docs/superpowers/specs/2026-09-12-dongle-fusion-deux-moteurs-design.md.
  *
- * En mode sans fil, les deux moitiés émettent leur matrice BRUTE ; le dongle
- * fusionne et fait tourner le moteur. Aucune moitié n'est « locale » ici,
- * contrairement à matrix_apply_remote : on reçoit deux bitmaps et on produit les
- * positions (row, colonne keymap) que le moteur indexe. Gauche = colonnes 0..cols-1
- * en direct ; droite = colonnes hautes via half_col_to_keymap (miroir du PCB).
+ * In wireless mode, both halves transmit their RAW matrix; the dongle
+ * fuses them and runs the engine. Neither half is "local" here,
+ * unlike matrix_apply_remote: we receive two bitmaps and produce the
+ * (row, keymap column) positions the engine indexes. Left = columns 0..cols-1
+ * directly; right = high columns via half_col_to_keymap (PCB mirror).
  *
- * Pure : pas d'I/O, pas d'état global. Écrit dans out_row/out_col, rend le nombre
- * de touches, borné à max. */
+ * Pure: no I/O, no global state. Writes into out_row/out_col, returns the
+ * number of keys, bounded to max. */
 static inline uint8_t fuse_halves(const uint8_t *left_bm, const uint8_t *right_bm,
                                   uint8_t cols, bool right_mirror,
                                   uint8_t *out_row, uint8_t *out_col, uint8_t max)
@@ -113,7 +113,7 @@ static inline uint8_t fuse_halves(const uint8_t *left_bm, const uint8_t *right_b
     for (uint8_t r = 0; r < RF_HALF_ROWS && n < max; r++)
         for (uint8_t c = 0; c < cols && n < max; c++)
             if (rf_bitmap_get(left_bm, r, c)) {
-                out_row[n] = r; out_col[n] = c; n++;   /* gauche : colonne directe */
+                out_row[n] = r; out_col[n] = c; n++;   /* left: direct column */
             }
     for (uint8_t r = 0; r < RF_HALF_ROWS && n < max; r++)
         for (uint8_t c = 0; c < cols && n < max; c++)
@@ -125,27 +125,27 @@ static inline uint8_t fuse_halves(const uint8_t *left_bm, const uint8_t *right_b
     return n;
 }
 
-/* ── État de fusion au dongle : DEUX demi-matrices routées par identité ──────
+/* ── Fusion state at the dongle: TWO half-matrices routed by identity ───────
  *
- * Testée host dans test/test_fusion_state.c.
+ * Tested on host in test/test_fusion_state.c.
  *
- * Sur le maître, une seule moitié était distante (half_state_t unique) : l'autre
- * était sa propre matrice locale. Au dongle il n'y a AUCUNE matrice locale — les
- * deux moitiés sont distantes et arrivent sur le même slot clavier, distinguées
- * par l'octet d'identité de PKT_TYPE_MATRIX. On tient donc deux demi-états, on
- * route chaque trame vers le bon, et on expire chacun indépendamment : une
- * moitié muette ne doit pas relâcher ce que l'autre tient (même prudence que
- * rf_slot.h côté supervision).
+ * On the master, only one half was remote (a single half_state_t): the other
+ * was its own local matrix. At the dongle there is NO local matrix at all — both
+ * halves are remote and arrive on the same keyboard slot, distinguished
+ * by PKT_TYPE_MATRIX's identity byte. So we hold two half-states, we
+ * route each frame to the right one, and we expire each independently: a
+ * silent half must not release what the other is holding (the same caution as
+ * rf_slot.h on the supervision side).
  *
- * Pure : pas d'I/O, pas d'état global. Réutilise half_state_* et fuse_halves. */
+ * Pure: no I/O, no global state. Reuses half_state_* and fuse_halves. */
 typedef struct {
     half_state_t left;
     half_state_t right;
 } fusion_state_t;
 
-/* Range une trame décodée dans le demi-état de sa moitié. Retourne false si
- * l'identité n'est ni gauche ni droite — une trame corrompue ne doit rien
- * écrire. */
+/* Stores a decoded frame into its half's half-state. Returns false if
+ * the identity is neither left nor right — a corrupted frame must not
+ * write anything. */
 static inline bool fusion_apply(fusion_state_t *fs, const rf_matrix_t *m,
                                 uint32_t now_ms)
 {
@@ -154,10 +154,10 @@ static inline bool fusion_apply(fusion_state_t *fs, const rf_matrix_t *m,
     return false;
 }
 
-/* Expire les deux demi-états. Retourne true si au moins un vient de tomber en
- * silence (signal « recalcule le rapport »). Les DEUX sont évalués — pas de
- * court-circuit —, sinon une moitié ne serait jamais expirée quand l'autre
- * l'est déjà. Comme half_state_timeout, ne signale qu'une fois par silence. */
+/* Expires both half-states. Returns true if at least one just fell into
+ * silence (signal "recompute the report"). BOTH are evaluated — no
+ * short-circuit —, otherwise a half would never expire when the other
+ * already is. Like half_state_timeout, signals only once per silence. */
 static inline bool fusion_timeout(fusion_state_t *fs, uint32_t now_ms,
                                   uint32_t delai_ms)
 {
@@ -166,8 +166,8 @@ static inline bool fusion_timeout(fusion_state_t *fs, uint32_t now_ms,
     return l || r;
 }
 
-/* Produit la liste fusionnée (row, colonne keymap) que le moteur indexera.
- * Gauche en colonnes directes, droite en colonnes hautes via le miroir du PCB. */
+/* Produces the fused list (row, keymap column) that the engine will index.
+ * Left in direct columns, right in high columns via the PCB mirror. */
 static inline uint8_t fusion_collect(const fusion_state_t *fs, uint8_t cols,
                                      bool right_mirror, uint8_t *out_row,
                                      uint8_t *out_col, uint8_t max)
@@ -176,29 +176,29 @@ static inline uint8_t fusion_collect(const fusion_state_t *fs, uint8_t cols,
                        out_row, out_col, max);
 }
 
-/* ── Cadence : quand la moitié droite doit-elle émettre ? ───────────────────
+/* ── Cadence: when must the right half transmit? ────────────────────────────
  *
- * Testée host dans test/test_half_tx_cadence.c.
+ * Tested on host in test/test_half_tx_cadence.c.
  *
- * Deux règles écrites séparément se contredisaient : la droite n'émettait que
- * sur CHANGEMENT (prémisse §2.3 du design, et la seule qui rende R1 tenable),
- * tandis que la gauche RELÂCHE après un silence. Maintenir une touche ne
- * produit aucun changement, donc aucune trame — et la gauche relâchait une
- * touche pourtant enfoncée. Pas de répétition, et les modificateurs de la
- * droite lâchaient en pleine frappe.
+ * Two rules written separately contradicted each other: the right only
+ * transmitted on CHANGE (design premise §2.3, and the only one that makes R1
+ * tenable), while the left RELEASES after a silence. Holding a key
+ * produces no change, hence no frame — and the left would release a
+ * key that was still pressed. No repeat, and the right's modifiers
+ * would let go mid-keystroke.
  *
- * La règle correcte distingue le REPOS de l'INACTIVITÉ : muet quand rien n'est
- * enfoncé, rafraîchi tant que quelque chose l'est. Le repos ne coûte toujours
- * rien, mais un maintien est réaffirmé avant que la gauche ne puisse en douter.
+ * The correct rule distinguishes REST from INACTIVITY: silent when nothing is
+ * pressed, refreshed as long as something is. Rest still costs
+ * nothing, but a hold is reaffirmed before the left can doubt it.
  *
- * ⚠ Les deux constantes sont liées : il faut qu'AU MOINS un rafraîchissement
- * puisse se perdre sans que le délai tombe, sinon un seul paquet manqué relâche
- * une touche tenue. Le test le vérifie. */
+ * ⚠ The two constants are linked: AT LEAST one refresh must be
+ * losable without the delay expiring, otherwise a single missed packet releases
+ * a held key. The test verifies this. */
 #define HALF_TX_REFRESH_MS   100u
-/* 400 ms, et non 250 : à 100 ms de rafraîchissement, la marge n'était que d'un
- * seul paquet. Il en faut désormais quatre consécutifs pour relâcher à tort.
- * Une moitié réellement morte se déverrouille toujours en moins d'une
- * demi-seconde, ce qui reste imperceptible. */
+/* 400 ms, not 250: at a 100 ms refresh, the margin was only
+ * one packet. It now takes four consecutive ones to release incorrectly.
+ * A truly dead half still unlocks in under half a
+ * second, which remains imperceptible. */
 #define HALF_LINK_TIMEOUT_MS 400u
 
 static inline bool half_tx_doit_emettre(bool change, bool tenu,
@@ -206,25 +206,25 @@ static inline bool half_tx_doit_emettre(bool change, bool tenu,
                                         uint32_t periode_ms)
 {
     if (change) return true;
-    if (!tenu)  return false;   /* repos : silence, c'est la prémisse de R1 */
-    /* Écart en arithmétique non signée : le compteur de ms déborde à ~49 jours
-     * et une soustraction signée figerait l'émission ce jour-là. */
+    if (!tenu)  return false;   /* rest: silence, that's R1's premise */
+    /* Gap in unsigned arithmetic: the ms counter overflows at ~49 days
+     * and a signed subtraction would freeze transmission that day. */
     return (uint32_t)(now_ms - dernier_ms) >= periode_ms;
 }
 
-/* ── Réparation bornée après changement ─────────────────────────────────────
+/* ── Bounded repair after a change ───────────────────────────────────────────
  *
- * Testée host dans test/test_half_tx_repeat.c.
+ * Tested on host in test/test_half_tx_repeat.c.
  *
- * half_tx_doit_emettre ne rejoue l'état que pour un MAINTIEN. Une trame de
- * changement refusée par l'ESB (15 retransmissions épuisées, ~1 % au banc)
- * n'avait donc qu'une chance : un appui bref perdu n'était jamais réparé (banc
- * 2026-09-13, même cause que la gauche). Ici un changement ARME un nombre borné
- * de répétitions, consommées une par tick de la tâche de rafraîchissement
- * (20 ms) même si rien n'est tenu ; puis retour à la règle de maintien. Le
- * repos jamais armé reste muet — la prémisse §2.3 (R1) tient. Le dongle
- * déduplique par contenu : les répétitions lui sont gratuites. */
-#define HALF_TX_REPEATS 3u   /* 3 × 20 ms ≈ la fenêtre 5 × 10 ms de la gauche */
+ * half_tx_doit_emettre only replays state for a HOLD. A change frame
+ * rejected by the ESB (15 retransmissions exhausted, ~1% on the bench)
+ * therefore had only one chance: a brief tap that got lost was never repaired
+ * (bench 2026-09-13, same cause as the left). Here a change ARMS a bounded
+ * number of repeats, consumed one per tick of the refresh task
+ * (20 ms) even if nothing is held; then back to the hold rule. Rest,
+ * never armed, stays silent — the §2.3 (R1) premise holds. The dongle
+ * deduplicates by content: the repeats cost it nothing. */
+#define HALF_TX_REPEATS 3u   /* 3 × 20 ms ≈ the left's 5 × 10 ms window */
 
 typedef struct { uint8_t restantes; } half_tx_repeat_t;
 
@@ -237,45 +237,45 @@ static inline bool half_tx_doit_emettre_repare(half_tx_repeat_t *rep, bool chang
     return half_tx_doit_emettre(false, tenu, now_ms, dernier_ms, periode_ms);
 }
 
-/* ── Cible d'émission de la droite : dongle ↔ gauche directe (fusion) ────────
+/* ── Right half's transmission target: dongle ↔ direct left (fusion) ────────
  *
- * En fusion, la droite parle au SLOT CLAVIER DU DONGLE (KaSe.01), qui fait
- * tourner le moteur. Mais si l'utilisateur DÉBRANCHE le dongle et tape sur la
- * gauche en USB, la droite n'a plus personne : ses trames au dongle ne sont plus
- * acquittées, et la gauche-USB — qui écoute pourtant déjà KaSe.03 pour la
- * réémission du dongle — n'entend plus rien. Repli : sur N envois consécutifs
- * SANS ACK, la droite RÉARME sa puce et BASCULE vers l'autre auditeur. La
- * gauche-USB écoute déjà KaSe.03 ; la droite y émet alors le HEARTBEAT
- * pré-fusion que kbd_relay décode (le MATRIX de fusion, lui, n'est décodé que
- * par le dongle). Si le dongle revient — ou si l'USB gauche part et la gauche
- * cesse d'écouter — la cible courante cesse d'acquitter et on rebascule :
- * auto-cicatrisant, jamais deux cibles à la fois, donc jamais de double frappe.
+ * In fusion, the right talks to the DONGLE'S KEYBOARD SLOT (KaSe.01), which
+ * runs the engine. But if the user UNPLUGS the dongle and types on the
+ * left over USB, the right no longer has anyone: its frames to the dongle no
+ * longer get acknowledged, and left-USB — which is already listening on KaSe.03
+ * for the dongle's re-emission — hears nothing anymore. Fallback: on N
+ * consecutive sends WITHOUT ACK, the right RE-ARMS its chip and SWITCHES to the
+ * other listener. Left-USB is already listening on KaSe.03; the right then
+ * transmits the pre-fusion HEARTBEAT that kbd_relay decodes (the fusion MATRIX,
+ * on the other hand, is only decoded by the dongle). If the dongle comes back —
+ * or if left USB goes away and the left stops listening — the current target
+ * stops acknowledging and we switch back: self-healing, never two targets at
+ * once, so never a double keystroke.
  *
- * ⚠ Muet au repos : la droite n'émet que sur changement/maintien (cf.
- * half_tx_doit_emettre), donc le compteur n'avance QUE quand il y a quelque
- * chose à router. La bascule réarme aussi une puce figée (clone nRF24) en
- * réécrivant la config PTX — elle subsume l'ancien chien de garde « réarmer sur
- * place ».
+ * ⚠ Silent at rest: the right only transmits on change/hold (see
+ * half_tx_doit_emettre), so the counter only advances when there is something
+ * to route. The switch also re-arms a stuck chip (nRF24 clone) by
+ * rewriting the PTX config — it subsumes the old "re-arm in place" watchdog.
  *
- * Testée host dans test/test_half_tx_target.c. */
+ * Tested on host in test/test_half_tx_target.c. */
 typedef enum {
-    HALF_TX_TO_DONGLE = 0,   /* MATRIX vers KaSe.01 — le dongle fusionne et tape */
-    HALF_TX_TO_LEFT   = 1,   /* HEARTBEAT vers KaSe.03 — la gauche-USB tape */
+    HALF_TX_TO_DONGLE = 0,   /* MATRIX to KaSe.01 — the dongle fuses and types */
+    HALF_TX_TO_LEFT   = 1,   /* HEARTBEAT to KaSe.03 — left-USB types */
 } half_tx_target_t;
 
 typedef struct {
-    half_tx_target_t cible;    /* auditeur courant */
-    uint16_t         sans_ack; /* envois consécutifs non acquittés */
+    half_tx_target_t cible;    /* current listener */
+    uint16_t         sans_ack; /* consecutive unacknowledged sends */
 } half_tx_fsm_t;
 
-/* 8 envois : chacun retransmis jusqu'à 15 fois en matériel (ESB), donc ~120
- * tentatives HW perdues avant de conclure « cet auditeur a disparu » — assez
- * confiant pour ne pas basculer sur un glitch, assez court pour que la bascule
- * se sente en <1 s sur un maintien (rafraîchi ~10/s). */
+/* 8 sends: each retransmitted up to 15 times in hardware (ESB), so ~120
+ * lost HW attempts before concluding "this listener is gone" — confident
+ * enough not to switch on a glitch, short enough for the switch to be felt
+ * in <1 s on a hold (refreshed ~10/s). */
 #define HALF_TX_SWITCH_FAILS 8u
 
-/* Un envoi vient d'avoir lieu (ack = acquitté). Met à jour l'état et renvoie
- * true s'il faut RÉARMER la puce PTX sur la (nouvelle) cible `s->cible`. */
+/* A send just happened (ack = acknowledged). Updates the state and returns
+ * true if the PTX chip must be RE-ARMED on the (new) target `s->cible`. */
 static inline bool half_tx_target_step(half_tx_fsm_t *s, bool ack, uint16_t seuil)
 {
     if (ack) { s->sans_ack = 0; return false; }
@@ -288,41 +288,41 @@ static inline bool half_tx_target_step(half_tx_fsm_t *s, bool ack, uint16_t seui
     return false;
 }
 
-/* Émetteur — moitié droite. Initialise la radio en PTX sur le canal du lien.
- * Retourne false si la radio ne répond pas. */
+/* Transmitter — right half. Initializes the radio in PTX on the link's channel.
+ * Returns false if the radio doesn't respond. */
 bool half_link_tx_init(void);
 
-/* Émet l'état courant de la demi-matrice. Le numéro de séquence est géré en
- * interne. Retourne true si le paquet a été acquitté par la gauche. */
+/* Transmits the half-matrix's current state. The sequence number is managed
+ * internally. Returns true if the packet was acknowledged by the left. */
 bool half_link_tx_matrix(const uint8_t *bitmap);
-/* Même chose pour une RÉPÉTITION : `encore_valide` évalué sous le verrou radio,
- * rien ne part si l'état est périmé (voir radio_emettre). */
+/* Same thing for a REPEAT: `encore_valide` evaluated under the radio lock,
+ * nothing goes out if the state is stale (see radio_emettre). */
 #include "radio_owner.h"
 bool half_link_tx_matrix_si(const uint8_t *bitmap, radio_valide_cb_t encore_valide, void *ctx);
 #if CONFIG_KASE_BATT_SENSE
-/* Jauge : un STATUS (tension, état de charge, identité DROITE) vers la cible
- * courante. Appelé par la tâche de rafraîchissement toutes les RF_BATT_PERIOD_MS
- * et au réveil. Retourne l'ACK. */
+/* Gauge: a STATUS (voltage, charge state, RIGHT identity) toward the current
+ * target. Called by the refresh task every RF_BATT_PERIOD_MS
+ * and on wake. Returns the ACK. */
 bool half_link_tx_status(void);
-/* Écran : la cible courante est le dongle et la DERNIÈRE émission a été
- * acquittée (collant : une moitié est muette au repos ; en repli vers la
- * gauche, faux). */
+/* Display: the current target is the dongle and the LAST transmission was
+ * acknowledged (sticky: a half is silent at rest; false when fallen back to
+ * the left). */
 bool half_link_tx_dongle_vu(void);
 #endif
 
-/* Applique la règle de cadence puis émet s'il y a lieu.
+/* Applies the cadence rule then transmits if warranted.
  *
- * Le callback de scan appelle (bitmap, true) : du neuf, à publier tout de
- * suite. La tâche de rafraîchissement appelle (NULL, false) : elle ne fournit
- * PAS d'état, elle réaffirme celui qui est déjà enregistré. C'est ce qui garde
- * un écrivain unique — sinon elle réécrirait un état lu au tour précédent et
- * ressusciterait un relâchement publié entre-temps. */
+ * The scan callback calls (bitmap, true): something new, to publish right
+ * away. The refresh task calls (NULL, false): it does NOT provide
+ * state, it reaffirms what's already recorded. This is what keeps
+ * a single writer — otherwise it would rewrite a state read on the previous
+ * round and resurrect a release published in the meantime. */
 void half_link_tx_update(const uint8_t *bitmap, bool change);
 
-/* Démarre la tâche qui réaffirme les maintiens. Sans elle, une touche tenue
- * plus de HALF_LINK_TIMEOUT_MS est relâchée à tort par la gauche : le callback
- * du pilote ne se déclenche que sur changement, un maintien ne produit donc
- * aucune trame. */
+/* Starts the task that reaffirms holds. Without it, a key held
+ * longer than HALF_LINK_TIMEOUT_MS is wrongly released by the left: the
+ * driver's callback only fires on change, so a hold produces no
+ * frame at all. */
 bool half_link_tx_refresh_start(void);
 
 

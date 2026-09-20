@@ -1,28 +1,28 @@
 /*
- * Bouchons propres au rôle souris (Conchodytes).
+ * Stubs specific to the mouse role (Conchodytes).
  *
- * cdc_binary_cmds.c compile inconditionnellement `bin_cmd_monitor`, qui
- * rapporte le compte de frappes et les mots par minute. Ces deux grandeurs
- * viennent de input/key_stats.c et input/key_features.c, qu'une souris ne
- * compile pas — elle n'a pas de touches.
+ * cdc_binary_cmds.c unconditionally compiles `bin_cmd_monitor`, which
+ * reports the keystroke count and words per minute. These two figures
+ * come from input/key_stats.c and input/key_features.c, which a mouse
+ * does not compile — it has no keys.
  *
- * La souris partage déjà cdc_niphar_slave_stubs.c pour tout ce qui manque des
- * deux côtés (affichage, BLE, moteur keymap). Ces deux symboles-ci ne peuvent
- * PAS y aller : l'esclave Niphargus a une matrice et les définit pour de vrai,
- * ce qui donnerait un doublon au lien. D'où ce fichier séparé, compilé pour le
- * seul rôle souris.
+ * The mouse already shares cdc_niphar_slave_stubs.c for everything missing
+ * on both sides (display, BLE, keymap engine). These two symbols cannot
+ * go there: the Niphargus slave has a matrix and defines them for real,
+ * which would give a duplicate at link time. Hence this separate file,
+ * compiled for the mouse role only.
  *
- * Modelé sur comm/cdc/cdc_dongle_stubs.c : on ne fournit que les symboles que
- * l'éditeur de liens a réellement réclamés, ajoutés un par un.
+ * Modeled on comm/cdc/cdc_dongle_stubs.c: we only provide the symbols the
+ * linker actually requested, added one by one.
  */
 
 #include <stdint.h>
 
-/* Aucune frappe n'est jamais comptée sur une souris. Les commandes CDC qui
- * lisent cette valeur rapporteront zéro — ce qui est la vérité, pas un
- * bouchon qui ment. */
+/* No keystroke is ever counted on a mouse. The CDC commands that
+ * read this value will report zero — which is the truth, not a
+ * stub that lies. */
 uint32_t key_stats_total = 0;
 
-/* Idem : pas de mots par minute sans touches. Même choix que le dongle, qui
- * rend 0 depuis comm/rf/dongle_state.c. */
+/* Same here: no words per minute without keys. Same choice as the dongle,
+ * which returns 0 from comm/rf/dongle_state.c. */
 uint16_t wpm_get(void) { return 0; }

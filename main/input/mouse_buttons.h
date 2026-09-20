@@ -1,48 +1,48 @@
-/* Décodage des clics SPDT de la souris Conchodytes.
+/* Decoding of the Conchodytes mouse's SPDT clicks.
  *
- * Volontairement PUR : des niveaux en entrée, un état en sortie, aucune
- * dépendance ESP-IDF. La lecture des GPIO vit dans app/mouse_task.c. C'est ce
- * qui rend ce raisonnement testable sur l'hôte (test/test_mouse_input.c), y
- * compris sur les cas que le banc ne produit pas à la demande.
+ * Deliberately PURE: levels in, a state out, no ESP-IDF dependency. GPIO
+ * reading lives in app/mouse_task.c. This is what makes this reasoning
+ * testable on the host (test/test_mouse_input.c), including cases the bench
+ * does not produce on demand.
  *
- * Le montage : COM à la masse, NO et NC tirés chacun au 3,3 V par 10 k
- * (R105-R107 et R108-R110 sur la carte). Le firmware lit LES DEUX contacts du
- * même bouton, et c'est cet appariement qui supprime le rebond.
+ * The wiring: COM to ground, NO and NC each pulled to 3.3 V by 10 k
+ * (R105-R107 and R108-R110 on the board). The firmware reads BOTH contacts of
+ * the same button, and it is this pairing that suppresses bounce.
  *
- * ⚠ Croiser les paires — le NO d'un bouton avec le NC d'un autre — donne un
- * firmware qui semble marcher et produit des clics fantômes. Le brochage est
- * verrouillé par test/test_conchodytes_pins.c pour cette raison.
+ * WARNING: crossing the pairs — the NO of one button with the NC of another
+ * — gives a firmware that appears to work and produces phantom clicks. The
+ * pinout is locked by test/test_conchodytes_pins.c for this reason.
  */
 #pragma once
 #include <stdbool.h>
 
 typedef enum {
-    /* NO haut, NC bas : le contact mobile est collé sur NC. */
+    /* NO high, NC low: the moving contact is stuck on NC. */
     MOUSE_CONTACT_RELEASED = 0,
-    /* NO bas, NC haut : le contact mobile est collé sur NO. */
+    /* NO low, NC high: the moving contact is stuck on NO. */
     MOUSE_CONTACT_PRESSED,
-    /* Les deux hauts : le contact mobile n'est collé sur RIEN. C'est la
-     * fenêtre de rebond, et elle est OBSERVABLE — c'est tout l'intérêt du
-     * SPDT sur un simple interrupteur.
+    /* Both high: the moving contact is stuck on NEITHER. This is the
+     * bounce window, and it is OBSERVABLE — that is the whole point of
+     * SPDT on a plain switch.
      *
-     * ⚠ Sa DURÉE n'est pas mesurée. La campagne du 2026-08-25 a été faite en
-     * croyant scruter à 1 kHz, alors que CONFIG_FREERTOS_HZ vaut 100 par
-     * défaut : vTaskDelay(1) donnait 10 ms, pas 1. Sur 24 fronts, seuls 4
-     * échantillons ambigus ont été vus — la plupart des rebonds sont donc
-     * tombés ENTRE deux mesures, ce qui borne leur durée à moins de 10 ms
-     * sans la chiffrer. Ce qui EST établi : zéro front parasite sur ces
-     * 24 transitions. À reprendre avec un tick à 1 kHz. */
+     * WARNING: its DURATION is not measured. The 2026-08-25 campaign was run
+     * believing it scanned at 1 kHz, while CONFIG_FREERTOS_HZ is 100 by
+     * default: vTaskDelay(1) gave 10 ms, not 1. Over 24 edges, only 4
+     * ambiguous samples were seen — so most bounces fell BETWEEN two
+     * measurements, which bounds their duration to under 10 ms without
+     * pinning it down. What IS established: zero spurious edge over these
+     * 24 transitions. To redo with a 1 kHz tick. */
     MOUSE_CONTACT_BOUNCING,
-    /* Les deux bas : les deux contacts fermés en même temps, ce qu'un
-     * inverseur ne fait pas. Cablâge douteux ou broche en court. */
+    /* Both low: both contacts closed at the same time, which an
+     * inverter does not do. Doubtful wiring or a shorted pin. */
     MOUSE_CONTACT_IMPOSSIBLE,
 } mouse_contact_t;
 
-/* Lit l'état du contact à partir des deux niveaux, sans mémoire. */
+/* Reads the contact state from the two levels, without memory. */
 mouse_contact_t mouse_contact_decode(int no_level, int nc_level);
 
-/* Rend l'état suivant du bouton. Sur BOUNCING comme sur IMPOSSIBLE on garde
- * `prev` : ne rien conclure vaut mieux qu'inventer un front. C'est là, et
- * nulle part ailleurs, que se joue l'anti-rebond — pas de compteur, pas de
- * délai, pas de constante à régler. */
+/* Returns the button's next state. On BOUNCING as on IMPOSSIBLE we keep
+ * `prev`: concluding nothing is better than inventing an edge. This is
+ * where, and nowhere else, debouncing happens — no counter, no
+ * delay, no constant to tune. */
 bool mouse_button_next(bool prev, mouse_contact_t contact);

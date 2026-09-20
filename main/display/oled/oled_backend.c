@@ -1,13 +1,13 @@
 /* OLED I2C (SSD1306) backend implementation — thin driver.
  *
- * Toute l'UI (status card, tama, layer label, barre KPM, indicateurs) vit
- * désormais dans le manager multi-écrans : oled_nav (machine à états),
- * oled_screens (registre + build/destroy/update), oled_kpm (fenêtre KPM) et
- * les modules screens/screen_*.c. Ce backend ne fait plus que :
- *   - configurer le hardware (oled_init) ;
- *   - piloter le manager sous le lock LVGL (refresh/tick/layer) ;
- *   - forwarder les événements (keypress/mouse/disp_key/activity) ;
- *   - gérer sleep/wake (power panel) et l'écran DFU.
+ * All the UI (status card, tama, layer label, KPM bar, indicators) now
+ * lives in the multi-screen manager: oled_nav (state machine),
+ * oled_screens (registry + build/destroy/update), oled_kpm (KPM window) and
+ * the screens/screen_*.c modules. This backend now only:
+ *   - configures the hardware (oled_init);
+ *   - drives the manager under the LVGL lock (refresh/tick/layer);
+ *   - forwards events (keypress/mouse/disp_key/activity);
+ *   - handles sleep/wake (power panel) and the DFU screen.
  */
 #include "display_backend.h"
 #include "status_display.h"
@@ -23,20 +23,20 @@
 
 LV_FONT_DECLARE(lv_font_montserrat_28);
 
-/* Horloge millisecondes dérivée du tick FreeRTOS (base commune au manager). */
+/* Millisecond clock derived from the FreeRTOS tick (base shared with the manager). */
 static uint32_t now_ms(void)
 {
     return (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount());
 }
 
-/* true une fois qu'un reset du manager a construit la nav ; garde oled_update()
- * de tourner avant le premier refresh_all. */
+/* true once a manager reset has built the nav; keeps oled_update()
+ * from running before the first refresh_all. */
 static bool oled_initialized = false;
 
-/* true dès le tout premier refresh_all (= vrai boot). Sert à n'armer le splash
- * qu'au démarrage : le réveil passe aussi par refresh_all mais ne doit PAS
- * re-déclencher le splash. Jamais remis à false (sleep touche oled_initialized,
- * pas celui-ci). */
+/* true from the very first refresh_all onward (= real boot). Used to arm the
+ * splash only at startup: wake also goes through refresh_all but must NOT
+ * re-trigger the splash. Never reset to false (sleep touches oled_initialized,
+ * not this one). */
 static bool oled_booted = false;
 
 /* ── Backend interface ───────────────────────────────────────────── */
@@ -62,25 +62,25 @@ static bool oled_init(void)
     return display_available;
 }
 
-/* Full (re)build : table rase + reset du manager. oled_screens_reset() remet le
- * KPM à zéro et re-synchronise tama_enabled (mais N'ARME PLUS le splash). Le
- * splash n'est armé qu'au tout premier appel (vrai boot), via oled_screens_boot() ;
- * les refresh suivants (réveil, action BT…) n'affichent pas de splash. Lock LVGL
- * tenu (le manager touche des objets LVGL via destroy()). */
+/* Full (re)build: clean slate + manager reset. oled_screens_reset() resets the
+ * KPM to zero and re-syncs tama_enabled (but NO LONGER arms the splash). The
+ * splash is only armed on the very first call (real boot), via oled_screens_boot();
+ * subsequent refreshes (wake, BT action...) do not show a splash. LVGL lock
+ * held (the manager touches LVGL objects via destroy()). */
 static void oled_refresh_all(void)
 {
     if (!display_available) return;
     if (!lvgl_port_lock(200)) return;
     uint32_t t = now_ms();
     oled_screens_reset(t);
-    if (!oled_booted) { oled_screens_boot(t); oled_booted = true; }  /* splash au boot seul */
+    if (!oled_booted) { oled_screens_boot(t); oled_booted = true; }  /* splash on boot only */
     display_clear_screen();
     oled_initialized = true;
     lvgl_port_unlock();
 }
 
-/* Tick périodique : le manager avance le KPM, résout l'écran actif, build/clean/
- * destroy si besoin puis update(). oled_screens_tick() exige le lock tenu. */
+/* Periodic tick: the manager advances the KPM, resolves the active screen,
+ * builds/cleans/destroys as needed then update(). oled_screens_tick() requires the lock held. */
 static void oled_update(void)
 {
     if (!display_available || !oled_initialized) return;
@@ -89,42 +89,42 @@ static void oled_update(void)
     lvgl_port_unlock();
 }
 
-/* Changement de couche : compte comme activité (pas de bascule d'écran — HOME
- * affiche déjà la couche) puis force un tick pour rafraîchir HOME tout de suite. */
+/* Layer change: counts as activity (no screen switch — HOME
+ * already shows the layer) then forces a tick to refresh HOME right away. */
 static void oled_update_layer(void)
 {
     if (!display_available) return;
     if (!oled_initialized) { oled_refresh_all(); return; }
     oled_screens_layer_changed(now_ms());
-    oled_update();   /* rafraîchit HOME immédiatement avec la nouvelle couche */
+    oled_update();   /* refreshes HOME immediately with the new layer */
 }
 
 static void oled_sleep(void)
 {
     if (!lvgl_port_lock(100)) return;
-    /* Détruit l'écran courant via le manager (reset → destroy + nav_init) et
-     * blanchit le buffer LVGL. */
+    /* Destroys the current screen via the manager (reset -> destroy + nav_init) and
+     * blanks the LVGL buffer. */
     oled_screens_reset(now_ms());
     display_clear_screen();
     oled_initialized = false;
-    /* Power le panneau OFF (SSD1306 display-off) tant qu'on tient le lock LVGL
-     * (pas de flush I2C concurrent). Le clear ne blanchit que le buffer LVGL ;
-     * en light-sleep la tâche LVGL est gelée et ne flush jamais, donc sans ceci
-     * la dernière frame resterait figée à l'écran. */
+    /* Powers the panel OFF (SSD1306 display-off) while holding the LVGL lock
+     * (no concurrent I2C flush). The clear only blanks the LVGL buffer;
+     * in light sleep the LVGL task is frozen and never flushes, so without
+     * this the last frame would stay frozen on the screen. */
     i2c_oled_display_power(false);
     lvgl_port_unlock();
 }
 
 static void oled_wake(void)
 {
-    i2c_oled_display_power(true);   /* panneau rallumé */
-    request_wake_request = true;    /* déclenche un refresh_all → reset + splash */
+    i2c_oled_display_power(true);   /* panel back on */
+    request_wake_request = true;    /* triggers a refresh_all -> reset + splash */
 }
 
 static void oled_notify_mouse(void)
 {
-    /* L'ancien indicateur souris "M" du HOME a été retiré dans la refonte ;
-     * on ne forwarde plus que l'activité (réveil idle-tama). */
+    /* The old "M" mouse indicator on HOME was removed in the rewrite;
+     * only the activity (idle-tama wake) is forwarded now. */
     oled_screens_activity(now_ms());
 }
 
@@ -141,8 +141,8 @@ static void oled_notify_display_key(void)
 
 static void oled_show_dfu(void)
 {
-    /* display_clear_screen() fait un lv_obj_clean (écriture LVGL) → doit être
-     * SOUS le lock, comme les autres chemins du backend (cohérence lock). */
+    /* display_clear_screen() does an lv_obj_clean (LVGL write) -> must be
+     * UNDER the lock, like the other backend paths (lock consistency). */
     if (lvgl_port_lock(0)) {
         display_clear_screen();
         lv_obj_t *label = lv_label_create(lv_scr_act());

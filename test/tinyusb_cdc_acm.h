@@ -1,7 +1,7 @@
-/* stub: tinyusb_cdc_acm.h — utilisé uniquement dans les builds hôte (TEST_HOST).
- * Déclare le minimum nécessaire pour compiler cdc_binary_protocol.c.
- * Les implémentations (fake write_queue / write_flush) sont définies
- * dans test_cdc_rx_feed.c. */
+/* stub: tinyusb_cdc_acm.h — used only in host builds (TEST_HOST).
+ * Declares the minimum needed to compile cdc_binary_protocol.c.
+ * The implementations (fake write_queue / write_flush) are defined
+ * in test_cdc_rx_feed.c. */
 #pragma once
 #include <stdint.h>
 #include <stddef.h>

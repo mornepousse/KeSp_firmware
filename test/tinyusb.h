@@ -1,8 +1,8 @@
-/* stub: tinyusb.h — valeurs HID pour les builds hôte (TEST_HOST).
- * Correspond à la spécification USB HID Usage Tables 1.12. */
+/* stub: tinyusb.h — HID values for host builds (TEST_HOST).
+ * Matches the USB HID Usage Tables 1.12 specification. */
 #pragma once
 
-/* Codes HID standards (usage page 0x07 Keyboard/Keypad) */
+/* Standard HID codes (usage page 0x07 Keyboard/Keypad) */
 #define HID_KEY_NONE          0x00
 #define HID_KEY_A             0x04
 #define HID_KEY_B             0x05
@@ -212,7 +212,7 @@
 #define HID_KEY_KEYPAD_DECIMAL_2            0xDC
 #define HID_KEY_KEYPAD_HEXADECIMAL          0xDD
 
-/* Modificateurs (0xE0..0xE7) — correspondance exacte avec le bit de mod HID */
+/* Modifiers (0xE0..0xE7) — exact match with the HID mod bit */
 #define HID_KEY_CONTROL_LEFT   0xE0
 #define HID_KEY_SHIFT_LEFT     0xE1
 #define HID_KEY_ALT_LEFT       0xE2

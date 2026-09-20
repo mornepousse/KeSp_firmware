@@ -1,16 +1,16 @@
 #pragma once
 #include <stdint.h>
 
-/* Jauge batterie d'une moitié Niphargus — lecture ADC de VBAT_SENSE.
- * La logique (conversion, rejet, SoC, états) est pure et testée : batt_calc.h.
+/* Battery gauge of a Niphargus half — ADC read of VBAT_SENSE.
+ * The logic (conversion, rejection, SoC, states) is pure and tested: batt_calc.h.
  *
- * Mesure toutes les 10 s éveillée, et une au réveil (veille.c) : le timer
- * esp_timer est gelé pendant le light sleep, et une valeur de plusieurs
- * minutes n'a aucun intérêt. Jamais de mesure PENDANT le sommeil.
- * 0 = inconnu, la convention de batt_dV. */
+ * Sampled every 10 s while awake, and once on wake-up (veille.c): the
+ * esp_timer clock is frozen during light sleep, and a value several
+ * minutes old is of no interest. Never sample DURING sleep.
+ * 0 = unknown, the batt_dV convention. */
 void     batt_sense_init(void);
 void     batt_sense_sample_now(void);
 uint8_t  batt_sense_dv(void);
-uint8_t  batt_sense_charging(void);   /* batt_chg_t : 0 inconnu, 1 en charge probable, 2 pleine */
-uint8_t  batt_sense_niveau(void);     /* batt_niveau_t : 0 normal, 1 FAIBLE (< 3,5 V), 2 CRITIQUE (< 3,3 V) */
-uint32_t batt_sense_age_ms(void);     /* 0xFFFFFFFF = jamais de mesure valide */
+uint8_t  batt_sense_charging(void);   /* batt_chg_t: 0 unknown, 1 probably charging, 2 full */
+uint8_t  batt_sense_niveau(void);     /* batt_niveau_t: 0 normal, 1 LOW (< 3.5 V), 2 CRITICAL (< 3.3 V) */
+uint32_t batt_sense_age_ms(void);     /* 0xFFFFFFFF = no valid sample yet */

@@ -1,14 +1,14 @@
 /* Tests for key_features: OSM, OSL, Caps Word, Repeat.
- * Linke le VRAI module (../main/input/key_features.c) — plus de réimplémentation.
- * L'état est global au process (statics du module) et partagé avec les autres
- * suites qui tirent key_processor.c ; key_features n'ayant pas de reset dédié,
- * chaque sous-test ramène l'état à une baseline connue via l'API publique. */
+ * Links the REAL module (../main/input/key_features.c) — no more reimplementation.
+ * The state is global to the process (module statics) and shared with the other
+ * suites that pull in key_processor.c; since key_features has no dedicated reset,
+ * each sub-test brings the state back to a known baseline via the public API. */
 #include "test_framework.h"
 #include "key_features.h"
 #include "key_definitions.h"   /* MOD_LSFT, MOD_LCTL */
 
-/* ── Baseline via API publique (pas d'accès aux statics du module) ── */
-static void reset_osm(void)  { (void)osm_consume(); }             /* vide les mods pending */
+/* ── Baseline via the public API (no access to the module's statics) ── */
+static void reset_osm(void)  { (void)osm_consume(); }             /* clears pending mods */
 static void reset_osl(void)  { osl_consume(); }                    /* → -1 */
 static void reset_caps(void) { if (caps_word_is_active()) caps_word_toggle(); }
 
@@ -75,23 +75,23 @@ static void test_caps_word_backspace_keeps(void) {
     TEST_ASSERT(caps_word_is_active(), "CW stays active on backspace");
 }
 
-/* Couverture ajoutée : inactif = no-op ; borne haute Z (0x1D) ; Tab désactive. */
+/* Added coverage: inactive = no-op; upper bound Z (0x1D); Tab deactivates. */
 static void test_caps_word_inactive_noop(void) {
-    reset_caps();                 /* inactif */
-    uint8_t kc = 0x04, mod = 0;   /* A, mais CW off */
+    reset_caps();                 /* inactive */
+    uint8_t kc = 0x04, mod = 0;   /* A, but CW off */
     caps_word_process(&kc, &mod);
-    TEST_ASSERT_EQ(mod, 0, "CW inactif → aucun shift");
+    TEST_ASSERT_EQ(mod, 0, "CW inactive → no shift");
 }
 
 static void test_caps_word_z_edge_then_tab(void) {
     reset_caps(); caps_word_toggle();
-    uint8_t kc = 0x1D, mod = 0;   /* Z, borne haute des lettres */
+    uint8_t kc = 0x1D, mod = 0;   /* Z, upper bound of letters */
     caps_word_process(&kc, &mod);
-    TEST_ASSERT_EQ(mod, MOD_LSFT, "CW shifte Z (0x1D)");
-    TEST_ASSERT(caps_word_is_active(), "CW actif après Z");
-    kc = 0x2B; mod = 0;           /* Tab : ni lettre/chiffre/backspace → désactive */
+    TEST_ASSERT_EQ(mod, MOD_LSFT, "CW shifts Z (0x1D)");
+    TEST_ASSERT(caps_word_is_active(), "CW active after Z");
+    kc = 0x2B; mod = 0;           /* Tab: neither letter/number/backspace → deactivates */
     caps_word_process(&kc, &mod);
-    TEST_ASSERT(!caps_word_is_active(), "CW désactivé sur Tab");
+    TEST_ASSERT(!caps_word_is_active(), "CW deactivated on Tab");
 }
 
 /* ── Repeat Key ──────────────────────────────────────────────────── */
@@ -115,17 +115,17 @@ static void test_repeat_ignores_zero(void) {
     TEST_ASSERT_EQ(repeat_key_get(), 0x04, "Repeat ignores zero");
 }
 
-/* OSL couche HORS BORNES (>= LAYERS=10) → ignorée (sinon OOB keymaps[]). */
+/* OSL layer OUT OF BOUNDS (>= LAYERS=10) → ignored (otherwise OOB keymaps[]). */
 static void test_osl_out_of_bounds(void) {
     reset_osl();
     osl_arm(15);   /* 15 >= LAYERS */
-    TEST_ASSERT_EQ(osl_get_layer(), -1, "OSL couche 15 (>= LAYERS) → ignorée, pas d'OOB");
+    TEST_ASSERT_EQ(osl_get_layer(), -1, "OSL layer 15 (>= LAYERS) → ignored, no OOB");
 }
 
 /* ── Suite runner ────────────────────────────────────────────────── */
 
 void test_key_features(void) {
-    TEST_SUITE("Key Features (OSM, OSL, Caps Word, Repeat) — module réel");
+    TEST_SUITE("Key Features (OSM, OSL, Caps Word, Repeat) — real module");
     TEST_RUN(test_osm_arm_consume);
     TEST_RUN(test_osm_multi_mod);
     TEST_RUN(test_osl_arm_consume);
@@ -139,6 +139,6 @@ void test_key_features(void) {
     TEST_RUN(test_repeat_key);
     TEST_RUN(test_repeat_ignores_modifiers);
     TEST_RUN(test_repeat_ignores_zero);
-    /* Laisse l'état propre pour les suites suivantes (CapsWord off, OSL/OSM vides) */
+    /* Leaves the state clean for the following suites (CapsWord off, OSL/OSM empty) */
     reset_caps(); reset_osl(); reset_osm();
 }

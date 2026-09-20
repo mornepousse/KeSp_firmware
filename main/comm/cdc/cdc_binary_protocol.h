@@ -38,7 +38,7 @@ typedef enum {
     KS_CMD_KEYMAP_GET       = 0x13,
     KS_CMD_LAYER_INDEX      = 0x14,
     KS_CMD_LAYER_NAME       = 0x15,
-    KS_CMD_CONFIG_FINGERPRINT = 0x16,  /* empreinte CRC-32 de la keymap — sync fusion */
+    KS_CMD_CONFIG_FINGERPRINT = 0x16,  /* CRC-32 fingerprint of the keymap — fusion sync */
     KS_CMD_CONFIG_COHERENCE = 0x17,    /* dongle: cohérence empreinte gauche↔dongle (fusion) */
 
     /* Layout names (0x20-0x2F) */
@@ -135,7 +135,7 @@ typedef enum {
     KS_STATUS_ERR_RANGE     = 0x04,
     KS_STATUS_ERR_BUSY      = 0x05,
     KS_STATUS_ERR_OVERFLOW  = 0x06,
-    KS_STATUS_ERR_STORAGE   = 0x07,   /* persistance NVS échouée (ex. NVS pleine) */
+    KS_STATUS_ERR_STORAGE   = 0x07,   /* NVS persistence failed (e.g. NVS full) */
 } ks_status_t;
 
 /* ── Binary command handler ─────────────────────────────────────── */
@@ -184,8 +184,8 @@ uint16_t ks_rx_feed(const char *data, uint16_t len);
 /* Reset parser state (e.g. on timeout or error) */
 void ks_rx_reset(void);
 
-/* Create the RX handoff mutex — appeler une fois au init CDC, avant que la tâche
- * de dispatch et le callback RX ne tournent (audit E5). */
+/* Create the RX handoff mutex — call once at CDC init, before the dispatch
+ * task and the RX callback start running (audit E5). */
 void ks_rx_init(void);
 
 /* Process a fully assembled binary command from the FIFO.

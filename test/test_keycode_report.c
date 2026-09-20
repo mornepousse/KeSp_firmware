@@ -1,18 +1,18 @@
-/* Tests de caractérisation pour build_keycode_report() et process_matrix_changes().
+/* Characterization tests for build_keycode_report() and process_matrix_changes().
  *
- * Ce fichier compile key_processor.c (via CMakeLists.txt) et fournit des stubs
- * pour toutes ses dépendances hardware/HID. Le but est d'épingler le comportement
- * ACTUEL du pipeline : un refactor qui casse un keystroke cassera un test ici.
+ * This file compiles key_processor.c (via CMakeLists.txt) and provides stubs
+ * for all its hardware/HID dependencies. The goal is to pin down the CURRENT
+ * behavior of the pipeline: a refactor that breaks a keystroke will break a test here.
  *
- * Stubs stateful : tap_hold_get_active_mods, tap_hold_get_active_layer,
+ * Stateful stubs: tap_hold_get_active_mods, tap_hold_get_active_layer,
  *                  osl_get_layer / osl_consume / osl_arm,
  *                  osm_consume, combo_consume.
- * Les autres stubs sont de purs no-ops.
+ * The other stubs are pure no-ops.
  */
 #include "test_framework.h"
 
-/* ── Inclusions production (stubs et globals définis dans ce TU) ───── */
-#include "key_definitions.h"     /* K_MK, K_EXLM, MOD_* — pour la section Modified Key */
+/* ── Production includes (stubs and globals defined in this TU) ───── */
+#include "key_definitions.h"     /* K_MK, K_EXLM, MOD_* — for the Modified Key section */
 #include "matrix_scan.h"         /* extern globals : current_press_*, keycodes, etc. */
 #include "keymap.h"              /* extern macro_t macros_list[], keymaps[][][] */
 #include "key_processor.h"       /* build_keycode_report, process_matrix_changes */
@@ -26,14 +26,14 @@
 #include "keyboard_actions.h"
 #include "sec_confirm.h"
 
-/* ── Constantes HID locales (évite la chaîne key_definitions.h/tinyusb) ── */
+/* ── Local HID constants (avoids the key_definitions.h/tinyusb chain) ── */
 #define T_KC_A      0x04u
 #define T_KC_B      0x05u
 #define T_KC_LSHIFT 0xE1u
 #define T_KC_RSHIFT 0xE5u
 #define T_KC_LCTRL  0xE0u
 
-/* Valeurs numériques des keycodes de couche (static const dans key_definitions.h) */
+/* Numeric values of layer keycodes (static const in key_definitions.h) */
 #define T_MO_L1  0x0200u   /* MO_L1 */
 #define T_MO_L2  0x0300u   /* MO_L2 = MO_L0 + 2*256 */
 #define T_TO_L1  0x0C00u   /* TO_L1 = TO_L0 + 256 */
@@ -42,7 +42,7 @@
 #define T_MOD_LSFT 0x02u   /* MOD_LSFT */
 #define T_K_SEC_CONFIRM 0x3E00u
 
-/* ── Définitions de tous les globals externes requis par key_processor.c ── */
+/* ── Definitions of all extern globals required by key_processor.c ── */
 
 uint16_t  keymaps[LAYERS][MATRIX_ROWS][MATRIX_COLS];
 uint8_t   keycodes[6];
@@ -54,7 +54,7 @@ uint8_t   last_layer      = 0;
 
 uint8_t   MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
 uint8_t   SLAVE_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
-/* tableau de pointeurs vers des tableaux 2D, comme déclaré dans matrix_scan.h */
+/* array of pointers to 2D arrays, as declared in matrix_scan.h */
 uint8_t (*matrix_states[2])[MATRIX_ROWS][MATRIX_COLS] = {
     &MATRIX_STATE, &SLAVE_MATRIX_STATE
 };
@@ -64,44 +64,44 @@ volatile uint8_t  is_layer_changed    = 0;
 volatile uint32_t last_activity_time_ms = 0;
 uint8_t           usb_bl_state        = 0;
 
-/* macros_list et macros_count sont définis dans keymap.c (now linked) */
+/* macros_list and macros_count are defined in keymap.c (now linked) */
 char      default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH];
 
 TaskHandle_t keyboard_task_handle = NULL;
 volatile bool matrix_test_mode    = false;
 
-/* ── Stubs matrix_scan.h ─────────────────────────────────────────────── */
+/* ── matrix_scan.h stubs ─────────────────────────────────────────────── */
 
 void     layer_changed(void)              {}
 uint32_t get_last_activity_time_ms(void)  { return 0; }
 void     matrix_setup(void)               {}
 void     rtc_matrix_deinit(void)          {}
 
-/* tap_hold.h : le VRAI module est linké (../main/input/tap_hold.c) — plus de
- * stubs ici. Aucun test de cette suite ne pilote tap_hold en état actif (aucune
- * touche MT/LT/OSM pressée), donc le vrai module reste inactif ici ; la logique
- * tap/hold est exercée dans test_tap_hold.c (horloge contrôlable). */
+/* tap_hold.h: the REAL module is linked (../main/input/tap_hold.c) — no more
+ * stubs here. No test in this suite drives tap_hold into an active state (no
+ * MT/LT/OSM key pressed), so the real module stays inactive here; the
+ * tap/hold logic is exercised in test_tap_hold.c (controllable clock). */
 
-/* tap_dance.h : le VRAI module est linké (../main/input/tap_dance.c) — plus de
- * stubs. Aucun test de cette suite ne presse de touche TD, le vrai module reste
- * inactif ici ; la logique est exercée dans test_tap_dance.c (horloge partagée). */
+/* tap_dance.h: the REAL module is linked (../main/input/tap_dance.c) — no more
+ * stubs. No test in this suite presses a TD key, the real module stays
+ * inactive here; the logic is exercised in test_tap_dance.c (shared clock). */
 
-/* combo.h : le VRAI module est linké (../main/input/combo.c) — plus de stubs.
- * Le combo est exercé en réel ici (test_kp_combo_result_injected) et dans
- * test_combo.c ; reset via combo_init(). */
+/* combo.h: the REAL module is linked (../main/input/combo.c) — no more stubs.
+ * The combo is exercised for real here (test_kp_combo_result_injected) and in
+ * test_combo.c; reset via combo_init(). */
 
-/* ── Stubs leader.h ──────────────────────────────────────────────────── */
+/* ── leader.h stubs ──────────────────────────────────────────────────── */
 
-/* leader.h : le VRAI module est linké (../main/input/leader.c) — plus de stubs.
- * Aucun test de cette suite ne presse K_LEADER, le vrai module reste inactif
- * ici ; le matcher est exercé dans test_leader.c. */
+/* leader.h: the REAL module is linked (../main/input/leader.c) — no more stubs.
+ * No test in this suite presses K_LEADER, the real module stays inactive
+ * here; the matcher is exercised in test_leader.c. */
 
-/* key_features.h : le VRAI module est linké (../main/input/key_features.c) —
- * plus de stubs ici. OSM/OSL/CapsWord/Repeat/GraveEsc/LayerLock/WPM/KeyOverride/
- * TriLayer sont exercés en réel (key_override NVS guardé #ifndef TEST_HOST). */
+/* key_features.h: the REAL module is linked (../main/input/key_features.c) —
+ * no more stubs here. OSM/OSL/CapsWord/Repeat/GraveEsc/LayerLock/WPM/KeyOverride/
+ * TriLayer are exercised for real (key_override guarded by NVS #ifndef TEST_HOST). */
 
 
-/* ── Stubs hid_bluetooth_manager.h ──────────────────────────────────── */
+/* ── hid_bluetooth_manager.h stubs ──────────────────────────────────── */
 
 bool hid_bluetooth_is_initialized(void) { return false; }
 void bt_next_device(void)               {}
@@ -110,7 +110,7 @@ void bt_start_pairing(void)             {}
 void bt_disconnect(void)                {}
 void save_io_mode(uint8_t m)            { (void)m; }
 
-/* ── Stubs keyboard_actions.h + keyboard_task.h ──────────────────────── */
+/* ── keyboard_actions.h + keyboard_task.h stubs ──────────────────────── */
 
 void km_post_display_update(void)  {}
 void km_post_display_next(void)    {}
@@ -119,14 +119,14 @@ void keyboard_worker_init(void)    {}
 void vTaskKeyboard(void *pv)       { (void)pv; }
 void keyboard_manager_init(void)   {}
 
-/* keymap.h (NVS) : les vraies implémentations viennent de keymap.c (now linked).
- * Pas de stubs ici — la collision multiple definition était le problème. */
+/* keymap.h (NVS): the real implementations come from keymap.c (now linked).
+ * No stubs here — the multiple-definition collision was the problem. */
 
 /* ══════════════════════════════════════════════════════════════════════ */
-/* Helpers de test                                                       */
+/* Test helpers                                                          */
 /* ══════════════════════════════════════════════════════════════════════ */
 
-/* Remet tous les slots de pression à "aucune touche" */
+/* Resets all press slots to "no key" */
 static void release_all_keys(void)
 {
     for (int i = 0; i < 6; i++) {
@@ -136,7 +136,7 @@ static void release_all_keys(void)
     }
 }
 
-/* Appuie sur une touche dans un slot donné */
+/* Presses a key in a given slot */
 static void press_key(int slot, uint8_t row, uint8_t col)
 {
     current_press_row[slot] = row;
@@ -144,7 +144,7 @@ static void press_key(int slot, uint8_t row, uint8_t col)
     current_press_stat[slot] = 1;
 }
 
-/* Vérifie si un keycode est présent dans keycodes[] */
+/* Checks whether a keycode is present in keycodes[] */
 static bool keycode_in_report(uint8_t kc)
 {
     for (int i = 0; i < 6; i++)
@@ -153,15 +153,15 @@ static bool keycode_in_report(uint8_t kc)
 }
 
 /*
- * Réinitialisation complète entre chaque sous-cas :
- * - Vide les keymaps, les keycodes, les globals de couche
- * - Remet les stubs stateful à leur état par défaut
- * - Exécute deux cycles idle pour vider les statics internes de key_processor
- *   (prev_press_row/col, prev_shift_pressed, tap_injected_slots…)
+ * Full reset between each sub-case:
+ * - Clears the keymaps, the keycodes, the layer globals
+ * - Resets the stateful stubs to their default state
+ * - Runs two idle cycles to clear key_processor's internal statics
+ *   (prev_press_row/col, prev_shift_pressed, tap_injected_slots...)
  */
 static void reset_kp_state(void)
 {
-    /* Globals keymaps + press */
+    /* keymaps + press globals */
     memset(keymaps, 0, sizeof(keymaps));
     memset(keycodes, 0, sizeof(keycodes));
     memset(extra_keycodes, 0, sizeof(extra_keycodes));
@@ -171,24 +171,24 @@ static void reset_kp_state(void)
     current_layout = 0;
     last_layer     = 0;
 
-    /* Globals key_processor.h visibles */
+    /* Visible key_processor.h globals */
     keypress_internal_function  = 0;
     current_row_layer_changer   = INVALID_KEY_POS;
     current_col_layer_changer   = INVALID_KEY_POS;
 
-    /* Stubs stateful */
-    tap_hold_init();                               /* réinit le vrai tap/hold */
-    tap_dance_init();                              /* réinit le vrai tap dance */
-    (void)osm_consume();                           /* vide l'OSM réel */
-    osl_consume();                                 /* OSL réel → -1 */
-    if (caps_word_is_active()) caps_word_toggle(); /* CapsWord réel → off */
-    combo_init();                                  /* réinit le vrai combo */
-    leader_init();                                 /* réinit le vrai leader */
+    /* Stateful stubs */
+    tap_hold_init();                               /* reinit the real tap/hold */
+    tap_dance_init();                              /* reinit the real tap dance */
+    (void)osm_consume();                           /* clears the real OSM */
+    osl_consume();                                 /* real OSL -> -1 */
+    if (caps_word_is_active()) caps_word_toggle(); /* real CapsWord -> off */
+    combo_init();                                  /* reinit the real combo */
+    leader_init();                                 /* reinit the real leader */
 
-    /* Vide le macro pending interne (opaque static dans key_processor.c) */
+    /* Clears the internal pending macro (static opaque in key_processor.c) */
     (void)key_processor_consume_macro();
 
-    /* Deux cycles idle pour flusher prev_press_row/col et prev_shift_pressed */
+    /* Two idle cycles to flush prev_press_row/col and prev_shift_pressed */
     build_keycode_report();
     build_keycode_report();
     memset(keycodes, 0, sizeof(keycodes));
@@ -196,32 +196,32 @@ static void reset_kp_state(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
-/* Cas de test                                                           */
+/* Test cases                                                            */
 /* ══════════════════════════════════════════════════════════════════════ */
 
-/* 1. Press simple : keycode HID standard → apparaît dans keycodes[] */
+/* 1. Simple press: standard HID keycode -> appears in keycodes[] */
 static void test_kp_simple_press(void)
 {
     reset_kp_state();
-    keymaps[0][0][0] = T_KC_A;     /* A à la position (0,0) couche 0 */
+    keymaps[0][0][0] = T_KC_A;     /* A at position (0,0) layer 0 */
     press_key(0, 0, 0);
     build_keycode_report();
-    TEST_ASSERT(keycode_in_report(T_KC_A), "press A → 0x04 dans keycodes");
+    TEST_ASSERT(keycode_in_report(T_KC_A), "press A -> 0x04 in keycodes");
 }
 
-/* 2. Release : après relâchement, keycode absent du report */
+/* 2. Release: after release, keycode absent from the report */
 static void test_kp_simple_release(void)
 {
     reset_kp_state();
     keymaps[0][0][0] = T_KC_A;
     press_key(0, 0, 0);
-    build_keycode_report();    /* cycle 1 : A pressé */
+    build_keycode_report();    /* cycle 1: A pressed */
     release_all_keys();
-    build_keycode_report();    /* cycle 2 : rien pressé */
-    TEST_ASSERT(!keycode_in_report(T_KC_A), "relâchement A → 0x04 absent du report");
+    build_keycode_report();    /* cycle 2: nothing pressed */
+    TEST_ASSERT(!keycode_in_report(T_KC_A), "release A -> 0x04 absent from the report");
 }
 
-/* 3. Touche modificatrice via position matricielle → HID mod dans keycodes[] */
+/* 3. Modifier key via matrix position -> HID mod in keycodes[] */
 static void test_kp_modifier_in_report(void)
 {
     reset_kp_state();
@@ -229,114 +229,114 @@ static void test_kp_modifier_in_report(void)
     press_key(0, 0, 0);
     build_keycode_report();
     TEST_ASSERT(keycode_in_report(T_KC_LSHIFT),
-                "LSHIFT dans keymaps → 0xE1 dans keycodes");
+                "LSHIFT in keymaps -> 0xE1 in keycodes");
 }
 
-/* 4. MO(layer) : press → current_layout bascule sur la couche */
+/* 4. MO(layer): press -> current_layout switches to the layer */
 static void test_kp_mo_activates_layer(void)
 {
     reset_kp_state();
     keymaps[0][0][0] = T_MO_L1;
     press_key(0, 0, 0);
     build_keycode_report();
-    TEST_ASSERT_EQ(current_layout, 1, "MO_L1 pressé → current_layout = 1");
+    TEST_ASSERT_EQ(current_layout, 1, "MO_L1 pressed -> current_layout = 1");
 }
 
-/* 5. La touche MO elle-même est absorbée (pas dans keycodes ni extra_keycodes) */
+/* 5. The MO key itself is absorbed (not in keycodes nor extra_keycodes) */
 static void test_kp_mo_key_absorbed(void)
 {
     reset_kp_state();
     keymaps[0][0][0] = T_MO_L1;
     press_key(0, 0, 0);
     build_keycode_report();
-    /* slot 0 : MO key absorbée → keycodes[0] = 0 */
-    TEST_ASSERT_EQ(keycodes[0], 0, "touche MO absorbée → keycodes[0] = 0");
+    /* slot 0: MO key absorbed -> keycodes[0] = 0 */
+    TEST_ASSERT_EQ(keycodes[0], 0, "MO key absorbed -> keycodes[0] = 0");
 }
 
-/* 6. Touche co-pressée avec MO → keycode de la couche active */
+/* 6. Key co-pressed with MO -> keycode of the active layer */
 static void test_kp_mo_active_layer_keycode(void)
 {
     reset_kp_state();
-    keymaps[0][0][0] = T_MO_L1;       /* MO_L1 en (0,0) couche 0 */
-    keymaps[1][0][1] = T_KC_B;        /* B en (0,1) couche 1 */
+    keymaps[0][0][0] = T_MO_L1;       /* MO_L1 at (0,0) layer 0 */
+    keymaps[1][0][1] = T_KC_B;        /* B at (0,1) layer 1 */
     press_key(0, 0, 0);
     press_key(1, 0, 1);
     build_keycode_report();
     TEST_ASSERT(keycode_in_report(T_KC_B),
-                "touche (0,1) sur couche 1 active → 0x05 (B) dans keycodes");
+                "key (0,1) on active layer 1 -> 0x05 (B) in keycodes");
 }
 
-/* 7. MO release : après relâchement de la touche MO, retour couche 0 */
+/* 7. MO release: after releasing the MO key, back to layer 0 */
 static void test_kp_mo_deactivates_on_release(void)
 {
     reset_kp_state();
     keymaps[0][0][0] = T_MO_L1;
     press_key(0, 0, 0);
-    build_keycode_report();    /* cycle press MO → current_layout = 1 */
+    build_keycode_report();    /* press MO cycle -> current_layout = 1 */
     release_all_keys();
-    build_keycode_report();    /* cycle release → restaure last_layer */
+    build_keycode_report();    /* release cycle -> restores last_layer */
     TEST_ASSERT_EQ(current_layout, 0,
-                   "relâchement MO_L1 → current_layout = 0");
+                   "release MO_L1 -> current_layout = 0");
 }
 
-/* 8. TO(layer) : press puis release → process_matrix_changes bascule la couche */
+/* 8. TO(layer): press then release -> process_matrix_changes switches the layer */
 static void test_kp_to_toggle_on(void)
 {
     reset_kp_state();
     keymaps[0][0][0] = T_TO_L1;
 
-    /* Cycle 1 : press TO_L1 */
+    /* Cycle 1: press TO_L1 */
     press_key(0, 0, 0);
     build_keycode_report();
-    process_matrix_changes();   /* clé encore tenue → pas de toggle */
+    process_matrix_changes();   /* key still held -> no toggle */
 
-    /* Cycle 2 : relâchement */
+    /* Cycle 2: release */
     release_all_keys();
     build_keycode_report();
-    process_matrix_changes();   /* clé relâchée → apply_toggle_layer */
+    process_matrix_changes();   /* key released -> apply_toggle_layer */
 
-    TEST_ASSERT_EQ(current_layout, 1, "TO_L1 press+release → current_layout = 1");
+    TEST_ASSERT_EQ(current_layout, 1, "TO_L1 press+release -> current_layout = 1");
 }
 
-/* 9. K_NO : touche transparente sur couche active → fallback sur last_layer */
+/* 9. K_NO: transparent key on the active layer -> fallback to last_layer */
 static void test_kp_kno_fallback(void)
 {
     reset_kp_state();
-    keymaps[0][0][0] = T_MO_L1;       /* MO_L1 active la couche 1 */
-    keymaps[0][0][1] = T_KC_A;        /* A en (0,1) couche 0 */
-    keymaps[1][0][1] = 0x0000u;       /* K_NO en (0,1) couche 1 → fallback à couche 0 */
+    keymaps[0][0][0] = T_MO_L1;       /* MO_L1 activates layer 1 */
+    keymaps[0][0][1] = T_KC_A;        /* A at (0,1) layer 0 */
+    keymaps[1][0][1] = 0x0000u;       /* K_NO at (0,1) layer 1 -> fallback to layer 0 */
 
-    press_key(0, 0, 0);               /* slot 0 : MO */
-    press_key(1, 0, 1);               /* slot 1 : touche avec K_NO sur L1 */
+    press_key(0, 0, 0);               /* slot 0: MO */
+    press_key(1, 0, 1);               /* slot 1: key with K_NO on L1 */
     build_keycode_report();
 
-    /* la touche (0,1) doit produire T_KC_A (depuis last_layer = 0) */
+    /* key (0,1) must produce T_KC_A (from last_layer = 0) */
     TEST_ASSERT(keycode_in_report(T_KC_A),
-                "K_NO sur couche active → fallback couche 0 = A (0x04)");
+                "K_NO on active layer -> fallback layer 0 = A (0x04)");
 }
 
-/* 10. OSM (logique QMK, M5) : le one-shot mod s'applique à la PROCHAINE frappe et
- * n'est consommé que là — un cycle sans frappe (release/idle) le laisse armé. */
+/* 10. OSM (QMK logic, M5): the one-shot mod applies to the NEXT keypress and
+ * is only consumed there — a cycle with no keypress (release/idle) leaves it armed. */
 static void test_kp_osm_applies_to_next_press(void)
 {
     reset_kp_state();
-    osm_arm(T_MOD_LSFT);          /* MOD_LSFT = bit 1 → HID_KEY_CONTROL_LEFT + 1 = 0xE1 */
-    /* Cycle sans frappe : l'OSM reste armé, PAS injecté */
+    osm_arm(T_MOD_LSFT);          /* MOD_LSFT = bit 1 -> HID_KEY_CONTROL_LEFT + 1 = 0xE1 */
+    /* Cycle with no keypress: the OSM stays armed, NOT injected */
     build_keycode_report();
     TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT),
-                "OSM sans frappe → mod PAS injecté (reste armé, M5/QMK)");
-    TEST_ASSERT(osm_is_active(), "OSM toujours armé après un cycle sans frappe");
-    /* Frappe cible : elle reçoit le mod OSM, alors consommé */
+                "OSM with no keypress -> mod NOT injected (stays armed, M5/QMK)");
+    TEST_ASSERT(osm_is_active(), "OSM still armed after a cycle with no keypress");
+    /* Target keypress: it receives the OSM mod, which is then consumed */
     keymaps[0][0][0] = T_KC_A;
     press_key(0, 0, 0);
     build_keycode_report();
-    TEST_ASSERT(keycode_in_report(T_KC_A), "frappe cible présente");
+    TEST_ASSERT(keycode_in_report(T_KC_A), "target keypress present");
     TEST_ASSERT((key_processor_report_mods() & 0x02) != 0,
-                "OSM appliqué à la frappe (octet modifier, porté hors keycodes[] — M7)");
-    TEST_ASSERT(!osm_is_active(), "OSM consommé par la frappe");
+                "OSM applied to the keypress (modifier byte, carried outside keycodes[] — M7)");
+    TEST_ASSERT(!osm_is_active(), "OSM consumed by the keypress");
 }
 
-/* 11a. OSL arm réel : press K_OSL(1) → le vrai osl_arm(1) est appelé */
+/* 11a. Real OSL arm: press K_OSL(1) -> the real osl_arm(1) is called */
 static void test_kp_osl_arm_called(void)
 {
     reset_kp_state();
@@ -344,39 +344,39 @@ static void test_kp_osl_arm_called(void)
     press_key(0, 0, 0);
     build_keycode_report();
     TEST_ASSERT_EQ(osl_get_layer(), 1,
-                   "press K_OSL(1) → osl armé sur couche 1");
+                   "press K_OSL(1) -> osl armed on layer 1");
 }
 
-/* 11b. OSL active layer réel : osl_arm(2) → active_layer écrasé sur 2 */
+/* 11b. Real OSL active layer: osl_arm(2) -> active_layer overwritten to 2 */
 static void test_kp_osl_active_layer(void)
 {
     reset_kp_state();
-    osl_arm(2);                    /* OSL couche 2 armé (vrai module) */
-    keymaps[2][0][0] = T_KC_B;    /* B sur couche 2 */
+    osl_arm(2);                    /* OSL layer 2 armed (real module) */
+    keymaps[2][0][0] = T_KC_B;    /* B on layer 2 */
     press_key(0, 0, 0);
     build_keycode_report();
     TEST_ASSERT(keycode_in_report(T_KC_B),
-                "osl_get_layer() = 2 → key (0,0) résout sur couche 2 = B (0x05)");
+                "osl_get_layer() = 2 -> key (0,0) resolves on layer 2 = B (0x05)");
 }
 
-/* 14. Combo réel : 2 touches d'un combo pressées ensemble → result injecté.
- *     Le pipeline défère les 2 touches (combo_should_defer/defer_key), puis
- *     combo_process les voit toutes deux présentes+déférées → résout → consume. */
+/* 14. Real combo: 2 keys of a combo pressed together -> result injected.
+ *     The pipeline defers the 2 keys (combo_should_defer/defer_key), then
+ *     combo_process sees both present+deferred -> resolves -> consume. */
 static void test_kp_combo_result_injected(void)
 {
     reset_kp_state();
     combo_config_t cfg = { .row1 = 0, .col1 = 0, .row2 = 0, .col2 = 1, .result = T_KC_A };
     combo_set(0, &cfg);
-    keymaps[0][0][0] = 0x0A;   /* G — keycode quelconque non nul */
+    keymaps[0][0][0] = 0x0A;   /* G — arbitrary non-zero keycode */
     keymaps[0][0][1] = 0x0B;   /* H */
     press_key(0, 0, 0);
     press_key(1, 0, 1);
     build_keycode_report();
     TEST_ASSERT(keycode_in_report(T_KC_A),
-                "combo (0,0)+(0,1) pressé → A (0x04) injecté dans keycodes");
+                "combo (0,0)+(0,1) pressed -> A (0x04) injected into keycodes");
 }
 
-/* 15. Plusieurs touches simultanées → toutes dans keycodes[] */
+/* 15. Several simultaneous keys -> all in keycodes[] */
 static void test_kp_multi_key_press(void)
 {
     reset_kp_state();
@@ -387,55 +387,55 @@ static void test_kp_multi_key_press(void)
     press_key(1, 0, 1);
     press_key(2, 1, 0);
     build_keycode_report();
-    TEST_ASSERT(keycode_in_report(T_KC_A), "multi-press : A (0x04) dans report");
-    TEST_ASSERT(keycode_in_report(T_KC_B), "multi-press : B (0x05) dans report");
-    TEST_ASSERT(keycode_in_report(0x06u),  "multi-press : C (0x06) dans report");
+    TEST_ASSERT(keycode_in_report(T_KC_A), "multi-press: A (0x04) in report");
+    TEST_ASSERT(keycode_in_report(T_KC_B), "multi-press: B (0x05) in report");
+    TEST_ASSERT(keycode_in_report(0x06u),  "multi-press: C (0x06) in report");
 }
 
-/* 16. MACRO + TO co-pressés : la touche MACRO ne doit PAS occuper le slot
- *     keypress_internal_function (réservé à TO/BT), sinon un TO simultané
- *     n'est jamais togglé. */
+/* 16. MACRO + TO co-pressed: the MACRO key must NOT occupy the
+ *     keypress_internal_function slot (reserved for TO/BT), otherwise a
+ *     simultaneous TO is never toggled. */
 static void test_kp_macro_does_not_starve_to(void)
 {
     reset_kp_state();
-    keymaps[0][0][0] = T_MACRO_1;   /* slot 0 : macro (vide → expand no-op) */
-    keymaps[0][0][1] = T_TO_L1;     /* slot 1 : TO_L1 */
+    keymaps[0][0][0] = T_MACRO_1;   /* slot 0: macro (empty -> expand no-op) */
+    keymaps[0][0][1] = T_TO_L1;     /* slot 1: TO_L1 */
 
-    /* Cycle press : les deux touches tenues */
+    /* Press cycle: both keys held */
     press_key(0, 0, 0);
     press_key(1, 0, 1);
     build_keycode_report();
-    process_matrix_changes();       /* encore tenues → pas de toggle */
+    process_matrix_changes();       /* still held -> no toggle */
 
-    /* Cycle release : TO relâché → toggle doit s'appliquer */
+    /* Release cycle: TO released -> toggle must apply */
     release_all_keys();
     build_keycode_report();
     process_matrix_changes();
 
     TEST_ASSERT_EQ(current_layout, 1,
-                   "MACRO + TO co-pressés → TO togglé (macro n'affame plus le slot interne)");
+                   "MACRO + TO co-pressed -> TO toggled (macro no longer starves the internal slot)");
 }
 
-/* 18. Double MO simultané : chaque touche MO est résolue depuis la couche
- *     active en DÉBUT de cycle, pas depuis la couche mutée par un MO traité
- *     plus tôt dans la boucle. Sans ça, l'ordre d'itération décide quelle
- *     couche est lue (bug d'ordre). Comportement aligné sur l'intention
- *     documentée de l'étape 2. */
+/* 18. Simultaneous double MO: each MO key is resolved from the active layer
+ *     at the START of the cycle, not from the layer mutated by an MO processed
+ *     earlier in the loop. Without this, iteration order decides which
+ *     layer is read (ordering bug). Behavior aligned with the intent
+ *     documented in step 2. */
 static void test_kp_double_mo_resolves_from_base_layer(void)
 {
     reset_kp_state();
-    keymaps[0][0][0] = T_MO_L1;   /* slot 0 : MO_L1 sur la base */
-    keymaps[0][0][1] = T_MO_L2;   /* slot 1 : MO_L2 sur la base */
-    keymaps[1][0][1] = T_KC_A;    /* sur couche 1, (0,1) = touche normale (piège) */
+    keymaps[0][0][0] = T_MO_L1;   /* slot 0: MO_L1 on the base */
+    keymaps[0][0][1] = T_MO_L2;   /* slot 1: MO_L2 on the base */
+    keymaps[1][0][1] = T_KC_A;    /* on layer 1, (0,1) = normal key (trap) */
 
     press_key(0, 0, 0);
     press_key(1, 0, 1);
     build_keycode_report();
 
-    /* Les deux MO lus depuis la couche 0 → MO_L2 reconnu → couche finale 2.
-     * (Avec le bug d'ordre : slot1 lu sur couche 1 = touche normale → couche 1.) */
+    /* Both MOs read from layer 0 -> MO_L2 recognized -> final layer 2.
+     * (With the ordering bug: slot1 read on layer 1 = normal key -> layer 1.) */
     TEST_ASSERT_EQ(current_layout, 2,
-                   "double MO simultané : résolution depuis la couche de base (→ couche 2)");
+                   "simultaneous double MO: resolution from the base layer (-> layer 2)");
 }
 
 /* 19. K_SEC_CONFIRM : press → authorize pending request, absorbed (not emitted) */
@@ -456,40 +456,40 @@ static void test_kp_sec_confirm_authorizes(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
-/* Tests expand_macro via le pipeline                                    */
+/* expand_macro tests via the pipeline                                   */
 /* ══════════════════════════════════════════════════════════════════════ */
 
-/* 20. Macro inline (pas de step MACRO_DELAY_MARKER) : les keycodes des steps
- *     sont injectés dans keycodes[] par expand_macro depuis build_keycode_report. */
+/* 20. Inline macro (no MACRO_DELAY_MARKER step): the steps' keycodes
+ *     are injected into keycodes[] by expand_macro from build_keycode_report. */
 static void test_kp_macro_inline_injects_steps(void)
 {
     reset_kp_state();
     macros_list[0].name[0] = 'm';
     macros_list[0].steps[0].keycode   = T_KC_A;
     macros_list[0].steps[0].modifier  = 0;
-    /* steps[1].keycode = 0 → fin de séquence (déjà 0 via memset dans reset_kp_state) */
+    /* steps[1].keycode = 0 -> end of sequence (already 0 via memset in reset_kp_state) */
     keymaps[0][0][0] = T_MACRO_1;
     press_key(0, 0, 0);
     build_keycode_report();
     TEST_ASSERT(keycode_in_report(T_KC_A),
-                "expand_macro inline : step.keycode injecté dans keycodes[]");
+                "expand_macro inline: step.keycode injected into keycodes[]");
 }
 
-/* 21. Macro avec name[0]=='\0' → guard actif, aucun keycode injecté (no-op) */
+/* 21. Macro with name[0]=='\0' -> guard active, no keycode injected (no-op) */
 static void test_kp_macro_empty_name_noop(void)
 {
     reset_kp_state();
-    /* macros_list[0].name[0] = '\0' → déjà via memset dans reset_kp_state */
-    macros_list[0].steps[0].keycode = T_KC_A;  /* ne doit PAS être injecté */
+    /* macros_list[0].name[0] = '\0' -> already via memset in reset_kp_state */
+    macros_list[0].steps[0].keycode = T_KC_A;  /* must NOT be injected */
     keymaps[0][0][0] = T_MACRO_1;
     press_key(0, 0, 0);
     build_keycode_report();
     TEST_ASSERT(!keycode_in_report(T_KC_A),
-                "expand_macro : name vide → no-op, aucun keycode injecté");
+                "expand_macro: empty name -> no-op, no keycode injected");
 }
 
-/* 22. Macro séquentielle (step MACRO_DELAY_MARKER présent) → pending_macro_idx
- *     positionné ; consommable via key_processor_consume_macro(). */
+/* 22. Sequential macro (MACRO_DELAY_MARKER step present) -> pending_macro_idx
+ *     set; consumable via key_processor_consume_macro(). */
 static void test_kp_macro_delay_sets_pending(void)
 {
     reset_kp_state();
@@ -500,20 +500,20 @@ static void test_kp_macro_delay_sets_pending(void)
     macros_list[0].steps[1].modifier  = 5; /* 50ms */
     macros_list[0].steps[2].keycode   = T_KC_B;
     macros_list[0].steps[2].modifier  = 0;
-    /* steps[3].keycode = 0 → fin (via memset) */
+    /* steps[3].keycode = 0 -> end (via memset) */
     keymaps[0][0][0] = T_MACRO_1;
     press_key(0, 0, 0);
     build_keycode_report();
     TEST_ASSERT(key_processor_has_pending_macro(),
-                "expand_macro délai : pending_macro_idx positionné");
+                "expand_macro delay: pending_macro_idx set");
     TEST_ASSERT_EQ(key_processor_consume_macro(), 0,
-                   "consume_macro retourne l'index 0");
+                   "consume_macro returns index 0");
     TEST_ASSERT(!key_processor_has_pending_macro(),
-                "après consume : pending_macro_idx vide");
+                "after consume: pending_macro_idx empty");
 }
 
-/* 22b. Macro à délai TENUE : ne se re-arme pas au scan suivant tant que la touche
- * est tenue (audit M8 — sinon rejeu en boucle à chaque changement matrice). */
+/* 22b. HELD delay macro: does not re-arm on the next scan while the key
+ * is held (audit M8 — otherwise replays in a loop on every matrix change). */
 static void test_kp_macro_delay_no_retrigger_held(void)
 {
     reset_kp_state();
@@ -524,32 +524,32 @@ static void test_kp_macro_delay_no_retrigger_held(void)
     macros_list[0].steps[2].keycode   = T_KC_B;
     keymaps[0][0][0] = T_MACRO_1;
     press_key(0, 0, 0);
-    build_keycode_report();                          /* 1er appui → en attente */
-    TEST_ASSERT(key_processor_has_pending_macro(), "1er appui macro-délai → en attente");
-    (void)key_processor_consume_macro();             /* keyboard_task la joue → consomme */
-    build_keycode_report();                          /* touche toujours tenue */
+    build_keycode_report();                          /* 1st press -> pending */
+    TEST_ASSERT(key_processor_has_pending_macro(), "1st delay-macro press -> pending");
+    (void)key_processor_consume_macro();             /* keyboard_task plays it -> consumes */
+    build_keycode_report();                          /* key still held */
     TEST_ASSERT(!key_processor_has_pending_macro(),
-                "macro-délai tenue → pas de re-armement au scan suivant (M8)");
+                "held delay-macro -> no re-arm on the next scan (M8)");
 }
 
-/* 23. Macro legacy (steps[0].keycode == 0) : utilise keys[] au lieu de steps[].
- *     Le keys[0] doit apparaître dans keycodes[] après build_keycode_report(). */
+/* 23. Legacy macro (steps[0].keycode == 0): uses keys[] instead of steps[].
+ *     keys[0] must appear in keycodes[] after build_keycode_report(). */
 static void test_kp_macro_legacy_injects_keys(void)
 {
     reset_kp_state();
     macros_list[0].name[0] = 'l';
-    /* steps[0].keycode = 0 → chemin legacy (déjà 0 via memset dans reset_kp_state) */
+    /* steps[0].keycode = 0 -> legacy path (already 0 via memset in reset_kp_state) */
     macros_list[0].keys[0] = T_KC_A;
     keymaps[0][0][0] = T_MACRO_1;
     press_key(0, 0, 0);
     build_keycode_report();
     TEST_ASSERT(keycode_in_report(T_KC_A),
-                "expand_macro legacy (steps[0]==0) : keys[0] injecté dans keycodes[]");
+                "expand_macro legacy (steps[0]==0): keys[0] injected into keycodes[]");
 }
 
-/* Key override déclenché par un mod PHYSIQUE + result_mod appliqué + mod
- * déclencheur retiré (audit E6 : l'override ne voyait que th_mods et jetait
- * result_mod → jamais déclenché en usage normal). */
+/* Key override triggered by a PHYSICAL mod + result_mod applied + trigger
+ * mod removed (audit E6: the override only saw th_mods and dropped
+ * result_mod -> never triggered in normal usage). */
 static void test_kp_key_override_physical_mod(void)
 {
     reset_kp_state();
@@ -557,80 +557,80 @@ static void test_kp_key_override_physical_mod(void)
     key_override_t ov = { .trigger_key = T_KC_A, .trigger_mod = 0x02 /* LShift */,
                           .result_key = T_KC_B,  .result_mod  = 0x01 /* LCtrl  */ };
     key_override_set(0, &ov);
-    keymaps[0][0][0] = T_KC_LSHIFT;   /* Shift physique en (0,0) */
-    keymaps[0][0][1] = T_KC_A;        /* A en (0,1) */
+    keymaps[0][0][0] = T_KC_LSHIFT;   /* physical Shift at (0,0) */
+    keymaps[0][0][1] = T_KC_A;        /* A at (0,1) */
     press_key(0, 0, 0);
     press_key(1, 0, 1);
     build_keycode_report();
     TEST_ASSERT(keycode_in_report(T_KC_B),
-                "override: Shift physique + A → B émis (déclenché par mod physique)");
+                "override: physical Shift + A -> B emitted (triggered by physical mod)");
     TEST_ASSERT(!keycode_in_report(T_KC_A),
-                "override: A remplacé, absent du report");
+                "override: A replaced, absent from the report");
     TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT),
-                "override: Shift déclencheur retiré du report");
+                "override: trigger Shift removed from the report");
     TEST_ASSERT((key_processor_report_mods() & 0x01) != 0,
-                "override: result_mod (Ctrl) appliqué (octet modifier — M7)");
-    key_override_init();   /* laisse propre pour les suites suivantes */
+                "override: result_mod (Ctrl) applied (modifier byte — M7)");
+    key_override_init();   /* leaves it clean for the following suites */
 }
 
-/* Mods portés hors keycodes[] : un mod (OSM Shift) survit même quand les 6 slots
- * sont pleins de vraies touches — avant, le mod volait/perdait une slot (audit M7). */
+/* Mods carried outside keycodes[]: a mod (OSM Shift) survives even when the
+ * 6 slots are full of real keys — before, the mod would steal/lose a slot (audit M7). */
 static void test_kp_mod_survives_full_report(void)
 {
     reset_kp_state();
-    /* 6 touches normales → remplissent keycodes[] (row 0, cols 0..5) */
+    /* 6 normal keys -> fill keycodes[] (row 0, cols 0..5) */
     for (uint8_t c = 0; c < 6; c++) {
         keymaps[0][0][c] = (uint16_t)(T_KC_A + c);
         press_key(c, 0, c);
     }
-    osm_arm(T_MOD_LSFT);          /* un mod via OSM → extra_mods */
+    osm_arm(T_MOD_LSFT);          /* a mod via OSM -> extra_mods */
     build_keycode_report();
     int keys = 0;
     for (int i = 0; i < 6; i++) if (keycodes[i] != 0) keys++;
-    TEST_ASSERT_EQ(keys, 6, "les 6 touches remplissent keycodes[]");
+    TEST_ASSERT_EQ(keys, 6, "the 6 keys fill keycodes[]");
     TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT),
-                "le mod n'occupe PAS une slot de keycode");
+                "the mod does NOT occupy a keycode slot");
     TEST_ASSERT((key_processor_report_mods() & 0x02) != 0,
-                "Shift (OSM) porté dans l'octet modifier même report plein (M7)");
+                "Shift (OSM) carried in the modifier byte even with a full report (M7)");
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
 /* Suite runner                                                          */
 /* ══════════════════════════════════════════════════════════════════════ */
 
-/* ── Slot recyclé : une touche absorbée hérite du keycode précédent ──────────
+/* ── Recycled slot: an absorbed key inherits the previous keycode ────────────
  *
- * Bug constaté au banc le 2026-09-12. En maintenant une couche (MO) sur la
- * moitié DISTANTE et en tapant un chiffre sur la LOCALE, le chiffre ne se
- * relâchait jamais — le host le répétait (« 231111114 » pour un seul appui).
+ * Bug observed at the bench on 2026-09-12. While holding a layer (MO) on the
+ * REMOTE half and typing a digit on the LOCAL one, the digit never
+ * released — the host repeated it ("231111114" for a single press).
  *
- * Cause : build_keycode_report ne remettait pas keycodes[i] à zéro dans la
- * branche « touche changeuse de couche — absorbée » (ni dans is_hold, advanced,
- * leader, combo). Ça passait tant que chaque slot gardait le même TYPE de
- * touche d'un cycle à l'autre. Mais la fusion distante REPACKE les slots : au
- * relâchement de la touche locale, le MO distant glisse du slot 1 au slot 0 —
- * le slot qui tenait le chiffre — et hérite de son keycode resté là.
+ * Cause: build_keycode_report was not resetting keycodes[i] to zero in the
+ * "layer-changing key — absorbed" branch (nor in is_hold, advanced,
+ * leader, combo). This held up as long as each slot kept the same TYPE of
+ * key from one cycle to the next. But remote fusion REPACKS the slots: on
+ * release of the local key, the remote MO slides from slot 1 to slot 0 —
+ * the slot that held the digit — and inherits its keycode left there.
  *
- * On reproduit le repack : chiffre au slot 0 + MO au slot 1, puis MO seul au
- * slot 0. Le rapport final ne doit contenir AUCUN chiffre. */
+ * We reproduce the repack: digit in slot 0 + MO in slot 1, then MO alone in
+ * slot 0. The final report must contain NO digit. */
 static void test_kp_slot_recycle_ne_gele_pas_le_keycode(void)
 {
     reset_kp_state();
-    keymaps[0][0][0] = T_KC_A;     /* "A" en (0,0) */
-    keymaps[0][0][1] = T_MO_L1;    /* MO(L1) en (0,1) */
+    keymaps[0][0][0] = T_KC_A;     /* "A" at (0,0) */
+    keymaps[0][0][1] = T_MO_L1;    /* MO(L1) at (0,1) */
 
-    /* Cycle 1 : A (slot 0) + MO (slot 1). */
+    /* Cycle 1: A (slot 0) + MO (slot 1). */
     press_key(0, 0, 0);
     press_key(1, 0, 1);
     build_keycode_report();
-    TEST_ASSERT(keycode_in_report(T_KC_A), "cycle 1 : A present");
+    TEST_ASSERT(keycode_in_report(T_KC_A), "cycle 1: A present");
 
-    /* Cycle 2 : la locale (A) est relachee, le MO glisse au slot 0 (repack). */
+    /* Cycle 2: the local key (A) is released, the MO slides to slot 0 (repack). */
     release_all_keys();
-    press_key(0, 0, 1);            /* MO seul, au SLOT 0 (là où était A) */
+    press_key(0, 0, 1);            /* MO alone, at SLOT 0 (where A used to be) */
     build_keycode_report();
     TEST_ASSERT(!keycode_in_report(T_KC_A),
-                "cycle 2 : A ne doit PLUS etre dans le rapport (slot recycle)");
+                "cycle 2: A must NO LONGER be in the report (slot recycle)");
 }
 
 void test_keycode_report(void)
@@ -664,22 +664,22 @@ void test_keycode_report(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
- * Modified Key (MK) — 0x8000-0x8FFF : « cette touche envoie Shift+1 ».
+ * Modified Key (MK) — 0x8000-0x8FFF: "this key sends Shift+1".
  *
- * Brief : docs/superpowers/specs/2026-09-11-modified-keycodes-design.md.
+ * Brief: docs/superpowers/specs/2026-09-11-modified-keycodes-design.md.
  *
- * HID ne connaît pas « ! » : 1 et ! sont la même touche (0x1E), c'est l'OS qui
- * tranche selon Shift. Le firmware doit donc mettre Shift dans l'OCTET
- * MODIFIER et 0x1E dans keycodes[] DANS LE MÊME RAPPORT. Deux erreurs sont
- * naturelles ici, et chaque test ci-dessous nomme celle qu'il attrape :
+ * HID does not know "!": 1 and ! are the same key (0x1E), it's the OS that
+ * decides based on Shift. The firmware must therefore put Shift in the
+ * MODIFIER BYTE and 0x1E in keycodes[] IN THE SAME REPORT. Two mistakes are
+ * natural here, and each test below names the one it catches:
  *
- *   (M7)  pousser 0xE1 dans keycodes[] au lieu de l'octet modifier — c'est le
- *         bug corrigé au commit bffdf4ec, où le mod volait une slot et se
- *         perdait quand les six étaient pleines ;
- *   (COL) laisser le mod dans extra_mods après relâchement — mod collant ;
- *   (TH)  router MK vers tap_hold comme MT — un tap enverrait « 1 » ;
- *   (BIT) tester `& 0x8000` au lieu de `& 0xF000 == 0x8000` — attrape tout ce
- *         qui est ≥ 0x8000, y compris les plages futures.
+ *   (M7)  pushing 0xE1 into keycodes[] instead of the modifier byte — this is
+ *         the bug fixed in commit bffdf4ec, where the mod stole a slot and got
+ *         lost when all six were full;
+ *   (COL) leaving the mod in extra_mods after release — sticky mod;
+ *   (TH)  routing MK to tap_hold like MT — a tap would send "1";
+ *   (BIT) testing `& 0x8000` instead of `& 0xF000 == 0x8000` — catches everything
+ *         that is >= 0x8000, including future ranges.
  * ══════════════════════════════════════════════════════════════════════════ */
 
 #define T_KC_1    0x1Eu
@@ -688,36 +688,36 @@ void test_keycode_report(void)
 
 static void test_mk_press_shift_dans_le_modifier_et_1_dans_keycodes(void)
 {
-    /* La sémantique de base. Attrape (M7) et (TH). */
+    /* The base semantics. Catches (M7) and (TH). */
     reset_kp_state();
     keymaps[0][0][0] = K_EXLM;
     press_key(0, 0, 0);
     build_keycode_report();
-    TEST_ASSERT(keycode_in_report(T_KC_1), "K_EXLM → 0x1E dans keycodes[]");
+    TEST_ASSERT(keycode_in_report(T_KC_1), "K_EXLM -> 0x1E in keycodes[]");
     TEST_ASSERT(key_processor_report_mods() & T_MOD_LSFT,
-                "K_EXLM → Shift dans l'octet modifier");
+                "K_EXLM -> Shift in the modifier byte");
     TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT),
-                "et JAMAIS 0xE1 dans keycodes[] — le mod ne vole pas de slot (M7)");
+                "and NEVER 0xE1 in keycodes[] — the mod does not steal a slot (M7)");
 }
 
 static void test_mk_release_ne_laisse_rien(void)
 {
-    /* Attrape (COL). */
+    /* Catches (COL). */
     reset_kp_state();
     keymaps[0][0][0] = K_EXLM;
     press_key(0, 0, 0);
     build_keycode_report();
     release_all_keys();
     build_keycode_report();
-    TEST_ASSERT(!keycode_in_report(T_KC_1), "relâché → 0x1E absent");
+    TEST_ASSERT(!keycode_in_report(T_KC_1), "released -> 0x1E absent");
     TEST_ASSERT(!(key_processor_report_mods() & T_MOD_LSFT),
-                "relâché → Shift absent du modifier (pas de mod collant)");
+                "released -> Shift absent from the modifier (no sticky mod)");
 }
 
 static void test_mk_ne_vole_pas_de_slot_quand_le_rapport_est_plein(void)
 {
-    /* LE test M7 : cinq touches normales + K_EXLM = six slots exactement. Si le
-     * Shift entrait dans keycodes[], l'une des six serait éjectée. */
+    /* THE M7 test: five normal keys + K_EXLM = exactly six slots. If the
+     * Shift went into keycodes[], one of the six would be evicted. */
     reset_kp_state();
     keymaps[0][0][0] = K_EXLM;
     keymaps[0][0][1] = T_KC_A;
@@ -730,9 +730,9 @@ static void test_mk_ne_vole_pas_de_slot_quand_le_rapport_est_plein(void)
     TEST_ASSERT(keycode_in_report(T_KC_1) && keycode_in_report(T_KC_A) &&
                 keycode_in_report(T_KC_B) && keycode_in_report(T_KC_C) &&
                 keycode_in_report(0x07u)  && keycode_in_report(0x08u),
-                "les six touches sont TOUTES dans le rapport");
-    TEST_ASSERT(key_processor_report_mods() & T_MOD_LSFT, "et Shift est dans le modifier");
-    TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT), "aucun 0xE1 dans keycodes[] (M7)");
+                "all six keys are in the report");
+    TEST_ASSERT(key_processor_report_mods() & T_MOD_LSFT, "and Shift is in the modifier");
+    TEST_ASSERT(!keycode_in_report(T_KC_LSHIFT), "no 0xE1 in keycodes[] (M7)");
 }
 
 static void test_mk_n_est_pas_que_shift(void)
@@ -741,16 +741,16 @@ static void test_mk_n_est_pas_que_shift(void)
     keymaps[0][0][0] = K_MK(MOD_LCTL, T_KC_C);
     press_key(0, 0, 0);
     build_keycode_report();
-    TEST_ASSERT(keycode_in_report(T_KC_C), "K_MK(LCTL, C) → C dans keycodes[]");
-    TEST_ASSERT(key_processor_report_mods() & T_MOD_LCTL, "et Ctrl dans le modifier");
-    TEST_ASSERT(!(key_processor_report_mods() & T_MOD_LSFT), "et PAS Shift");
+    TEST_ASSERT(keycode_in_report(T_KC_C), "K_MK(LCTL, C) -> C in keycodes[]");
+    TEST_ASSERT(key_processor_report_mods() & T_MOD_LCTL, "and Ctrl in the modifier");
+    TEST_ASSERT(!(key_processor_report_mods() & T_MOD_LSFT), "and NOT Shift");
 }
 
 static void test_mk_tenu_plus_une_lettre_la_limite_hid(void)
 {
-    /* L'octet modifier est GLOBAL au rapport : tenir K_EXLM et presser A donne
-     * Shift+1+A = « !A ». QMK fait pareil. On le fige comme comportement
-     * documenté, pas comme défaut caché. */
+    /* The modifier byte is GLOBAL to the report: holding K_EXLM and pressing A gives
+     * Shift+1+A = "!A". QMK does the same. We pin this down as documented
+     * behavior, not as a hidden defect. */
     reset_kp_state();
     keymaps[0][0][0] = K_EXLM;
     keymaps[0][0][1] = T_KC_A;
@@ -758,24 +758,24 @@ static void test_mk_tenu_plus_une_lettre_la_limite_hid(void)
     press_key(1, 0, 1);
     build_keycode_report();
     TEST_ASSERT(keycode_in_report(T_KC_1) && keycode_in_report(T_KC_A),
-                "0x1E et 0x04 dans le même rapport");
-    TEST_ASSERT(key_processor_report_mods() & T_MOD_LSFT, "avec Shift global");
+                "0x1E and 0x04 in the same report");
+    TEST_ASSERT(key_processor_report_mods() & T_MOD_LSFT, "with global Shift");
 }
 
 static void test_mk_bornes_de_la_plage(void)
 {
-    /* Attrape (BIT). */
-    TEST_ASSERT(!K_IS_MK(0x7FFFu), "0x7FFF n'est pas MK");
-    TEST_ASSERT( K_IS_MK(0x8000u), "0x8000 est MK");
-    TEST_ASSERT( K_IS_MK(0x8FFFu), "0x8FFF est MK");
-    TEST_ASSERT(!K_IS_MK(0x9000u), "0x9000 n'est PAS MK — `& 0x8000` le prendrait");
+    /* Catches (BIT). */
+    TEST_ASSERT(!K_IS_MK(0x7FFFu), "0x7FFF is not MK");
+    TEST_ASSERT( K_IS_MK(0x8000u), "0x8000 is MK");
+    TEST_ASSERT( K_IS_MK(0x8FFFu), "0x8FFF is MK");
+    TEST_ASSERT(!K_IS_MK(0x9000u), "0x9000 is NOT MK — `& 0x8000` would catch it");
     TEST_ASSERT(K_MK_MOD(K_EXLM) == MOD_LSFT && K_MK_KEY(K_EXLM) == T_KC_1,
-                "K_EXLM se décompose en (Shift, 0x1E)");
+                "K_EXLM decomposes into (Shift, 0x1E)");
 }
 
 static void test_mk_repeat_reproduit_le_symbole(void)
 {
-    /* Décision 4 du brief : après « ! », Repeat doit redonner « ! », pas « 1 ». */
+    /* Brief decision 4: after "!", Repeat must give back "!", not "1". */
     reset_kp_state();
     keymaps[0][0][0] = K_EXLM;
     keymaps[0][0][1] = K_REPEAT;
@@ -785,23 +785,23 @@ static void test_mk_repeat_reproduit_le_symbole(void)
     build_keycode_report();
     press_key(0, 0, 1);
     build_keycode_report();
-    TEST_ASSERT(keycode_in_report(T_KC_1), "Repeat → 0x1E");
+    TEST_ASSERT(keycode_in_report(T_KC_1), "Repeat -> 0x1E");
     TEST_ASSERT(key_processor_report_mods() & T_MOD_LSFT,
-                "Repeat → et le Shift du MK, sinon on obtient « 1 »");
+                "Repeat -> and the MK's Shift, otherwise we get \"1\"");
 }
 
 static void test_mk_sous_caps_word_un_seul_shift(void)
 {
-    /* Décision 2 : caps word ne shifte que les lettres ; 0x1E n'en est pas une.
-     * Résultat attendu : exactement Shift (celui du MK), rien de plus. */
+    /* Decision 2: caps word only shifts letters; 0x1E is not one.
+     * Expected result: exactly Shift (the MK's), nothing more. */
     reset_kp_state();
     caps_word_toggle();
     keymaps[0][0][0] = K_EXLM;
     press_key(0, 0, 0);
     build_keycode_report();
-    TEST_ASSERT(keycode_in_report(T_KC_1), "0x1E présent");
+    TEST_ASSERT(keycode_in_report(T_KC_1), "0x1E present");
     TEST_ASSERT((key_processor_report_mods() & 0x0F) == T_MOD_LSFT,
-                "un seul Shift, aucun autre mod ajouté");
+                "a single Shift, no other mod added");
 }
 
 void test_modified_key(void)

@@ -1,27 +1,27 @@
-/* Transport du lien filaire TRRS — brick B2.
+/* Wired TRRS link transport — brick B2.
  *
- * Tout ce qui est décidé est ailleurs : le format dans link_frame.h, la
- * poignée de main du 5 V dans link_handshake.h — logique pure, testée hôte.
- * Ici, seulement ce qui touche le matériel : l'UART1, la broche du load
- * switch, et la présence USB. Ce fichier traduit des événements en
- * link_hs_step() et des actions en gpio_set_level().
+ * Everything that is decided lives elsewhere: the format in link_frame.h, the
+ * 5 V handshake in link_handshake.h — pure logic, host-tested. Here, only what
+ * touches the hardware: UART1, the load switch pin, and USB presence. This
+ * file translates events into link_hs_step() and actions into
+ * gpio_set_level().
  *
- * ── Le câble est droit ───────────────────────────────────────────────────────
- * TX arrive sur TX. UNE moitié échange donc TXD/RXD via la matrice GPIO
- * (BOARD_LINK_SWAP_TX_RX, à 1 sur la gauche). Piloter les deux TX sans ce
- * swap mettrait deux sorties en opposition sur le même fil.
+ * ── The cable is straight ────────────────────────────────────────────────────
+ * TX arrives on TX. ONE half therefore swaps TXD/RXD via the GPIO matrix
+ * (BOARD_LINK_SWAP_TX_RX, set to 1 on the left). Driving both TX without this
+ * swap would put two outputs in opposition on the same wire.
  *
- * ── Sûreté du 5 V ────────────────────────────────────────────────────────────
- * LINK_5V_EN a un pull-down de 100 k : mort par défaut, et ce fichier le met
- * BAS avant toute autre chose. Il ne passe haut que sur une action de la
- * machine d'états, qui ne l'émet qu'après un échange vérifié — voir
- * l'invariant en tête de link_handshake.h.
+ * ── 5 V safety ───────────────────────────────────────────────────────────────
+ * LINK_5V_EN has a 100 k pull-down: dead by default, and this file drives it
+ * LOW before anything else. It only goes high on an action from the state
+ * machine, which only emits it after a verified exchange — see the invariant
+ * at the top of link_handshake.h.
  *
- * ── Une moitié en charge reste éveillée ──────────────────────────────────────
- * Le récepteur doit répondre aux sondes pour que le 5 V passe. En light sleep
- * son UART est muette : le pair expire (LINK_HS_PEER_TIMEOUT_MS) et rouvre
- * son switch. link_uart_active() sert donc de verrou à la veille, via le
- * paramètre `bloque` de veille_pas(). Un appareil branché ne dort pas. */
+ * ── A charging half stays awake ──────────────────────────────────────────────
+ * The receiver must answer probes for the 5 V to pass. In light sleep its
+ * UART is mute: the peer times out (LINK_HS_PEER_TIMEOUT_MS) and reopens its
+ * switch. link_uart_active() therefore acts as a sleep lock, via the
+ * `bloque` parameter of veille_pas(). A plugged-in device does not sleep. */
 #include "link_uart.h"
 #include "cadence.h"    /* LINK_TICK_MS / LINK_REPOS_MS */
 #include "link_frame.h"
@@ -29,7 +29,7 @@
 #include "board.h"
 #include "usb_presence.h"     /* vbus_debounce_step, usb_presence_cable */
 #if CONFIG_KASE_BATT_SENSE
-#include "batt_sense.h"       /* batterie faible : pas de 5 V pour l'autre */
+#include "batt_sense.h"       /* low battery: no 5 V for the other half */
 #endif
 #include "driver/uart.h"
 #include "driver/gpio.h"
@@ -37,7 +37,7 @@
 #include "esp_timer.h"
 #include "tinyusb.h"
 #if CONFIG_KASE_VEILLE
-#include "veille_task.h"   /* veto LIEN : une moitié qui charge l'autre ne dort pas */
+#include "veille_task.h"   /* LINK veto: a half charging the other does not sleep */
 #endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -56,18 +56,18 @@ static uint8_t          s_seq;
 static uint8_t          s_rx[LINK_RX_BUF];
 static uint16_t         s_rx_len;
 static volatile bool    s_active;
-static QueueHandle_t    s_uart_q;      /* événements du pilote UART : réveil sur réception */
+static QueueHandle_t    s_uart_q;      /* UART driver events: wake on reception */
 
-/* Compteurs de banc : on ne voit pas le fil, il faut le compter. */
+/* Bench counters: we can't see the wire, we have to count it. */
 static uint32_t s_probes_tx, s_acks_tx, s_probes_rx, s_acks_rx, s_skips;
 
 static void set_5v(bool on)
 {
     gpio_set_level(BOARD_LINK_5V_EN, on ? 1 : 0);
-    if (s_active == on) return;   /* l'entretien re-ferme un switch déjà fermé toutes les 200 ms */
+    if (s_active == on) return;   /* keepalive re-closes an already-closed switch every 200 ms */
     s_active = on;
 #if CONFIG_KASE_VEILLE
-    veille_veto(VEILLE_VETO_LIEN, on);   /* endormie, elle cesserait de répondre et le pair rouvrirait son 5 V */
+    veille_veto(VEILLE_VETO_LIEN, on);   /* asleep, it would stop answering and the peer would reopen its 5 V */
 #endif
     ESP_LOGW(TAG, "5 V %s — GPIO%d relu = %d", on ? "FERME" : "ouvert",
              BOARD_LINK_5V_EN, gpio_get_level(BOARD_LINK_5V_EN));
@@ -92,9 +92,9 @@ static void apply(link_hs_action_t a)
     }
 }
 
-/* Vider l'UART et décoder, avec resynchronisation : le décodeur dit combien
- * consommer, on avance d'autant, et un SKIP consomme toujours au moins un
- * octet — pas de boucle infinie sur du bruit. */
+/* Drain the UART and decode, with resynchronisation: the decoder says how
+ * much to consume, we advance by that much, and a SKIP always consumes at
+ * least one byte — no infinite loop on noise. */
 static void drain_uart(uint32_t now)
 {
     int n = uart_read_bytes(BOARD_LINK_UART_NUM, s_rx + s_rx_len,
@@ -115,7 +115,7 @@ static void drain_uart(uint32_t now)
         }
     }
     if (off) { memmove(s_rx, s_rx + off, s_rx_len - off); s_rx_len -= off; }
-    if (s_rx_len == LINK_RX_BUF) s_rx_len = 0;   /* tampon plein sans trame : bruit, on repart */
+    if (s_rx_len == LINK_RX_BUF) s_rx_len = 0;   /* buffer full without a frame: noise, start over */
 }
 
 static void link_task(void *arg)
@@ -125,19 +125,19 @@ static void link_task(void *arg)
     for (;;) {
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
 
-        /* Présence USB, en FRONT : la machine d'états veut des événements, pas
-         * un état. tud_ready(), pas tud_mounted() — sur l'ESP32-S3 mounted
-         * reste vrai après un débranchement à chaud. Même leçon que la veille. */
-        /* Même règle que le routage et la veille (usb_presence_brut) : pont VBUS
-         * si soudé — un chargeur mural n'énumère pas et doit quand même faire de
-         * cette moitié la source du 5 V —, sinon tud_ready(), forçage de banc
-         * compris. */
+        /* USB presence, on EDGE: the state machine wants events, not a
+         * state. tud_ready(), not tud_mounted() — on the ESP32-S3 mounted
+         * stays true after a hot unplug. Same lesson as sleep. */
+        /* Same rule as routing and sleep (usb_presence_brut): VBUS bridge if
+         * populated — a wall charger does not enumerate and must still make
+         * this half the source of the 5 V —, otherwise tud_ready(), bench
+         * forcing included. */
         bool usb = vbus_debounce_step(&s_usb_db, usb_presence_cable(), now, 50);
 #if CONFIG_KASE_BATT_SENSE
-        /* Batterie FAIBLE (< 3,5 V) : cette moitié ne se déclare plus source du
-         * 5 V — on ne charge pas l'autre avec une cellule à plat. Sur USB avec
-         * pont VBUS c'est le 5 V du câble qui nourrit ; sans pont on ne peut
-         * pas le savoir, on reste prudent. */
+        /* LOW battery (< 3.5 V): this half no longer declares itself source
+         * of the 5 V — we don't charge the other half from a flat cell. On
+         * USB with a VBUS bridge the cable's 5 V is what feeds it; without a
+         * bridge we can't know, so we stay cautious. */
         if (usb && batt_sense_niveau() != 0) usb = false;
 #endif
         if (usb != s_usb_prev) {
@@ -157,18 +157,18 @@ static void link_task(void *arg)
                      (unsigned)s_probes_tx, (unsigned)s_probes_rx,
                      (unsigned)s_acks_tx, (unsigned)s_acks_rx, (unsigned)s_skips);
         }
-        /* Au repos (5 V mort, pas d'USB) : bloquée sur la file d'événements
-         * UART — un octet du pair la réveille aussitôt (sa sonde arrive toutes
-         * les 300 ms en poignée de main) ; l'USB, événement humain, est sondé
-         * à LINK_REPOS_MS. À 10 ms cette tâche sortait le processeur
-         * d'oisiveté 100 fois par seconde pour rien ; à 100 ms de poll encore
-         * dix fois. En poignée de main ou lien établi : tick de LINK_TICK_MS
-         * (keepalive 200 ms, timeouts 200-500 ms). */
+        /* At rest (5 V dead, no USB): blocked on the UART event queue — a
+         * byte from the peer wakes it immediately (its probe arrives every
+         * 300 ms during the handshake); USB, a human event, is polled at
+         * LINK_REPOS_MS. At 10 ms this task pulled the processor out of
+         * idle 100 times a second for nothing; at 100 ms poll still ten
+         * times. During handshake or with the link up: tick of LINK_TICK_MS
+         * (200 ms keepalive, 200-500 ms timeouts). */
         bool repos = (s_hs.state == LINK_HS_IDLE) && !usb;
         uart_event_t ev;
         if (s_uart_q && xQueueReceive(s_uart_q, &ev, pdMS_TO_TICKS(repos ? LINK_REPOS_MS : LINK_TICK_MS)) == pdTRUE) {
-            /* Débordement (TX flottante du pair endormi = flot de faux octets) :
-             * repartir propre plutôt que de décoder du bruit pendant des secondes. */
+            /* Overflow (floating TX of a sleeping peer = flood of fake bytes):
+             * start clean rather than decode noise for seconds. */
             if (ev.type == UART_FIFO_OVF || ev.type == UART_BUFFER_FULL) {
                 uart_flush_input(BOARD_LINK_UART_NUM);
                 xQueueReset(s_uart_q);
@@ -184,31 +184,31 @@ bool link_uart_active(void) { return s_active; }
 
 void link_uart_start(void)
 {
-    /* 1. Le switch, BAS, avant tout : c'est la seule broche qui peut faire
-     *    du mal, et elle ne doit dépendre d'aucune suite. */
+    /* 1. The switch, LOW, before anything else: it's the only pin that can
+     *    do harm, and it must not depend on anything that follows. */
     gpio_config_t io = {
         .pin_bit_mask = 1ULL << BOARD_LINK_5V_EN,
-        .mode = GPIO_MODE_INPUT_OUTPUT,   /* relecture possible : on veut VOIR ce qu'on commande */
+        .mode = GPIO_MODE_INPUT_OUTPUT,   /* readback possible: we want to SEE what we command */
     };
     gpio_config(&io);
     gpio_set_level(BOARD_LINK_5V_EN, 0);
 
-    /* 2. L'UART, avec le swap sur la moitié qui l'annonce. */
+    /* 2. The UART, with the swap on the half that declares it. */
     uart_config_t uc = {
         .baud_rate = LINK_BAUD,
         .data_bits = UART_DATA_8_BITS,
         .parity    = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        /* XTAL, pas APB : avec le DFS (CONFIG_PM_ENABLE) l'APB tombe à 40 MHz au
-         * repos et une UART cadencée dessus perd son baud entre deux verrous.
-         * Le XTAL ne bouge jamais. */
+        /* XTAL, not APB: with DFS (CONFIG_PM_ENABLE) the APB drops to 40 MHz at
+         * rest and a UART clocked off it loses its baud between two locks.
+         * The XTAL never moves. */
         .source_clk = UART_SCLK_XTAL,
     };
     ESP_ERROR_CHECK(uart_driver_install(BOARD_LINK_UART_NUM, 256, 0, 8, &s_uart_q, 0));
     ESP_ERROR_CHECK(uart_param_config(BOARD_LINK_UART_NUM, &uc));
 #if BOARD_LINK_SWAP_TX_RX
-    const int link_rx_pin = BOARD_LINK_TX;   /* swap : la vraie RX est sur TX */
+    const int link_rx_pin = BOARD_LINK_TX;   /* swap: the real RX is on TX */
     ESP_ERROR_CHECK(uart_set_pin(BOARD_LINK_UART_NUM, BOARD_LINK_RX, BOARD_LINK_TX,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_LOGI(TAG, "UART%d TX=GPIO%d RX=GPIO%d (SWAP, cable droit)",
@@ -220,12 +220,12 @@ void link_uart_start(void)
     ESP_LOGI(TAG, "UART%d TX=GPIO%d RX=GPIO%d", BOARD_LINK_UART_NUM, BOARD_LINK_TX, BOARD_LINK_RX);
 #endif
 
-    /* Pull-up sur la RX. Quand l'autre moitié dort, sa TX flotte : au repos une
-     * UART est à l'état HAUT, une ligne qui flotte descend et se fait lire comme
-     * un flot de faux octets (91 682 « bruit » comptés sur une capture du
-     * 2026-09-12). Le pull-up interne la tient haute — ligne au repos, pas de
-     * décodage parasite. Piste aussi contre le couplage du câble TRRS vers les
-     * lignes de matrice, soupçonné dans les réveils fantômes. */
+    /* Pull-up on RX. When the other half sleeps, its TX floats: at rest a
+     * UART is in the HIGH state, a floating line drifts low and gets read as
+     * a flood of fake bytes (91,682 "noise" counted on a capture from
+     * 2026-09-12). The internal pull-up holds it high — line at rest, no
+     * spurious decoding. Also a lead against TRRS cable coupling into the
+     * matrix lines, suspected in the phantom wakeups. */
     gpio_set_pull_mode(link_rx_pin, GPIO_PULLUP_ONLY);
 
     link_hs_init(&s_hs);

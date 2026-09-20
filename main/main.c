@@ -3,7 +3,7 @@
  */
 #include "cdc_acm_com.h"
 #include "cpu_time.h"
-#include "veille_task.h"   /* pur hors CONFIG_KASE_VEILLE (veto/hook : appels sous #if) */
+#include "veille_task.h"   /* pure outside CONFIG_KASE_VEILLE (veto/hook: calls under #if) */
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
@@ -14,7 +14,7 @@
 #include "batt_sense.h"
 #endif
 #if CONFIG_KASE_DISPLAY_MEMLCD
-#include "memlcd_panel.h"   /* memlcd_cs_idle : CS écran bas dès le boot (bus partagé nRF24) */
+#include "memlcd_panel.h"   /* memlcd_cs_idle: display CS low from boot (shared nRF24 bus) */
 #endif
 #if CONFIG_KASE_VEILLE
 #include "veille.h"
@@ -39,7 +39,7 @@
 #include <stdint.h>
 
 #if CONFIG_KASE_HAS_DISPLAY
-#include "display_backend.h"   /* tout rôle avec un écran (clavier, moitié droite) */
+#include "display_backend.h"   /* any role with a display (keyboard, right half) */
 #endif
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 #include "hid_bluetooth_manager.h"   /* real API, or no-op stubs when HAS_BLE off */
@@ -48,19 +48,19 @@
 #include "status_display.h"
 #endif
 
-/* matrix_scan.h suit la matrice, pas le rôle : la moitié droite du Niphargus
- * scanne aussi (KASE_HAS_LOCAL_MATRIX) sans être un clavier complet. */
+/* matrix_scan.h follows the matrix, not the role: the Niphargus right half
+ * also scans (KASE_HAS_LOCAL_MATRIX) without being a full keyboard. */
 #if CONFIG_KASE_HAS_LOCAL_MATRIX
 #include "matrix_scan.h"
 #endif
 
 #if CONFIG_KASE_KBD_WIRELESS
 #include "kbd_relay_tx.h"
-#include "usb_presence.h"   /* kbd_active_route — affiche par le battement de coeur */
+#include "usb_presence.h"   /* kbd_active_route — displayed via the heartbeat */
 #endif
 
-/* Diagnostic de banc, independant du role : la gauche du Niphargus n'a ni
- * KBD_WIRELESS ni HAS_RF_RX, l'include doit donc vivre hors de ces blocs. */
+/* Bench diagnostic, role-independent: the Niphargus left half has neither
+ * KBD_WIRELESS nor HAS_RF_RX, so the include must live outside these blocks. */
 #if CONFIG_KASE_NRF_PROBE
 #include "rf_probe.h"
 #endif
@@ -85,8 +85,8 @@ static const char *TAG = "Main";
 TaskHandle_t status_display_task_handle = NULL;
 
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD && !CONFIG_KASE_VEILLE
-/* KaSe V1/V2 : battement de coeur de banc. Sur les moitiés du Niphargus
- * (KASE_VEILLE) c'est la tâche de veille qui le porte (power/veille_task.c). */
+/* KaSe V1/V2: bench heartbeat. On the Niphargus halves
+ * (KASE_VEILLE) the sleep task carries it (power/veille_task.c). */
 static void cpu_time_logger_task(void *arg) {
   (void)arg;
   char buf[512];
@@ -94,20 +94,20 @@ static void cpu_time_logger_task(void *arg) {
     if (cpu_time_measure_period(1000, buf, sizeof(buf)) == 0) {
       ESP_LOGI(TAG, "CPU usage:\n%s", buf);
     } else {
-      /* Les statistiques FreeRTOS ne sont pas compilees
-       * (CONFIG_FREERTOS_USE_TRACE_FACILITY absent) : ce message tombait toutes
-       * les 5 s sans rien apprendre. On en fait un battement de coeur, seul
-       * temoin de vie quand la carte tourne sur batterie — l'USB est alors
-       * debranche et ne dit plus rien. Il affiche aussi le routage, ce qui
-       * permet de verifier que la bascule USB -> RF a bien eu lieu. */
+      /* FreeRTOS runtime stats are not compiled in
+       * (CONFIG_FREERTOS_USE_TRACE_FACILITY absent): this message fired every
+       * 5 s learning nothing. We turn it into a heartbeat, the only
+       * sign of life when the board runs on battery — USB is then
+       * unplugged and says nothing more. It also shows the routing, which
+       * lets us verify the USB -> RF switch actually happened. */
       uint32_t up_s = (uint32_t)(esp_timer_get_time() / 1000000);
       uint32_t dodo_n = 0, dodo_ms = 0;
 #if CONFIG_KASE_VEILLE
-      veille_bilan(&dodo_n, &dodo_ms);   /* « dormi X s sur Y » : lit une nuit d'un coup d'oeil */
+      veille_bilan(&dodo_n, &dodo_ms);   /* "slept X s out of Y": reads a whole night at a glance */
 #endif
       uint32_t inactif_s = (uint32_t)((esp_timer_get_time() / 1000) - get_last_activity_time_ms()) / 1000;
 #if CONFIG_PM_PROFILING
-      esp_pm_dump_locks(stdout);   /* banc : temps passé par mode (light sleep, APB min/max) */
+      esp_pm_dump_locks(stdout);   /* bench: time spent per mode (light sleep, APB min/max) */
 #endif
 #if CONFIG_KASE_KBD_WIRELESS
       ESP_LOGW(TAG, "HB up=%us inactif=%us dormi=%us/%u route=%s relais=%s", (unsigned)up_s,
@@ -119,9 +119,9 @@ static void cpu_time_logger_task(void *arg) {
                (unsigned)(dodo_ms / 1000), (unsigned)dodo_n);
 #endif
     }
-    /* 10 s : ce battement est un témoin de banc (inactif, dormi, route), pas
-     * un service ; à 2 s il coûtait une ligne série et une sortie d'oisiveté
-     * toutes les deux secondes. Assez pour lire une nuit. */
+    /* 10 s: this heartbeat is a bench witness (inactive, slept, route), not
+     * a service; at 2 s it cost a serial line and an idle print
+     * every two seconds. Enough to read back a whole night. */
     vTaskDelay(pdMS_TO_TICKS(HB_PERIODE_MS));
   }
 }
@@ -129,8 +129,8 @@ static void cpu_time_logger_task(void *arg) {
 
 #if CONFIG_KASE_HAS_DISPLAY
 #if CONFIG_KASE_DEVICE_ROLE_NIPHAR_SLAVE && CONFIG_KASE_DISPLAY_MEMLCD
-/* Écran de la DROITE : tâche minimale, voir l'appel dans app_main (rôle
- * esclave). La tâche clavier ci-dessous tire le moteur et les stats, absents. */
+/* RIGHT half display: minimal task, see the call in app_main (slave
+ * role). The keyboard task below drives the engine and stats, which are absent here. */
 static void memlcd_slave_display_task(void *arg) {
   (void)arg;
   const display_backend_t *be = display_get_backend();
@@ -178,7 +178,7 @@ static void status_display_task(void *arg) {
     status_display_update();
 
     /* Periodically save stats + tick WPM every second */
-    key_stats_check_save();   /* no-op sur les moitiés : CONFIG_KASE_KEY_STATS=n */
+    key_stats_check_save();   /* no-op on the halves: CONFIG_KASE_KEY_STATS=n */
     {
       static uint32_t last_wpm_tick = 0;
       uint32_t now_wpm = esp_timer_get_time() / 1000;
@@ -217,10 +217,10 @@ void app_main(void) {
   ESP_LOGI(TAG, "Boot count: %lu", (unsigned long)boot_crash_count);
 
 #if CONFIG_KASE_VEILLE
-  /* D'où vient ce démarrage ? Un réveil de sommeil profond est un REDÉMARRAGE :
-   * sans cette ligne, il est indiscernable d'une mise sous tension ou d'un
-   * plantage, et le journal ne permet pas de dire si EXT1 a fonctionné.
-   * Éprouvé au banc le 2026-09-08 : rst:0x5 (DSLEEP), Boot OK à 702 ms. */
+  /* Where does this boot come from? A deep sleep wake-up is a REBOOT:
+   * without this line, it is indistinguishable from a power-on or a
+   * crash, and the log gives no way to tell whether EXT1 worked.
+   * Tested on the bench on 2026-09-08: rst:0x5 (DSLEEP), Boot OK at 702 ms. */
   {
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause == ESP_SLEEP_WAKEUP_EXT1)
@@ -228,21 +228,21 @@ void app_main(void) {
     else if (cause != ESP_SLEEP_WAKEUP_UNDEFINED)
       ESP_LOGW(TAG, "reveil de veille, cause=%d", (int)cause);
   }
-  /* AVANT toute configuration de matrice : les colonnes peuvent être encore
-   * figées par le maintien RTC posé avant le sommeil profond. */
+  /* BEFORE any matrix configuration: the columns may still be
+   * frozen by the RTC hold set before deep sleep. */
   veille_liberer_gpio();
 #endif
 #if CONFIG_KASE_DISPLAY_MEMLCD
-  /* Écran sur le SPI PARTAGÉ avec la radio : son CS (actif haut) est tenu BAS
-   * dès maintenant, AVANT toute init radio, pour qu'il n'écoute jamais le bus. */
+  /* Display on the SPI bus SHARED with the radio: its CS (active high) is held LOW
+   * right now, BEFORE any radio init, so it never listens on the bus. */
   memlcd_cs_idle();
 #endif
 #if CONFIG_KASE_BATT_SENSE
-  /* Jauge : premiere mesure au boot, puis toutes les 10 s et a chaque reveil. */
+  /* Gauge: first sample at boot, then every 10 s and on every wake-up. */
   batt_sense_init();
 #endif
-  /* Frequence dynamique : 160 MHz en travail, 40 MHz oisif (power/pm_dfs.c).
-   * Rien sans CONFIG_PM_ENABLE (moities Niphargus seulement). */
+  /* Dynamic frequency: 160 MHz while working, 40 MHz idle (power/pm_dfs.c).
+   * No-op without CONFIG_PM_ENABLE (Niphargus halves only). */
   pm_dfs_init();
 
   if (boot_crash_count > BOOT_CRASH_LIMIT) {
@@ -254,21 +254,21 @@ void app_main(void) {
        Safe mode just skips display/BLE/NVS loading. */
   }
 
-  /* ── NVS, pour TOUS les rôles ────────────────────────────────────────────
+  /* ── NVS, for ALL roles ────────────────────────────────────────────
    *
-   * Elle n'était initialisée que par keymap_init_nvs(), dans input/keymap.c,
-   * derrière la garde du moteur keymap. Ni le dongle ni la souris ne compilent
-   * ce fichier — et hid_bluetooth_manager.c, l'autre appelant, pas davantage.
+   * It used to be initialized only by keymap_init_nvs(), in input/keymap.c,
+   * behind the keymap engine's guard. Neither the dongle nor the mouse compile
+   * that file — nor does hid_bluetooth_manager.c, the other caller.
    *
-   * Conséquence, constatée au banc le 2026-08-26 : le dongle répondait
-   * ESP_ERR_NVS_NOT_INITIALIZED (0x1101) à toute écriture. Il acquittait les
-   * demandes d'appairage sans jamais rien enregistrer, et n'avait aucun moyen
-   * de le dire — il tourne sans console en production. La souris présentait
-   * exactement le même symptôme, pour exactement la même raison.
+   * Consequence, found on the bench on 2026-08-26: the dongle replied
+   * ESP_ERR_NVS_NOT_INITIALIZED (0x1101) to every write. It acknowledged
+   * pairing requests without ever saving anything, with no way
+   * to say so — it runs with no console in production. The mouse showed
+   * exactly the same symptom, for exactly the same reason.
    *
-   * La NVS est de l'infrastructure : elle n'a rien à faire derrière une garde
-   * de rôle. keymap_init_nvs() reste appelée plus bas pour les rôles clavier ;
-   * un second nvs_flash_init() est sans effet. */
+   * NVS is infrastructure: it has no business being behind a role
+   * guard. keymap_init_nvs() is still called further down for keyboard roles;
+   * a second nvs_flash_init() has no effect. */
   {
     esp_err_t nvs = nvs_flash_init();
     if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -350,18 +350,18 @@ void app_main(void) {
   }
 
 #if CONFIG_KASE_LINK_WIRE
-  /* Lien filaire TRRS. Placé tôt et hors du dispatch de rôles : sa première
-   * action est de mettre LINK_5V_EN à BAS, avant que quoi que ce soit d'autre
-   * ne touche aux GPIO. */
+  /* Wired TRRS link. Placed early and outside the role dispatch: its first
+   * action is to set LINK_5V_EN LOW, before anything else
+   * touches the GPIOs. */
   link_uart_start();
 #endif
 
 
 #if CONFIG_KASE_NRF_PROBE
-  /* Diagnostic de banc, HORS du dispatch de rôles : la moitié droite le veut
-   * aussi, et elle n'est pas en rôle clavier. Placé avant toute init de rôle
-   * car kbd_relay_init() réclame les GPIO de la radio et ouvre le bus SPI —
-   * après quoi le test de lignes ne mesurerait plus que ses propres broches. */
+  /* Bench diagnostic, OUTSIDE the role dispatch: the right half wants it
+   * too, and it isn't in a keyboard role. Placed before any role init
+   * because kbd_relay_init() claims the radio's GPIOs and opens the SPI bus —
+   * after which the line test would only measure its own pins. */
   rf_probe_run();
 #endif
 
@@ -439,20 +439,20 @@ void app_main(void) {
   {
     /* Engine subsystem inits (keyboard_manager_init lives in keyboard_task.c
      * which is not compiled on the dongle — call the pieces directly). */
-    /* Plus aucune initialisation de moteur ici : le dongle reçoit du HID déjà
-     * fini et n'a plus rien à calculer. Voir
+    /* No more engine initialization here: the dongle receives HID that is
+     * already finished and has nothing left to compute. See
      * docs/superpowers/specs/2026-08-19-dongle-role-niphargus-design.md */
     extern bool rf_rx_start(void);
     if (!rf_rx_start())
       ESP_LOGE(TAG, "RF RX failed to start (no radios?)");
   }
 #elif CONFIG_KASE_DEVICE_ROLE_MOUSE
-  /* --- Rôle souris (Conchodytes) : capteur PMW3389, trois clics, molette. ---
+  /* --- Mouse role (Conchodytes): PMW3389 sensor, three clicks, wheel. ---
    *
-   * Ni matrice, ni keymap, ni écran, ni BLE : le CMakeLists ne compile aucun
-   * de ces modules pour ce rôle. La tâche ne produit pas encore de rapport
-   * HID — le relais vers le slot 2 du dongle est le jalon suivant, avec sa
-   * propre spec. */
+   * No matrix, no keymap, no display, no BLE: the CMakeLists compiles none
+   * of these modules for this role. The task does not yet produce an HID
+   * report — relaying to the dongle's slot 2 is the next milestone, with its
+   * own spec. */
   ESP_LOGI(TAG, "Role souris : capteur + clics + molette");
   {
     extern esp_err_t mouse_task_start(void);
@@ -461,34 +461,34 @@ void app_main(void) {
       ESP_LOGE(TAG, "mouse_task_start a echoue : %s", esp_err_to_name(err));
   }
 #elif CONFIG_KASE_DEVICE_ROLE_NIPHAR_SLAVE
-  /* --- Moitié DROITE du Niphargus : un scanner, rien d'autre. ---
+  /* --- Niphargus RIGHT half: a scanner, nothing else. ---
    *
-   * La spec la décrit comme « un scanner qui remonte sa matrice brute » : elle
-   * n'a ni moteur keymap, ni sortie HID — c'est la gauche qui porte les deux.
-   * On initialise donc le scan et rien de plus. Le pilote keyboard_button crée
-   * sa propre tâche et rappelle notre callback ; aucune tâche à créer ici.
+   * The spec describes it as "a scanner that reports its raw matrix": it
+   * has neither a keymap engine nor an HID output — the left half carries both.
+   * So we only initialize the scan and nothing more. The keyboard_button driver
+   * creates its own task and calls our callback back; no task to create here.
    *
-   * Sans cet appel, activer KASE_HAS_LOCAL_MATRIX compilait le module sans
-   * jamais l'initialiser : la matrice restait muette et le brochage
-   * invérifiable. L'émission vers la gauche est le ressort de B3, pas encore
-   * écrite. */
+   * Without this call, enabling KASE_HAS_LOCAL_MATRIX compiled the module without
+   * ever initializing it: the matrix stayed silent and the pinout was
+   * unverifiable. Transmitting to the left half is B3's job, not yet
+   * written. */
   ESP_LOGI(TAG, "Role esclave Niphargus : scan matrice seul");
 #if CONFIG_KASE_HALF_LINK_TX
-  /* AVANT matrix_setup() : le callback de scan émettra dès le premier appui,
-   * et il lui faut une radio prête. */
+  /* BEFORE matrix_setup(): the scan callback will transmit from the first press,
+   * and it needs a radio that is ready. */
   half_link_tx_init();
-  /* APRES l'init : la tache reaffirme les maintiens, que le callback de scan ne
-   * peut pas produire (il ne se declenche que sur changement). Sans elle, une
-   * touche tenue plus de 250 ms est relachee a tort par la gauche. */
+  /* AFTER init: the task reaffirms held keys, which the scan callback
+   * cannot produce (it only fires on change). Without it, a
+   * key held for more than 250 ms is wrongly released by the left half. */
   half_link_tx_refresh_start();
 #endif
   rtc_matrix_deinit();
   matrix_setup();
 #if CONFIG_KASE_DISPLAY_MEMLCD
-  /* Écran de la DROITE : la status_display_task du rôle clavier tire le moteur
-   * et les stats, absents ici. Une tâche minimale suffit : init du backend,
-   * update() toutes les 100 ms (redessin à la demande + entretien VCOM), et la
-   * veille lui est signalée par veille.c (image gelée). */
+  /* RIGHT half display: the keyboard role's status_display_task drives the engine
+   * and stats, which are absent here. A minimal task is enough: backend init,
+   * update() every 100 ms (redraw on demand + VCOM upkeep), and
+   * sleep is signaled to it by veille.c (frozen image). */
   {
     extern const display_backend_t memlcd_display_backend;
     display_set_backend(&memlcd_display_backend);
@@ -504,10 +504,10 @@ void app_main(void) {
                           1);
 #endif
 #if CONFIG_KASE_VEILLE
-  /* UNE tâche de veille pour les deux moitiés : inactivité, vetos (USB, lien,
-   * sync, test), hooks (radio, écran, jauge), battement de coeur. Démarrée
-   * après les modules ; un hook enregistré plus tard (écran, dans sa tâche)
-   * compte dès le sommeil suivant. */
+  /* ONE sleep task for both halves: inactivity, vetoes (USB, link,
+   * sync, test), hooks (radio, display, gauge), heartbeat. Started
+   * after the modules; a hook registered later (display, in its own task)
+   * counts from the very next sleep. */
   veille_task_start();
 #endif
 

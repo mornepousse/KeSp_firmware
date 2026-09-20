@@ -1,86 +1,86 @@
-# Guide Sprites Tamagotchi — KaSe Keyboard
+# Tamagotchi Sprite Guide — KaSe Keyboard
 
-## Contraintes techniques
+## Technical constraints
 
-| Paramètre | Valeur |
+| Parameter | Value |
 |-----------|--------|
-| **Taille sprite** | 32×32 pixels |
-| **Couleurs** | Monochrome (1 bit : pixel ON ou OFF) |
-| **Écran round** | 240×240 px — sprite affiché à ~80×80 px (zoom 2.5x) |
-| **Écran OLED** | 128×64 px — sprite affiché à 32×32 px (taille native) |
-| **Zone disponible** | ~100×100 px au centre de l'écran round |
-| **Format de livraison** | PNG 32×32 monochrome (noir et blanc pur, pas de gris) |
+| **Sprite size** | 32×32 pixels |
+| **Colors** | Monochrome (1 bit: pixel ON or OFF) |
+| **Round screen** | 240×240 px — sprite displayed at ~80×80 px (2.5x zoom) |
+| **OLED screen** | 128×64 px — sprite displayed at 32×32 px (native size) |
+| **Available area** | ~100×100 px at the center of the round screen |
+| **Delivery format** | PNG 32×32 monochrome (pure black and white, no gray) |
 
-## Ce qu'il faut dessiner
+## What to draw
 
-### 20 créatures (niveaux d'évolution)
+### 20 creatures (evolution levels)
 
-Chaque créature a **2 poses** :
-- **Main** : pose normale / active
-- **Idle** : pose repos (légère variation — yeux fermés, posture détendue, etc.)
+Each creature has **2 poses**:
+- **Main**: normal / active pose
+- **Idle**: rest pose (slight variation — closed eyes, relaxed posture, etc.)
 
-L'animation bascule entre les 2 poses toutes les 600ms + un léger mouvement vertical de respiration.
+The animation toggles between the 2 poses every 600ms plus a slight vertical breathing motion.
 
-| Niveau | Nom suggéré | Style | Description |
+| Level | Suggested name | Style | Description |
 |--------|-------------|-------|-------------|
-| 1 | Egg | Simple | Un œuf avec un motif |
-| 2-5 | Bébé | Petit, rond | Petite créature mignonne, simple |
-| 6-10 | Enfant | Plus détaillé | Membres visibles, expression |
-| 11-15 | Ado | Complexe | Personnalité distincte |
-| 16-19 | Adulte | Détaillé | Design unique, élaboré |
-| 20 | Ultime | Épique | Forme finale, impressionnante |
+| 1 | Egg | Simple | An egg with a pattern |
+| 2-5 | Baby | Small, round | Small cute creature, simple |
+| 6-10 | Child | More detailed | Visible limbs, expression |
+| 11-15 | Teen | Complex | Distinct personality |
+| 16-19 | Adult | Detailed | Unique, elaborate design |
+| 20 | Ultimate | Epic | Final form, impressive |
 
-### 8 icônes d'état (16×16 pixels)
+### 8 status icons (16×16 pixels)
 
-| Icône | Usage |
+| Icon | Use |
 |-------|-------|
-| Nourriture | Barre de faim |
-| Cœur | Bonheur |
-| Éclair | Énergie |
-| Croix médicale | Santé/médecine |
-| Étoile | Niveau/XP |
-| Zzz | Sommeil |
-| ! | Alerte (faim basse) |
-| ☺ | Célébration |
+| Food | Hunger bar |
+| Heart | Happiness |
+| Lightning bolt | Energy |
+| Medical cross | Health/medicine |
+| Star | Level/XP |
+| Zzz | Sleep |
+| ! | Alert (low hunger) |
+| ☺ | Celebration |
 
-## Règles de design
+## Design rules
 
-### Pixel art monochrome
-- **Noir et blanc uniquement** — pas de niveaux de gris
-- Le firmware colorise le sprite selon l'état émotionnel :
-  - Blanc = idle
-  - Vert = happy
-  - Jaune = excited
+### Monochrome pixel art
+- **Black and white only** — no gray levels
+- The firmware colorizes the sprite according to emotional state:
+  - White = idle
+  - Green = happy
+  - Yellow = excited
   - Orange = eating
-  - Rouge = sick
-  - Bleu = sad
-  - Violet foncé = sleeping
+  - Red = sick
+  - Blue = sad
+  - Dark purple = sleeping
   - Magenta = celebrating
 
-### Conseils
-- **Centrer** la créature dans le cadre 32×32
-- **Garder 2-3px de marge** sur les bords (le zoom peut couper les pixels extrêmes)
-- Les **yeux** sont importants — c'est ce qui donne l'émotion
-- La différence entre main et idle doit être **subtile** (1-3 pixels de changement) — l'animation est rapide (600ms)
-- **Silhouette claire** — le sprite doit être reconnaissable même à 32×32
+### Tips
+- **Center** the creature in the 32×32 frame
+- **Keep a 2-3px margin** on the edges (zoom can crop the outermost pixels)
+- **Eyes** matter a lot — they carry the emotion
+- The difference between main and idle should be **subtle** (1-3 pixels of change) — the animation is fast (600ms)
+- **Clear silhouette** — the sprite must be recognizable even at 32×32
 
-### Exemples de différence main/idle
+### Examples of main/idle difference
 ```
-Main :          Idle :
-  ●  ●            —  —       (yeux ouverts → fermés)
+Main:           Idle:
+  ●  ●            —  —       (open eyes → closed)
   ╰──╯            ╰──╯
 
    /\              /\
-  /  \            /  \        (même corps, légère rotation)
+  /  \            /  \        (same body, slight rotation)
  /    \          /   \
 ```
 
-## Livraison
+## Delivery
 
-### Format fichiers
+### File format
 ```
 sprites/
-├── egg_main.png      (32×32, noir et blanc)
+├── egg_main.png      (32×32, black and white)
 ├── egg_idle.png
 ├── baby1_main.png
 ├── baby1_idle.png
@@ -98,26 +98,26 @@ sprites/
 ```
 
 ### Validation
-- Ouvrir dans un éditeur de pixel art (Aseprite, Piskel, GIMP)
-- Vérifier que c'est bien 32×32 (ou 16×16 pour les icônes)
-- Vérifier qu'il n'y a que 2 couleurs (noir pur #000000 et blanc pur #FFFFFF)
-- Le fond doit être **noir** (#000000), la créature en **blanc** (#FFFFFF)
+- Open in a pixel art editor (Aseprite, Piskel, GIMP)
+- Check that it is indeed 32×32 (or 16×16 for icons)
+- Check that there are only 2 colors (pure black #000000 and pure white #FFFFFF)
+- The background must be **black** (#000000), the creature in **white** (#FFFFFF)
 
-## Outils recommandés
+## Recommended tools
 
-| Outil | URL | Usage |
+| Tool | URL | Use |
 |-------|-----|-------|
-| **Piskel** | piskelapp.com | Gratuit, en ligne, parfait pour pixel art |
-| **Aseprite** | aseprite.org | Pro, payant, le meilleur pour l'animation |
-| **GIMP** | gimp.org | Gratuit, pour retouches finales |
-| **Lospec** | lospec.com/pixel-art-tutorials | Tutoriels pixel art |
+| **Piskel** | piskelapp.com | Free, online, perfect for pixel art |
+| **Aseprite** | aseprite.org | Pro, paid, the best for animation |
+| **GIMP** | gimp.org | Free, for final touch-ups |
+| **Lospec** | lospec.com/pixel-art-tutorials | Pixel art tutorials |
 
-## Contexte
+## Context
 
-Le sprite s'affiche au centre d'un écran rond de smartwatch (240×240 px). Il est entouré de :
-- Un arc KPM (vitesse de frappe) sur le pourtour
-- Le nom du layout clavier en haut
-- Des barres de stats (faim, bonheur, énergie) en dessous
-- Le niveau et nom de la créature en texte
+The sprite is displayed in the center of a round smartwatch-style screen (240×240 px). It is surrounded by:
+- A KPM arc (typing speed) around the edge
+- The keyboard layout name at the top
+- Stat bars (hunger, happiness, energy) below
+- The creature's level and name as text
 
-Le tamagotchi vit grâce à l'utilisation du clavier — plus tu tapes, plus il est content. Il évolue en gagnant de l'XP par les frappes.
+The tamagotchi lives off keyboard use — the more you type, the happier it is. It evolves by earning XP from keystrokes.

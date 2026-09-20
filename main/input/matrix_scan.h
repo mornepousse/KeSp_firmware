@@ -15,9 +15,9 @@
 #define INVALID_KEY_POS  0xFF
 
 
-/* Le dongle n'a pas de matrice : ni keymap, ni statistiques par position, ni
- * état de matrice. Déclarer ces symboles chez lui obligeait sa carte à inventer
- * des dimensions — c'est ce que board.h ne fait plus. */
+/* The dongle has no matrix: no keymap, no per-position statistics, no
+ * matrix state. Declaring these symbols for it forced its board to invent
+ * dimensions — which board.h no longer does. */
 #if !CONFIG_KASE_NO_KEYMAP_ENGINE
 extern uint8_t MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
 extern uint8_t SLAVE_MATRIX_STATE[MATRIX_ROWS][MATRIX_COLS];
@@ -29,10 +29,10 @@ extern uint8_t current_press_col[6];
 extern uint8_t current_press_stat[6];
 
 #if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
-/* Rejoue la fusion des touches reçues de la moitié distante. Idempotente :
- * la tâche clavier l'appelle à chaque cycle, car le callback de scan ne tourne
- * que sur activité locale. Source distante : half_link (maître) ou kbd_relay
- * (fusion, droite réémise par le dongle en mode USB). */
+/* Replays the fusion of keys received from the remote half. Idempotent:
+ * the keyboard task calls it every cycle, because the scan callback only
+ * runs on local activity. Remote source: half_link (master) or kbd_relay
+ * (fusion, right re-sent by the dongle in USB mode). */
 void matrix_apply_remote(void);
 #endif
 extern volatile uint8_t stat_matrix_changed; /* written in ISR, read in task */
@@ -73,26 +73,26 @@ void matrix_setup(void);
 /* Light-sleep matrix key-wake (V2D wireless): arm/disarm matrix GPIOs as a
  * keypress wake source around esp_light_sleep_start(). */
 void matrix_arm_key_wake(void);
-/* Tamponne l'activité à maintenant — à appeler au réveil, AVANT que la
- * boucle clavier ne réévalue l'inactivité. */
+/* Stamps activity to now — call on wake-up, BEFORE the keyboard
+ * loop re-evaluates inactivity. */
 void matrix_mark_activity(void);
-/* Balaie la matrice une fois à la main et publie ce qu'un callback aurait
- * publié. À appeler dès le retour de light sleep, AVANT matrix_setup() : la
- * touche qui a réveillé la carte est enfoncée à cet instant, plus tard elle ne
- * l'est peut-être plus. */
+/* Scans the matrix once by hand and publishes what a callback would have
+ * published. Call right after returning from light sleep, BEFORE matrix_setup():
+ * the key that woke the board is pressed at that instant, later it may not
+ * be anymore. */
 void matrix_wake_capture(void);
-/* La dernière capture a-t-elle trouvé au moins une touche ? Sert à veille.c
- * pour distinguer un vrai fantôme d'un premier front lu pendant le rebond. */
+/* Did the last capture find at least one key? Used by veille.c
+ * to tell a real ghost apart from a first edge read during the debounce. */
 bool matrix_wake_had_keys(void);
-/* À appeler APRÈS matrix_setup() et AVANT matrix_wake_reconcile() : attend que
- * le pilote recréé ait parlé (premier événement) ou que la grâce déduite de son
- * anti-rebond soit écoulée (wake_grace.h). Jamais un tick nu : vTaskDelay(1)
- * attend jusqu'à la prochaine frontière de tick — entre ~0 et 10 ms — et une
- * touche TENUE était relâchée à tort quand la phase tombait mal. */
+/* Call AFTER matrix_setup() and BEFORE matrix_wake_reconcile(): waits until
+ * the recreated driver has spoken (first event) or the grace period derived
+ * from its debounce has elapsed (wake_grace.h). Never a bare tick: vTaskDelay(1)
+ * waits until the next tick boundary — between ~0 and 10 ms — and a
+ * HELD key was wrongly released when the phase landed badly. */
 void matrix_wake_wait_first_scan(void);
-/* Après matrix_wake_wait_first_scan() : si le pilote n'a rien signalé alors qu'une
- * touche avait été capturée, elle a été relâchée entre-temps — publie le
- * relâchement et retourne true (l'appelant l'émet). */
+/* After matrix_wake_wait_first_scan(): if the driver reported nothing although a
+ * key had been captured, it was released in the meantime — publishes the
+ * release and returns true (the caller emits it). */
 bool matrix_wake_reconcile(void);
 void matrix_disarm_key_wake(void);
 

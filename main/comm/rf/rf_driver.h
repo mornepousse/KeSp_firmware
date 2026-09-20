@@ -44,18 +44,18 @@ uint16_t rf_driver_read_rx(rf_radio_t *radio, uint8_t *buf, uint16_t maxlen);
 bool rf_driver_rx_available(rf_radio_t *radio);
 
 /* Register access (exposed for probe/diagnostics). */
-/* Règle SETUP_RETR (0x04) : quartet haut = ARD, pas de 250 µs moins un ;
- * quartet bas = ARC, nombre de retransmissions.
+/* SETUP_RETR rule (0x04): high nibble = ARD, steps of 250 µs minus one;
+ * low nibble = ARC, number of retransmissions.
  *
- * ⚠ Le pilote initialise 0x1F (ARD=500 µs, ARC=15), taillé pour le CLAVIER dont
- * l'état est ABSOLU : réémettre une frappe perdue est toujours juste, et attendre
- * en vaut la peine. Pour un déplacement RELATIF c'est l'inverse — la trame de
- * remplacement arrive avant que la retransmission n'aboutisse, et pendant ce
- * temps `rf_driver_send()` bloque son appelant.
+ * WARNING: the driver initializes 0x1F (ARD=500 µs, ARC=15), sized for the
+ * KEYBOARD whose state is ABSOLUTE: resending a lost keystroke is always
+ * right, and waiting is worth it. For a RELATIVE movement it is the
+ * opposite — the replacement frame arrives before the retransmission
+ * succeeds, and meanwhile `rf_driver_send()` blocks its caller.
  *
- * `rf_driver_send()` déduit son délai de scrutation de ce registre : le baisser
- * raccourcit l'attente automatiquement, il n'y a pas de seconde constante à
- * garder en phase. */
+ * `rf_driver_send()` derives its polling delay from this register: lowering
+ * it automatically shortens the wait, there is no second constant to
+ * keep in sync. */
 void rf_driver_set_retr(rf_radio_t *radio, uint8_t setup_retr);
 
 uint8_t rf_driver_read_reg(rf_radio_t *radio, uint8_t reg);
@@ -72,18 +72,18 @@ void rf_driver_set_rx_address(rf_radio_t *r, const uint8_t addr[5]);
  * NRF that stopped ACKing/receiving over time. Used by the dongle radio watchdog. */
 void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg);
 
-/* Bascule persistante vers PTX (canal/adresse du cfg) sur une puce déjà
- * initialisée, sans re-claim ni ré-init SPI. Pendant de rf_driver_rearm_rx.
- * Fusion phase 2 : la gauche alterne PRX(USB)↔PTX(sans-fil) selon la route. */
+/* Persistent switch to PTX (channel/address from cfg) on an already
+ * initialized chip, without re-claim or SPI re-init. Counterpart of rf_driver_rearm_rx.
+ * Fusion phase 2: the left half alternates PRX(USB)<->PTX(wireless) depending on the route. */
 void rf_driver_set_ptx(rf_radio_t *r, const rf_radio_cfg_t *cfg);
 
-/* PRX : charge la charge utile qui partira dans le PROCHAIN ACK émis sur `pipe`
- * (W_ACK_PAYLOAD, nRF24L01+ PS §7.4.2). L'ESB garantit l'aller (la trame du
- * PTX est retransmise jusqu'à ACK) mais PAS le retour : l'ACK — et sa charge —
- * peut se perdre sans que personne ne le sache. Le protocole au-dessus doit donc
- * être idempotent (le PTX redemande ce qu'il n'a pas reçu). Requiert EN_ACK_PAY
- * (FEATURE bit1), activé dans toutes les inits/réarmements. len ≤ 32.
- * Sync auto keymap : docs/superpowers/specs/2026-09-13-keymap-sync-ack-payload-design.md */
+/* PRX: loads the payload that will go out in the NEXT ACK sent on `pipe`
+ * (W_ACK_PAYLOAD, nRF24L01+ PS §7.4.2). ESB guarantees the outbound leg (the
+ * PTX's frame is retransmitted until ACK) but NOT the return leg: the ACK —
+ * and its payload — can be lost without anyone knowing. The protocol above
+ * must therefore be idempotent (the PTX re-asks for what it didn't get).
+ * Requires EN_ACK_PAY (FEATURE bit1), enabled in every init/re-arm. len <= 32.
+ * Auto keymap sync: docs/superpowers/specs/2026-09-13-keymap-sync-ack-payload-design.md */
 void rf_driver_load_ack_payload(rf_radio_t *r, uint8_t pipe, const uint8_t *data, uint8_t len);
 
 /* Boot-time sanity check on a freshly init'd PRX radio: read back CONFIG/EN_AA/
@@ -97,16 +97,16 @@ bool rf_driver_verify_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg);
  * Switches to PTX on ch+addr, transmits payload once (CE pulse, poll TX_DS/MAX_RT),
  * then restores PRX on restore_ch+restore_addr and re-asserts CE high. Returns TX_DS.
  * Compiled in both roles (no KASE_HAS_RF_TX guard). */
-/* Issues des excursions : acquittees / MAX_RT / scrutin expire. Un compteur de
- * timeouts qui monte veut dire que le dongle ne repond pas dans les 5 ms. */
+/* Excursion outcomes: acknowledged / MAX_RT / poll timed out. A rising
+ * timeout counter means the dongle isn't responding within the 5 ms. */
 extern uint32_t rf_oob_ok, rf_oob_maxrt, rf_oob_timeout;
 
 bool rf_driver_oob_tx(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
                       const uint8_t *payload, uint8_t len,
                       uint8_t restore_ch, const uint8_t restore_addr[5]);
-/* Même excursion, en récupérant la charge utile de l'ACK (EN_ACK_PAY) — le
- * seul canal descendant vers une moitié en PRX sur un autre canal (gauche en
- * mode USB : trame DISPLAY). ack_out ≥ 32 o ; *ack_len = 0 si l'ACK était nu. */
+/* Same excursion, additionally recovering the ACK's payload (EN_ACK_PAY) —
+ * the only downlink channel to a half in PRX on another channel (left half in
+ * USB mode: DISPLAY frame). ack_out >= 32 B; *ack_len = 0 if the ACK was bare. */
 bool rf_driver_oob_tx_ap(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
                          const uint8_t *payload, uint8_t len,
                          uint8_t restore_ch, const uint8_t restore_addr[5],
@@ -139,11 +139,11 @@ esp_err_t rf_driver_init_tx(rf_radio_t *radio, const rf_radio_cfg_t *cfg);
  * Returns true on TX_DS (ACK from dongle). */
 bool rf_driver_send(rf_radio_t *radio, const uint8_t *buf, uint8_t len);
 
-/* Comme rf_driver_send, et récupère en plus la charge utile portée par l'ACK
- * (EN_ACK_PAY) si le PRX en avait chargé une : copiée dans ack_out (≤ 32 o),
- * longueur dans *ack_len (0 = ACK nu). ack_out/ack_len peuvent être NULL — la
- * FIFO RX est alors vidée pour ne pas s'encrasser. Retourne TX_DS comme send.
- * Sync auto keymap : docs/superpowers/specs/2026-09-13-keymap-sync-ack-payload-design.md */
+/* Like rf_driver_send, and additionally recovers the payload carried by the ACK
+ * (EN_ACK_PAY) if the PRX had loaded one: copied into ack_out (<= 32 B),
+ * length in *ack_len (0 = bare ACK). ack_out/ack_len may be NULL — the
+ * RX FIFO is then flushed so it doesn't clog up. Returns TX_DS like send.
+ * Auto keymap sync: docs/superpowers/specs/2026-09-13-keymap-sync-ack-payload-design.md */
 bool rf_driver_send_ap(rf_radio_t *radio, const uint8_t *buf, uint8_t len,
                        uint8_t *ack_out, uint8_t *ack_len);
 

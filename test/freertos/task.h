@@ -1,3 +1,3 @@
-/* stub: freertos/task.h — utilisé uniquement dans les builds hôte. */
+/* stub: freertos/task.h — used only in host builds. */
 #pragma once
 typedef void *TaskHandle_t;

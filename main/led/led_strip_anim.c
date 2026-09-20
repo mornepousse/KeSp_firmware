@@ -18,8 +18,8 @@
 
 #define TAG "LED_STRIP"
 
-/* Constantes + math d'animation (courbe réactive, KPM bar) extraites dans un
- * module pur testable host-side (source unique de vérité). */
+/* Animation constants + math (reactive curve, KPM bar) extracted into a
+ * pure module testable host-side (single source of truth). */
 #include "led_curve.h"
 
 /* LED strip handle */

@@ -14,13 +14,13 @@
 #include "esp_rom_sys.h"   /* esp_rom_delay_us — tick-independent short wait */
 #include <string.h>
 #if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
-#include "usb_presence.h"  /* kbd_active_route — en fusion/RF, le dongle tape, pas nous */
-/* Fusion, moitié gauche en route RF : c'est le DONGLE qui tape (règle 3,
- * fusion_left_types_local(usb=false) == false, testée). Le moteur local tourne
- * encore et poussait chaque rapport vers un USB sans hôte : 2,5 ms d'attente
- * d'EP par rapport dans keyboard_task, et une ligne « report not sent (EP busy) »
- * par frappe au journal. On rend « envoyé » sans rien faire : il n'y a personne
- * à qui parler, et la déduplication amont reste cohérente. */
+#include "usb_presence.h"  /* kbd_active_route — in fusion/RF, the dongle types, not us */
+/* Fusion, left half in RF route: it's the DONGLE that types (rule 3,
+ * fusion_left_types_local(usb=false) == false, tested). The local engine still
+ * runs and was pushing every report to a hostless USB: 2.5 ms of EP wait
+ * per report in keyboard_task, and a "report not sent (EP busy)" line
+ * per keystroke in the log. We return "sent" without doing anything: there's
+ * nobody to talk to, and the upstream deduplication stays consistent. */
 #define HID_USB_SILENT_IN_RF() (kbd_active_route() == KBD_OUT_RF)
 #else
 #define HID_USB_SILENT_IN_RF() (false)
@@ -54,7 +54,7 @@ static const char *TAG_HTX = "HID_TX";
  * leader / macros), and the TinyUSB device API is not reentrant. */
 #define USB_HID_TX_WAIT_US 2500   /* > 2 full-speed frames (1 ms each) */
 
-static void usb_resume_if_suspended(void);   /* défini plus bas */
+static void usb_resume_if_suspended(void);   /* defined below */
 #define USB_HID_TX_POLL_US 100
 
 static SemaphoreHandle_t s_usb_tx_mutex = NULL;
@@ -77,10 +77,10 @@ static inline void usb_tx_unlock(void)
 
 /* Wait until the HID endpoint can take a report, or give up after
  * USB_HID_TX_WAIT_US. Must be called with the tx mutex held. */
-/* Compteurs de banc (CDC RF_STATUS[35..42] sur le dongle) : rapports clavier
- * partis / refusés (point d'accès muet), reprises demandées / restées
- * suspendues après 100 ms. « La première touche après une pause se perd » se
- * lit ici sans console. */
+/* Bench counters (CDC RF_STATUS[35..42] on the dongle): keyboard reports
+ * sent / refused (mute access point), resumes requested / left
+ * suspended after 100 ms. "The first key after a pause is lost" can be
+ * read here without a console. */
 static uint32_t s_kb_ok, s_kb_refuses, s_reprises, s_reprises_ratees;
 
 static bool usb_hid_wait_ready(void)
@@ -109,26 +109,26 @@ static bool send_usb_kb_mouse(uint8_t modifier, const uint8_t kb[6],
     return ok;
 }
 
-/* Réveiller l'hôte si le bus est suspendu, et attendre qu'il reprenne.
+/* Wake the host if the bus is suspended, and wait for it to resume.
  *
- * Après une minute sans trafic HID, l'hôte suspend le bus USB. Le rapport
- * suivant tombait alors sur un point d'accès muet : usb_hid_wait_ready()
- * expirait au bout de 2,5 ms et le rapport était JETÉ avec un simple
- * avertissement. La tentative échouée, ou la souris, finissait par réveiller
- * l'hôte — et les touches suivantes passaient. Constaté au banc le
- * 2026-09-11 sur le dongle : « la première touche est perdue » après chaque
- * veille du clavier, quel que soit ce que faisait la moitié gauche.
+ * After a minute without HID traffic, the host suspends the USB bus. The next
+ * report would then land on a mute access point: usb_hid_wait_ready()
+ * would time out after 2.5 ms and the report was DROPPED with a mere
+ * warning. The failed attempt, or the mouse, would eventually wake
+ * the host — and the following keys got through. Observed on the bench on
+ * 2026-09-11 on the dongle: "the first key is lost" after every keyboard
+ * sleep, whatever the left half was doing.
  *
- * usb_try_remote_wakeup() existait, mais n'était appelé que par la tâche
- * clavier — un clavier USB direct. Le dongle relaie par rf_rx_task et n'y
- * passait jamais. usb_hid.c raconte qu'un V2D filaire avait déjà perdu cette
- * fonction de la même façon : la troisième fois, elle vit au seul endroit
- * que tous les chemins traversent, l'émission elle-même.
+ * usb_try_remote_wakeup() existed, but was only called by the keyboard
+ * task — a direct USB keyboard. The dongle relays via rf_rx_task and never
+ * went through it. usb_hid.c recounts that a wired V2D had already lost this
+ * feature the same way: the third time, it lives at the one place
+ * every path crosses, the transmission itself.
  *
- * Une reprise USB dure au moins 20 ms (resume signaling, USB 2.0 §7.1.7.7) :
- * on attend jusqu'à 100 ms que tud_suspended() retombe. tud_remote_wakeup()
- * ne fait rien si l'hôte n'a pas autorisé le réveil distant — la chaîne
- * échoue alors comme avant, mais on aura essayé. */
+ * A USB resume takes at least 20 ms (resume signaling, USB 2.0 §7.1.7.7):
+ * we wait up to 100 ms for tud_suspended() to drop. tud_remote_wakeup()
+ * does nothing if the host hasn't authorized remote wake — the chain
+ * then fails as before, but at least we tried. */
 void hid_transport_stats(uint32_t *kb_ok, uint32_t *kb_refuses, uint32_t *reprises, uint32_t *reprises_ratees)
 {
     if (kb_ok) *kb_ok = s_kb_ok;

@@ -1,17 +1,17 @@
 #ifndef BOARD_H
 #define BOARD_H
 
-/* Conchodytes — la souris du set KaSe.
+/* Conchodytes — the mouse of the KaSe set.
  *
- * PCB de remplacement pour coque Logitech M100 : ESP32-S3-WROOM-1U, capteur
- * PMW3389DM-T3QU, nRF24L01+ vers le slot 2 du dongle.
- * Matériel : ~/Documents/GitHub/Conchodytes
- * Design   : docs/superpowers/specs/2026-08-25-conchodytes-firmware-design.md
+ * Replacement PCB for a Logitech M100 shell: ESP32-S3-WROOM-1U, PMW3389DM-T3QU
+ * sensor, nRF24L01+ to the dongle's slot 2.
+ * Hardware: ~/Documents/GitHub/Conchodytes
+ * Design  : docs/superpowers/specs/2026-08-25-conchodytes-firmware-design.md
  *
- * Brochage relevé à la netlist au `kicad-cli export netlist` le 2026-08-25, et
- * vérifié sur carte le même jour. NE PAS le recopier du README du dépôt
- * matériel : celui-ci inversait gauche et droite sur les contacts NC.
- * Verrouillé par test/test_conchodytes_pins.c.
+ * Pinout read from the netlist via `kicad-cli export netlist` on 2026-08-25, and
+ * verified on the board the same day. DO NOT copy it from the hardware repo's
+ * README: it had left and right swapped on the NC contacts.
+ * Locked by test/test_conchodytes_pins.c.
  */
 
 #ifdef ESP_PLATFORM
@@ -24,58 +24,58 @@
 #define MANUFACTURER_NAME   "Mae"
 #define PRODUCT_NAME        "Conchodytes"
 #define SERIAL_NUMBER       "N/A"
-#define MODULE_ID           0xC0   /* souris — distinct du dongle 0xD0 et des moitiés 0x01/0x02 */
+#define MODULE_ID           0xC0   /* mouse — distinct from the dongle 0xD0 and the halves 0x01/0x02 */
 
-/* ── Pas de matrice, pas d'écran, pas de trackpad ───────────────
+/* ── No matrix, no display, no trackpad ─────────────────────────
  *
- * Une souris n'a pas de touches en matrice : ses trois clics sont lus
- * individuellement, par paires NO+NC (voir plus bas). Aucun MATRIX_ROWS,
- * MATRIX_COLS, ROWSn ni COLSn ici — le moteur keymap n'est pas compilé pour ce
- * rôle (main/CMakeLists.txt), donc rien n'en a besoin, et un board.h qui
- * déclarerait un clavier imaginaire finirait par tromper quelqu'un.
+ * A mouse has no matrix keys: its three clicks are read
+ * individually, in NO+NC pairs (see below). No MATRIX_ROWS,
+ * MATRIX_COLS, ROWSn or COLSn here — the keymap engine is not compiled for this
+ * role (main/CMakeLists.txt), so nothing needs them, and a board.h that
+ * declared an imaginary keyboard would eventually mislead someone.
  *
- * L'absence de BOARD_DISPLAY_BACKEND_* est également volontaire : le
- * CMakeLists racine détecte cette absence et saute les sources d'affichage.
+ * The absence of BOARD_DISPLAY_BACKEND_* is also deliberate: the
+ * root CMakeLists detects this absence and skips the display sources.
  */
 
-/* ── Bus SPI, PARTAGÉ entre le capteur et la radio ──────────────
+/* ── SPI bus, SHARED between the sensor and the radio ────────────
  *
- * SCK/MOSI/MISO sont communs au PMW3389 et au nRF24, chacun derrière 100 Ω en
- * série (R30/R18/R16 côté carte — sans effet à ces fréquences).
+ * SCK/MOSI/MISO are common to the PMW3389 and the nRF24, each behind a 100 Ω
+ * series resistor (R30/R18/R16 on the board — no effect at these frequencies).
  *
- * Les deux appareils n'ont PAS le même mode SPI : mode 0 pour le nRF24,
- * mode 3 pour le PMW3389. ESP-IDF reconfigure le mode par appareil, mais
- * l'exclusion mutuelle reste à notre charge : un seul CS bas à la fois, les
- * deux tirés haut au démarrage avant toute initialisation, et le bus acquis
- * pendant le téléversement du SROM (~61 ms) sous peine de le corrompre.
+ * The two devices do NOT share the same SPI mode: mode 0 for the nRF24,
+ * mode 3 for the PMW3389. ESP-IDF reconfigures the mode per device, but
+ * mutual exclusion remains our responsibility: only one CS low at a time, both
+ * pulled high at startup before any initialization, and the bus held
+ * during the SROM upload (~61 ms) or it gets corrupted.
  */
 #define BOARD_NRF_SPI_HOST   SPI2_HOST
 #define BOARD_NRF_SCK        GPIO_NUM_38
 #define BOARD_NRF_MISO       GPIO_NUM_39
 #define BOARD_NRF_MOSI       GPIO_NUM_40
 
-/* ── Radio nRF24L01+ ────────────────────────────────────────────
- * Slot 2 du dongle. boards/kase_dongle/board.h annote BOARD_NRF2_* comme
- * « slot souris (Conchodytes), canal 0x52 par défaut » : les deux côtés
- * doivent s'accorder ou le lien ne s'établit jamais. */
+/* ── nRF24L01+ radio ────────────────────────────────────────────
+ * Dongle's slot 2. boards/kase_dongle/board.h annotates BOARD_NRF2_* as
+ * "mouse slot (Conchodytes), channel 0x52 by default": both sides
+ * must agree or the link never comes up. */
 #define BOARD_NRF_CSN        GPIO_NUM_2
 #define BOARD_NRF_CE         GPIO_NUM_1
 #define BOARD_NRF_IRQ        GPIO_NUM_41
 #define BOARD_NRF_CLOCK_HZ   (8 * 1000 * 1000)
 #define BOARD_NRF_CHANNEL    0x52
-#define BOARD_NRF_ADDR_SUFFIX 0x02   /* 0x01 = clavier, 0x02 = souris (rf_slot.h) */
+#define BOARD_NRF_ADDR_SUFFIX 0x02   /* 0x01 = keyboard, 0x02 = mouse (rf_slot.h) */
 
-/* ── Alias de brochage : DEUX conventions coexistent dans ce dépôt ──────────
+/* ── Pinout aliases: TWO conventions coexist in this repo ─────────────────
  *
- * Les board.h Niphargus nomment les lignes `BOARD_NRF_SCK`, `BOARD_NRF_CSN`…
- * tandis que comm/rf/kbd_relay_tx.c attend `BOARD_NRF_SPI_SCK`,
- * `BOARD_NRF_CSN_GPIO`… et retombe sur des valeurs de repli quand il ne les
- * trouve pas.
+ * The Niphargus board.h files name the lines `BOARD_NRF_SCK`, `BOARD_NRF_CSN`…
+ * while comm/rf/kbd_relay_tx.c expects `BOARD_NRF_SPI_SCK`,
+ * `BOARD_NRF_CSN_GPIO`… and falls back to default values when it doesn't
+ * find them.
  *
- * ⚠ Ces valeurs de repli sont GPIO35/37/36/34/33/38 — choisies pour le PCB du
- * KaSe V2, sans aucun rapport avec cette carte. Un board.h qui ne déclare que
- * la première convention compile donc parfaitement et pilote les mauvaises
- * broches, en silence. D'où ces alias : ils ne dupliquent rien, ils traduisent.
+ * ⚠ These fallback values are GPIO35/37/36/34/33/38 — chosen for the KaSe V2
+ * PCB, with no relation to this board. A board.h that declares only
+ * the first convention therefore compiles perfectly and drives the wrong
+ * pins, silently. Hence these aliases: they duplicate nothing, they translate.
  */
 #define BOARD_NRF_SPI_SCK       BOARD_NRF_SCK
 #define BOARD_NRF_SPI_MISO      BOARD_NRF_MISO
@@ -85,84 +85,84 @@
 #define BOARD_NRF_CE_GPIO       BOARD_NRF_CE
 #define BOARD_NRF_IRQ_GPIO      BOARD_NRF_IRQ
 
-/* ── Capteur PMW3389DM-T3QU ─────────────────────────────────────
+/* ── PMW3389DM-T3QU sensor ─────────────────────────────────────
  *
- * Datasheet PixArt Version 1.0 | 07 sep 2017. Validé sur carte le 2026-08-25 :
- * Product_ID 0x47, Inverse 0xB8, Revision 0x01, SROM_ID 0xE8 après
- * téléversement, déplacement lu.
+ * PixArt datasheet Version 1.0 | 07 Sep 2017. Validated on the board on 2026-08-25:
+ * Product_ID 0x47, Inverse 0xB8, Revision 0x01, SROM_ID 0xE8 after
+ * upload, movement read.
  *
- * ⚠ Ce n'est PAS un PMW3360, malgré ce que disent encore les noms de fichiers
- * du dépôt matériel. Blob SROM différent, plan de registres partiellement
- * différent, temporisations SPI plus longues (tSRAD 160 µs contre 35).
+ * ⚠ This is NOT a PMW3360, despite what the hardware repo's file names
+ * still say. Different SROM blob, partially different register map,
+ * longer SPI timings (tSRAD 160 µs vs 35).
  */
 #define BOARD_SNS_NCS_GPIO     GPIO_NUM_17
 #define BOARD_SNS_MOTION_GPIO  GPIO_NUM_18
 #define BOARD_SNS_SPI_MODE     3            /* CPOL=1, CPHA=1 */
 #define BOARD_SNS_CLOCK_HZ     (2 * 1000 * 1000)  /* fSCLK max, Table 4 p. 15 */
 
-/* Résolution du capteur, en cpi.
+/* Sensor resolution, in cpi.
  *
- * 1000 cpi est la valeur de la M100 d'origine, dont cette carte reprend la
- * coque : garder la même évite que le remplacement se sente sous la main.
- * Le PMW3389 monte à 16000 (datasheet p. 1) et c'est près de ce plafond qu'il
- * démarre si personne ne lui dit rien — le firmware ne le réglait pas, d'où un
- * curseur bien trop rapide au banc le 2026-08-26. */
+ * 1000 cpi is the original M100's value, whose shell this board reuses:
+ * keeping it the same avoids the replacement feeling different under the hand.
+ * The PMW3389 goes up to 16000 (datasheet p. 1) and it starts near that
+ * ceiling if nobody tells it otherwise — the firmware wasn't setting it, hence
+ * a far too fast cursor on the bench on 2026-08-26. */
 #define BOARD_SNS_CPI          1000
 
-/* Le capteur est-il monté tourné de 180° par rapport à l'axe de la souris ?
+/* Is the sensor mounted rotated 180° relative to the mouse's axis?
  *
- * ⚠ SUR LA v1, OUI — ET ÇA CHANGE À LA v2. Mesuré le 2026-08-25 (NOTES-V2 §1,
- * dépôt Conchodytes) : geste vers la droite → X négatif, biais 100,0 % sur 76
- * échantillons ; geste vers l'avant → Y positif, biais 99,8 % sur 71. Les DEUX
- * axes retournés et chacun resté propre — signature d'une rotation de 180° et
- * non d'un miroir, qui n'en inverserait qu'un.
+ * ⚠ ON v1, YES — AND IT CHANGES ON v2. Measured on 2026-08-25 (NOTES-V2 §1,
+ * Conchodytes repo): gesture to the right → negative X, 100.0% bias over 76
+ * samples; gesture forward → positive Y, 99.8% bias over 71. BOTH
+ * axes flipped and each stayed clean — the signature of a 180° rotation and
+ * not a mirror, which would only invert one of them.
  *
- * ⚠ METTRE À 0 QUAND LE LAYOUT v2 TOURNERA U2 DE 180°. La rotation de
- * l'empreinte et cette constante corrigent LE MÊME défaut : les laisser toutes
- * deux actives le réintroduirait à l'envers. La v2 est conditionnée à ce que la
- * lentille LM19-LSI accepte la rotation dans la coque M100 — tant que ce n'est
- * pas tranché, la correction vit ici. */
+ * ⚠ SET TO 0 WHEN THE v2 LAYOUT ROTATES U2 BY 180°. The footprint's
+ * rotation and this constant fix THE SAME defect: leaving both
+ * active would reintroduce it backwards. v2 is conditioned on whether the
+ * LM19-LSI lens accepts the rotation inside the M100 shell — until that's
+ * settled, the fix lives here. */
 #define BOARD_SNS_ROT_180      1
 
-/* Lissage adaptatif du déplacement, en Q8 (256 = 1,0). À 0, aucun lissage.
+/* Adaptive smoothing of the movement, in Q8 (256 = 1.0). At 0, no smoothing.
  *
- * ⚠ PALLIATIF D'UN DÉFAUT OPTIQUE, pas une correction. Le capteur tremble parce
- * que son SQUAL est à 30-55 pour ~80 attendu — voir NOTES-V2 §8 (dépôt
- * Conchodytes). Si l'optique est réparée, REMETTRE `ALPHA_MIN` à 256 (soit
- * aucun lissage) plutôt que de laisser un retard qu'on ne paie plus pour rien.
+ * ⚠ A WORKAROUND FOR AN OPTICAL DEFECT, not a fix. The sensor jitters because
+ * its SQUAL is at 30-55 for ~80 expected — see NOTES-V2 §8 (Conchodytes
+ * repo). If the optics get repaired, SET `ALPHA_MIN` BACK to 256 (i.e.
+ * no smoothing) rather than leaving a delay that no longer buys anything.
  *
- * ALPHA_MIN gouverne le lissage À L'ARRÊT ET AUX GESTES LENTS : plus il est bas,
- * plus c'est lissé et plus le retard est long. 38/256 ≈ 0,15, soit une constante
- * de temps de 4 ms / 0,15 ≈ 27 ms à 250 Hz.
+ * ALPHA_MIN governs the smoothing AT REST AND ON SLOW GESTURES: the lower it
+ * is, the more it's smoothed and the longer the delay. 38/256 ≈ 0.15, i.e. a
+ * time constant of 4 ms / 0.15 ≈ 27 ms at 250 Hz.
  *
- * VITESSE_MAX est le seuil, en comptes par échantillon, au-delà duquel on ne
- * lisse PLUS DU TOUT. 8 comptes à 250 Hz = 2000 comptes/s ≈ 5 cm/s : tout geste
- * franc passe donc sans le moindre retard, seul le bruit de faible amplitude est
- * atténué. */
+ * VITESSE_MAX is the threshold, in counts per sample, beyond which smoothing
+ * STOPS ENTIRELY. 8 counts at 250 Hz = 2000 counts/s ≈ 5 cm/s: any sharp
+ * gesture therefore passes with no delay at all, only low-amplitude noise is
+ * attenuated. */
 #define BOARD_SNS_LISSAGE_ALPHA_MIN   38
 #define BOARD_SNS_LISSAGE_VITESSE_MAX 8
 
-/* ── Clics : trois SPDT, anti-rebond par le contact NC ──────────
+/* ── Clicks: three SPDT, debounce via the NC contact ────────────
  *
- * COM à la masse, NO et NC tirés chacun au 3,3 V par 10 k (R105-R107 et
- * R108-R110). Le firmware lit LES DEUX contacts :
+ * COM to ground, NO and NC each pulled to 3.3 V by 10 k (R105-R107 and
+ * R108-R110). The firmware reads BOTH contacts:
  *
- *   repos  : NC collé sur COM -> bas ; NO ouvert -> haut
- *   appuyé : NO collé sur COM -> bas ; NC ouvert -> haut
- *   rebond : les DEUX hauts — on garde l'état précédent
+ *   idle    : NC stuck to COM -> low ; NO open -> high
+ *   pressed : NO stuck to COM -> low ; NC open -> high
+ *   bounce  : BOTH high — keep the previous state
  *
- * Vérifié sur carte le 2026-08-25 : sur 24 transitions, AUCUN front parasite.
- * Pas de double-clic sans un seul filtre temporel ni une constante à régler —
- * mais cela n'est vrai QUE si NO et NC appartiennent au même bouton.
+ * Verified on the board on 2026-08-25: over 24 transitions, NO spurious edge.
+ * No double-click without a single time filter or a constant to tune —
+ * but this is true ONLY if NO and NC belong to the same button.
  *
- * ⚠ La DURÉE du rebond n'est pas mesurée : la campagne croyait scruter à 1 kHz
- * alors que CONFIG_FREERTOS_HZ vaut 100 par défaut, soit 10 ms par échantillon.
- * Voir main/input/mouse_buttons.h.
+ * ⚠ The bounce DURATION is not measured: the campaign believed it was sampling
+ * at 1 kHz while CONFIG_FREERTOS_HZ defaults to 100, i.e. 10 ms per sample.
+ * See main/input/mouse_buttons.h.
  *
- * ⚠ Le README du dépôt matériel annonçait LEFT_NC=GPIO4 et RIGHT_NC=GPIO5.
- * La netlist dit l'inverse : GPIO4 -> SW2.3 (clic DROIT, R109), GPIO5 -> SW1.3
- * (clic GAUCHE, R108). Vérifié sur carte : appui sur le seul clic gauche a
- * produit 26 fronts sur G et 0 sur D.
+ * ⚠ The hardware repo's README claimed LEFT_NC=GPIO4 and RIGHT_NC=GPIO5.
+ * The netlist says the opposite: GPIO4 -> SW2.3 (RIGHT click, R109), GPIO5 -> SW1.3
+ * (LEFT click, R108). Verified on the board: pressing only the left click
+ * produced 26 edges on L and 0 on R.
  */
 #define BOARD_SW_LEFT_GPIO      GPIO_NUM_10
 #define BOARD_SW_LEFT_NC_GPIO   GPIO_NUM_5
@@ -171,60 +171,60 @@
 #define BOARD_SW_MID_GPIO       GPIO_NUM_12
 #define BOARD_SW_MID_NC_GPIO    GPIO_NUM_6
 
-/* ── Molette : NON FONCTIONNELLE EN v1 — défaut de conception ────
+/* ── Wheel: NOT FUNCTIONAL ON v1 — a design defect ──────────────
  *
- * ⚠⚠ LQ1 EST CÂBLÉ À L'ENVERS SUR LA v1. Établi le 2026-08-26 en confrontant le
- * schéma d'origine de la M100 (`USB-Mouse-main/Mouse.sch`) au câblage réel.
+ * ⚠⚠ LQ1 IS WIRED BACKWARDS ON v1. Established on 2026-08-26 by comparing the
+ * M100's original schematic (`USB-Mouse-main/Mouse.sch`) against the actual wiring.
  *
- * LQ1 n'est PAS un double phototransistor A/COM/B — c'est un capteur à trois
- * fils VCC/GND/DATA (marquage `H6Y07`) :
+ * LQ1 is NOT a dual phototransistor A/COM/B — it's a three-wire
+ * VCC/GND/DATA sensor (marking `H6Y07`):
  *
- *   broche | M100 d'origine        | Conchodytes v1
+ *   pin    | original M100          | Conchodytes v1
  *   -------|-----------------------|------------------------
- *      1   | Pin_4 = sortie DATA   | ENC_A + tirage 10 k   ✅
- *      2   | Pin_2J = VCC          | la MASSE              ❌
- *      3   | GNDREF = GND          | ENC_B + tirage 10 k   ❌
+ *      1   | Pin_4 = DATA output   | ENC_A + 10 k pull-up   ✅
+ *      2   | Pin_2J = VCC          | GROUND                 ❌
+ *      3   | GNDREF = GND          | ENC_B + 10 k pull-up   ❌
  *
- * Le composant est donc alimenté à l'envers. Le courant passe par sa diode de
- * substrat interne et clampe les deux nets à 0,65 V, quelle que soit la
- * lumière. Vérifié sur DEUX composants distincts : c'est le câblage, pas eux.
+ * The component is therefore powered backwards. Current flows through its
+ * internal substrate diode and clamps both nets to 0.65 V, regardless of
+ * the light. Verified on TWO separate components: it's the wiring, not them.
  *
- * L'erreur vient du symbole `Optical_Mouse:LQ` hérité du fork, dont les broches
- * ne portent aucun nom de fonction — seulement « 1, 2, 3 ».
+ * The mistake comes from the `Optical_Mouse:LQ` symbol inherited from the fork,
+ * whose pins carry no function name — only "1, 2, 3".
  *
- * ⚠ ET UNE SEULE SORTIE DATA = UN SEUL CANAL. La quadrature en exige deux. Le
- * principe même de lecture de la molette est à revoir en v2, pas seulement son
- * câblage. Question ouverte : voir Conchodytes/NOTES-V2.md §1bis.
+ * ⚠ AND A SINGLE DATA OUTPUT = A SINGLE CHANNEL. Quadrature requires two. The
+ * very principle of reading the wheel needs rethinking in v2, not just its
+ * wiring. Open question: see Conchodytes/NOTES-V2.md §1bis.
  *
- * Conséquence pour ce firmware : le décodage de quadrature
- * (input/mouse_wheel.c) est vérifié sur l'hôte uniquement, et ne pourra pas
- * être exercé sur cette carte. Les macros ci-dessous décrivent le câblage
- * ACTUEL, qui est faux — elles changeront avec la v2.
+ * Consequence for this firmware: quadrature decoding
+ * (input/mouse_wheel.c) is verified on host only, and cannot
+ * be exercised on this board. The macros below describe the CURRENT
+ * wiring, which is wrong — they will change with v2.
  */
 #define BOARD_ENC_A_GPIO     GPIO_NUM_7
 #define BOARD_ENC_B_GPIO     GPIO_NUM_9
 
-/* ── Jauge batterie ─────────────────────────────────────────────
- * Pont diviseur 1M/1M + 100 nF (R64/R67/C21), rapport ÷2 : 4,2 V pleine
- * charge -> 2,1 V à l'entrée. Les 1 MΩ sont un choix de consommation — 2,1 µA
- * de fuite permanente contre 21 µA avec du 100 k — viable parce que C21 fournit
- * la charge d'échantillonnage de l'ADC.
+/* ── Battery gauge ─────────────────────────────────────────────
+ * 1M/1M + 100 nF divider bridge (R64/R67/C21), ÷2 ratio: 4.2 V full
+ * charge -> 2.1 V at the input. The 1 MΩ is a power-consumption choice — 2.1 µA
+ * of permanent leakage against 21 µA with 100 k — viable because C21 supplies
+ * the ADC's sampling charge.
  *
- * ⚠ GPIO13 = ADC2_CH2, et sur ESP32-S3 l'ADC2 est partagé avec le driver WiFi :
- * tant que cette mesure est là, le WiFi est interdit sur cette carte. Sans
- * conséquence aujourd'hui — la radio est un nRF24 — mais c'est une hypothèque.
- * NOTES-V2.md point 7 prévoit GPIO8 / ADC1_CH7 en v2.
+ * ⚠ GPIO13 = ADC2_CH2, and on ESP32-S3 ADC2 is shared with the WiFi driver:
+ * as long as this measurement is here, WiFi is forbidden on this board. No
+ * consequence today — the radio is an nRF24 — but it's a mortgage.
+ * NOTES-V2.md point 7 plans GPIO8 / ADC1_CH7 for v2.
  */
 #define BOARD_VBAT_SENSE_GPIO   GPIO_NUM_13
 
-/* ── Pas d'écran, pas de bandeau LED ────────────────────────── */
+/* ── No display, no LED strip ─────────────────────────────── */
 #define BOARD_DISPLAY_SLEEP_MS    0
 #define BOARD_SLEEP_MINS          0
 #define BOARD_HAS_LED_STRIP       0
 
-/* ── Identification USB ─────────────────────────────────────────
- * Même VID/PID de développement que le reste du set jusqu'à la première
- * publication. À migrer vers pid.codes (VID 0x1209) avant la v4.0. */
+/* ── USB identification ────────────────────────────────────────
+ * Same development VID/PID as the rest of the set until the first
+ * publication. To migrate to pid.codes (VID 0x1209) before v4.0. */
 #define BOARD_USB_VID             0x303A
 #define BOARD_USB_PID             0x4002
 

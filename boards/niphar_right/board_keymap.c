@@ -1,9 +1,9 @@
-/* Keymap par défaut — Niphargus moitié droite.
- * 26 touches : rangées de 7/7/6/6. Les positions manquantes des deux dernières
- * rangées sont K_NO. Colonnes miroir de la gauche (moitié droite du clavier
- * physique). La droite n'a pas de moteur keymap (esclave) : keymaps[][] existe
- * ici uniquement parce que input/keymap.c est toujours compilé — rien ne
- * l'exploite tant que le rôle esclave ne remonte que sa matrice. */
+/* Default keymap — Niphargus right half.
+ * 26 keys: rows of 7/7/6/6. The missing positions in the last two
+ * rows are K_NO. Columns are a mirror of the left (right half of the
+ * physical keyboard). The right side has no keymap engine (slave): keymaps[][]
+ * exists here only because input/keymap.c is always compiled — nothing
+ * uses it as long as the slave role only reports its matrix. */
 #include "keymap.h"
 #include "key_definitions.h"
 #include "keyboard_config.h"

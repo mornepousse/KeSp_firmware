@@ -1,12 +1,12 @@
-/* screen_home.c — HOME : nom de couche en grand + barre de statut.
+/* screen_home.c — HOME: layer name in large + status bar.
  *
- * Layout 128×64 SSD1306 mono (lv_color_black() = pixel allumé) :
- *   y=0..15  : [icône connexion 16] ................. slot ...... CAP
- *   y=15     : séparateur
- *   y=20..48 : NOM_COUCHE en grand (font_28, centré, tronqué …)
- *   y=50..62 : "layer N" (font_14, centré)
+ * Layout 128×64 SSD1306 mono (lv_color_black() = pixel lit):
+ *   y=0..15  : [connection icon 16] ................. slot ...... CAP
+ *   y=15     : separator
+ *   y=20..48 : LAYER_NAME in large (font_28, centered, truncated …)
+ *   y=50..62 : "layer N" (font_14, centered)
  *
- * (Le tamagotchi a été retiré ; les stats de frappe vivent sur l'écran STATS.)
+ * (The tamagotchi has been removed; keystroke stats live on the STATS screen.)
  */
 #include "oled_screen.h"
 #include "lvgl.h"

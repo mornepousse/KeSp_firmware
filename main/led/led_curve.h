@@ -1,19 +1,19 @@
-/* Math d'animation LED — extrait de led_strip_anim.c pour être testable
- * host-side sans les dépendances hardware (led_strip driver, LVGL round_ui,
- * freertos, esp_timer). led_strip_anim.c inclut ce header et appelle ces
- * fonctions ; les constantes y sont la source unique de vérité. */
+/* LED animation math — extracted from led_strip_anim.c to be testable
+ * host-side without the hardware dependencies (led_strip driver, LVGL round_ui,
+ * freertos, esp_timer). led_strip_anim.c includes this header and calls these
+ * functions; the constants here are the single source of truth. */
 #pragma once
 #include <stdint.h>
 
-#define LED_STRIP_FRAME_MS  20    /* période de frame (50 FPS) */
-#define REACTIVE_ATTACK_MS  100   /* plein éclat maintenu après une frappe */
-#define REACTIVE_DECAY_MS   500   /* fondu jusqu'à 0 sur cette durée */
-#define KPM_BAR_MAX         400   /* KPM qui allume toutes les LEDs */
+#define LED_STRIP_FRAME_MS  20    /* frame period (50 FPS) */
+#define REACTIVE_ATTACK_MS  100   /* full brightness held after a keystroke */
+#define REACTIVE_DECAY_MS   500   /* fade to 0 over this duration */
+#define KPM_BAR_MAX         400   /* KPM that lights up all the LEDs */
 
-/* Luminosité réactive selon le temps écoulé depuis la dernière frappe :
- * 255 pendant l'attaque, décroissance linéaire jusqu'à 0 à REACTIVE_DECAY_MS,
- * puis 0. */
+/* Reactive brightness based on time elapsed since the last keystroke:
+ * 255 during the attack, linear decay to 0 at REACTIVE_DECAY_MS,
+ * then 0. */
 uint8_t led_reactive_brightness(uint32_t elapsed_ms);
 
-/* Nombre de LEDs allumées pour un KPM donné (0..num_leds, clampé). */
+/* Number of LEDs lit for a given KPM (0..num_leds, clamped). */
 uint8_t led_kpm_bar_lit(uint32_t kpm, uint8_t num_leds);

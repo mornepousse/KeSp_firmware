@@ -1,24 +1,24 @@
-/* Décodage en quadrature de la molette Conchodytes.
+/* Quadrature decoding of the Conchodytes wheel.
  *
- * L'encodeur est optique : LD1 éclaire une roue à 60 fentes, LQ1 (double
- * phototransistor) rend deux voies déphasées d'un quart de période. L'état est
- * `(A << 1) | B`, et un pas valide ne fait changer QU'UNE voie à la fois.
+ * The encoder is optical: LD1 lights up a 60-slot wheel, LQ1 (dual
+ * phototransistor) yields two channels a quarter period out of phase. The
+ * state is `(A << 1) | B`, and a valid step changes ONLY ONE channel at a time.
  *
- * Pur, sans dépendance ESP-IDF : la lecture des GPIO vit dans
- * app/mouse_task.c. Testé sur l'hôte par test/test_mouse_input.c.
+ * Pure, no ESP-IDF dependency: GPIO reading lives in
+ * app/mouse_task.c. Tested on the host by test/test_mouse_input.c.
  *
- * ⚠ CE DÉCODAGE N'A JAMAIS TOURNÉ SUR SILICIUM, et ne le pourra pas sur la v1 :
- * LQ1 y est câblé à l'envers (alimentation et masse inversées), et surtout il
- * n'expose qu'UNE sortie DATA là où la quadrature en demande deux. Voir
- * Conchodytes/NOTES-V2.md §1bis. Ce fichier reste juste dans son domaine — il
- * décode une quadrature correcte — mais le matériel v1 ne lui en fournira
- * jamais. À reconfronter au schéma v2 quand celui-ci sera tranché.
+ * WARNING: THIS DECODING HAS NEVER RUN ON SILICON, and cannot on v1:
+ * LQ1 is wired backwards there (power and ground swapped), and above all it
+ * only exposes ONE DATA output where quadrature needs two. See
+ * Conchodytes/NOTES-V2.md §1bis. This file stays within its own domain — it
+ * decodes correct quadrature — but the v1 hardware will never feed it any.
+ * Revisit against the v2 schematic once that is settled.
  */
 #pragma once
 #include <stdint.h>
 
-/* Rend +1, -1, ou 0. Le 0 couvre deux cas distincts : aucun changement, et
- * transition impossible (les deux voies changées dans le même intervalle,
- * donc un pas raté). Rendre 0 plutôt qu'un sens deviné est délibéré — se
- * tromper de sens fait reculer la page, ne rien faire ne coûte qu'un cran. */
+/* Returns +1, -1, or 0. The 0 covers two distinct cases: no change, and an
+ * impossible transition (both channels changed within the same interval, so a
+ * missed step). Returning 0 rather than a guessed direction is deliberate —
+ * guessing wrong scrolls the page backwards, doing nothing only costs one notch. */
 int8_t mouse_wheel_step(uint8_t prev_ab, uint8_t cur_ab);

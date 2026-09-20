@@ -1,3 +1,3 @@
-/* stub: driver/gpio.h — builds hôte (TEST_HOST) : rien n'est appelé. */
+/* stub: driver/gpio.h — host builds (TEST_HOST): nothing is called. */
 #pragma once
 typedef int gpio_num_t;

@@ -1,7 +1,7 @@
 /* Tests for advanced keycode encoding/decoding.
- * Linke le VRAI header de prod (key_definitions.h, partagé avec KaSe_soft) au
- * lieu de recopier les macros : une dérive d'encodage casse maintenant le test.
- * key_definitions.h est autonome (tinyusb.h stubé) et compile déjà host-side
+ * Links the REAL production header (key_definitions.h, shared with KaSe_soft) instead
+ * of copying the macros: an encoding drift now breaks the test.
+ * key_definitions.h is self-contained (tinyusb.h stubbed) and already compiles host-side
  * via key_processor.c. */
 #include "test_framework.h"
 #include "key_definitions.h"
@@ -45,7 +45,7 @@ static void test_lt_encoding(void) {
 }
 
 static void test_lt_all_layers(void) {
-    /* Le nibble de couche tient 0..15 — couvrir toute la plage, pas seulement 0..9 */
+    /* The layer nibble holds 0..15 — cover the whole range, not just 0..9 */
     for (int layer = 0; layer < 16; layer++) {
         uint16_t kc = K_LT(layer, 0x04); /* LT(layer, A) */
         TEST_ASSERT(K_IS_LT(kc), "LT detection for all layers");

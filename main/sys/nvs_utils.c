@@ -31,7 +31,7 @@ esp_err_t nvs_save_blob_with_total(const char *ns, const char *blob_key, const v
         ESP_LOGE(TAG_NVS, "NVS commit(%s) failed: %s", blob_key, esp_err_to_name(err));
     }
     nvs_close(h);
-    return err;   /* propage l'échec commit → le caller (stats) peut désactiver la sauvegarde */
+    return err;   /* propagates the commit failure → the caller (stats) can disable saving */
 }
 
 esp_err_t nvs_load_blob_with_total(const char *ns, const char *blob_key, void *blob,

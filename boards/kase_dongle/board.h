@@ -3,7 +3,7 @@
 
 #ifdef ESP_PLATFORM
 #include "driver/gpio.h"
-#include "sdkconfig.h"     /* CONFIG_KASE_DONGLE_FUSION — voir les dims plus bas */
+#include "sdkconfig.h"     /* CONFIG_KASE_DONGLE_FUSION — see the dims below */
 #endif
 
 /* ── Product info ──────────────────────────────────────────── */
@@ -11,40 +11,40 @@
 #define MANUFACTURER_NAME   "KaSe"
 #define PRODUCT_NAME        "KaSe Dongle"
 #define SERIAL_NUMBER       "N/A"
-#define MODULE_ID           0xD0   /* dongle, distinct des halves 0x01/0x02 */
+#define MODULE_ID           0xD0   /* dongle, distinct from halves 0x01/0x02 */
 
-/* ── Pas de matrice ─────────────────────────────────────────────
+/* ── No matrix ─────────────────────────────────────────────────
  *
- * Cette carte déclarait une matrice 5×14, un brochage complet en GPIO_NUM_NC et
- * une keymap de 70 touches. Rien de tout cela n'existe : le dongle n'a aucun
- * interrupteur. C'était la trace de l'architecture A, où il fusionnait les
- * demi-matrices des anciennes moitiés et appliquait la keymap lui-même.
+ * This board used to declare a 5x14 matrix, a full pinout in GPIO_NUM_NC and
+ * a 70-key keymap. None of that exists: the dongle has no switches at all.
+ * It was a trace of architecture A, where it merged the half-matrices of the
+ * old halves and applied the keymap itself.
  *
- * Le Niphargus lui envoie du HID déjà fini, alors la déclaration ne décrivait
- * plus qu'un clavier imaginaire — et un `board.h` qui ment sur son matériel finit
- * par tromper quelqu'un. Le moteur d'entrée n'est plus compilé pour ce rôle
- * (main/CMakeLists.txt), le bloc CLAVIER du protocole CDC non plus, donc plus
- * rien n'en a besoin.
+ * The Niphargus sends it HID that is already finished, so the declaration was
+ * only describing an imaginary keyboard — and a `board.h` that lies about its
+ * hardware ends up misleading someone. The input engine is no longer compiled
+ * for this role (main/CMakeLists.txt), nor is the KEYBOARD block of the CDC
+ * protocol, so nothing needs it any more.
  */
 
-/* ── Dimensions de fusion (KASE_DONGLE_FUSION uniquement) ────────────────────
+/* ── Fusion dimensions (KASE_DONGLE_FUSION only) ─────────────────────────────
  *
- * En mode fusion, le dongle RETROUVE le moteur keymap : il reçoit les DEUX
- * demi-matrices brutes des moitiés, les fusionne et sort le HID. Il partage donc
- * la géométrie et la keymap par défaut de la moitié GAUCHE (boards/niphar_left) —
- * mêmes dimensions, un seul fichier de keymap redirigé (board_keymap.c / .c ici
- * ne font qu'inclure ceux de la gauche). La NVS répliquée reste l'autorité
- * runtime (phase 3). Design : docs/superpowers/specs/2026-09-12-dongle-fusion-*.
+ * In fusion mode, the dongle GETS BACK the keymap engine: it receives BOTH
+ * raw half-matrices from the halves, merges them and outputs HID. It therefore
+ * shares the geometry and default keymap of the LEFT half (boards/niphar_left) —
+ * same dimensions, a single keymap file redirected (board_keymap.c / .c here
+ * only include those of the left half). The replicated NVS remains the
+ * runtime authority (phase 3). Design: docs/superpowers/specs/2026-09-12-dongle-fusion-*.
  *
- * Ces macros n'existent PAS hors fusion : sans moteur, personne ne les lit, et un
- * board.h ne doit pas décrire une matrice que la carte n'a pas. C'est aussi
- * pourquoi elles sont gardées et non déclarées en dur. */
+ * These macros do NOT exist outside fusion: without an engine, nobody reads
+ * them, and a board.h must not describe a matrix the board does not have.
+ * That is also why they are guarded rather than hard-declared. */
 #if defined(CONFIG_KASE_DONGLE_FUSION)
 #define MATRIX_ROWS  4
 #define MATRIX_COLS  7
 #define KEYMAP_COLS  14
-/* Les deux moitiés sont le même PCB retourné : la droite se range en colonnes
- * hautes à l'envers. La conversion appartient au moteur (half_col_to_keymap). */
+/* Both halves are the same PCB flipped over: the right half's columns run
+ * high, reversed. The conversion belongs to the engine (half_col_to_keymap). */
 #define BOARD_REMOTE_COLS_MIRRORED  1
 #endif
 
@@ -55,12 +55,12 @@
 #define BOARD_NRF_SPI_SCK        GPIO_NUM_7
 #define BOARD_NRF_SPI_CLOCK_HZ   (10 * 1000 * 1000)   /* 10 MHz, NRF24 datasheet max */
 
-/* NRF#1 = slot clavier (moitié maître Niphargus), canal 0x4C par défaut */
+/* NRF#1 = keyboard slot (Niphargus master half), channel 0x4C by default */
 #define BOARD_NRF1_CSN_GPIO      GPIO_NUM_13
 #define BOARD_NRF1_CE_GPIO       GPIO_NUM_14
 #define BOARD_NRF1_IRQ_GPIO      GPIO_NUM_8
 
-/* NRF#2 = slot souris (Conchodytes), canal 0x52 par défaut */
+/* NRF#2 = mouse slot (Conchodytes), channel 0x52 by default */
 #define BOARD_NRF2_CSN_GPIO      GPIO_NUM_1
 #define BOARD_NRF2_CE_GPIO       GPIO_NUM_4
 #define BOARD_NRF2_IRQ_GPIO      GPIO_NUM_2

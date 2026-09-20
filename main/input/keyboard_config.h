@@ -21,11 +21,11 @@
 #define MAX_LAYER (LAYERS-1)
 #define MOD_LED_BYTES 2
 #if !CONFIG_KASE_DEVICE_ROLE_DONGLE
-/* Colonnes couvertes par la KEYMAP, à distinguer de MATRIX_COLS qui compte
- * celles que la carte BALAIE. Elles diffèrent sur la moitié maître d'un split :
- * la gauche du Niphargus scanne 7 colonnes mais porte les keycodes des 14, la
- * droite n'étant qu'un scanner sans moteur keymap. Un board.h peut donc la
- * surcharger ; par défaut les deux notions coïncident. */
+/* Columns covered by the KEYMAP, to be distinguished from MATRIX_COLS which
+ * counts the ones the board SCANS. They differ on the master half of a split:
+ * the Niphargus left half scans 7 columns but carries the keycodes for all 14,
+ * the right half being just a scanner with no keymap engine. A board.h can
+ * therefore override it; by default the two notions coincide. */
 #ifndef KEYMAP_COLS
 #define KEYMAP_COLS MATRIX_COLS
 #endif

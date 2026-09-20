@@ -62,9 +62,9 @@ void load_keymaps(uint16_t *data, size_t size_bytes) {
         return;
     }
 
-    /* Garde de taille : un blob de taille différente (LAYERS/matrice changés
-     * entre firmwares) ne doit PAS être chargé partiellement → garder les
-     * défauts compile-time. Symétrique à load_macros. */
+    /* Size guard: a blob of a different size (LAYERS/matrix changed
+     * between firmwares) must NOT be partially loaded → keep the
+     * compile-time defaults. Symmetric to load_macros. */
     size_t stored_size = 0;
     err = nvs_get_blob(my_handle, "keymaps", NULL, &stored_size);
     if (err == ESP_OK && stored_size != size_bytes) {
@@ -127,8 +127,8 @@ void load_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count)
         return;
     }
 
-    /* Garde de taille (cf. E3) : ne pas charger partiellement un blob d'une autre
-     * config → garder les défauts. */
+    /* Size guard (see E3): do not partially load a blob from a different
+     * config → keep the defaults. */
     size_t stored_size = 0;
     err = nvs_get_blob(my_handle, "layout_names", NULL, &stored_size);
     if (err == ESP_OK && stored_size != required_size) {
@@ -150,10 +150,10 @@ void load_layout_names(char names[][MAX_LAYOUT_NAME_LENGTH], size_t layer_count)
     nvs_close(my_handle);
 }
 
-/* Version du layout on-disk du blob macros. À bumper si macro_t / macro_step_t
- * change de disposition SANS changer de taille (que la garde de taille laisse
- * passer) — audit M11. L'absence de clé de version (données pré-M11) est acceptée
- * (layout compatible) ; une version présente et différente → défauts. */
+/* On-disk layout version of the macros blob. Bump it if macro_t / macro_step_t
+ * change layout WITHOUT changing size (which the size guard would let
+ * through) — audit M11. The absence of a version key (pre-M11 data) is accepted
+ * (compatible layout); a version present and different → defaults. */
 #define MACROS_NVS_VERSION 1u
 
 bool save_macros(macro_t *macros, size_t count) {
@@ -217,9 +217,9 @@ void load_macros(macro_t *macros, size_t count) {
         return;
     }
 
-    /* Garde de version : détecte un struct réordonné SANS changement de taille (que
-     * la garde de taille laisse passer). Absence de version acceptée (données
-     * pré-M11) ; version présente ≠ courante → défauts (audit M11). */
+    /* Version guard: detects a reordered struct WITHOUT a size change (which
+     * the size guard would let through). Absence of a version accepted (pre-M11
+     * data); version present ≠ current → defaults (audit M11). */
     uint32_t stored_ver = 0;
     esp_err_t ver_err = nvs_get_u32(my_handle, "macros_ver", &stored_ver);
     if (ver_err == ESP_OK && stored_ver != MACROS_NVS_VERSION) {

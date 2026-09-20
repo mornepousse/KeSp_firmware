@@ -10,7 +10,7 @@
 #define BOARD_HAS_BLE             0   /* No Bluetooth */
 #define BOARD_HAS_TAMA            0   /* No virtual pet */
 #define BOARD_HAS_RF_RX           1   /* 2x NRF24L01+ on shared SPI */
-#define BOARD_HAS_ESPNOW          0   /* retiré avec le firmware des anciennes moitiés */
+#define BOARD_HAS_ESPNOW          0   /* removed along with the old halves' firmware */
 #define BOARD_HAS_USB_HID         1   /* USB HID output (NKRO + mouse + consumer) */
 #define BOARD_HAS_USB_CDC         1   /* CDC binary protocol */
 

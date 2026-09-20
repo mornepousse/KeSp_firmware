@@ -1,19 +1,20 @@
-/* Contrat de la keymap combinee du Niphargus (logique pure).
+/* Niphargus combined keymap contract (pure logic).
  *
- * La moitie gauche est le seul moteur keymap du clavier : la spec la decrit
- * comme « la seule a produire un rapport HID », la droite n'etant qu'un scanner
- * qui remonte sa matrice brute. La gauche doit donc porter des keycodes pour
- * les 52 touches, alors qu'elle n'en SCANNE que 26.
+ * The left half is the keyboard's only keymap engine: the spec describes it
+ * as "the only one to produce a HID report", the right half being just a
+ * scanner that reports its raw matrix. The left half must therefore carry
+ * keycodes for all 52 keys, even though it only SCANS 26.
  *
- * D'ou deux notions a ne pas confondre, et que keyboard_config.h avait deja
- * nommees sans jamais les cabler — KEYMAP_COLS y valait MATRIX_COLS et n'etait
- * utilise nulle part :
+ * Hence two notions not to confuse, which keyboard_config.h had already named
+ * without ever wiring them up — KEYMAP_COLS was equal to MATRIX_COLS there
+ * and used nowhere:
  *
- *   MATRIX_COLS  colonnes que CETTE carte balaie physiquement       (7)
- *   KEYMAP_COLS  colonnes que la keymap couvre, les deux moities   (14)
+ *   MATRIX_COLS  columns THIS board physically scans                (7)
+ *   KEYMAP_COLS  columns the keymap covers, both halves             (14)
  *
- * Convention retenue : colonnes 0..6 = moitie gauche, 7..13 = moitie droite.
- * La coordonnee recue de la droite se traduit par un decalage de MATRIX_COLS.
+ * Convention adopted: columns 0..6 = left half, 7..13 = right half.
+ * The coordinate received from the right half is translated by an offset of
+ * MATRIX_COLS.
  */
 #include "test_framework.h"
 
@@ -25,43 +26,42 @@
 
 static void test_scan_reste_a_sept_colonnes(void)
 {
-    /* Elargir la keymap ne doit PAS elargir le balayage : la gauche n'a que
-     * sept colonnes cablees, et les piloter au-dela toucherait d'autres
-     * fonctions (GPIO13 = jauge batterie, 14 = CS ecran, 15/16 = nRF24). */
-    TEST_ASSERT_EQ(MATRIX_ROWS, 4, "la gauche balaie 4 rangees");
-    TEST_ASSERT_EQ(MATRIX_COLS, 7, "la gauche balaie 7 colonnes, inchange");
+    /* Widening the keymap must NOT widen the scan: the left half only has
+     * seven columns wired, and driving beyond that would touch other
+     * functions (GPIO13 = battery gauge, 14 = screen CS, 15/16 = nRF24). */
+    TEST_ASSERT_EQ(MATRIX_ROWS, 4, "left half scans 4 rows");
+    TEST_ASSERT_EQ(MATRIX_COLS, 7, "left half scans 7 columns, unchanged");
 }
 
 static void test_keymap_couvre_les_deux_moities(void)
 {
-    TEST_ASSERT_EQ(KEYMAP_COLS, 2 * MATRIX_COLS, "la keymap couvre les deux moities");
-    TEST_ASSERT_EQ(KEYMAP_COLS, 14, "soit 14 colonnes");
-    /* 4 rangees x 14 colonnes = 56 positions pour 52 touches reelles : les
-     * quatre manquantes sont les trous des deux dernieres rangees (7/7/6/6). */
-    TEST_ASSERT_EQ(MATRIX_ROWS * KEYMAP_COLS, 56, "56 positions de keymap");
+    TEST_ASSERT_EQ(KEYMAP_COLS, 2 * MATRIX_COLS, "the keymap covers both halves");
+    TEST_ASSERT_EQ(KEYMAP_COLS, 14, "i.e. 14 columns");
+    /* 4 rows x 14 columns = 56 keymap positions for 52 real keys: the four
+     * missing ones are the gaps in the last two rows (7/7/6/6). */
+    TEST_ASSERT_EQ(MATRIX_ROWS * KEYMAP_COLS, 56, "56 keymap positions");
 }
 
 static void test_les_tailles_derivees_suivent(void)
 {
-    /* ⚠ Ces deux macros ne sont utilisees NULLE PART aujourd'hui (verifie au
-     * grep) : elles sont mortes. On les verrouille tout de meme sur la keymap,
-     * parce que leur nom promet de dimensionner un rapport de touches — et le
-     * jour ou quelqu'un s'en servira, il vaut mieux qu'elles couvrent les 52
-     * touches que les 26 balayees.
+    /* ⚠ these two macros are used NOWHERE today (checked with grep):
+     * they are dead. We lock them onto the keymap anyway, because their name
+     * promises to size a key report — and the day someone uses them, they'd
+     * better cover the 52 keys rather than the 26 scanned.
      *
-     * Les statistiques de frappe, elles, suivent la matrice BALAYEE :
-     * key_stats est dimensionne en MATRIX_COLS, et boucler dessus en
-     * KEYMAP_COLS a produit un depassement de tableau que le compilateur a
-     * attrape (cdc_binary_cmds.c, « iteration 7 invokes undefined behavior »). */
+     * Keystroke statistics, on the other hand, follow the SCANNED matrix:
+     * key_stats is sized in MATRIX_COLS, and looping over it in KEYMAP_COLS
+     * produced an array overrun that the compiler caught (cdc_binary_cmds.c,
+     * "iteration 7 invokes undefined behavior"). */
     TEST_ASSERT_EQ(REPORT_COUNT_BYTES, MATRIX_ROWS * KEYMAP_COLS,
-                   "les stats couvrent la keymap entiere");
+                   "the stats cover the entire keymap");
     TEST_ASSERT_EQ(REPORT_LEN, MOD_LED_BYTES + MATRIX_ROWS * KEYMAP_COLS,
-                   "le rapport couvre la keymap entiere");
+                   "the report covers the entire keymap");
 }
 
 void test_niphar_keymap_span(void)
 {
-    printf("\n-- keymap combinee Niphargus (gauche = moteur des 52 touches) --\n");
+    printf("\n-- Niphargus combined keymap (left = engine for the 52 keys) --\n");
     test_scan_reste_a_sept_colonnes();
     test_keymap_couvre_les_deux_moities();
     test_les_tailles_derivees_suivent();

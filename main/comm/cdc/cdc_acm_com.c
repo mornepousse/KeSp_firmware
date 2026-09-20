@@ -36,6 +36,6 @@ void cdc_process_commands_task(void *arg)
 
 void init_cdc_commands(void)
 {
-    ks_rx_init();   /* crée le mutex de handoff RX avant de lancer la tâche de dispatch */
+    ks_rx_init();   /* creates the RX handoff mutex before starting the dispatch task */
     xTaskCreate(cdc_process_commands_task, "cdc_cmd", 6144, NULL, 4, NULL);
 }

@@ -1,90 +1,90 @@
-/* Les deux slots RF du dongle.
+/* The dongle's two RF slots.
  *
- * Historiquement c'étaient les deux moitiés d'un même clavier, et le dongle
- * réconciliait leurs demi-matrices. Ce n'est plus le cas : la moitié maître du
- * Niphargus lui envoie du HID déjà fini, et le second slot appartient à la
- * souris Conchodytes. Les deux appareils n'ont plus rien en commun.
+ * Historically these were the two halves of a single keyboard, and the dongle
+ * reconciled their half-matrices. That's no longer the case: the Niphargus master
+ * half sends it already-finished HID, and the second slot belongs to the
+ * Conchodytes mouse. The two devices no longer have anything in common.
  *
- * D'où ce module minuscule, dont l'unique raison d'être est de rendre cette
- * séparation impossible à oublier : **la perte d'un slot ne relâche que ce que
- * ce slot tenait**. Sous l'ancienne lecture, relâcher tout le clavier à la perte
- * de l'une ou l'autre moitié était juste ; aujourd'hui ce serait un bug — une
- * souris qui sort de portée effacerait la frappe en cours.
+ * Hence this tiny module, whose sole purpose is to make this
+ * separation impossible to forget: **losing a slot only releases what
+ * that slot held**. Under the old reading, releasing the whole keyboard on the loss
+ * of either half was correct; today it would be a bug — a
+ * mouse going out of range would wipe out the keystroke in progress.
  *
- * Le repli lui-même reste nécessaire : un lien qui se tait laisse l'hôte sur le
- * dernier rapport reçu. Si c'était « Super enfoncé », il le reste.
+ * The fallback itself is still necessary: a link that goes silent leaves the host on the
+ * last report received. If it was "Super pressed", it stays that way.
  *
- * Les clés NVS d'appairage gardent leurs noms d'origine (`mac_left` /
- * `mac_right`) : les renommer désapparierait le matériel déjà appairé pour un
- * gain purement cosmétique. Le slot 0x01 y désigne le clavier, le 0x02 la souris.
+ * The pairing NVS keys keep their original names (`mac_left` /
+ * `mac_right`): renaming them would unpair hardware already paired for a
+ * purely cosmetic gain. Slot 0x01 there designates the keyboard, 0x02 the mouse.
  */
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
 
-#define RF_SLOT_KBD    0u   /* moitié maître Niphargus — envoie du HID fini */
+#define RF_SLOT_KBD    0u   /* Niphargus master half — sends finished HID */
 #define RF_SLOT_MOUSE  1u   /* Conchodytes */
 #define RF_SLOT_COUNT  2u
 
-/* ── Plan de canaux 2,4 GHz ───────────────────────────────────────────────────
+/* ── 2.4 GHz channel plan ───────────────────────────────────────────────────
  *
- * Quatre liens coexistent. Ils étaient définis chacun dans son coin — le canal
- * d'appairage dans rf_pairing.h, ceux du dongle dans les board.h — et rien
- * n'empêchait deux d'entre eux de tomber sur la même fréquence. Une collision
- * ne casse aucune compilation : elle se manifeste par un lien qui se tait, ou
- * par des paquets qui passent par intermittence selon le trafic.
+ * Four links coexist. They used to be defined each in its own corner — the
+ * pairing channel in rf_pairing.h, the dongle's in the board.h files — and nothing
+ * prevented two of them from landing on the same frequency. A collision
+ * breaks no compilation: it shows up as a link going silent, or
+ * as packets passing through intermittently depending on traffic.
  *
- * Ils sont donc rassemblés ici, et verrouillés par test/test_rf_channel_plan.c.
+ * They are therefore gathered here, and locked down by test/test_rf_channel_plan.c.
  *
- * Espacement : le driver émet à 1 Mbps (RF_SETUP = 0x06), et le nRF24L01+
- * Product Specification §6.3 p.25 précise qu'à ce débit « the channel occupies
- * a bandwidth of less than 1MHz » — 1 MHz d'écart suffit donc. La contrainte de
- * 2 MHz ne vaut qu'à 2 Mbps.
+ * Spacing: the driver transmits at 1 Mbps (RF_SETUP = 0x06), and the nRF24L01+
+ * Product Specification §6.3 p.25 states that at this rate "the channel occupies
+ * a bandwidth of less than 1MHz" — a 1 MHz gap is therefore enough. The 2 MHz
+ * constraint only applies at 2 Mbps.
  *
- * Placement : le WiFi 2,4 GHz monte jusqu'à ~2473 MHz (canal 11). Les trois
- * liens de données se tiennent au-dessus, là où la bande est nettement plus
- * calme. Le canal d'appairage, lui, est en plein WiFi — c'est assumé : il ne
- * sert que quelques secondes, à courte distance, et sous ARC 15.
+ * Placement: 2.4 GHz WiFi goes up to ~2473 MHz (channel 11). The three
+ * data links sit above that, where the band is noticeably
+ * quieter. The pairing channel, meanwhile, sits right in WiFi territory — this is deliberate: it
+ * is only used for a few seconds, at short range, and under ARC 15.
  *
- * La bande ISM s'arrête à 2483,5 MHz. La puce monterait à 2525 (§6.3) mais on
- * n'y va pas : au-delà on brouille d'autres services. */
-#define RF_CH_KBD_DONGLE    0x4C   /* 2476 MHz — moitié gauche → dongle, slot 1 */
-#define RF_CH_HALF_LINK     0x4F   /* 2479 MHz — moitié droite → moitié gauche  */
+ * The ISM band stops at 2483.5 MHz. The chip could go up to 2525 (§6.3) but we
+ * don't: beyond that we'd jam other services. */
+#define RF_CH_KBD_DONGLE    0x4C   /* 2476 MHz — left half → dongle, slot 1 */
+#define RF_CH_HALF_LINK     0x4F   /* 2479 MHz — right half → left half  */
 #define RF_CH_MOUSE_DONGLE  0x52   /* 2482 MHz — Conchodytes → dongle, slot 2   */
-/* Le canal d'appairage vit dans rf_pairing.h (RF_PAIR_CHANNEL, 0x28 / 2440 MHz)
- * et reste là-bas : il appartient au protocole d'appairage, pas au plan de
- * fonctionnement. Le test de plan l'inclut malgré tout dans ses collisions. */
+/* The pairing channel lives in rf_pairing.h (RF_PAIR_CHANNEL, 0x28 / 2440 MHz)
+ * and stays there: it belongs to the pairing protocol, not to the operating
+ * plan. The plan test still includes it in its collision checks. */
 
-/* Suffixes d'adresse, 5e octet après la base "KaSe". 0x01 clavier et 0x02
- * souris sont ceux des slots du dongle (voir plus haut) ; 0x03 désigne le lien
- * inter-moitiés, qui ne passe pas par le dongle. */
-#define RF_ADDR_KBD_DONGLE  0x01   /* slot clavier du dongle (les DEUX moitiés en fusion) */
+/* Address suffixes, 5th byte after the "KaSe" base. 0x01 keyboard and 0x02
+ * mouse are those of the dongle's slots (see above); 0x03 designates the
+ * inter-half link, which does not go through the dongle. */
+#define RF_ADDR_KBD_DONGLE  0x01   /* dongle keyboard slot (BOTH halves under fusion) */
 #define RF_ADDR_HALF_LINK   0x03
 
-/* ── Supervision du lien clavier → dongle ───────────────────────────────────
+/* ── Keyboard → dongle link supervision ───────────────────────────────────
  *
- * Le dongle déclare un slot PERDU après RF_LINK_LOST_MS de silence total et
- * relâche ses touches — sans quoi un clavier disparu laisserait une touche
- * collée chez l'hôte. Il attend donc une trame d'état au repos.
+ * The dongle declares a slot LOST after RF_LINK_LOST_MS of total silence and
+ * releases its keys — otherwise a vanished keyboard would leave a stuck
+ * key on the host. So it expects an idle status frame.
  *
- * Or PKT_TYPE_STATUS n'était JAMAIS émis : il n'existait qu'en décodage. Tant
- * qu'on tape, les rapports HID entretiennent le lien par accident ; mais une
- * touche MAINTENUE ne produit aucun changement, donc plus aucun rapport, et le
- * dongle relâchait la touche au bout de ~2 s. Constaté au banc le 2026-09-08.
+ * But PKT_TYPE_STATUS was NEVER sent: it only existed in decoding. As long
+ * as typing continues, HID reports keep the link alive by accident; but a
+ * HELD key produces no change, hence no more reports, and the
+ * dongle would release the key after ~2 s. Found on the bench on 2026-09-08.
  *
- * Les deux constantes sont ici, et non chacune de son côté : c'est un contrat
- * entre deux firmwares, et la moitié qui émet doit connaître le budget de celle
- * qui écoute. Verrouillé par test/test_rf_status_cadence.c. */
-#define RF_STATUS_PERIOD_MS  1000u   /* cadence de la trame d'état */
-#define RF_BATT_PERIOD_MS    30000u  /* STATUS lent de la DROITE au repos (jauge) — la tension
-                                      * d'une 16340 ne bouge pas en 30 s ; contrat avec le dongle */
-#define RF_REARM_SILENCE_MS  2000u   /* silence → réécrire la config RX (radio figée) */
-#define RF_LINK_LOST_MS      2500u   /* silence → slot perdu, repli appliqué */
+ * Both constants are here, and not each on its own side: it's a contract
+ * between two firmwares, and the half that transmits must know the budget of the one
+ * that listens. Locked down by test/test_rf_status_cadence.c. */
+#define RF_STATUS_PERIOD_MS  1000u   /* status frame cadence */
+#define RF_BATT_PERIOD_MS    30000u  /* slow STATUS from the RIGHT at rest (gauge) — the voltage
+                                      * of a 16340 doesn't move in 30 s; contract with the dongle */
+#define RF_REARM_SILENCE_MS  2000u   /* silence → rewrite the RX config (frozen radio) */
+#define RF_LINK_LOST_MS      2500u   /* silence → slot lost, fallback applied */
 
-/* Faut-il émettre une trame d'état maintenant ? `dernier_ms` est la date de la
- * DERNIÈRE émission quelle qu'elle soit — un rapport HID entretient le lien
- * aussi bien qu'une trame d'état, inutile d'en ajouter pendant la frappe.
- * Écart en arithmétique non signée : le compteur de ms déborde vers 49 jours. */
+/* Should a status frame be sent now? `dernier_ms` is the date of the
+ * LAST transmission of any kind — an HID report keeps the link alive
+ * just as well as a status frame, no need to add one while typing.
+ * Gap in unsigned arithmetic: the ms counter wraps around after 49 days. */
 static inline bool rf_status_doit_emettre(uint32_t now_ms, uint32_t dernier_ms,
                                           uint32_t periode_ms)
 {
@@ -93,8 +93,8 @@ static inline bool rf_status_doit_emettre(uint32_t now_ms, uint32_t dernier_ms,
 
 typedef enum {
     RF_SAFE_NONE = 0,
-    RF_SAFE_RELEASE_KEYS,      /* rapport clavier vide */
-    RF_SAFE_RELEASE_BUTTONS,   /* rapport souris à zéro */
+    RF_SAFE_RELEASE_KEYS,      /* empty keyboard report */
+    RF_SAFE_RELEASE_BUTTONS,   /* zeroed mouse report */
 } rf_safe_action_t;
 
 typedef struct {
@@ -102,7 +102,7 @@ typedef struct {
     bool     up;
 } rf_slot_link_t;
 
-/* Tout paquet reçu — battement, état, rapport HID — vaut preuve de vie. */
+/* Any packet received — heartbeat, status, HID report — counts as proof of life. */
 static inline void rf_slot_link_rx(rf_slot_link_t *l, uint32_t now_ms)
 {
     if (l == NULL) return;
@@ -110,13 +110,13 @@ static inline void rf_slot_link_rx(rf_slot_link_t *l, uint32_t now_ms)
     l->up = true;
 }
 
-/* À appeler à chaque tour de la boucle RF. Rend l'action de repli à effectuer,
- * une seule fois par perte : la boucle tourne toutes les 10 ms, un déclenchement
- * répété noierait l'endpoint HID de rapports vides.
+/* To be called on every turn of the RF loop. Returns the fallback action to
+ * perform, only once per loss: the loop runs every 10 ms, a repeated
+ * trigger would flood the HID endpoint with empty reports.
  *
- * La soustraction est non signée à dessein : le compteur de millisecondes
- * repasse par zéro après ~49 jours, ce qu'un dongle branché en permanence
- * atteint. */
+ * The subtraction is unsigned by design: the millisecond counter
+ * wraps around after ~49 days, which a permanently plugged-in dongle
+ * reaches. */
 static inline rf_safe_action_t rf_slot_link_check(rf_slot_link_t *l, uint8_t slot,
                                                   uint32_t now_ms, uint32_t timeout_ms)
 {

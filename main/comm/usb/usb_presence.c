@@ -34,9 +34,9 @@ void usb_presence_init(void)
 
 bool usb_presence_active(void)
 {
-    /* Une seule règle (usb_presence_brut) : pont VBUS si soudé, sinon
-     * tud_ready() = mounted AND not suspended — tud_mounted() seul reste vrai
-     * après un débranchement à chaud sur le S3. */
+    /* A single rule (usb_presence_brut): VBUS bridge if soldered, otherwise
+     * tud_ready() = mounted AND not suspended — tud_mounted() alone stays true
+     * after a hot unplug on the S3. */
     bool raw = usb_presence_cable();
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
     return vbus_debounce_step(&s_db, raw, now_ms, VBUS_DEBOUNCE_MS);
@@ -50,11 +50,11 @@ void usb_presence_poll(bool relay_active)
 kbd_out_t kbd_active_route(void)
 {
 #if CONFIG_KASE_RF_FORCE_ROUTE
-    /* Banc : le HID part par la radio meme USB branche. On garde ainsi
-     * l'alimentation et la console USB pendant qu'on eprouve le lien vers le
-     * dongle — utile tant que l'alimentation batterie n'est pas fiable.
-     * s_route continue d'etre calcule par usb_presence_poll() : seule la
-     * decision rendue ici est forcee, l'etat reel reste observable. */
+    /* Bench: HID goes out over the radio even with USB plugged in. This keeps
+     * power and the USB console while we're proving the link to the
+     * dongle — useful while battery power isn't reliable yet.
+     * s_route is still computed by usb_presence_poll(): only the
+     * decision returned here is forced, the real state stays observable. */
     return KBD_OUT_RF;
 #else
     return s_route;

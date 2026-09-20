@@ -21,11 +21,11 @@
  * comm/rf/dongle_engine_state.c. The Niphargus right half compiles neither
  * (no keymap engine, no RF RX stack) but cdc_binary_cmds.c references them
  * unconditionally, so they need a home here. */
-/* Depuis que la moitie droite scanne sa propre matrice
- * (KASE_HAS_LOCAL_MATRIX y vaut y), input/matrix_scan.c definit ces quatre
- * symboles pour de vrai : les bouchonner en plus donnait une definition
- * multiple au lien. On ne les fournit donc que lorsque la matrice n'est PAS
- * compilee — cas de la souris, et de la droite avant qu'elle ne scanne. */
+/* Since the right half scans its own matrix
+ * (KASE_HAS_LOCAL_MATRIX set to y), input/matrix_scan.c defines these four
+ * symbols for real: stubbing them too caused a multiple definition at
+ * link time. So they are only provided here when the matrix is NOT
+ * compiled — the mouse's case, and the right half before it scanned. */
 #if !CONFIG_KASE_HAS_LOCAL_MATRIX
 volatile bool matrix_test_mode = false;
 volatile uint32_t matrix_test_last_activity_ms = 0;

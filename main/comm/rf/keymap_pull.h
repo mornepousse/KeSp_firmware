@@ -1,27 +1,27 @@
 #pragma once
-/* keymap_pull — tirage de la keymap du dongle par ACK payload (gauche, fusion).
+/* keymap_pull — dongle keymap pull via ACK payload (left half, fusion).
  *
- * La gauche PILOTE : quand l'ACK d'une de ses émissions porte une BALISE (une
- * keymap d'empreinte ≠ la sienne l'attend), elle entame un pull et demande le
- * prochain chunk manquant (SYNC_REQ) toutes les 100 ms ; chaque chunk arrive
- * dans l'ACK de l'émission suivante. Quand les 40 sont là, la keymap est
- * copiée et enregistrée en NVS ; le STATUS suivant annonce la nouvelle
- * empreinte et le dongle coupe la balise. Un veto de veille tient pendant le
- * tirage. Logique pure dans keymap_sync.h (testée) ; ici le portage sur le
- * relais de la gauche. Extrait de kbd_relay_tx.c le 2026-09-19. */
+ * The left half DRIVES: when the ACK of one of its transmissions carries a
+ * BEACON (a keymap with a different fingerprint is expected), it starts a
+ * pull and requests the next missing chunk (SYNC_REQ) every 100 ms; each
+ * chunk arrives in the ACK of the next transmission. Once all 40 are in,
+ * the keymap is copied and saved to NVS; the next STATUS announces the
+ * new fingerprint and the dongle clears the beacon. A sleep veto holds
+ * during the pull. Pure logic lives in keymap_sync.h (tested); this file
+ * is the port onto the left half's relay. Extracted from kbd_relay_tx.c on 2026-09-19. */
 #include <stdbool.h>
 #include <stdint.h>
 
-/* À appeler avec la charge de CHAQUE ACK reçu (balise ou chunk), depuis le
- * chemin d'émission — sous le verrou du propriétaire de la radio. */
+/* Call with the payload of EVERY ACK received (beacon or chunk), from the
+ * transmit path — under the radio owner's lock. */
 void keymap_pull_on_ack(const uint8_t *ack, uint8_t n);
 
-/* Un tirage est-il en cours ou une keymap à enregistrer ? (cadence rapide du
- * relais, priorité aux maintiens) */
+/* Is a pull in progress or a keymap pending save? (fast relay cadence,
+ * holds take priority) */
 bool keymap_pull_en_cours(void);
 
-/* Tick du relais, APRÈS la réaffirmation des maintiens : enregistre en NVS
- * quand 40/40 sont là (copie sous le verrou radio, NVS hors verrou), puis
- * émet un REQ au plus toutes les 100 ms tant qu'on tire, via `emettre`.
- * Retourne true si un REQ est parti (le relais a fini son tick). */
+/* Relay tick, AFTER holds are reaffirmed: saves to NVS
+ * once 40/40 are in (copy under the radio lock, NVS outside the lock), then
+ * sends a REQ at most every 100 ms while pulling, via `emettre`.
+ * Returns true if a REQ went out (the relay is done with its tick). */
 bool keymap_pull_tick(void (*emettre)(const uint8_t *, uint8_t));

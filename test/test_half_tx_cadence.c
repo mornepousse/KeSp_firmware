@@ -1,22 +1,22 @@
-/* Quand la moitie droite doit-elle emettre ? (logique pure)
+/* When must the right half transmit? (pure logic)
  *
- * Deux regles ecrites separement le 2026-09-05 se contredisaient :
+ * Two rules written separately on 2026-09-05 contradicted each other:
  *
- *   - la droite emet SUR CHANGEMENT de matrice, jamais periodiquement. C'est la
- *     premisse §2.3 du design et la seule qui rende le pari R1 tenable : au
- *     repos, un clavier ne produit aucun trafic.
- *   - la gauche RELACHE les touches distantes apres 250 ms de silence, pour
- *     qu'une moitie morte ne laisse pas « Maj » enfoncee chez l'hote.
+ *   - the right half transmits ON MATRIX CHANGE, never periodically. That is
+ *     premise §2.3 of the design and the only one that makes the R1 bet
+ *     tenable: at rest, a keyboard produces no traffic.
+ *   - the left half RELEASES remote keys after 250 ms of silence, so that a
+ *     dead half does not leave "Shift" held on the host.
  *
- * Maintenir une touche plus de 250 ms ne produit aucun changement, donc aucune
- * trame, donc la gauche conclut au silence et relache une touche qui est
- * pourtant physiquement enfoncee. Pas de repetition, et les modificateurs de la
- * droite lachent en pleine frappe.
+ * Holding a key for more than 250 ms produces no change, hence no
+ * frame, hence the left half concludes silence and releases a key that is
+ * yet physically held. No repeat, and the right half's modifiers
+ * let go mid-typing.
  *
- * La regle correcte distingue le REPOS de l'INACTIVITE : silence quand rien
- * n'est enfonce, rafraichissement tant que quelque chose l'est. Le repos reste
- * muet — R1 tient — mais un maintien est reaffirme avant que la gauche ne
- * puisse en douter. */
+ * The correct rule distinguishes REST from INACTIVITY: silence when nothing
+ * is held, refresh while something is. Rest stays silent — R1 holds — but a
+ * held key is reaffirmed before the left half can doubt it.
+ */
 #include "test_framework.h"
 #include "../main/comm/rf/half_link.h"
 
@@ -25,69 +25,69 @@
 static void test_un_changement_emet_toujours(void)
 {
     TEST_ASSERT(half_tx_doit_emettre(true, false, 1000, 1000, PERIODE),
-                "un relachement emet, meme s'il ne reste rien d'enfonce");
+                "a release transmits, even if nothing remains held");
     TEST_ASSERT(half_tx_doit_emettre(true, true, 1000, 999, PERIODE),
-                "un appui emet sans attendre la periode");
+                "a press transmits without waiting for the period");
 }
 
 static void test_le_repos_est_muet(void)
 {
-    /* LE test de ce fichier cote R1 : rien d'enfonce, rien a dire, meme apres
-     * une eternite. C'est ce qui rend le lien gratuit au repos. */
+    /* THE test of this file for R1: nothing held, nothing to say, even after
+     * an eternity. This is what makes the link free at rest. */
     TEST_ASSERT(!half_tx_doit_emettre(false, false, 1000, 900, PERIODE),
-                "rien d'enfonce : pas d'emission");
+                "nothing held: no transmission");
     TEST_ASSERT(!half_tx_doit_emettre(false, false, 999999, 0, PERIODE),
-                "et toujours rien, quel que soit le temps ecoule");
+                "and still nothing, no matter how much time has passed");
 }
 
 static void test_un_maintien_est_rafraichi(void)
 {
-    /* LE test de ce fichier cote fiabilite. */
+    /* THE test of this file for reliability. */
     TEST_ASSERT(!half_tx_doit_emettre(false, true, 1050, 1000, PERIODE),
-                "50 ms apres : trop tot, la gauche n'a pas encore de doute");
+                "50 ms later: too soon, the left half has no doubt yet");
     TEST_ASSERT(half_tx_doit_emettre(false, true, 1100, 1000, PERIODE),
-                "100 ms apres : on reaffirme le maintien");
+                "100 ms later: the hold is reaffirmed");
     TEST_ASSERT(half_tx_doit_emettre(false, true, 5000, 1000, PERIODE),
-                "et longtemps apres, a plus forte raison");
+                "and long after, all the more so");
 }
 
 static void test_la_periode_tient_sous_le_delai_de_la_gauche(void)
 {
-    /* Contrainte de conception, pas de gout.
+    /* Design constraint, not a matter of taste.
      *
-     * La marge etait de DEUX rafraichissements (100 ms contre 250 ms), donc un
-     * seul paquet de reserve. Insuffisant, et pas seulement par malchance : le
-     * defaut s'auto-entretient. Quand le silence expire, la gauche relache les
-     * touches distantes, ce qui change le rapport HID, ce qui declenche une
-     * emission vers le dongle et ses reemissions bornees — autant d'excursions
-     * PRX->PTX->PRX pendant lesquelles elle est SOURDE. Le rafraichissement
-     * suivant de la droite tombe dans ce trou, le silence expire de nouveau, et
-     * la boucle se referme.
+     * The margin was TWO refreshes (100 ms against 250 ms), so a
+     * single spare packet. Insufficient, and not just by bad luck: the
+     * defect is self-sustaining. When the silence expires, the left half
+     * releases the remote keys, which changes the HID report, which triggers
+     * a transmit to the dongle and its bounded retransmissions — so many
+     * PRX->PTX->PRX excursions during which it is DEAF. The right half's next
+     * refresh falls into that hole, the silence expires again, and
+     * the loop closes.
      *
-     * Constate au banc le 2026-09-08 : un maintien long sur Backspace finissait
-     * par se relacher tout seul, alors que le lien ne perdait qu'un paquet sur
-     * 960. Ce n'etait pas la qualite du lien, c'etait la marge.
+     * Found on the bench on 2026-09-08: a long hold on Backspace ended
+     * up releasing itself, even though the link was only losing one packet in
+     * 960. It was not the link quality, it was the margin.
      *
-     * QUATRE rafraichissements : il faut desormais quatre pertes CONSECUTIVES
-     * pour relacher a tort, ce qui sort du domaine de l'accident ordinaire. */
+     * FOUR refreshes: it now takes four CONSECUTIVE losses
+     * to wrongly release, which is outside the range of an ordinary accident. */
     TEST_ASSERT(HALF_TX_REFRESH_MS * 4 <= HALF_LINK_TIMEOUT_MS,
-                "quatre rafraichissements tiennent dans le delai de relachement");
+                "four refreshes fit within the release delay");
 }
 
 static void test_le_compteur_de_ms_peut_deborder(void)
 {
-    /* esp_timer_get_time()/1000 tronque a 32 bits deborde au bout de ~49 jours.
-     * L'ecart doit se calculer en arithmetique non signee modulaire, sinon le
-     * clavier cesse d'emettre ses maintiens ce jour-la. */
-    uint32_t avant = 0xFFFFFFF0u;      /* juste avant le debordement */
-    uint32_t apres = 0x00000060u;      /* 112 ms plus tard, apres bouclage */
+    /* esp_timer_get_time()/1000 truncated to 32 bits overflows after ~49 days.
+     * The difference must be computed in unsigned modular arithmetic, otherwise
+     * the keyboard stops transmitting its holds that day. */
+    uint32_t avant = 0xFFFFFFF0u;      /* just before the overflow */
+    uint32_t apres = 0x00000060u;      /* 112 ms later, after wraparound */
     TEST_ASSERT(half_tx_doit_emettre(false, true, apres, avant, PERIODE),
-                "le debordement du compteur ne fige pas l'emission");
+                "the counter overflow does not freeze transmission");
 }
 
 void test_half_tx_cadence(void)
 {
-    printf("\n-- cadence d'emission de la moitie droite --\n");
+    printf("\n-- right half transmit cadence --\n");
     test_un_changement_emet_toujours();
     test_le_repos_est_muet();
     test_un_maintien_est_rafraichi();

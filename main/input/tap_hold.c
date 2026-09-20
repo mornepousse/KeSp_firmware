@@ -23,8 +23,8 @@ static tap_hold_entry_t pending[TAP_HOLD_MAX_PENDING];
 static uint8_t active_hold_mods = 0;
 static int8_t active_hold_layer = -1;
 static bool hold_activated_flag = false;
-static uint32_t th_seq = 0;         /* compteur d'ordre d'activation des LT holds */
-static int8_t th_layer_base = -1;   /* couche à restaurer quand plus aucune LT tenue (-1 = pas de LT) */
+static uint32_t th_seq = 0;         /* activation order counter for LT holds */
+static int8_t th_layer_base = -1;   /* layer to restore when no LT is held anymore (-1 = no LT) */
 
 static uint32_t now_ms(void)
 {
@@ -52,22 +52,22 @@ static tap_hold_entry_t *find_free(void)
     return NULL;
 }
 
-/* Recalcule la couche pilotée par les LT holds actifs : la LT activée le plus
- * récemment (activate_seq max) gagne ; quand plus aucune LT n'est tenue, restaure
- * la couche de base capturée à la 1re LT. Robuste au relâchement dans le désordre
- * de plusieurs LT concurrentes (le bug audit E1 : le mono-slot perdait la couche
- * de la LT encore tenue au 1er release). */
+/* Recomputes the layer driven by the active LT holds: the most recently
+ * activated LT (max activate_seq) wins; when no LT is held anymore, restores
+ * the base layer captured at the 1st LT. Robust to out-of-order release
+ * of several concurrent LTs (audit bug E1: the mono-slot lost the layer
+ * of the LT still held at the 1st release). */
 static void recompute_lt_layer(void)
 {
     tap_hold_entry_t *top = NULL;
     for (int i = 0; i < TAP_HOLD_MAX_PENDING; i++) {
-        /* La borne se revérifie ICI, et pas seulement dans activate_hold().
-         * Celui-ci pose e->state = TH_HOLD AVANT de tester la couche : une LT
-         * hors bornes reste donc dans pending[] en TH_HOLD, avec activate_seq à
-         * 0. Sans ce filtre, le relâchement d'une LT valide tenue en même temps
-         * la laisse gagner par `!top` — elle est alors la seule candidate — et
-         * current_layout part indexer keymaps[] hors du tableau (audit CR-1,
-         * reproduit par test_th_lt_oob_wins_recompute_after_valid_release). */
+        /* The bound is re-checked HERE, not only in activate_hold().
+         * The latter sets e->state = TH_HOLD BEFORE testing the layer: an out-of-
+         * bounds LT therefore stays in pending[] as TH_HOLD, with activate_seq at
+         * 0. Without this filter, releasing a valid LT held at the same time
+         * lets it win via `!top` — it's then the only candidate — and
+         * current_layout goes on to index keymaps[] out of bounds (audit CR-1,
+         * reproduced by test_th_lt_oob_wins_recompute_after_valid_release). */
         if (pending[i].state == TH_HOLD && K_IS_LT(pending[i].keycode) &&
             K_LT_LAYER(pending[i].keycode) < LAYERS &&
             (!top || pending[i].activate_seq > top->activate_seq))
@@ -95,11 +95,11 @@ static void activate_hold(tap_hold_entry_t *e)
         active_hold_mods |= K_MT_MOD(kc);
     } else if (K_IS_LT(kc)) {
         uint8_t layer = K_LT_LAYER(kc);
-        if (layer < LAYERS) {   /* couche hors bornes → pas de changement (évite l'OOB keymaps[]) */
-            if (active_hold_layer < 0)         /* 1re LT active → mémorise la couche de base */
+        if (layer < LAYERS) {   /* out-of-bounds layer → no change (avoids OOB keymaps[]) */
+            if (active_hold_layer < 0)         /* 1st active LT → remember the base layer */
                 th_layer_base = (int8_t)current_layout;
             e->activate_seq = ++th_seq;
-            recompute_lt_layer();              /* e (TH_HOLD, seq max) devient la couche active */
+            recompute_lt_layer();              /* e (TH_HOLD, max seq) becomes the active layer */
         }
     } else if (K_IS_OSM(kc)) {
         active_hold_mods |= K_OSM_MOD(kc);
@@ -114,9 +114,9 @@ static void deactivate_hold(tap_hold_entry_t *e)
         active_hold_mods &= ~K_MT_MOD(kc);
     } else if (K_IS_LT(kc)) {
         uint8_t layer = K_LT_LAYER(kc);
-        if (layer < LAYERS) {   /* symétrique à activate_hold : la couche hors bornes n'avait rien changé */
-            e->state = TH_IDLE;                /* retirer ce hold avant de recalculer la couche */
-            recompute_lt_layer();              /* → LT encore tenue la + récente, ou couche de base */
+        if (layer < LAYERS) {   /* symmetric to activate_hold: the out-of-bounds layer had changed nothing */
+            e->state = TH_IDLE;                /* remove this hold before recomputing the layer */
+            recompute_lt_layer();              /* → most recently held LT still active, or base layer */
         }
     } else if (K_IS_OSM(kc)) {
         active_hold_mods &= ~K_OSM_MOD(kc);
@@ -226,9 +226,9 @@ uint8_t tap_hold_consume_tap(void)
         if (K_IS_MT(kc)) return K_MT_KEY(kc);
         if (K_IS_OSM(kc))
             osm_arm(K_OSM_MOD(kc));
-        /* OSM armé (ou tap sans keycode direct) → continuer à scanner les autres
-         * taps en attente au lieu de rendre 0, ce qui arrêterait la boucle du
-         * caller et perdrait un tap MT/LT résolu le même cycle (audit M4). */
+        /* OSM armed (or tap with no direct keycode) → keep scanning the other
+         * pending taps instead of returning 0, which would stop the caller's
+         * loop and lose an MT/LT tap resolved the same cycle (audit M4). */
     }
     return 0;
 }

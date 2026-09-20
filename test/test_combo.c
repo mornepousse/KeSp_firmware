@@ -1,7 +1,7 @@
-/* Combo engine tests — VRAI module linké (../main/input/combo.c).
- * Combo = 2 touches déférées puis présentes ensemble dans la fenêtre
- * COMBO_TIMEOUT_MS → result émis, les deux touches sources supprimées.
- * Horloge partagée host_clock pour tester la fenêtre / le timeout. */
+/* Combo engine tests — REAL linked module (../main/input/combo.c).
+ * Combo = 2 keys deferred then present together within the
+ * COMBO_TIMEOUT_MS window -> result emitted, both source keys suppressed.
+ * Shared host_clock clock to test the window / the timeout. */
 #include "test_framework.h"
 #include "combo.h"
 #include "host_clock.h"
@@ -23,46 +23,46 @@ static void press_none(uint8_t pr[6], uint8_t pc[6]) {
 
 static void cb_reset(void) { combo_init(); host_clock_reset(); }
 
-/* 1. Combo déclenché : 2 touches déférées + présentes → result + suppression. */
+/* 1. Combo fires: 2 keys deferred + present -> result + suppression. */
 static void test_cb_fires(void) {
     cb_reset();
     combo_config_t cfg = { .row1 = 0, .col1 = 0, .row2 = 0, .col2 = 1, .result = 0x29 };
     combo_set(0, &cfg);
-    TEST_ASSERT(combo_should_defer(0, 0), "touche membre → should_defer");
+    TEST_ASSERT(combo_should_defer(0, 0), "member key -> should_defer");
     combo_defer_key(0, 0, 0x0A);
     combo_defer_key(0, 1, 0x0B);
     uint8_t pr[6], pc[6]; press2(0, 0, 0, 1, pr, pc);
-    TEST_ASSERT_EQ(combo_process(pr, pc), 1, "les 2 présentes+déférées → 1 combo résolu");
+    TEST_ASSERT_EQ(combo_process(pr, pc), 1, "both present+deferred -> 1 combo resolved");
     uint8_t r1, c1, r2, c2;
-    TEST_ASSERT_EQ(combo_consume(&r1, &c1, &r2, &c2), 0x29, "consume → result ESC");
-    TEST_ASSERT(combo_is_suppressed(0, 0), "touche du combo actif → supprimée");
+    TEST_ASSERT_EQ(combo_consume(&r1, &c1, &r2, &c2), 0x29, "consume -> result ESC");
+    TEST_ASSERT(combo_is_suppressed(0, 0), "key of the active combo -> suppressed");
 }
 
-/* 2. should_defer : membre oui / hors-combo non / slot non configuré non. */
+/* 2. should_defer: member yes / outside combo no / unconfigured slot no. */
 static void test_cb_should_defer(void) {
     cb_reset();
     combo_config_t cfg = { .row1 = 1, .col1 = 2, .row2 = 1, .col2 = 3, .result = 0x28 };
     combo_set(0, &cfg);
-    TEST_ASSERT(combo_should_defer(1, 2), "membre du combo → defer");
-    TEST_ASSERT(!combo_should_defer(5, 5), "touche hors combo → pas de defer");
+    TEST_ASSERT(combo_should_defer(1, 2), "combo member -> defer");
+    TEST_ASSERT(!combo_should_defer(5, 5), "key outside combo -> no defer");
     combo_config_t zero = { 0 };
     combo_set(1, &zero);
-    TEST_ASSERT(!combo_should_defer(0, 0), "slot non configuré (result=0) → pas de defer");
+    TEST_ASSERT(!combo_should_defer(0, 0), "unconfigured slot (result=0) -> no defer");
 }
 
-/* 3. Une seule touche présente → pas de résolution. */
+/* 3. Only one key present -> no resolution. */
 static void test_cb_one_key_no_fire(void) {
     cb_reset();
     combo_config_t cfg = { .row1 = 0, .col1 = 0, .row2 = 0, .col2 = 1, .result = 0x29 };
     combo_set(0, &cfg);
     combo_defer_key(0, 0, 0x0A);
     uint8_t pr[6], pc[6]; press1(0, 0, pr, pc);
-    TEST_ASSERT_EQ(combo_process(pr, pc), 0, "une seule touche → 0 combo");
+    TEST_ASSERT_EQ(combo_process(pr, pc), 0, "only one key -> 0 combo");
     uint8_t d;
-    TEST_ASSERT_EQ(combo_consume(&d, &d, &d, &d), 0, "rien à consommer");
+    TEST_ASSERT_EQ(combo_consume(&d, &d, &d, &d), 0, "nothing to consume");
 }
 
-/* 4. Timeout dépassé, touche toujours pressée seule → ressort en 'expired'. */
+/* 4. Timeout exceeded, key still pressed alone -> comes back out as 'expired'. */
 static void test_cb_timeout_expired(void) {
     cb_reset();
     combo_config_t cfg = { .row1 = 0, .col1 = 0, .row2 = 0, .col2 = 1, .result = 0x29 };
@@ -71,10 +71,10 @@ static void test_cb_timeout_expired(void) {
     host_clock_advance_ms(51);         /* > COMBO_TIMEOUT_MS (50) */
     uint8_t pr[6], pc[6]; press1(0, 0, pr, pc);
     combo_process(pr, pc);
-    TEST_ASSERT_EQ(combo_consume_expired(), 0x0A, "timeout → touche déférée ressort telle quelle");
+    TEST_ASSERT_EQ(combo_consume_expired(), 0x0A, "timeout -> deferred key comes back out as-is");
 }
 
-/* 5. Le partenaire arrive dans la fenêtre → combo résolu. */
+/* 5. The partner arrives within the window -> combo resolved. */
 static void test_cb_partner_in_time(void) {
     cb_reset();
     combo_config_t cfg = { .row1 = 0, .col1 = 0, .row2 = 0, .col2 = 1, .result = 0x29 };
@@ -83,47 +83,47 @@ static void test_cb_partner_in_time(void) {
     host_clock_advance_ms(30);         /* < 50ms */
     combo_defer_key(0, 1, 0x0B);
     uint8_t pr[6], pc[6]; press2(0, 0, 0, 1, pr, pc);
-    TEST_ASSERT_EQ(combo_process(pr, pc), 1, "partenaire à temps → combo résolu");
+    TEST_ASSERT_EQ(combo_process(pr, pc), 1, "partner in time -> combo resolved");
     uint8_t d;
     TEST_ASSERT_EQ(combo_consume(&d, &d, &d, &d), 0x29, "result ESC");
 }
 
-/* 6. Touche déférée relâchée (absente du report) → ressort, pas de combo. */
+/* 6. Deferred key released (absent from the report) -> comes back out, no combo. */
 static void test_cb_released_expires(void) {
     cb_reset();
     combo_config_t cfg = { .row1 = 0, .col1 = 0, .row2 = 0, .col2 = 1, .result = 0x29 };
     combo_set(0, &cfg);
     combo_defer_key(0, 0, 0x0A);
-    uint8_t pr[6], pc[6]; press_none(pr, pc);   /* touche relâchée avant partenaire */
+    uint8_t pr[6], pc[6]; press_none(pr, pc);   /* key released before the partner */
     combo_process(pr, pc);
-    TEST_ASSERT_EQ(combo_consume_expired(), 0x0A, "relâchée avant partenaire → ressort");
+    TEST_ASSERT_EQ(combo_consume_expired(), 0x0A, "released before partner -> comes back out");
 }
 
-/* Épuisement de slots (6KRO) : combo non résolu → touches NON supprimées (M3).
- * L'ancien code posait combo_active=true avant de vérifier le defer → les 2
- * touches d'un combo non déférable (slots pleins) étaient supprimées = perte. */
+/* Slot exhaustion (6KRO): unresolved combo -> keys NOT suppressed (M3).
+ * The old code set combo_active=true before checking the defer -> both
+ * keys of a non-deferrable combo (full slots) were suppressed = loss. */
 static void test_cb_slot_exhaustion_no_suppress(void) {
     cb_reset();
     combo_config_t cfg = { .row1 = 0, .col1 = 0, .row2 = 0, .col2 = 1, .result = 0x29 };
     combo_set(0, &cfg);
-    /* Sature les 4 slots deferred avec d'autres touches */
+    /* Saturates the 4 deferred slots with other keys */
     combo_defer_key(2, 0, 0xA0);
     combo_defer_key(2, 1, 0xA1);
     combo_defer_key(2, 2, 0xA2);
     combo_defer_key(2, 3, 0xA3);
-    /* Les 2 touches du combo ne peuvent plus être déférées (alloc échoue) */
+    /* Both keys of the combo can no longer be deferred (alloc fails) */
     combo_defer_key(0, 0, 0x0A);
     combo_defer_key(0, 1, 0x0B);
     uint8_t pr[6], pc[6]; press2(0, 0, 0, 1, pr, pc);
     combo_process(pr, pc);
     TEST_ASSERT(!combo_is_suppressed(0, 0),
-                "slots pleins → combo non résolu → (0,0) PAS supprimée (pas de perte)");
+                "full slots -> unresolved combo -> (0,0) NOT suppressed (no loss)");
     TEST_ASSERT(!combo_is_suppressed(0, 1),
-                "slots pleins → combo non résolu → (0,1) PAS supprimée");
+                "full slots -> unresolved combo -> (0,1) NOT suppressed");
 }
 
 void test_combo(void) {
-    TEST_SUITE("Combos — module réel");
+    TEST_SUITE("Combos — real module");
     TEST_RUN(test_cb_fires);
     TEST_RUN(test_cb_slot_exhaustion_no_suppress);
     TEST_RUN(test_cb_should_defer);
@@ -131,5 +131,5 @@ void test_combo(void) {
     TEST_RUN(test_cb_timeout_expired);
     TEST_RUN(test_cb_partner_in_time);
     TEST_RUN(test_cb_released_expires);
-    combo_init();   /* laisse le module propre */
+    combo_init();   /* leaves the module clean */
 }

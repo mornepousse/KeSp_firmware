@@ -92,9 +92,9 @@ bool tap_dance_on_press(uint8_t index, uint8_t row, uint8_t col)
         return true;
     }
 
-    /* Different key (or dance) pressed during a count → QMK: l'interruption résout
-     * la danse COURANTE à son tap count actuel, puis la nouvelle touche est traitée
-     * normalement (le return false ne l'absorbe pas) — audit M9. */
+    /* Different key (or dance) pressed during a count → QMK: the interruption resolves
+     * the CURRENT dance at its current tap count, then the new key is handled
+     * normally (the return false does not absorb it) — audit M9. */
     if (active.state == TD_COUNTING) {
         uint8_t action_idx = (active.tap_count > TAP_DANCE_MAX_TAPS)
                            ? TAP_DANCE_MAX_TAPS - 1
@@ -121,9 +121,9 @@ void tap_dance_on_release(uint8_t row, uint8_t col)
 
 void tap_dance_tick(void)
 {
-    /* Ne PAS effacer resolved_flag ici : une résolution posée par on_press (4ᵉ
-     * tap) doit survivre jusqu'à ce que le consumer la lise via consume (M2).
-     * Le flag est effacé dans tap_dance_consume. */
+    /* Do NOT clear resolved_flag here: a resolution set by on_press (4th
+     * tap) must survive until the consumer reads it via consume (M2).
+     * The flag is cleared in tap_dance_consume. */
     if (active.state != TD_COUNTING) return;
 
     uint32_t t = now_ms();
@@ -149,7 +149,7 @@ uint8_t tap_dance_consume(void)
 {
     uint8_t kc = resolved_keycode;
     resolved_keycode = 0;
-    resolved_flag = false;   /* effacé à la consommation, plus dans tick (M2) */
+    resolved_flag = false;   /* cleared on consumption, no longer in tick (M2) */
     if (active.state == TD_RESOLVED)
         active.state = TD_IDLE;
     return kc;

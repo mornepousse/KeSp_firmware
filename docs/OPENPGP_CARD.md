@@ -15,94 +15,94 @@ malware cannot inject.
 
 ---
 
-## 0. Première configuration — tutoriel pas à pas (FR)
+## 0. First-time setup — step-by-step tutorial
 
-> Validé en live le 2026-06-11 (gpg 2.4.9). Refais exactement ces étapes pour installer **ta vraie
-> identité** sur le dongle. Compte ~15 min. Sections 3-10 = la référence détaillée.
+> Validated live on 2026-06-11 (gpg 2.4.9). Follow these exact steps to install **your real
+> identity** on the dongle. Takes ~15 min. Sections 3-10 are the detailed reference.
 >
-> 🚀 **Raccourci :** `scripts/kase-pgp-setup.sh setup` est un assistant guidé qui enchaîne tout
-> (détection + recovery CCID, PINs, generate avec rappel de la touche, git signing, clé SSH/GitLab,
-> et `… reset` pour repartir à zéro). Il NE voit jamais tes PINs (pinentry) et ne peut pas presser
-> la touche à ta place. Les étapes manuelles ci-dessous restent la référence / le fallback.
+> 🚀 **Shortcut:** `scripts/kase-pgp-setup.sh setup` is a guided wizard that chains everything
+> (CCID detection + recovery, PINs, generate with a touch reminder, git signing, SSH/GitLab key,
+> and `… reset` to start over). It NEVER sees your PINs (pinentry) and cannot press the touch
+> button in your place. The manual steps below remain the reference / the fallback.
 
-**Prérequis — gpg natif (NixOS, recommandé).** Pour un usage quotidien, gpg + l'agent (scdaemon
-carte, pinentry, agent SSH) doivent être **déclaratifs** dans ta config, pas via `nix-shell`. Sur
-NixOS :
+**Prerequisite — native gpg (NixOS, recommended).** For daily use, gpg + the agent (scdaemon
+card driver, pinentry, SSH agent) should be **declarative** in your config, not via `nix-shell`.
+On NixOS:
 
 ```nix
-# modules/apps/gnupg.nix  (importé par tes hosts)
+# modules/apps/gnupg.nix  (imported by your hosts)
 programs.gnupg.agent = {
   enable = true;
-  enableSSHSupport = true;                 # expose la clé AUTH de la carte à ssh + pose SSH_AUTH_SOCK
-  pinentryPackage = pkgs.pinentry-gnome3;  # GUI Wayland/Hyprland ; ou pinentry-curses en terminal
+  enableSSHSupport = true;                 # exposes the card's AUTH key to ssh + sets SSH_AUTH_SOCK
+  pinentryPackage = pkgs.pinentry-gnome3;  # Wayland/Hyprland GUI; or pinentry-curses in a terminal
 };
 environment.systemPackages = [ pkgs.gnupg ];
-# NE PAS activer services.pcscd : scdaemon utilise son driver CCID interne.
-# Une règle udev pour le VID 303a est nécessaire (accès non-root au nœud USB CCID).
+# DO NOT enable services.pcscd: scdaemon uses its own internal CCID driver.
+# A udev rule for VID 303a is required (non-root access to the USB CCID node).
 ```
-`nh os switch`, puis **ouvre un shell de login frais** (`exec zsh -l` ou relogue la session) pour
-que `SSH_AUTH_SOCK` soit posé. Vérifie : `echo "$SSH_AUTH_SOCK"` non-vide.
-Après ça, toutes les commandes ci-dessous sont du `gpg` **direct** (plus de `nix-shell`).
+`nh os switch`, then **open a fresh login shell** (`exec zsh -l` or re-log the session) so that
+`SSH_AUTH_SOCK` gets set. Check: `echo "$SSH_AUTH_SOCK"` is non-empty.
+After that, all the commands below are **direct** `gpg` (no more `nix-shell`).
 
-> Pas encore natif ? Fallback ponctuel : `nix-shell -p gnupg pinentry-curses --run 'gpg ...'` après
-> `echo "pinentry-program $(command -v pinentry-curses)" > ~/.gnupg/gpg-agent.conf`. Mais pour le
-> quotidien, fais le natif ci-dessus.
+> Not native yet? One-off fallback: `nix-shell -p gnupg pinentry-curses --run 'gpg ...'` after
+> `echo "pinentry-program $(command -v pinentry-curses)" > ~/.gnupg/gpg-agent.conf`. But for daily
+> use, go native as above.
 
-**Étape 1 — vérifier la carte.**
+**Step 1 — check the card.**
 ```bash
 gpgconf --kill scdaemon; gpg --card-status
 ```
-Tu dois voir `Application type: OpenPGP`, `Key attributes: nistp256 cv25519 nistp256`, PINs `3 0 3`.
-Si tu vois "No such device", relance (`gpgconf --kill all` puis re-`gpg --card-status`) — le CCID
-se réveille parfois au 2e essai.
+You should see `Application type: OpenPGP`, `Key attributes: nistp256 cv25519 nistp256`, PINs `3 0 3`.
+If you see "No such device", retry (`gpgconf --kill all` then `gpg --card-status` again) — the CCID
+sometimes wakes up on the 2nd try.
 
-**Étape 2 — changer les PINs (defaults `123456`/`12345678` publics).**
+**Step 2 — change the PINs (public defaults `123456`/`12345678`).**
 ```bash
 gpg --card-edit
 ```
-Puis : `admin` → `passwd` → `1` (PW1 user, actuel `123456`, ≥ 6 car.) → `3` (PW3 admin, actuel
-`12345678`, ≥ 8 car.) → `q`. Garde `gpg/card>` ouvert pour l'étape 3.
-⚠️ Retiens-les : 3 essais faux sur **les deux** PINs = carte bloquée (récupérable seulement par
-factory-reset, qui efface les clés).
+Then: `admin` → `passwd` → `1` (PW1 user, current `123456`, ≥ 6 chars) → `3` (PW3 admin, current
+`12345678`, ≥ 8 chars) → `q`. Keep `gpg/card>` open for step 3.
+⚠️ Remember them: 3 wrong attempts on **both** PINs = card locked (recoverable only by
+factory-reset, which erases the keys).
 
-**Étape 3 — générer ton identité SUR la carte.** Toujours dans `gpg/card>` (`admin` actif) :
+**Step 3 — generate your identity ON the card.** Still inside `gpg/card>` (`admin` active):
 ```
 generate
 ```
-- **« Make off-card backup of encryption key? »** → `n` (les clés ne quittent jamais le dongle ;
-  caveat : sans backup, si le dongle meurt tu perds le déchiffrement d'anciens messages — OK pour
-  une identité dev git/SSH).
-- PIN Admin, validité (`0` = pas d'expiration), puis **Real name / Email / Comment**.
-- 👉 **TOUCHE REQUISE** : à la fin, gpg auto-signe ton certificat avec la clé de **signature**, et
-  l'UIF Sign est ON → **presse `K_SEC_CONFIRM` sur ta moitié dans les 15 s** quand le pinentry/agent
-  attend. Sans la touche, la génération échoue (6985).
-- Résultat attendu : `public and secret key created and signed.` et `gpg -K` montre `sec>` + deux
-  `ssb>` avec `Card serial no.` (les 3 clés sont sur la carte).
+- **"Make off-card backup of encryption key?"** → `n` (the keys never leave the dongle;
+  caveat: without a backup, if the dongle dies you lose decryption of old messages — fine for
+  a dev git/SSH identity).
+- Admin PIN, validity (`0` = no expiration), then **Real name / Email / Comment**.
+- 👉 **TOUCH REQUIRED**: at the end, gpg auto-signs your certificate with the **signature**
+  key, and UIF Sign is ON → **press `K_SEC_CONFIRM` on your half within 15 s** when the
+  pinentry/agent is waiting. Without the touch, generation fails (6985).
+- Expected result: `public and secret key created and signed.` and `gpg -K` shows `sec>` + two
+  `ssb>` with `Card serial no.` (all 3 keys are on the card).
 
-**Étape 4 — signature git.**
+**Step 4 — git signing.**
 ```bash
 FPR=$(gpg --list-keys --with-colons | awk -F: '/^fpr/{print $10; exit}')
 git config --global user.signingkey $FPR
 git config --global commit.gpgsign true
 git config --global gpg.program gpg
 ```
-Chaque `git commit` demandera PW1 + **une touche** (UIF Sign ON). Vérifie : `git log --show-signature`.
+Every `git commit` will ask for PW1 + **a touch** (UIF Sign ON). Verify with: `git log --show-signature`.
 
-**Étape 5 — SSH (GitLab/GitHub).** Avec `enableSSHSupport = true`, `SSH_AUTH_SOCK` est déjà posé
-(shell de login frais) — pas d'export manuel.
+**Step 5 — SSH (GitLab/GitHub).** With `enableSSHSupport = true`, `SSH_AUTH_SOCK` is already set
+(fresh login shell) — no manual export needed.
 ```bash
 ssh-add -L
 ```
-Copie la ligne `ecdsa-sha2-nistp256 … cardno:…` dans GitLab → *SSH Keys*. Test : `ssh -T git@gitlab.com`.
-- `ssh-add -L` dit « has no identities » ? La carte n'a pas encore de clé AUTH (refais l'étape 3),
-  ou `SSH_AUTH_SOCK` n'est pas posé (shell de login frais).
-- « Could not open a connection to your authentication agent » = `SSH_AUTH_SOCK` absent →
-  `export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"; gpgconf --launch gpg-agent`, puis
-  fixe la persistance (shell de login / module gpg-agent). Si un autre agent (gnome-keyring) squatte
-  la variable, démarre gnome-keyring avec `--components=secrets,pkcs11` (sans `ssh`).
+Copy the `ecdsa-sha2-nistp256 … cardno:…` line into GitLab → *SSH Keys*. Test: `ssh -T git@gitlab.com`.
+- `ssh-add -L` says "has no identities"? The card does not have an AUTH key yet (redo step 3),
+  or `SSH_AUTH_SOCK` is not set (fresh login shell).
+- "Could not open a connection to your authentication agent" = `SSH_AUTH_SOCK` missing →
+  `export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"; gpgconf --launch gpg-agent`, then
+  fix persistence (login shell / gpg-agent module). If another agent (gnome-keyring) is hogging
+  the variable, start gnome-keyring with `--components=secrets,pkcs11` (without `ssh`).
 
-**Voilà.** Tu as une identité dev complète (sign + decrypt + SSH) née sur le dongle. Pour repartir
-de zéro un jour : `gpg --card-edit` → `admin` → `factory-reset` (efface tout, PINs par défaut).
+**That's it.** You now have a complete dev identity (sign + decrypt + SSH) born on the dongle. To
+start over one day: `gpg --card-edit` → `admin` → `factory-reset` (wipes everything, default PINs).
 
 ---
 
@@ -346,37 +346,37 @@ See the design spec **§2c** for the full posture.
 
 ## 10. Troubleshooting
 
-### 10.0 Usage quotidien (le seul truc à retenir)
+### 10.0 Daily use (the only thing to remember)
 
-Une fois l'identité installée (§0), tu ne refais RIEN de tout ce qui suit. Au quotidien :
+Once the identity is installed (§0), you never redo ANY of what follows. Day to day:
 
-- **Commit signé** : `git commit …` → tape ton PIN User (mis en cache un moment) **+ presse
-  `K_SEC_CONFIRM`** (la touche que tu as mappée, p.ex. l'ex-ESC du half_left) dans les 15 s.
-- **SSH / push** : transparent — la carte fait l'auth (PIN si demandé).
+- **Signed commit**: `git commit …` → type your User PIN (cached for a while) **+ press
+  `K_SEC_CONFIRM`** (the key you mapped, e.g. the former ESC of half_left) within 15 s.
+- **SSH / push**: transparent — the card handles the auth (PIN if prompted).
 
-Tout le reste de cette section, c'est **« au cas où »** — la plupart des pannes ci-dessous
-n'arrivent que pendant le **setup initial**.
+Everything else in this section is **"just in case"** — most of the failures below only
+happen during **initial setup**.
 
-### 10.1 Pannes courantes — symptôme → cause → fix
+### 10.1 Common failures — symptom → cause → fix
 
-| Tu vois… | Cause | Fix |
+| You see… | Cause | Fix |
 |---|---|---|
-| `gpg: No pinentry` | gpg-agent n'a pas de programme pinentry (config vide, ou chemin nix-shell garbage-collecté) | Installe-en un **persistant** : `nix profile install nixpkgs#pinentry-curses` puis `echo "pinentry-program $(command -v pinentry-curses)" >> ~/.gnupg/gpg-agent.conf && gpgconf --kill gpg-agent`. Permanent/propre = via le module NixOS (§0). |
-| `^M` quand tu valides (Entrée ne passe pas) | Terminal resté en **mode raw** (laissé par une session `expect`/`gpg --card-edit` interrompue) | `stty sane` (tape-le même si tu vois `^M`). Si ça résiste : `reset` ⏎ ou nouveau terminal. |
-| ssh : `Could not open a connection to your authentication agent` | `SSH_AUTH_SOCK` pas posé dans ce shell | Shell de login frais (`exec zsh -l`) si le module `enableSSHSupport` est actif ; sinon `export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)" && gpgconf --launch gpg-agent`. |
-| ssh-add : `The agent has no identities` | Pas (encore) de clé AUTH sur la carte, ou carte non lue | Génère l'identité (§0/§4), ou `gpg --card-status` une fois pour réveiller la carte. *(message normal sur carte vierge.)* |
-| `No such device` / `OpenPGP card not available` | Interface CCID figée (wedge), souvent après une rafale d'opérations | `gpgconf --kill all` puis réessaie 1-2× (le CCID se réveille). Wedge tenace → **rebranche le dongle**. |
-| `Conditions of use not satisfied` après un reset | scdaemon a une vue périmée de la carte | `gpgconf --kill all` puis `gpg --card-status`. |
-| `factory-reset` → `This command is not supported by this card` | Le firmware n'annonce pas le flag « life-cycle » à gpg (limitation connue) | Reset en **raw APDU** (bloque les 2 PINs → TERMINATE `00E60000` → ACTIVATE `00440000`) ou `scripts/kase-pgp-setup.sh reset`. |
-| **Timeout** sur une **passphrase** pendant `generate` | C'est le backup off-card (le pinentry expire) | Au `generate`, réponds **`n`** à *« Make off-card backup? »* (pas de backup = pas de passphrase = pas de timeout). |
-| **Timeout** sur la **touche** pendant `generate` | Les 15 s du gate UIF dépassées | Setup sans pression : `gpg --card-edit → admin → uif 1 off` AVANT `generate`, puis `uif 1 on` après. La touche reste obligatoire pour l'usage quotidien. |
-| `Key generation failed` / clés sur la carte mais `General key info: [none]` | Un `generate` a échoué (backup/touche) → clés orphelines sans trousseau | Reset (raw APDU ci-dessus) puis régénère proprement (`backup n`, `uif off`). |
-| `pubkey_encrypt failed: Invalid object` | Bug firmware corrigé (double préfixe `0x40` cv25519) | Mets à jour le firmware (≥ commit `ab105aa6`) et régénère. |
+| `gpg: No pinentry` | gpg-agent has no pinentry program (empty config, or a garbage-collected nix-shell path) | Install a **persistent** one: `nix profile install nixpkgs#pinentry-curses` then `echo "pinentry-program $(command -v pinentry-curses)" >> ~/.gnupg/gpg-agent.conf && gpgconf --kill gpg-agent`. Permanent/clean = via the NixOS module (§0). |
+| `^M` when you confirm (Enter does not go through) | Terminal stuck in **raw mode** (left behind by an interrupted `expect`/`gpg --card-edit` session) | `stty sane` (type it even if you see `^M`). If it persists: `reset` ⏎ or a new terminal. |
+| ssh: `Could not open a connection to your authentication agent` | `SSH_AUTH_SOCK` not set in this shell | Fresh login shell (`exec zsh -l`) if the `enableSSHSupport` module is active; otherwise `export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)" && gpgconf --launch gpg-agent`. |
+| ssh-add: `The agent has no identities` | No AUTH key on the card (yet), or card not read | Generate the identity (§0/§4), or run `gpg --card-status` once to wake the card. *(normal message on a blank card.)* |
+| `No such device` / `OpenPGP card not available` | CCID interface wedged, often after a burst of operations | `gpgconf --kill all` then retry 1-2 times (the CCID wakes up). Persistent wedge → **unplug and replug the dongle**. |
+| `Conditions of use not satisfied` after a reset | scdaemon has a stale view of the card | `gpgconf --kill all` then `gpg --card-status`. |
+| `factory-reset` → `This command is not supported by this card` | The firmware does not advertise the "life-cycle" flag to gpg (known limitation) | Reset via **raw APDU** (locks both PINs → TERMINATE `00E60000` → ACTIVATE `00440000`) or `scripts/kase-pgp-setup.sh reset`. |
+| **Timeout** on a **passphrase** during `generate` | This is the off-card backup (the pinentry times out) | At `generate`, answer **`n`** to *"Make off-card backup?"* (no backup = no passphrase = no timeout). |
+| **Timeout** on the **touch** during `generate` | The 15 s UIF gate window was exceeded | Set up without pressure: `gpg --card-edit → admin → uif 1 off` BEFORE `generate`, then `uif 1 on` afterward. The touch remains mandatory for daily use. |
+| `Key generation failed` / keys on the card but `General key info: [none]` | A `generate` failed (backup/touch) → orphaned keys with no keyring entry | Reset (raw APDU above) then regenerate cleanly (`backup n`, `uif off`). |
+| `pubkey_encrypt failed: Invalid object` | Firmware bug fixed (double `0x40` cv25519 prefix) | Update the firmware (≥ commit `ab105aa6`) and regenerate. |
 
-### 10.2 Reset propre de la carte (la commande raw qui marche toujours)
+### 10.2 Clean card reset (the raw command that always works)
 
-`factory-reset` de gpg ne marche pas sur cette carte → reset déterministe en raw APDU (indépendant
-des PINs : bloque les deux, puis TERMINATE + ACTIVATE) :
+gpg's `factory-reset` does not work on this card → deterministic reset via raw APDU (independent
+of the PINs: locks both, then TERMINATE + ACTIVATE):
 
 ```bash
 gpg-connect-agent /hex "scd serialno" \
@@ -384,16 +384,16 @@ gpg-connect-agent /hex "scd serialno" \
   "scd apdu 0020008106 303030303030" "scd apdu 0020008106 303030303030" "scd apdu 0020008106 303030303030" \
   "scd apdu 0020008308 3030303030303030" "scd apdu 0020008308 3030303030303030" "scd apdu 0020008308 3030303030303030" \
   "scd apdu 00E60000" "scd apdu 00440000" /bye
-gpgconf --kill all      # puis: gpg --card-status  (doit montrer 0 clé, PINs 3 0 3)
+gpgconf --kill all      # then: gpg --card-status  (should show 0 keys, PINs 3 0 3)
 ```
-(ou plus simple : `./scripts/kase-pgp-setup.sh reset`)
+(or more simply: `./scripts/kase-pgp-setup.sh reset`)
 
-### 10.3 Outils de diagnostic
+### 10.3 Diagnostic tools
 
-- **Reset scdaemon entre deux essais** (il cache l'état de la carte) : `gpgconf --kill scdaemon`
-  (ou `gpgconf --kill all` pour tout relancer).
+- **Reset scdaemon between two attempts** (it caches the card's state): `gpgconf --kill scdaemon`
+  (or `gpgconf --kill all` to relaunch everything).
 
-- **Log scdaemon verbeux** — dans `~/.gnupg/scdaemon.conf` :
+- **Verbose scdaemon log** — in `~/.gnupg/scdaemon.conf`:
 
   ```
   debug-level guru

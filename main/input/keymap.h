@@ -1,13 +1,13 @@
 #pragma once
-#include <stddef.h>   /* size_t — nécessaire pour les signatures de fonctions */
-#include <stdbool.h>  /* bool — retour des save_* (échec de persistance NVS) */
+#include <stddef.h>   /* size_t — needed for function signatures */
+#include <stdbool.h>  /* bool — return of save_* (NVS persistence failure) */
 #include "keyboard_config.h"
-/* Ni le dongle ni la souris n'ont de matrice : ni keymap, ni statistiques par
- * position, ni état de matrice. Déclarer ces symboles chez eux obligerait leur
- * carte à inventer des dimensions — c'est ce que leurs board.h ne font pas. */
+/* Neither the dongle nor the mouse has a matrix: no keymap, no per-position
+ * statistics, no matrix state. Declaring these symbols for them would force
+ * their board to invent dimensions — which their board.h files do not do. */
 #if !CONFIG_KASE_NO_KEYMAP_ENGINE
-/* KEYMAP_COLS, pas MATRIX_COLS : sur la moitié maître d'un split la keymap
- * couvre les deux moitiés alors que le balayage n'en couvre qu'une. */
+/* KEYMAP_COLS, not MATRIX_COLS: on the master half of a split the keymap
+ * covers both halves while the scan only covers one. */
 extern uint16_t keymaps[][MATRIX_ROWS][KEYMAP_COLS];
 extern char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH];
 #endif
@@ -31,18 +31,18 @@ typedef struct {
   uint16_t key_definition;
 } macro_t;
 
-bool save_keymaps(uint16_t *data, size_t size_bytes);   /* true = persisté OK */
-/* Taille du blob « keymaps » en NVS — LA source unique, des deux côtés.
+bool save_keymaps(uint16_t *data, size_t size_bytes);   /* true = persisted OK */
+/* Size of the "keymaps" blob in NVS — THE single source, on both sides.
  *
- * Elle se calcule sur KEYMAP_COLS, PAS sur MATRIX_COLS : sur le maître d'un
- * split, la keymap couvre les deux moitiés (14 colonnes) alors que la matrice
- * locale n'en balaie que 7. Les deux formules coexistaient — écriture en
- * KEYMAP_COLS (1120 octets), lecture en MATRIX_COLS (560) — et la garde de
- * taille de load_keymaps rejetait donc le blob à CHAQUE démarrage, en gardant
- * les valeurs d'usine. Le remappage de l'utilisateur était écrit, jamais relu,
- * et rien ne le signalait. Constaté au banc le 2026-09-07.
+ * It is computed from KEYMAP_COLS, NOT from MATRIX_COLS: on the master of a
+ * split, the keymap covers both halves (14 columns) while the local matrix
+ * only scans 7. The two formulas used to coexist — write in
+ * KEYMAP_COLS (1120 bytes), read in MATRIX_COLS (560) — and load_keymaps'
+ * size guard therefore rejected the blob at EVERY boot, keeping the factory
+ * values. The user's remapping was written, never read back,
+ * and nothing signaled it. Found on the bench on 2026-09-07.
  *
- * Verrouillé par test/test_keymap_blob_size.c. */
+ * Locked in by test/test_keymap_blob_size.c. */
 #define KEYMAP_BLOB_BYTES \
     ((size_t)LAYERS * MATRIX_ROWS * KEYMAP_COLS * sizeof(uint16_t))
 

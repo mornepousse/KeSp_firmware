@@ -4,7 +4,7 @@
 #include "keyboard_task.h"
 #include "matrix_scan.h"
 #include "key_definitions.h"
-#include "key_processor.h"   /* key_processor_report_mods() — mods portés hors keycodes[] (M7) */
+#include "key_processor.h"   /* key_processor_report_mods() — mods carried outside keycodes[] (M7) */
 #include "hid_dedup.h"       /* commit-only-on-success (audit F1) */
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -137,8 +137,8 @@ void send_hid_key(void)
     static hid_dedup_t dedup;
 
     uint8_t modifier = 0;
-    extract_modifiers(keycodes, &modifier);      /* mods de touches physiques (0xE0-0xE7) */
-    modifier |= key_processor_report_mods();     /* + mods tap-hold/OSM/… portés à part (M7) */
+    extract_modifiers(keycodes, &modifier);      /* mods from physical keys (0xE0-0xE7) */
+    modifier |= key_processor_report_mods();     /* + tap-hold/OSM/... mods carried separately (M7) */
     current_modifiers = modifier;
 
     /* Real milliseconds, not ticks: the FreeRTOS tick is 10 ms here, so a

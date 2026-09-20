@@ -34,9 +34,9 @@ uint8_t current_col_layer_changer = INVALID_KEY_POS;
 static uint8_t lm_active_mods = 0;  /* modifier mask held by LM key */
 uint16_t extra_keycodes[6] = {0};
 
-/* Modified Key : mods à OR-er dans l'octet modifier, et par slot pour que
- * Repeat sache qu'une slot vient d'un MK. Remis à zéro à chaque rapport, comme
- * macro_hold_mods — un MK relâché ne laisse rien derrière lui. */
+/* Modified Key: mods to OR into the modifier byte, and per-slot so
+ * Repeat knows a slot comes from an MK. Reset to zero on every report, like
+ * macro_hold_mods — a released MK leaves nothing behind. */
 static uint8_t mk_mods = 0;
 static uint8_t mk_slot_mods[6] = {0};
 
@@ -60,8 +60,8 @@ static void apply_momentary_layer(uint16_t keycode, uint8_t key_idx)
         mods = K_LM_MODS(keycode);
     }
 
-    /* Borne exprimée par LAYERS et non par un littéral : `layer <= 9` était
-     * juste tant que LAYERS vaut 10, et devenait faux en silence sinon. */
+    /* Bound expressed via LAYERS, not a literal: `layer <= 9` was
+     * correct only as long as LAYERS is 10, and became silently wrong otherwise. */
     if (layer < LAYERS) {
         last_layer = current_layout;
         current_layout = layer;
@@ -86,8 +86,8 @@ static bool is_new_press(uint8_t row, uint8_t col);
 
 /* ── Legacy internal function dispatch ───────────────────────────── */
 
-/* uint16_t, pas int16_t : en signé, tout keycode ≥ 0x8000 (Modified Key)
- * devenait négatif et n'était rejeté que par accident. */
+/* uint16_t, not int16_t: signed, any keycode >= 0x8000 (Modified Key)
+ * turned negative and was only rejected by accident. */
 static bool detect_internal_function(uint16_t keycode)
 {
     /* Only capture keycodes that process_matrix_changes actually handles:
@@ -147,9 +147,9 @@ static void dispatch_internal_function(void)
 static int16_t pending_macro_idx = -1;
 
 static uint8_t macro_hold_mods = 0;  /* modifier mask from held no-delay macro */
-static uint8_t report_mods = 0;      /* mods (tap-hold/OSM/LM/macro/override) portés
-                                        vers l'octet modifier SÉPARÉ du report HID au
-                                        lieu d'occuper une slot de keycode (audit M7) */
+static uint8_t report_mods = 0;      /* mods (tap-hold/OSM/LM/macro/override) carried
+                                        to the modifier byte, SEPARATE from the HID report,
+                                        instead of occupying a keycode slot (audit M7) */
 
 static void expand_macro(uint16_t keycode, bool is_new)
 {
@@ -175,9 +175,9 @@ static void expand_macro(uint16_t keycode, bool is_new)
     }
 
     if (has_delay) {
-        /* Sequential: queue for keyboard_task playback — seulement au nouvel appui,
-         * sinon la macro est re-armée à chaque scan tant que la touche est tenue
-         * → rejeu en boucle (audit M8). */
+        /* Sequential: queue for keyboard_task playback — only on a new press,
+         * otherwise the macro gets re-armed on every scan while the key is held
+         * -> replayed in a loop (audit M8). */
         if (is_new)
             pending_macro_idx = idx;
     } else {
@@ -198,7 +198,7 @@ bool key_processor_has_pending_macro(void)
 }
 
 /* Get and clear the pending macro index */
-/* Modificateurs à OR dans l'octet modifier du report HID (portés hors keycodes[], M7). */
+/* Modifiers to OR into the HID report's modifier byte (carried outside keycodes[], M7). */
 uint8_t key_processor_report_mods(void)
 {
     return report_mods;
@@ -224,12 +224,12 @@ static bool is_advanced_keycode(uint16_t kc)
 
 static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
 {
-    /* Modified Key : la touche de base va dans keycodes[] comme une touche
-     * normale, le mod dans l'octet modifier — jamais dans keycodes[], où il
-     * volerait une slot (bug M7, bffdf4ec). Pas de timer : ce n'est pas MT, un
-     * tap donne le symbole tout de suite. Il court-circuite aussi le key
-     * override, qui ne voit que le chemin des touches simples : un MK est une
-     * touche finale, pas une combinaison à réinterpréter (décision 3). */
+    /* Modified Key: the base key goes into keycodes[] like a normal
+     * key, the mod into the modifier byte — never into keycodes[], where it
+     * would steal a slot (bug M7, bffdf4ec). No timer: it's not MT, a
+     * tap gives the symbol right away. It also bypasses the key
+     * override, which only sees the plain-key path: an MK is a final
+     * key, not a combination to reinterpret (decision 3). */
     if (K_IS_MK(kc)) {
         mk_mods |= K_MK_MOD(kc);
         return K_MK_KEY(kc);
@@ -245,8 +245,8 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
     if (K_IS_OSL(kc))      { osl_arm(K_OSL_LAYER(kc)); return 0; }
     if (kc == K_CAPS_WORD) { caps_word_toggle(); return 0; }
     if (kc == K_REPEAT)    {
-        /* Après « ! », Repeat redonne « ! » et non « 1 » : le mod enregistré
-         * avec la dernière touche revient avec elle (décision 4). */
+        /* After "!", Repeat gives back "!" and not "1": the mod recorded
+         * with the last key comes back with it (decision 4). */
         mk_mods |= repeat_key_get_mods();
         return repeat_key_get();
     }
@@ -268,8 +268,8 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
     if (kc == K_SEC_CONFIRM) { if (is_new_press(row, col)) sec_confirm_authorize(); return 0; }
     if (kc == K_LAYER_LOCK){ layer_lock_toggle(); return 0; }
     if (kc == K_DISP_NEXT) { if (is_new_press(row, col)) km_post_display_next(); return 0; }
-    /* K_TAMA_* (0x3500-0x3800) : keycodes conservés (partagés KaSe_soft) mais
-     * sans effet — le tamagotchi a été retiré. Ils tombent sur le return 0. */
+    /* K_TAMA_* (0x3500-0x3800): keycodes kept (shared with KaSe_soft) but
+     * with no effect — the tamagotchi has been removed. They fall through to return 0. */
     return 0;
 }
 
@@ -336,8 +336,8 @@ void build_keycode_report(void)
     uint8_t th_mods = tap_hold_get_active_mods();
     bool has_normal_press = false;
 
-    /* Modificateurs physiques tenus (Shift/Ctrl/… encodés 0xE0-0xE7 dans le keymap)
-     * — les key overrides doivent voir la vraie combinaison, pas seulement th_mods. */
+    /* Physical modifiers held (Shift/Ctrl/… encoded 0xE0-0xE7 in the keymap)
+     * — key overrides must see the real combination, not just th_mods. */
     uint8_t physical_mods = 0;
     for (uint8_t i = 0; i < 6; i++) {
         if (current_press_col[i] == INVALID_KEY_POS) continue;
@@ -345,8 +345,8 @@ void build_keycode_report(void)
         if (mkc >= 0xE0 && mkc <= 0xE7)
             physical_mods |= (uint8_t)(1u << (mkc - 0xE0));
     }
-    uint8_t override_add_mods = 0;       /* result_mod des overrides déclenchés */
-    uint8_t override_suppress_mods = 0;  /* trigger_mod à retirer du report */
+    uint8_t override_add_mods = 0;       /* result_mod of triggered overrides */
+    uint8_t override_suppress_mods = 0;  /* trigger_mod to remove from the report */
 
     /* Step 4: process each pressed key */
     for (uint8_t i = 0; i < 6; i++) {
@@ -360,14 +360,14 @@ void build_keycode_report(void)
         uint8_t col = current_press_col[i];
         uint16_t kc = keymaps[active_layer][row][col];
 
-        /* Ce slot est reconstruit à neuf : on efface AVANT de le remplir.
-         * Sans cela, une touche absorbée (changeuse de couche, tap-hold tenu,
-         * combo différé, leader…) laissait keycodes[i] à sa valeur du cycle
-         * précédent. Invisible tant que chaque slot gardait le même type de
-         * touche — mais la fusion distante REPACKE les slots, et au relâchement
-         * d'une touche locale le MO distant glissait sur un slot qui tenait un
-         * caractère, dont il héritait. Bug « la touche ne se relâche pas sous MO
-         * distant », 2026-09-12. Chaque branche qui émet écrase ce zéro. */
+        /* This slot is rebuilt from scratch: we clear it BEFORE filling it.
+         * Without this, an absorbed key (layer changer, held tap-hold,
+         * deferred combo, leader…) left keycodes[i] at its value from the
+         * previous cycle. Invisible as long as each slot kept the same
+         * type of key — but remote fusion REPACKS the slots, and on the
+         * release of a local key the remote MO would slide onto a slot that
+         * held a character, which it then inherited. Bug "the key does not
+         * release under a held remote MO", 2026-09-12. Every emitting branch overwrites this zero. */
         keycodes[i] = 0;
         extra_keycodes[i] = 0;
 
@@ -412,7 +412,7 @@ void build_keycode_report(void)
             if (kc > 0xFF) {
                 extra_keycodes[i] = kc;
             } else {
-                /* Key override: remplace la combo mod+touche (mods physiques inclus) */
+                /* Key override: replaces the mod+key combo (physical mods included) */
                 uint8_t override_mod = 0, trigger_mod = 0;
                 uint8_t override_kc = key_override_check(
                     (uint8_t)kc, (uint8_t)(th_mods | physical_mods),
@@ -448,8 +448,8 @@ void build_keycode_report(void)
         th_mods = tap_hold_get_active_mods();
     }
 
-    /* Key override: retirer du report les modificateurs déclencheurs (ex. le Shift
-     * de "Shift+, → ;") pour ne pas les combiner au result_key. */
+    /* Key override: remove from the report the trigger modifiers (e.g. the Shift
+     * of "Shift+, -> ;") so they don't combine with the result_key. */
     if (override_suppress_mods) {
         for (uint8_t i = 0; i < 6; i++) {
             uint8_t k = keycodes[i];
@@ -460,9 +460,9 @@ void build_keycode_report(void)
     }
 
     /* Step 5: apply modifiers (tap/hold + one-shot + LM + macro hold + override).
-     * OSM (logique QMK, M5) : consommé seulement sur une vraie frappe ; un cycle
-     * sans frappe (release/idle) laisse l'OSM armé pour la frappe suivante — même
-     * garde que l'OSL (has_normal_press). */
+     * OSM (QMK logic, M5): consumed only on a real keystroke; a cycle
+     * with no keystroke (release/idle) leaves the OSM armed for the next
+     * keystroke — same guard as the OSL (has_normal_press). */
     uint8_t osm_mods = has_normal_press ? osm_consume() : 0;
     uint8_t extra_mods = th_mods | osm_mods | lm_active_mods | macro_hold_mods | mk_mods;
     extra_mods = (uint8_t)((extra_mods & ~override_suppress_mods) | override_add_mods);
@@ -475,10 +475,10 @@ void build_keycode_report(void)
         }
     }
 
-    /* Step 7: les modificateurs ne sont PLUS empilés dans keycodes[] (où ils
-     * volaient une slot → un mod perdu si les 6 slots étaient pleins, M7). Ils sont
-     * portés séparément et OR'és dans l'octet modifier par send_hid_key via
-     * key_processor_report_mods(). Un report standard = 6 touches + 8 mods. */
+    /* Step 7: modifiers are NO LONGER stacked into keycodes[] (where they
+     * stole a slot -> a mod lost if all 6 slots were full, M7). They are
+     * carried separately and OR'ed into the modifier byte by send_hid_key via
+     * key_processor_report_mods(). A standard report = 6 keys + 8 mods. */
     report_mods = extra_mods;
 
     /* Step 8: inject resolved taps (key already released) */

@@ -1,70 +1,70 @@
 #pragma once
-/* Cadences des moitiés Niphargus — UN lieu, une règle, une garde.
+/* Cadences of the Niphargus halves — ONE place, one rule, one guard.
  *
- * La règle : au repos, aucune attente périodique sous CADENCE_REPOS_MIN_MS.
- * ESP-IDF ne tente le light sleep automatique (tickless) que si toutes les
- * tâches sont bloquées ≥ CONFIG_FREERTOS_IDLE_TIME_BEFORE_SLEEP ticks (3, à
- * 100 Hz = 30 ms). Une boucle à 10 ms laisse UN tick libre : le profil disait
- * « mode SLEEP 92 % » et light_sleep_counts restait à 0 (banc 2026-09-16, tâche
- * clavier). Un mode oisif n'est pas un sommeil, et rien ne le signale.
+ * The rule: at rest, no periodic wait below CADENCE_REPOS_MIN_MS.
+ * ESP-IDF only attempts automatic light sleep (tickless) if all tasks are
+ * blocked for >= CONFIG_FREERTOS_IDLE_TIME_BEFORE_SLEEP ticks (3, at
+ * 100 Hz = 30 ms). A 10 ms loop leaves ONE tick free: the profile said
+ * "mode SLEEP 92%" and light_sleep_counts stayed at 0 (bench 2026-09-16,
+ * keyboard task). An idle mode is not a sleep, and nothing signals it.
  *
- * La garde : chaque cadence de REPOS est suivie d'un CADENCE_REPOS_OK — une
- * valeur trop courte ne compile pas. Les cadences ACTIVES (touche tenue,
- * réparation bornée, poignée de main) restent ≤ 20 ms : c'est ce qui tient
- * les réaffirmations à 100 ms et la réparation 5 × 10 ms.
+ * The guard: every REST cadence is followed by a CADENCE_REPOS_OK — a
+ * value that is too short does not compile. The ACTIVE cadences (key held,
+ * bounded repair, handshake) stay <= 20 ms: that is what keeps the
+ * reaffirmations at 100 ms and the repair at 5 x 10 ms.
  *
- * ⚠ Ralentir un tick change ce qu'il VIDE, pas seulement ce qu'il émet : le
- * relais de la gauche passé à 100 ms au repos perdait les touches de la droite
- * en mode USB, parce que ce tick vide la FIFO nRF24 (3 trames) — voir
- * kbd_relay_cadence_ms. Lister les consommateurs avant de toucher une valeur.
+ * ⚠ slowing down a tick changes what it DRAINS, not just what it
+ * emits: the left relay set to 100 ms at rest was losing the right half's
+ * keys in USB mode, because that tick drains the nRF24 FIFO (3 frames) — see
+ * kbd_relay_cadence_ms. List the consumers before touching a value.
  *
- * Testé host : test/test_cadence.c. */
+ * Tested on host: test/test_cadence.c. */
 #include <stdint.h>
 
 #define CADENCE_TICK_MS          10u   /* CONFIG_FREERTOS_HZ = 100 */
-#define CADENCE_REPOS_MIN_MS     30u   /* 3 ticks : CONFIG_FREERTOS_IDLE_TIME_BEFORE_SLEEP */
+#define CADENCE_REPOS_MIN_MS     30u   /* 3 ticks: CONFIG_FREERTOS_IDLE_TIME_BEFORE_SLEEP */
 #define CADENCE_REPOS_OK(ms) _Static_assert((ms) >= CADENCE_REPOS_MIN_MS, #ms " < 3 ticks : tue le light sleep automatique")
 
-/* Tâche clavier (gauche) : minuteries tap-hold/tap-dance/leader, mode test,
- * fusion distante en USB. Notifiée par le balayage sur changement. */
+/* Keyboard task (left): tap-hold/tap-dance/leader timers, test mode,
+ * remote fusion over USB. Notified by the scan on change. */
 #define KBD_CADENCE_ACTIF_MS     10u
 #define KBD_CADENCE_REPOS_MS     100u
 #define KBD_CADENCE_FENETRE_MS   1500u   /* > LEADER_TIMEOUT_MS (1000) */
 CADENCE_REPOS_OK(KBD_CADENCE_REPOS_MS);
 
-/* Relais radio de la gauche (timer esp_timer) : réparation bornée, maintiens,
- * sync par ACK, et en USB la vidange de la FIFO des trames de la droite. */
+/* Left radio relay (esp_timer timer): bounded repair, holds,
+ * ACK sync, and over USB the draining of the right half's frame FIFO. */
 #define KBD_RELAY_REFRESH_MS     10u
 #define KBD_RELAY_REPOS_MS       100u
 CADENCE_REPOS_OK(KBD_RELAY_REPOS_MS);
 
-/* Rafraîchissement de la droite : réaffirmation des maintiens, réparation. */
+/* Right half refresh: reaffirmation of holds, repair. */
 #define HALF_TX_TENU_MS          20u
 #define HALF_TX_REPOS_MS         100u
 CADENCE_REPOS_OK(HALF_TX_REPOS_MS);
 
-/* Lien TRRS : tick de la machine d'états en poignée de main / lien établi ;
- * au repos (5 V mort, pas d'USB) la tâche est bloquée sur la file UART et ne
- * se réveille d'elle-même que pour sonder l'USB (événement humain). */
+/* TRRS link: state machine tick during handshake / established link;
+ * at rest (5 V dead, no USB) the task is blocked on the UART queue and only
+ * wakes on its own to probe USB (human event). */
 #define LINK_TICK_MS             10u
 #define LINK_REPOS_MS            1000u
 CADENCE_REPOS_OK(LINK_REPOS_MS);
 
-/* Écran de la droite (tâche minimale : update() + VCOM). */
-#define MEMLCD_DROITE_PERIODE_MS 1000u  /* modèle : jauge 30 s, dongle vu ; VCOM horodaté dans update() */
+/* Right half screen (minimal task: update() + VCOM). */
+#define MEMLCD_DROITE_PERIODE_MS 1000u  /* model: 30 s gauge, dongle seen; VCOM timestamped in update() */
 CADENCE_REPOS_OK(MEMLCD_DROITE_PERIODE_MS);
 
-/* LVGL (esp_lvgl_port) : tick, rafraîchissement, sommeil max de la tâche. */
+/* LVGL (esp_lvgl_port): tick, refresh, max task sleep. */
 #define LVGL_TICK_MS             50u
 #define LVGL_REFR_MS             200u
 #define LVGL_TASK_MAX_SLEEP_MS   500u
 CADENCE_REPOS_OK(LVGL_TICK_MS);
 CADENCE_REPOS_OK(LVGL_REFR_MS);
 
-/* Tâche de veille (veille_task.c) : évaluation de l'inactivité et des vetos.
- * La veille n'arrive qu'à 15 s, une seconde de latence ne se voit pas. */
+/* Sleep task (veille_task.c): evaluation of inactivity and vetoes.
+ * Sleep only arrives at 15 s, a second of latency is not noticeable. */
 #define VEILLE_TICK_MS           1000u
 CADENCE_REPOS_OK(VEILLE_TICK_MS);
 
-/* Battement de coeur de banc (porté par la tâche de veille). */
+/* Bench heartbeat (carried by the sleep task). */
 #define HB_PERIODE_MS            10000u

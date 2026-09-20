@@ -1,13 +1,13 @@
 #include "matrix_scan.h"
 #if CONFIG_KASE_VEILLE
-#include "veille_task.h"   /* veto TEST */
+#include "veille_task.h"   /* TEST veto */
 #endif
 #include "matrix_flag.h"
 
 #include "keyboard_task.h"
 #include "key_stats.h"
 #include "keyboard_config.h"
-#include "wake_grace.h"         /* wake_grace_ms — grâce du pilote au réveil (tous boards) */
+#include "wake_grace.h"         /* wake_grace_ms — driver grace period on wake (all boards) */
 #include "cdc_binary_protocol.h"
 #if CONFIG_KASE_HALF_LINK_TX
 #include "half_link.h"
@@ -15,8 +15,8 @@
 #endif
 #if CONFIG_KASE_DONGLE_FUSION
 #include "rf_packet.h"          /* rf_matrix_to_bitmap, RF_HALF_LEFT */
-#include "fusion_route.h"       /* fusion_left_emits_raw (règle 3) */
-#include "half_link.h"          /* half_col_to_keymap (fusion distante 4b) */
+#include "fusion_route.h"       /* fusion_left_emits_raw (rule 3) */
+#include "half_link.h"          /* half_col_to_keymap (remote fusion 4b) */
 #if CONFIG_KASE_KBD_WIRELESS
 #include "kbd_relay_tx.h"       /* kbd_relay_send_matrix + remote_pressed/changed */
 #include "usb_presence.h"       /* kbd_active_route / KBD_OUT_USB */
@@ -55,38 +55,38 @@ uint8_t current_press_col[MAX_REPORT_KEYS];
 uint8_t current_press_stat[MAX_REPORT_KEYS];
 
 #if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
-/* Sens de rangement des colonnes distantes — propriété du câblage, déclarée par
- * le board.h du maître. 0 = simple décalage, 1 = miroir. */
+/* Ordering of the remote columns — a property of the wiring, declared by
+ * the master's board.h. 0 = simple shift, 1 = mirror. */
 #ifndef BOARD_REMOTE_COLS_MIRRORED
 #define BOARD_REMOTE_COLS_MIRRORED 0
 #endif
 
-/* Source de la demi-matrice distante selon le mode :
- *  - fusion, gauche en USB → kbd_relay_remote_pressed (droite réémise par le
- *    dongle et reçue en écoute USB). */
+/* Source of the remote half-matrix depending on mode:
+ *  - fusion, left on USB → kbd_relay_remote_pressed (right re-emitted by the
+ *    dongle and received while listening on USB). */
 #define KASE_REMOTE_PRESSED(r, c) kbd_relay_remote_pressed((r), (c))
 
-/* Frontière entre les entrées du balayage LOCAL et celles reçues par radio.
- * Tout ce qui est au-delà appartient à la moitié distante et se reconstruit à
- * chaque appel de matrix_apply_remote(). */
+/* Boundary between the entries of the LOCAL scan and those received by radio.
+ * Everything beyond it belongs to the remote half and is rebuilt on every
+ * call to matrix_apply_remote(). */
 static uint8_t s_filled_local;
 
-/* Fusion des deux moitiés — IDEMPOTENTE, donc appelable à chaque cycle.
+/* Fusion of the two halves — IDEMPOTENT, so it can be called every cycle.
  *
- * Elle doit l'être : le callback de scan ne tourne que sur activité LOCALE, or
- * un appui sur la seule moitié droite n'en produit aucune. Sans un appel
- * périodique depuis la tâche clavier, les touches reçues par radio
- * n'atteindraient jamais le moteur — c'est le défaut qui faisait que la droite
- * ne tapait rien alors que son lien était acquitté.
+ * It has to be: the scan callback only runs on LOCAL activity, and a
+ * keypress on the right half alone produces none. Without a periodic call
+ * from the keyboard task, keys received by radio would never reach the
+ * engine — that's the bug that made the right half type nothing while its
+ * link was acknowledged.
  *
- * Les touches distantes occupent les colonnes 7-13, cette moitié les 0-6. Le
- * moteur ne sait pas d'où elles viennent, il indexe keymaps[layer][row][col] et
- * rien d'autre. Le SENS de rangement dépend du câblage et passe par
- * half_col_to_keymap() : les deux moitiés étant le même PCB retourné, la
- * colonne 0 de la droite est sa touche la plus à droite.
+ * Remote keys occupy columns 7-13, this half occupies 0-6. The engine does
+ * not know where they come from, it just indexes keymaps[layer][row][col]
+ * and nothing else. The ORDERING depends on the wiring and goes through
+ * half_col_to_keymap(): since both halves are the same PCB flipped over,
+ * the right's column 0 is its rightmost key.
  *
- * Le plafond MAX_REPORT_KEYS est respecté, et les touches locales gardent la
- * priorité puisqu'elles occupent le début du tableau. */
+ * The MAX_REPORT_KEYS ceiling is respected, and local keys keep priority
+ * since they occupy the start of the array. */
 void matrix_apply_remote(void)
 {
     uint8_t filled = s_filled_local;
@@ -114,16 +114,16 @@ volatile uint32_t last_activity_time_ms = 0;
 
 static keyboard_btn_handle_t s_kbd = NULL;
 static uint8_t prev_matrix_state[MATRIX_ROWS][MATRIX_COLS];  /* For KPM: track new keypresses */
-/* État de la matrice capturé au réveil de veille, par balayage manuel avant
- * que le pilote ne soit recréé. matrix_setup() en fait le prev_matrix_state
- * initial du nouveau pilote, puis l'efface : un démarrage ordinaire repart de
- * « rien d'enfoncé » comme avant. */
+/* Matrix state captured on sleep wake, by manual scan before the driver
+ * gets recreated. matrix_setup() turns it into the new driver's initial
+ * prev_matrix_state, then clears it: an ordinary boot starts again from
+ * "nothing pressed" as before. */
 static uint8_t s_wake_state[MATRIX_ROWS][MATRIX_COLS];
-/* Le pilote recréé a-t-il émis un événement ? Il ne signale que les
- * CHANGEMENTS par rapport à son propre état, qui part de « rien d'enfoncé » :
- * une touche capturée au réveil puis relâchée avant son premier balayage ne
- * produit donc AUCUN événement, ni appui ni relâchement. Ce drapeau permet de
- * le savoir. */
+/* Has the recreated driver emitted an event? It only signals CHANGES
+ * relative to its own state, which starts from "nothing pressed": a key
+ * captured on wake and then released before its first scan therefore
+ * produces NO event, neither press nor release. This flag lets us
+ * know. */
 static volatile bool s_cb_since_setup;
 static bool s_wake_had_keys;
 
@@ -144,9 +144,9 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
     }
 
 #if CONFIG_KASE_MATRIX_LOG_CONSOLE
-    /* Journal de banc : chaque changement en clair sur la console, avant que
-     * prev_matrix_state ne soit ecrase par l'un ou l'autre des chemins. Ne
-     * depend pas du CDC, contrairement au mode test ci-dessous. */
+    /* Bench log: each change spelled out on the console, before
+     * prev_matrix_state gets overwritten by one path or the other. Does not
+     * depend on CDC, unlike the test mode below. */
     for (int r = 0; r < MATRIX_ROWS; r++)
         for (int c = 0; c < MATRIX_COLS; c++)
             if (new_state[r][c] != prev_matrix_state[r][c])
@@ -155,11 +155,11 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
 #endif
 
 #if CONFIG_KASE_HALF_LINK_TX
-    /* Moitié droite : émettre la demi-matrice à chaque changement. Événementiel
-     * et non périodique — c'est la prémisse §2.3 du design, et la seule qui
-     * rende le pari R1 tenable. Contexte tâche (le callback vient du pilote
-     * keyboard_button, pas d'une ISR), donc rf_driver_send peut y bloquer le
-     * temps de ses retransmissions. */
+    /* Right half: emit the half-matrix on every change. Event-driven,
+     * not periodic — that's premise §2.3 of the design, and the only one
+     * that makes the R1 bet tenable. Task context (the callback comes from
+     * the keyboard_button driver, not an ISR), so rf_driver_send can block
+     * there for the duration of its retransmissions. */
     {
         bool change = false;
         for (int r = 0; r < MATRIX_ROWS && !change; r++)
@@ -174,34 +174,34 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
 #endif
 
 #if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
-    /* Fusion, côté GAUCHE : cette moitié ne fait plus tourner le moteur ni
-     * n'envoie de HID fini (le dongle s'en charge) — elle émet sa demi-matrice
-     * BRUTE au dongle, sur changement, comme la droite le fait vers le dongle.
-     * KBD_WIRELESS identifie la gauche (la droite est NIPHAR_SLAVE et gagnera son
-     * propre chemin au banc). Le miroir n'est PAS appliqué ici : chaque moitié
-     * émet ses coordonnées physiques, le dongle range (half_col_to_keymap). */
+    /* Fusion, LEFT side: this half no longer runs the engine nor sends
+     * finished HID (the dongle handles that) — it emits its RAW half-matrix
+     * to the dongle, on change, the same way the right does towards the dongle.
+     * KBD_WIRELESS identifies the left (the right is NIPHAR_SLAVE and will earn
+     * its own path at the bench). The mirror is NOT applied here: each half
+     * emits its physical coordinates, the dongle sorts them out (half_col_to_keymap). */
     {
         bool change = false;
         for (int r = 0; r < MATRIX_ROWS && !change; r++)
             for (int c = 0; c < MATRIX_COLS; c++)
                 if (new_state[r][c] != prev_matrix_state[r][c]) { change = true; break; }
-        /* Règle 3 : on n'émet le brut au dongle QUE hors mode USB. Si un hôte USB
-         * est branché à la gauche, c'est SON moteur qui tape en local — alimenter
-         * le dongle en plus ferait taper deux fois. Au repos/batterie
-         * (route ≠ USB), on émet, le dongle fusionne et tape. */
+        /* Rule 3: we emit the raw data to the dongle ONLY outside USB mode.
+         * If a USB host is plugged into the left, it's ITS engine that types
+         * locally — feeding the dongle too would type twice. At rest/on
+         * battery (route != USB), we emit, the dongle fuses and types. */
         bool usb = (kbd_active_route() == KBD_OUT_USB);
         if (change && fusion_left_emits_raw(usb)) {
             uint8_t bm[RF_HALF_BITMAP_BYTES];
             rf_matrix_to_bitmap(&new_state[0][0], MATRIX_ROWS, MATRIX_COLS, bm);
             kbd_relay_send_matrix(RF_HALF_LEFT, bm);
         }
-        /* Hors USB, le moteur LOCAL ne sert à rien : c'est le dongle qui tape.
-         * Le faire tourner quand même (rapport, tap-hold, combos, HID muet)
-         * coûtait du temps par frappe pour un résultat jeté. On s'arrête ici :
-         * état mémorisé, activité notée, rien d'autre. USB rebranché → la route
-         * bascule et le moteur reprend au balayage suivant (« ne charger le
-         * keymap local qu'avec l'USB », 2026-09-16 — c'est l'exécution qu'on
-         * conditionne, le code reste là). Le mode test matrice garde la main. */
+        /* Outside USB, the LOCAL engine is useless: it's the dongle that
+         * types. Running it anyway (report, tap-hold, combos, muted HID)
+         * cost time per keystroke for a discarded result. We stop here:
+         * state stored, activity noted, nothing else. USB replugged -> the
+         * route switches and the engine resumes on the next scan ("only load
+         * the local keymap with USB", 2026-09-16 — it's the execution we're
+         * gating, the code stays here). Matrix test mode keeps control. */
         if (!fusion_left_types_local(usb) && !matrix_test_mode) {
             memcpy(prev_matrix_state, new_state, sizeof(prev_matrix_state));
             last_activity_time_ms = esp_timer_get_time() / 1000;
@@ -240,23 +240,23 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
     /* ── Normal mode ── */
     memcpy(MATRIX_STATE, new_state, sizeof(MATRIX_STATE));
 
-    /* ⚠ NE PAS remettre keycodes[] à zéro ici. Ce tableau appartient au
-     * producteur de rapport : build_keycode_report() parcourt les six
-     * emplacements et écrit 0 dans chacun de ceux qui sont vides
-     * (key_processor.c, « Step 4 »), donc il le détermine entièrement — l'effacer
-     * ici n'apportait rien.
+    /* ⚠ DO NOT reset keycodes[] to zero here. This array belongs to the
+     * report producer: build_keycode_report() walks the six slots and
+     * writes 0 into each of the empty ones
+     * (key_processor.c, "Step 4"), so it fully determines it — clearing it
+     * here brought nothing.
      *
-     * Mais ce callback tourne dans la tâche du pilote keyboard_button, en
-     * priorité 5, pendant que vTaskKeyboard est peut-être ENTRE
-     * build_keycode_report() et send_hid_key() — une fenêtre qui contient tout
-     * process_matrix_changes(). L'effacement partait alors juste avant l'envoi :
-     * le rapport sortait VIDE, et le cycle suivant reconstruisait à partir d'un
-     * état où la touche était déjà relâchée. L'appui n'était jamais transmis.
+     * But this callback runs in the keyboard_button driver task, at
+     * priority 5, while vTaskKeyboard may be BETWEEN build_keycode_report()
+     * and send_hid_key() — a window that contains all of
+     * process_matrix_changes(). The reset then landed right before sending:
+     * the report went out EMPTY, and the next cycle rebuilt from a state
+     * where the key was already released. The press was never transmitted.
      *
-     * Constaté au banc le 2026-09-08 : en frappe rapide sur la moitié gauche,
-     * une touche sautait. Le mode test matrice (KS_CMD_MATRIX_TEST) a montré
-     * 45 événements sans le moindre trou — le balayage voyait tout, la perte
-     * était ici. */
+     * Observed at the bench on 2026-09-08: on fast typing on the left
+     * half, a key skipped. Matrix test mode (KS_CMD_MATRIX_TEST) showed
+     * 45 events without a single gap — the scan saw everything, the loss
+     * was here. */
     for (int i = 0; i < MAX_REPORT_KEYS; i++) {
         current_press_row[i] = INVALID_KEY_POS;
         current_press_col[i] = INVALID_KEY_POS;
@@ -282,25 +282,25 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
         }
     }
 
-    /* ⚠ Le #if entoure la boucle ENTIÈRE, accolades comprises. Ne l'appliquer
-     * qu'au corps d'un `for` sans accolades ferait de l'instruction suivante ce
-     * corps — ici le memcpy de prev_matrix_state, qui cesserait alors d'être
-     * exécuté dès qu'un cycle ne compte aucun nouvel appui. Observé au banc sur
-     * la moitié droite : chaque relâchement était signalé deux fois.
+    /* ⚠ The #if surrounds the WHOLE loop, braces included. Applying it
+     * only to the body of a brace-less `for` would turn the next statement
+     * into that body — here the memcpy of prev_matrix_state, which would
+     * then stop being executed once a cycle counts no new keypress.
+     * Observed at the bench on the right half: every release reported twice.
      *
-     * La moitié droite du Niphargus scanne sans écran (module non compilé) : le
-     * lien échouait sur ce seul symbole. Même cas que v2d_sleep.c. */
-    /* ⚠ LA FUSION N'A RIEN À VOIR AVEC L'ÉCRAN — ne jamais la remettre sous
-     * CONFIG_KASE_HAS_DISPLAY. Elle y a été imbriquée par accident le
-     * 2026-09-07, en corrigeant le piège du `for` sans accolades ci-dessus, et
-     * la moitié gauche n'ayant pas d'écran, ces deux lignes n'étaient PAS
-     * compilées : s_filled_local restait à zéro, donc matrix_apply_remote()
-     * repartait de l'indice 0 et ÉCRASAIT les touches locales, tandis que le
-     * chemin local n'appelait jamais la fusion et effaçait les distantes.
-     * Chaque moitié tapait seule, et AUCUNE combinaison entre les deux ne
-     * passait — Maj à gauche + lettre à droite, notamment. */
+     * The Niphargus right half scans without a screen (module not compiled):
+     * the link failed on this one symbol alone. Same case as v2d_sleep.c. */
+    /* ⚠ FUSION HAS NOTHING TO DO WITH THE SCREEN — never nest it back under
+     * CONFIG_KASE_HAS_DISPLAY. It ended up nested there by accident on
+     * 2026-09-07, while fixing the brace-less `for` trap above, and since
+     * the left half has no screen, these two lines were NOT compiled:
+     * s_filled_local stayed at zero, so matrix_apply_remote() restarted from
+     * index 0 and OVERWROTE the local keys, while the local path never
+     * called fusion and erased the remote ones. Each half typed alone, and
+     * NO combination between the two ever went through — Shift on the left
+     * + a letter on the right, in particular. */
 #if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
-    s_filled_local = filled;   /* frontiere local / distant, pour la fusion */
+    s_filled_local = filled;   /* local/remote boundary, for fusion */
     matrix_apply_remote();
 #endif
 
@@ -319,12 +319,12 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
         xTaskNotifyGive(keyboard_task_handle);
 }
 
-/* Le pilote en économie d'énergie (enable_power_save) POSE un gpio_hold_en sur
- * les colonnes au repos et ne le lève qu'en tête de son propre balayage ;
- * keyboard_button_delete (gpio_reset_pin) ne le lève PAS. Tout ce qui pilote
- * les colonnes hors du pilote — capture au réveil, armement de la veille,
- * recréation — doit d'abord les libérer, sinon les sept colonnes restent
- * hautes ensemble et une touche tenue se lit sur toute sa rangée. */
+/* The power-saving driver (enable_power_save) SETS a gpio_hold_en on the
+ * columns at rest and only lifts it at the start of its own scan;
+ * keyboard_button_delete (gpio_reset_pin) does NOT lift it. Anything that
+ * drives the columns outside the driver — wake capture, sleep arming,
+ * recreation — must release them first, otherwise the seven columns stay
+ * high together and a held key reads across its whole row. */
 static void matrix_cols_unhold(void)
 {
     const int cols[] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5,
@@ -388,33 +388,33 @@ void matrix_disarm_key_wake(void)
 
 void matrix_setup(void)
 {
-    /* ⚠ matrix_setup() est sur le CHEMIN DE RÉVEIL. Chaque ligne de journal
-     * coûte ~3,5 ms à 115 200 bauds, et la table de brochage en faisait
-     * quatorze : le premier balayage n'avait lieu que 60 ms après le réveil.
-     * Une frappe brève était déjà relâchée — la touche qui réveillait la
-     * carte était perdue. Constaté au banc le 2026-09-11.
+    /* ⚠ matrix_setup() is on the WAKE PATH. Each log line costs ~3.5 ms at
+     * 115,200 baud, and the pinout table used to print fourteen of them: the
+     * first scan only happened 60 ms after wake. A brief keystroke was
+     * already released — the key that woke the board was lost. Observed at
+     * the bench on 2026-09-11.
      *
-     * La table est utile au bring-up, pas à chaque réveil : elle passe en
-     * ESP_LOGD, une seule ligne reste en INFO. Un doute sur le brochage se lève
-     * avec le niveau de log, pas en ralentissant chaque réveil. */
+     * The table is useful for bring-up, not on every wake: it moves to
+     * ESP_LOGD, only one line stays at INFO. A doubt about the pinout is
+     * resolved by raising the log level, not by slowing down every wake. */
     ESP_LOGI(TAG, "matrix_setup");
     memset(MATRIX_STATE, 0, sizeof(MATRIX_STATE));
     memset(SLAVE_MATRIX_STATE, 0, sizeof(SLAVE_MATRIX_STATE));
-    /* Le pilote est (re)créé : l'état précédent n'a plus de sens. Sans cet
-     * effacement, le premier balayage après un réveil de sommeil léger se
-     * compare à l'état d'AVANT le sommeil et fabrique des appuis et des
-     * relâchements fantômes. Le repartir de « rien d'enfoncé » fait au contraire
-     * que la touche qui a réveillé la carte est vue comme un appui neuf, ce qui
-     * est exactement ce qu'on veut. */
+    /* The driver is (re)created: the previous state no longer means
+     * anything. Without this clearing, the first scan after a light sleep
+     * wake compares against the state from BEFORE sleep and manufactures
+     * phantom presses and releases. Restarting it from "nothing pressed"
+     * instead makes the key that woke the board be seen as a fresh press,
+     * which is exactly what we want. */
     s_cb_since_setup = false;
     memcpy(prev_matrix_state, s_wake_state, sizeof(prev_matrix_state));
     memset(s_wake_state, 0, sizeof(s_wake_state));
-    /* Si matrix_wake_capture() vient de publier une touche, le premier
-     * balayage du pilote la trouve déjà dans prev : encore tenue → rien de
-     * neuf, pas de doublon ; relâchée → un relâchement, et l'hôte la lâche.
-     * Sans cela, une touche capturée puis relâchée avant ce balayage resterait
-     * COLLÉE chez l'hôte — le pilote n'aurait jamais vu ni l'appui ni le
-     * relâchement. */
+    /* If matrix_wake_capture() has just published a key, the driver's first
+     * scan already finds it in prev: still held -> nothing new, no
+     * duplicate; released -> a release, and the host lets it go. Without
+     * this, a key captured then released before this scan would stay STUCK
+     * on the host — the driver would never have seen either the press or
+     * the release. */
 
     // Build gpio arrays from keyboard_config defines
     static int output_gpios[MATRIX_COLS];
@@ -426,7 +426,7 @@ void matrix_setup(void)
 
     /* Reset all matrix GPIOs to detach any function set by ROM bootloader
        (UART0 on GPIO43/44, SPI on GPIO37, etc.) */
-    matrix_cols_unhold();   /* un maintien survivrait au gpio_reset_pin */
+    matrix_cols_unhold();   /* a hold would survive gpio_reset_pin */
     for (int i = 0; i < MATRIX_COLS; i++) gpio_reset_pin(cols_map[i]);
     for (int i = 0; i < MATRIX_ROWS; i++) gpio_reset_pin(rows_map[i]);
 #else
@@ -452,12 +452,12 @@ void matrix_setup(void)
     cfg.active_level = 1; // Active HIGH 
     cfg.debounce_ticks = BOARD_DEBOUNCE_TICKS;
     cfg.ticks_interval = BOARD_MATRIX_SCAN_INTERVAL_US;
-    /* Économie d'énergie du pilote : sans touche enfoncée, le gptimer de 1 ms
-     * s'ARRÊTE, les colonnes sont tenues hautes et une interruption sur les
-     * lignes le relance au premier appui. Sans cela le processeur sortait
-     * d'oisiveté 1000 fois par seconde au repos — chaque fois en rallumant la
-     * PLL pour 160 MHz — et le DFS (power/pm_dfs.c) ne descendait jamais
-     * vraiment. Le premier balayage suit l'appui en < 1 ms, comme avant. */
+    /* Driver power saving: with no key pressed, the 1 ms gptimer STOPS, the
+     * columns are held high, and an interrupt on the rows restarts it on the
+     * first press. Without this the processor came out of idle 1000 times
+     * per second at rest — each time relighting the PLL for 160 MHz — and
+     * the DFS (power/pm_dfs.c) never really went down. The first scan
+     * follows the press in < 1 ms, as before. */
     cfg.enable_power_save = true;
     cfg.priority = 5;
     cfg.core_id = 0;
@@ -493,73 +493,73 @@ uint32_t get_last_activity_time_ms(void)
     return last_activity_time_ms;
 }
 
-/* Un réveil EST une activité. Sans ce coup de tampon, la boucle clavier relit
- * une inactivité de 60 s dès le tour suivant — le pilote recréé n'a pas encore
- * balayé — et renvoie la carte dormir 10 ms après son réveil. La touche encore
- * enfoncée la réveille aussitôt, et le cycle recommence, 80 ms par tour,
- * jusqu'à ce qu'un balayage tombe dans la fenêtre. Constaté au banc le
- * 2026-09-11 : « très lent avant de pouvoir taper », et frappe perdue si on
- * relâche trop tôt. v2d_sleep.c faisait ce geste, il avait été perdu. */
-/* Capturer la touche qui a réveillé la carte — AVANT de recréer le pilote.
+/* A wake IS activity. Without this bump, the keyboard loop re-reads a 60 s
+ * inactivity right on the next round — the recreated driver hasn't scanned
+ * yet — and sends the board back to sleep 10 ms after its wake. The key
+ * still pressed wakes it right back up, and the cycle restarts, 80 ms per
+ * round, until a scan lands inside the window. Observed at the bench on
+ * 2026-09-11: "very slow before being able to type", and keystrokes lost if
+ * released too early. v2d_sleep.c did this bump, it had been lost. */
+/* Capture the key that woke the board — BEFORE recreating the driver.
  *
- * Le réveil GPIO n'a lieu que parce qu'une touche est enfoncée À CET INSTANT :
- * c'est l'information la plus sûre qu'on aura. Or recréer le pilote, attendre
- * son premier balayage et son anti-rebond, rallumer la radio, prend ~90 ms —
- * une frappe brève est relâchée avant, et la touche qui a réveillé le clavier
- * était PERDUE. Constaté au banc le 2026-09-11, et retirer les journaux du
- * chemin n'avait pas suffi.
+ * The GPIO wake only happens because a key is pressed AT THIS INSTANT:
+ * it's the most reliable information we'll get. Recreating the driver,
+ * waiting for its first scan and its debounce, relighting the radio, takes
+ * ~90 ms — a brief keystroke is released before that, and the key that
+ * woke the keyboard was LOST. Observed at the bench on 2026-09-11, and
+ * removing the logs from the path hadn't been enough.
  *
- * Ici on balaie une fois à la main, en quelques dizaines de microsecondes, et
- * on publie exactement ce que le callback aurait publié. La durée du chemin
- * de réveil cesse d'avoir de l'importance.
+ * Here we scan once by hand, in a few tens of microseconds, and publish
+ * exactly what the callback would have published. The duration of the wake
+ * path stops mattering.
  *
- * Préconditions : configuration de réveil en place (matrix_arm_key_wake) —
- * colonnes en sortie, lignes en entrée avec rappel bas. On baisse toutes les
- * colonnes, on les remonte une à une, on lit les lignes, on restaure. Même
- * chaîne électrique que le scan : COL → interrupteur → diode → ROW. */
+ * Preconditions: wake configuration in place (matrix_arm_key_wake) —
+ * columns as outputs, rows as inputs with pull-down. We lower all columns,
+ * raise them one by one, read the rows, restore. Same electrical chain as
+ * the scan: COL -> switch -> diode -> ROW. */
 void matrix_wake_capture(void)
 {
     const int cols[] = { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5,
                          COLS6, COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 };
     const int rows[] = { ROWS0, ROWS1, ROWS2, ROWS3, ROWS4 };
-    /* DEUX balayages, on ne garde que ce qui tient sur les deux. Le réveil GPIO
-     * se déclenche sur un simple front : une ligne qui glitche (couplage
-     * capacitif des colonnes voisines tenues hautes, ESD, ligne au seuil)
-     * réveille la carte et se lit « pressée » sur un balayage unique. Elle
-     * ne survit pas à deux lectures espacées de 1 ms ; un vrai appui, si.
+    /* TWO scans, we only keep what holds on both. The GPIO wake triggers on
+     * a simple edge: a glitching line (capacitive coupling from neighboring
+     * columns held high, ESD, a line at threshold) wakes the board and
+     * reads "pressed" on a single scan. It does not survive two reads 1 ms
+     * apart; a real keypress does.
      *
-     * Sans ce filtre, chaque réveil fantôme (cause=7, ~3 par 10 min mesurés le
-     * 2026-09-12) faisait deux dégâts : il tamponnait 60 s d'activité — radio
-     * allumée, 0,2 V perdus sur une nuit — ET la capture PUBLIAIT la touche,
-     * qui partait taper un caractère parasite vers le dongle. */
+     * Without this filter, every phantom wake (cause=7, ~3 per 10 min
+     * measured on 2026-09-12) did two kinds of damage: it bumped 60 s of
+     * activity — radio on, 0.2 V lost over a night — AND the capture
+     * PUBLISHED the key, which went on to type a stray character to the dongle. */
     uint8_t st[MATRIX_ROWS][MATRIX_COLS];
     uint8_t st2[MATRIX_ROWS][MATRIX_COLS];
     memset(st, 0, sizeof(st));
     memset(st2, 0, sizeof(st2));
-    matrix_cols_unhold();   /* le pilote détruit a pu laisser ses maintiens */
+    matrix_cols_unhold();   /* the destroyed driver may have left its holds */
 
     for (int pass = 0; pass < 2; pass++) {
         uint8_t (*dst)[MATRIX_COLS] = (pass == 0) ? st : st2;
         for (int c = 0; c < MATRIX_COLS; c++) gpio_set_level(cols[c], 0);
         for (int c = 0; c < MATRIX_COLS; c++) {
             gpio_set_level(cols[c], 1);
-            esp_rom_delay_us(20);             /* RC des 100 Ω série + capacité */
+            esp_rom_delay_us(20);             /* RC of the 100 Ohm series + capacitance */
             for (int r = 0; r < MATRIX_ROWS; r++)
                 dst[r][c] = (uint8_t)gpio_get_level(rows[r]);
             gpio_set_level(cols[c], 0);
         }
-        if (pass == 0) esp_rom_delay_us(1000);   /* 1 ms entre les deux passes */
+        if (pass == 0) esp_rom_delay_us(1000);   /* 1 ms between the two passes */
     }
     for (int c = 0; c < MATRIX_COLS; c++) gpio_set_level(cols[c], 1);
 
-    /* ET des deux passes : un fantôme transitoire tombe, un vrai appui reste. */
+    /* AND of the two passes: a transient phantom drops out, a real press stays. */
     uint8_t st1[MATRIX_ROWS][MATRIX_COLS];
-    memcpy(st1, st, sizeof(st1));   /* passe 1 brute, pour le diagnostic ci-dessous */
+    memcpy(st1, st, sizeof(st1));   /* raw pass 1, for the diagnostic below */
     for (int r = 0; r < MATRIX_ROWS; r++)
         for (int c = 0; c < MATRIX_COLS; c++)
             st[r][c] = st[r][c] && st2[r][c];
 
-    /* Publier comme le callback : rapport local, frontière, fusion, drapeau. */
+    /* Publish like the callback: local report, boundary, fusion, flag. */
     for (int i = 0; i < MAX_REPORT_KEYS; i++) {
         current_press_row[i]  = INVALID_KEY_POS;
         current_press_col[i]  = INVALID_KEY_POS;
@@ -575,7 +575,7 @@ void matrix_wake_capture(void)
                 filled++;
             }
     memcpy(MATRIX_STATE, st, sizeof(MATRIX_STATE));
-    memcpy(s_wake_state, st, sizeof(s_wake_state));   /* pour matrix_setup */
+    memcpy(s_wake_state, st, sizeof(s_wake_state));   /* for matrix_setup */
     s_wake_had_keys = (filled != 0);
     memcpy(prev_matrix_state, st, sizeof(prev_matrix_state));
 #if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
@@ -583,24 +583,24 @@ void matrix_wake_capture(void)
     matrix_apply_remote();
 #endif
 #if CONFIG_KASE_HALF_LINK_TX
-    /* La moitié droite n'a pas de tâche clavier : c'est le callback qui émet.
-     * On émet donc ici ce qu'il aurait émis. */
-    if (filled) {   /* réveil fantôme (rien d'enfoncé) : muet, rien à annoncer */
+    /* The right half has no keyboard task: it's the callback that emits.
+     * So here we emit what it would have emitted. */
+    if (filled) {   /* phantom wake (nothing pressed): mute, nothing to report */
         uint8_t bm[RF_HALF_BITMAP_BYTES];
         rf_matrix_to_bitmap(&st[0][0], MATRIX_ROWS, MATRIX_COLS, bm);
         half_link_tx_update(bm, true);
     }
 #endif
 #if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
-    /* Fusion, côté GAUCHE : le même trou que la droite comble juste au-dessus.
-     * Le seul émetteur brut de la gauche est le callback sur CHANGEMENT — or la
-     * capture pose prev_matrix_state = st, donc le scanner recréé voit la touche
-     * tenue SANS changement et n'émet rien ; seul le relâchement partait. La
-     * première touche après le light sleep était avalée (banc 2026-09-13 ; la
-     * séquence de veille.c émettait sur le chemin pré-fusion (retiré le 2026-09-18),
-     * compilé out ici). On émet donc l'appui capturé tout de suite, hors USB
-     * (règle 3), avec le même émetteur que le callback — la réaffirmation à
-     * 100 ms prend ensuite le relais tant que la touche est tenue. */
+    /* Fusion, LEFT side: the same gap as the right, closed just above. The
+     * left's only raw emitter is the callback on CHANGE — but the capture
+     * sets prev_matrix_state = st, so the recreated scanner sees the key
+     * held WITHOUT a change and emits nothing; only the release used to go
+     * out. The first key after light sleep was swallowed (bench 2026-09-13;
+     * the veille.c sequence used to emit on the pre-fusion path (removed on
+     * 2026-09-18), compiled out here). So we emit the captured press right
+     * away, outside USB (rule 3), with the same emitter as the callback —
+     * the 100 ms reaffirmation then takes over as long as the key is held. */
     if (filled && fusion_left_emits_raw(kbd_active_route() == KBD_OUT_USB)) {
         uint8_t bm[RF_HALF_BITMAP_BYTES];
         rf_matrix_to_bitmap(&st[0][0], MATRIX_ROWS, MATRIX_COLS, bm);
@@ -610,25 +610,25 @@ void matrix_wake_capture(void)
     if (filled) {
         matrix_flag_signal(&stat_matrix_changed);
         if (keyboard_task_handle != NULL) xTaskNotifyGive(keyboard_task_handle);
-        /* Une TOUCHE est une activité. Un réveil sans touche — glitch sur une
-         * ligne, couplage du câble TRRS, bruit — ne l'est PAS : le tamponner
-         * achetait 60 s de radio allumée à chaque parasite. Une nuit du
-         * 2026-09-12 : 1,2 h d'éveil sur 7 h pour ~70 réveils fantômes, 0,2 V
-         * perdus. Sans tampon, la boucle relit une inactivité ancienne et
-         * renvoie dormir en ~15 ms — exactement ce qu'un glitch mérite. Une
-         * vraie touche que la capture aurait manquée serait vue par le pilote
-         * dans ces 15 ms et tamponnerait par le callback. */
+        /* A KEY is activity. A wake without a key — a glitch on a line, TRRS
+         * cable coupling, noise — is NOT: bumping it would buy 60 s of radio
+         * on for every parasite. One night on 2026-09-12: 1.2 h awake out of
+         * 7 h for ~70 phantom wakes, 0.2 V lost. Without a bump, the loop
+         * re-reads an old inactivity and sends it back to sleep in ~15 ms —
+         * exactly what a glitch deserves. A real key that the capture would
+         * have missed would be seen by the driver within those 15 ms and
+         * would get bumped by the callback. */
         last_activity_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
     }
-    /* Une ligne par réveil : ce que la capture a trouvé. C'est elle qui a
-     * prouvé, le 2026-09-11, que la gauche voyait bien la touche de réveil. */
+    /* One line per wake: what the capture found. It's this line that
+     * proved, on 2026-09-11, that the left did see the wake key. */
     ESP_LOGI(TAG, "reveil : %u touche(s) capturee(s)", filled);
 #if CONFIG_KASE_VEILLE_DIAG
     if (filled == 0) {
-        /* Capture vide sur un réveil GPIO : dire ce que CHAQUE passe a lu, pour
-         * distinguer un rebond (passe 1 pleine, passe 2 vide ou l'inverse) d'un
-         * pré-contact ou d'un fantôme (les deux vides). Banc 2026-09-16 :
-         * « touche de réveil perdue sur la gauche, depuis toujours ». */
+        /* Empty capture on a GPIO wake: report what EACH pass read, to
+         * distinguish a bounce (pass 1 full, pass 2 empty or vice versa)
+         * from a pre-contact or a phantom (both empty). Bench 2026-09-16:
+         * "wake key lost on the left, since forever". */
         char l1[MATRIX_ROWS * MATRIX_COLS + 1], l2[MATRIX_ROWS * MATRIX_COLS + 1];
         int k = 0;
         for (int r = 0; r < MATRIX_ROWS; r++)
@@ -641,29 +641,29 @@ void matrix_wake_capture(void)
         ESP_LOGI(TAG, "  (%u,%u)", current_press_row[i], current_press_col[i]);
 }
 
-/* À appeler ~10 ms après matrix_setup(), quand le pilote a eu le temps de
- * faire son premier balayage et son anti-rebond.
+/* To be called ~10 ms after matrix_setup(), once the driver has had time
+ * to do its first scan and its debounce.
  *
- * Si la capture au réveil avait trouvé une touche et que le pilote n'a RIEN
- * signalé depuis, c'est que la touche a été relâchée entre les deux : le
- * pilote, parti de « rien d'enfoncé », a vu « rien d'enfoncé » et s'est tu.
- * Sans cette réconciliation la touche restait dans le rapport jusqu'au
- * prochain événement de CETTE moitié — les frappes de l'autre moitié ne la
- * délogent pas, la fusion préserve les touches locales. Un pouce Super
- * capturé au réveil transformait alors toute la frappe de droite en
- * raccourcis. Constaté au banc le 2026-09-11.
+ * If the wake capture had found a key and the driver has signaled NOTHING
+ * since, the key was released between the two: the driver, starting from
+ * "nothing pressed", saw "nothing pressed" and kept quiet. Without this
+ * reconciliation the key would stay in the report until the next event
+ * from THIS half — keystrokes from the other half do not dislodge it,
+ * fusion preserves local keys. A Super thumb key captured on wake would
+ * then turn all of the right's typing into shortcuts. Observed at the
+ * bench on 2026-09-11.
  *
- * Retourne true si un relâchement a été publié : l'appelant doit alors
- * l'émettre. */
+ * Returns true if a release was published: the caller must then
+ * emit it. */
 bool matrix_wake_had_keys(void) { return s_wake_had_keys; }
 
 void matrix_wake_wait_first_scan(void)
 {
-    /* Attente CONDITIONNELLE, pas un délai deviné : on sort dès que le pilote a
-     * rappelé (touche tenue confirmée — la capture l'a déjà émise, rien à faire),
-     * sinon on attend la grâce déduite de son anti-rebond avant de conclure au
-     * relâchement. vTaskDelay(1) dans la boucle rend la main au pilote (tâche
-     * prio 5) sans jamais l'affamer ; le temps, lui, se mesure à esp_timer. */
+    /* CONDITIONAL wait, not a guessed delay: we exit as soon as the driver
+     * has called back (held key confirmed — the capture already emitted it,
+     * nothing to do), otherwise we wait the grace deduced from its debounce
+     * before concluding a release. vTaskDelay(1) in the loop hands control
+     * back to the driver (prio 5 task) without starving it; time is measured with esp_timer. */
     const uint32_t grace = wake_grace_ms(BOARD_DEBOUNCE_TICKS, BOARD_MATRIX_SCAN_INTERVAL_US);
     const uint32_t t0 = (uint32_t)(esp_timer_get_time() / 1000);
     while (!s_cb_since_setup &&
@@ -694,9 +694,9 @@ bool matrix_wake_reconcile(void)
     }
 #endif
 #if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
-    /* Fusion, gauche : la touche de réveil a été émise à la capture ; relâchée
-     * avant le premier balayage, le callback ne le dira jamais — on émet le
-     * relâchement, sinon elle reste collée au dongle. */
+    /* Fusion, left: the wake key was emitted at capture time; released
+     * before the first scan, the callback will never say so — we emit the
+     * release, otherwise it stays stuck at the dongle. */
     if (fusion_left_emits_raw(kbd_active_route() == KBD_OUT_USB)) {
         uint8_t bm[RF_HALF_BITMAP_BYTES];
         memset(bm, 0, sizeof(bm));

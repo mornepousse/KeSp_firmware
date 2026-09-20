@@ -12,9 +12,9 @@ typedef enum {
 
 #define OLED_NAV_SPLASH_MS  2000u
 
-/* Réinitialise la machine à états. resting=HOME. N'ARME PAS le splash (c'est
-   OLED_EV_BOOT qui l'arme, uniquement au vrai démarrage) → pas de splash au
-   réveil/refresh. */
+/* Resets the state machine. resting=HOME. Does NOT ARM the splash (only
+   OLED_EV_BOOT arms it, on a real startup only) -> no splash on
+   wake/refresh. */
 void oled_nav_init(uint32_t now_ms);
 void oled_nav_event(oled_nav_event_t ev, uint32_t now_ms);
 oled_screen_id_t oled_nav_active(uint32_t now_ms);

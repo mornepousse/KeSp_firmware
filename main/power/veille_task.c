@@ -1,11 +1,11 @@
-/* Une seule tâche de veille pour les deux moitiés — voir veille_task.h.
+/* A single sleep task for both halves — see veille_task.h.
  *
- * Elle tourne à VEILLE_TICK_MS (1 s) : la veille n'arrive qu'à 15 s
- * d'inactivité, une seconde de latence ne se voit pas, et à 10 ms cette
- * évaluation sortait le processeur d'oisiveté cent fois par seconde. Un veto
- * posé après une frappe ne retarde rien ; seul le battement de coeur attend
- * le tick. veille_pas() peut bloquer des heures : c'est cette tâche qui porte
- * le light sleep (esp_light_sleep_start) et le réveil. */
+ * It runs at VEILLE_TICK_MS (1 s): sleep only kicks in at 15 s of
+ * inactivity, one second of latency is not noticeable, and at 10 ms this
+ * evaluation pulled the processor out of idle a hundred times per second. A veto
+ * set after a keystroke delays nothing; only the heartbeat waits for
+ * the tick. veille_pas() can block for hours: it is this task that carries
+ * the light sleep (esp_light_sleep_start) and the wake-up. */
 #include "veille_task.h"
 #include "veille.h"
 #include "cadence.h"
@@ -18,10 +18,10 @@
 #include "esp_pm.h"
 #endif
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-#include "usb_presence.h"   /* rattrapage du veto USB : usb_presence_cable() */
+#include "usb_presence.h"   /* USB veto catch-up: usb_presence_cable() */
 #endif
 #if CONFIG_KASE_BATT_SENSE
-#include "batt_sense.h"     /* batterie critique : veille plus tôt */
+#include "batt_sense.h"     /* critical battery: sleep sooner */
 #endif
 #include <stdio.h>
 
@@ -61,16 +61,16 @@ static veille_vetos_t vetos_lire(void)
     return v;
 }
 
-/* Battement de coeur : seul témoin de vie sur batterie (l'USB ne dit plus
- * rien). « dormi X s/n » lit une nuit d'un coup d'oeil — une nuit à 0,2 V
- * perdus est indiscernable d'une nuit à 244 µA sans ce chiffre. */
+/* Heartbeat: the only sign of life on battery (USB no longer says
+ * anything). "slept X s/n" reads a night at a glance — a night with 0.2 V
+ * lost is indistinguishable from a night at 244 µA without this figure. */
 static void hb(uint32_t inactif_ms, const veille_vetos_t *v)
 {
     uint32_t dodo_n = 0, dodo_ms = 0; char vb[24];
     veille_bilan(&dodo_n, &dodo_ms);
 #if CONFIG_PM_PROFILING
-    esp_pm_dump_locks(stdout);   /* banc : light_sleep_counts, temps par mode, verrous */
-    esp_timer_dump(stdout);      /* banc : qui arme des alarmes trop rapprochées */
+    esp_pm_dump_locks(stdout);   /* bench: light_sleep_counts, time per mode, locks */
+    esp_timer_dump(stdout);      /* bench: who arms alarms too close together */
 #endif
     ESP_LOGW(TAG, "HB up=%lus inactif=%lus dormi=%lus/%lu vetos=%s%s",
              (unsigned long)(esp_timer_get_time() / 1000000), (unsigned long)(inactif_ms / 1000),
@@ -84,16 +84,16 @@ static void veille_task(void *arg)
     uint32_t dernier_hb = 0, dernier_refus = 0;
     for (;;) {
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-        /* Rattrapage : TinyUSB ne signale pas toujours le débranchement à chaud
-         * sur l'ESP32-S3 (mounted reste vrai). tud_ready() retombe dès que le
-         * bus se suspend — c'est le signal qu'utilise déjà le routage USB/RF.
-         * Contrepartie assumée : un hôte qui s'endort câble branché laisse
-         * aussi le clavier dormir ; il se ré-énumère au réveil. */
-        veille_veto(VEILLE_VETO_USB, usb_presence_cable());   /* pont VBUS si soudé, sinon tud_ready */
+        /* Catch-up: TinyUSB does not always report a hot unplug
+         * on the ESP32-S3 (mounted stays true). tud_ready() drops as soon as the
+         * bus suspends — this is the signal the USB/RF routing already uses.
+         * Accepted trade-off: a host that goes to sleep with the cable plugged in
+         * also lets the keyboard sleep; it re-enumerates on wake. */
+        veille_veto(VEILLE_VETO_USB, usb_presence_cable());   /* VBUS bridge if soldered, else tud_ready */
 #endif
 #if CONFIG_KASE_BATT_SENSE
-        /* Batterie CRITIQUE (< 3,3 V) : l'étage léger à 5 s au lieu de 15 —
-         * chaque seconde d'éveil oisif compte, la cellule est au bout. */
+        /* CRITICAL battery (< 3.3 V): the light stage at 5 s instead of 15 —
+         * every second of idle wakefulness counts, the cell is running out. */
         veille_seuil_legere_set(batt_sense_niveau() == 2 ? VEILLE_LEGERE_CRITIQUE_MS
                                                          : (uint32_t)CONFIG_KASE_VEILLE_LEGERE_S * 1000u);
 #endif
@@ -107,7 +107,7 @@ static void veille_task(void *arg)
             ESP_LOGW(TAG, "veille REFUSEE depuis %lu s : vetos=%s",
                      (unsigned long)(inactif / 1000), veille_vetos_str(&v, vb, sizeof vb));
         }
-        veille_pas(inactif, veille_bloquee(&v));   /* peut bloquer des heures (light sleep) */
+        veille_pas(inactif, veille_bloquee(&v));   /* can block for hours (light sleep) */
         vTaskDelay(pdMS_TO_TICKS(VEILLE_TICK_MS));
     }
 }

@@ -1,83 +1,83 @@
-/* Trame du lien inter-moitiés Niphargus (TRRS, UART1).
+/* Frame of the Niphargus inter-half link (TRRS, UART1).
  *
- * Logique pure, entièrement en inline : aucune UART, aucun FreeRTOS. La couche
- * transport appelle les encodeurs pour émettre, et link_decode() sur ce qu'elle
- * a reçu.
+ * Pure logic, entirely inline: no UART, no FreeRTOS. The transport layer
+ * calls the encoders to send, and link_decode() on what it
+ * has received.
  *
- * ── Format ───────────────────────────────────────────────────────────────────
+ * -- Format -------------------------------------------------------------------
  *   [0]        SOF 0x4E ('N')
- *   [1]        longueur de la charge utile (type + seq [+ bitmap])
+ *   [1]        payload length (type + seq [+ bitmap])
  *   [2]        type
  *   [3]        seq
- *   [4..]      bitmap 5 octets, pour MATRIX seulement
- *   [dernier]  CRC-8 sur les octets [1] à l'avant-dernier
+ *   [4..]      5-byte bitmap, for MATRIX only
+ *   [last]     CRC-8 over bytes [1] to the second-to-last
  *
- * ── Pourquoi un décodeur qui rend ce qu'il a consommé ────────────────────────
+ * -- Why a decoder that returns what it consumed -----------------------------
  *
- * Le lien est exposé au connecteur : on le débranche à chaud, il prend de l'ESD,
- * et le premier octet reçu tombe volontiers au milieu d'une trame. Un décodeur
- * qui répond seulement « valide / pas valide » ne dit pas à l'appelant de combien
- * avancer, et un flux bruité ne se resynchronise alors jamais — c'est justement
- * ce qu'un format préfixé par sa longueur est censé offrir.
+ * The link is exposed at the connector: it gets hot-unplugged, it takes ESD,
+ * and the first byte received readily falls in the middle of a frame. A
+ * decoder that only answers "valid / not valid" does not tell the caller how
+ * much to advance, and a noisy stream then never resynchronizes — which is
+ * exactly what a length-prefixed format is supposed to offer.
  *
- * D'où le contrat à trois issues :
- *   NEED_MORE  rien n'est consommé, rappeler avec plus d'octets ;
- *   FRAME      une trame valide est dans *out, `consumed` octets consommés ;
- *   SKIP       `consumed` octets à jeter (bruit, CRC faux, trame incohérente).
+ * Hence the three-outcome contract:
+ *   NEED_MORE  nothing consumed, call again with more bytes;
+ *   FRAME      a valid frame is in *out, `consumed` bytes consumed;
+ *   SKIP       `consumed` bytes to discard (noise, wrong CRC, inconsistent frame).
  *
- * Un SKIP consomme toujours au moins un octet : sans cette garantie, une boucle
- * de resynchronisation tournerait indéfiniment sur le même octet.
+ * A SKIP always consumes at least one byte: without this guarantee, a
+ * resynchronization loop would spin forever on the same byte.
  *
- * ── Compatibilité ascendante ─────────────────────────────────────────────────
+ * -- Backward compatibility ---------------------------------------------------
  *
- * Une trame bien cadrée dont le type est inconnu est consommée EN ENTIER plutôt
- * que resynchronisée octet par octet. Une moitié plus récente peut donc parler à
- * une plus ancienne sans lui embrouiller le flux.
+ * A well-framed frame whose type is unknown is consumed WHOLE rather than
+ * resynchronized byte by byte. A newer half can therefore talk to an
+ * older one without garbling its stream.
  */
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-#include "rf_packet.h"             /* RF_HALF_BITMAP_BYTES — même bitmap qu'en RF */
+#include "rf_packet.h"             /* RF_HALF_BITMAP_BYTES — same bitmap as over RF */
 #include "cdc_binary_protocol.h"   /* ks_crc8 */
 
 #define LINK_SOF          0x4Eu
 
-#define LINK_TYPE_MATRIX  0x01u    /* état de la demi-matrice */
-#define LINK_TYPE_PROBE   0x02u    /* « t'es bien ma moitié ? » (poignée de main 5 V) */
-#define LINK_TYPE_ACK     0x03u    /* réponse à une sonde */
+#define LINK_TYPE_MATRIX  0x01u    /* half-matrix state */
+#define LINK_TYPE_PROBE   0x02u    /* "are you really my other half?" (5 V handshake) */
+#define LINK_TYPE_ACK     0x03u    /* reply to a probe */
 
-/* Charge utile = type + seq, plus le bitmap pour MATRIX. */
+/* Payload = type + seq, plus the bitmap for MATRIX. */
 #define LINK_PAYLOAD_CTRL    2
 #define LINK_PAYLOAD_MATRIX  (2 + RF_HALF_BITMAP_BYTES)
 #define LINK_PAYLOAD_MAX     LINK_PAYLOAD_MATRIX
 
-/* SOF + longueur + charge utile + CRC */
+/* SOF + length + payload + CRC */
 #define LINK_FRAME_MAX  (2 + LINK_PAYLOAD_MAX + 1)
 #define LINK_FRAME_MIN  (2 + LINK_PAYLOAD_CTRL + 1)
 
 typedef struct {
     uint8_t type;
     uint8_t seq;
-    uint8_t bitmap[RF_HALF_BITMAP_BYTES];   /* rempli pour MATRIX, sinon zéro */
+    uint8_t bitmap[RF_HALF_BITMAP_BYTES];   /* filled for MATRIX, zero otherwise */
 } link_frame_t;
 
 typedef enum {
-    LINK_DECODE_NEED_MORE = 0,   /* rien consommé, rappeler avec plus d'octets */
-    LINK_DECODE_FRAME,           /* trame valide dans *out */
-    LINK_DECODE_SKIP,            /* octets à jeter */
+    LINK_DECODE_NEED_MORE = 0,   /* nothing consumed, call again with more bytes */
+    LINK_DECODE_FRAME,           /* valid frame in *out */
+    LINK_DECODE_SKIP,            /* bytes to discard */
 } link_decode_status_t;
 
-/* Le lien réutilise ks_crc8() du protocole CDC binaire plutôt que de
- * réimplémenter un CRC-8 : une seule implémentation à relire dans le dépôt.
- * link_crc8() reste une fonction à part pour préserver l'interface du module et
- * documenter que c'est bien le CRC du dépôt qui est utilisé ici. */
+/* The link reuses ks_crc8() from the binary CDC protocol rather than
+ * reimplementing a CRC-8: a single implementation to review in the repo.
+ * link_crc8() stays a separate function to preserve the module's interface and
+ * document that it really is the repo's CRC being used here. */
 static inline uint8_t link_crc8(const uint8_t *data, uint16_t len)
 {
     return ks_crc8(data, len);
 }
 
-/* ── Encodeurs : écrivent dans buf, rendent le nombre d'octets (0 si erreur) ── */
+/* -- Encoders: write into buf, return the number of bytes (0 on error) ------ */
 
 static inline uint16_t link_encode_matrix(uint8_t *buf,
                                           const uint8_t bitmap[RF_HALF_BITMAP_BYTES],
@@ -93,7 +93,7 @@ static inline uint16_t link_encode_matrix(uint8_t *buf,
     return LINK_FRAME_MAX;
 }
 
-/* Trames de contrôle sans charge utile : PROBE et ACK. */
+/* Control frames without payload: PROBE and ACK. */
 static inline uint16_t link_encode_ctrl(uint8_t *buf, uint8_t type, uint8_t seq)
 {
     if (buf == NULL) return 0;
@@ -105,7 +105,7 @@ static inline uint16_t link_encode_ctrl(uint8_t *buf, uint8_t type, uint8_t seq)
     return LINK_FRAME_MIN;
 }
 
-/* ── Décodeur resynchronisant ───────────────────────────────────────────────── */
+/* -- Resynchronizing decoder -------------------------------------------------- */
 
 static inline link_decode_status_t link_decode(const uint8_t *buf, uint16_t len,
                                                link_frame_t *out, uint16_t *consumed)
@@ -115,36 +115,36 @@ static inline link_decode_status_t link_decode(const uint8_t *buf, uint16_t len,
 
     if (len == 0) return LINK_DECODE_NEED_MORE;
 
-    /* Pas un début de trame : on jette CET octet seulement. En jeter plus
-     * risquerait d'avaler le vrai SOF qui suit peut-être immédiatement. */
+    /* Not a frame start: discard THIS byte only. Discarding more would
+     * risk swallowing the real SOF that may follow immediately. */
     if (buf[0] != LINK_SOF) { *consumed = 1; return LINK_DECODE_SKIP; }
 
-    if (len < 2) return LINK_DECODE_NEED_MORE;      /* la longueur manque encore */
+    if (len < 2) return LINK_DECODE_NEED_MORE;      /* the length is still missing */
 
     uint8_t payload_len = buf[1];
     if (payload_len < LINK_PAYLOAD_CTRL || payload_len > LINK_PAYLOAD_MAX) {
-        /* Longueur impossible : ce 0x4E était du bruit, pas un SOF. */
+        /* Impossible length: this 0x4E was noise, not a SOF. */
         *consumed = 1;
         return LINK_DECODE_SKIP;
     }
 
     uint16_t total = (uint16_t)(2 + payload_len + 1);
-    if (len < total) return LINK_DECODE_NEED_MORE;  /* trame incomplète */
+    if (len < total) return LINK_DECODE_NEED_MORE;  /* incomplete frame */
 
     if (link_crc8(&buf[1], (uint16_t)(1 + payload_len)) != buf[total - 1]) {
-        /* CRC faux : on ne peut pas se fier au cadrage annoncé — un vrai SOF se
-         * cache peut-être à l'intérieur. On repart à l'octet suivant. */
+        /* Wrong CRC: the announced framing cannot be trusted — a real SOF may
+         * be hiding inside. Restart at the next byte. */
         *consumed = 1;
         return LINK_DECODE_SKIP;
     }
 
-    /* À partir d'ici le cadrage est authentifié : quoi qu'on décide du contenu,
-     * on consomme la trame entière. */
+    /* From here the framing is authenticated: whatever is decided about the
+     * content, the whole frame is consumed. */
     *consumed = total;
 
     uint8_t type = buf[2];
     if (type == LINK_TYPE_MATRIX && payload_len != LINK_PAYLOAD_MATRIX)
-        return LINK_DECODE_SKIP;    /* MATRIX sans son bitmap : incohérente */
+        return LINK_DECODE_SKIP;    /* MATRIX without its bitmap: inconsistent */
 
     out->type = type;
     out->seq  = buf[3];

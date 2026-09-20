@@ -1,33 +1,33 @@
-/* Test bigram tracking logic — rewired sur main/input/key_stats.c */
+/* Test bigram tracking logic — rewired on main/input/key_stats.c */
 #include "test_framework.h"
 #include "key_stats.h"
 
 /*
- * Le bigramme est un effet de bord de key_stats_record_press().
- * Chaque test appelle reset_bigram_stats() en début — remet last_key_idx
- * interne à -1 et efface bigram_stats / bigram_total.
- * key_stats[][] accumule en parallèle ; on ne le teste pas ici.
+ * The bigram is a side effect of key_stats_record_press().
+ * Each test calls reset_bigram_stats() at the start — resets the internal
+ * last_key_idx to -1 and clears bigram_stats / bigram_total.
+ * key_stats[][] accumulates in parallel; it is not tested here.
  */
 
-/* Test: première frappe ne crée pas de bigramme */
+/* Test: first keypress does not create a bigram */
 static void test_bigram_first_key_no_bigram(void) {
     reset_bigram_stats();
     key_stats_record_press(2, 3);
-    TEST_ASSERT_EQ(bigram_total, 0, "premiere frappe: aucun bigramme");
+    TEST_ASSERT_EQ(bigram_total, 0, "first keypress: no bigram");
 }
 
-/* Test: deux frappes consécutives créent exactement un bigramme */
+/* Test: two consecutive keypresses create exactly one bigram */
 static void test_bigram_two_consecutive(void) {
     reset_bigram_stats();
     int a = 2 * MATRIX_COLS + 3;
     int b = 1 * MATRIX_COLS + 5;
     key_stats_record_press(2, 3);  /* A */
     key_stats_record_press(1, 5);  /* B */
-    TEST_ASSERT_EQ(bigram_stats[a][b], 1, "A->B bigramme == 1");
+    TEST_ASSERT_EQ(bigram_stats[a][b], 1, "A->B bigram == 1");
     TEST_ASSERT_EQ(bigram_total, 1, "total == 1");
 }
 
-/* Test: séquence répétée accumule A->B et B->A correctement */
+/* Test: repeated sequence correctly accumulates A->B and B->A */
 static void test_bigram_repeated_sequence(void) {
     reset_bigram_stats();
     int a = 2 * MATRIX_COLS + 3;
@@ -36,48 +36,48 @@ static void test_bigram_repeated_sequence(void) {
         key_stats_record_press(2, 3);
         key_stats_record_press(1, 5);
     }
-    /* A->B: 10 fois ; B->A: 9 fois (B n'est pas suivi de A à la dernière itération) */
+    /* A->B: 10 times; B->A: 9 times (B is not followed by A on the last iteration) */
     TEST_ASSERT_EQ(bigram_stats[a][b], 10, "A->B == 10");
     TEST_ASSERT_EQ(bigram_stats[b][a], 9,  "B->A == 9");
     TEST_ASSERT_EQ(bigram_total, 19, "total == 19");
 }
 
-/* Test: saturation à UINT16_MAX — le compteur ne dépasse jamais UINT16_MAX */
+/* Test: saturation at UINT16_MAX — the counter never exceeds UINT16_MAX */
 static void test_bigram_saturation(void) {
     reset_bigram_stats();
-    /* Préparer last_key_idx interne = 0 (key 0,0) sans créer de bigramme */
+    /* Prepare internal last_key_idx = 0 (key 0,0) without creating a bigram */
     key_stats_record_press(0, 0);
-    /* Pré-charger le compteur A(0)->B(1) à UINT16_MAX - 1 */
+    /* Preload the A(0)->B(1) counter to UINT16_MAX - 1 */
     bigram_stats[0][1] = UINT16_MAX - 1;
-    /* Frappe B : doit atteindre exactement UINT16_MAX */
+    /* Press B: must reach exactly UINT16_MAX */
     key_stats_record_press(0, 1);
-    TEST_ASSERT_EQ(bigram_stats[0][1], UINT16_MAX, "atteint UINT16_MAX");
-    /* Remettre last_key_idx à 0 via frappe A, puis tenter d'incrémenter au-delà */
-    key_stats_record_press(0, 0);  /* crée bigramme B->A en passant, inoffensif */
-    key_stats_record_press(0, 1);  /* A->B déjà à UINT16_MAX, ne doit pas incrémenter */
-    TEST_ASSERT_EQ(bigram_stats[0][1], UINT16_MAX, "reste a UINT16_MAX apres saturation");
+    TEST_ASSERT_EQ(bigram_stats[0][1], UINT16_MAX, "reaches UINT16_MAX");
+    /* Reset last_key_idx to 0 via press A, then try to increment beyond */
+    key_stats_record_press(0, 0);  /* creates B->A bigram in passing, harmless */
+    key_stats_record_press(0, 1);  /* A->B already at UINT16_MAX, must not increment */
+    TEST_ASSERT_EQ(bigram_stats[0][1], UINT16_MAX, "stays at UINT16_MAX after saturation");
 }
 
-/* Test: auto-bigramme — même touche deux fois enregistre [idx][idx] */
+/* Test: self-bigram — same key twice records [idx][idx] */
 static void test_bigram_self(void) {
     reset_bigram_stats();
     int idx = 2 * MATRIX_COLS + 5;
     key_stats_record_press(2, 5);
     key_stats_record_press(2, 5);
-    TEST_ASSERT_EQ(bigram_stats[idx][idx], 1, "auto-bigramme (2,5)->(2,5) == 1");
+    TEST_ASSERT_EQ(bigram_stats[idx][idx], 1, "self-bigram (2,5)->(2,5) == 1");
 }
 
-/* Test: reset_bigram_stats efface les données et remet last_key_idx à -1 */
+/* Test: reset_bigram_stats clears the data and resets last_key_idx to -1 */
 static void test_bigram_reset(void) {
     reset_bigram_stats();
     key_stats_record_press(0, 0);
     key_stats_record_press(1, 1);
     reset_bigram_stats();
-    TEST_ASSERT_EQ(bigram_total, 0, "reset efface total");
-    TEST_ASSERT_EQ(get_bigram_stats_max(), 0, "reset efface les compteurs");
-    /* Apres reset, last_key_idx == -1 : une seule frappe ne crée pas de bigramme */
+    TEST_ASSERT_EQ(bigram_total, 0, "reset clears total");
+    TEST_ASSERT_EQ(get_bigram_stats_max(), 0, "reset clears the counters");
+    /* After reset, last_key_idx == -1: a single keypress does not create a bigram */
     key_stats_record_press(0, 0);
-    TEST_ASSERT_EQ(bigram_total, 0, "first press post-reset: aucun bigramme (last_key_idx remis a -1)");
+    TEST_ASSERT_EQ(bigram_total, 0, "first press post-reset: no bigram (last_key_idx reset to -1)");
 }
 
 void test_bigram(void) {

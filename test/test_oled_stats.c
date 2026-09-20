@@ -4,7 +4,7 @@
 static void test_wpm(void) {
     TEST_ASSERT_EQ(oled_wpm_from_kpm(0),   0u,  "0 kpm → 0 wpm");
     TEST_ASSERT_EQ(oled_wpm_from_kpm(300), 60u, "300 kpm → 60 wpm");
-    TEST_ASSERT_EQ(oled_wpm_from_kpm(7),   1u,  "7 kpm → 1 wpm (troncature)");
+    TEST_ASSERT_EQ(oled_wpm_from_kpm(7),   1u,  "7 kpm → 1 wpm (truncation)");
 }
 
 static void test_sparkline_scaling(void) {
@@ -12,8 +12,8 @@ static void test_sparkline_scaling(void) {
     uint8_t  out[4]  = {0};
     oled_sparkline_bars(hist, 4, 400, out, 4);
     TEST_ASSERT_EQ(out[0], 0, "0/400 → 0");
-    TEST_ASSERT_EQ(out[3], 7, "400/400 → 7 (plein)");
-    TEST_ASSERT(out[1] < out[2] && out[2] < out[3], "monotone croissant");
+    TEST_ASSERT_EQ(out[3], 7, "400/400 → 7 (full)");
+    TEST_ASSERT(out[1] < out[2] && out[2] < out[3], "monotonically increasing");
 }
 
 static void test_sparkline_max_zero(void) {
@@ -24,13 +24,13 @@ static void test_sparkline_max_zero(void) {
     TEST_ASSERT_EQ(out[1], 0, "max=0 → 0");
 }
 
-/* Vrai downsampling n>out_n : chaque bin = moyenne de plusieurs éléments.
-   Exerce les frontières de bin + la moyenne (les autres tests font n==out_n,
-   qui bypasse la moyenne — cf. review Task 4). */
+/* True downsampling n>out_n: each bin = average of several elements.
+   Exercises bin boundaries + the average (the other tests use n==out_n,
+   which bypasses the average — cf. review Task 4). */
 static void test_sparkline_downsample(void) {
-    /* n=8 → out_n=4, max=100. bin b = [2b, 2b+2) → moyenne de 2 éléments.
-       Valeurs qui DIFFÈRENT dans le bin → distingue la vraie moyenne d'un
-       échantillonnage 1-élément (qui donnerait out[1]=1, out[3]=2). */
+    /* n=8 → out_n=4, max=100. bin b = [2b, 2b+2) → average of 2 elements.
+       Values that DIFFER within the bin → distinguishes the true average from
+       a 1-element sampling (which would give out[1]=1, out[3]=2). */
     uint32_t hist[8] = { 0, 0, 20, 80, 100, 100, 30, 70 };
     uint8_t  out[4]  = {0};
     oled_sparkline_bars(hist, 8, 100, out, 4);
@@ -41,7 +41,7 @@ static void test_sparkline_downsample(void) {
 }
 
 void test_oled_stats(void) {
-    TEST_SUITE("OLED stats — helpers purs");
+    TEST_SUITE("OLED stats — pure helpers");
     TEST_RUN(test_wpm);
     TEST_RUN(test_sparkline_scaling);
     TEST_RUN(test_sparkline_downsample);

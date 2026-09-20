@@ -6,7 +6,7 @@ static uint32_t s_splash_until;
 void oled_nav_init(uint32_t now_ms) {
     (void)now_ms;
     s_resting      = OLED_SCR_HOME;
-    s_splash_until = 0;   /* pas de splash au réveil — armé par OLED_EV_BOOT */
+    s_splash_until = 0;   /* no splash on wake — armed by OLED_EV_BOOT */
 }
 
 oled_screen_id_t oled_nav_active(uint32_t now_ms) {
@@ -25,10 +25,10 @@ void oled_nav_event(oled_nav_event_t ev, uint32_t now_ms) {
         break;
     case OLED_EV_DISP_KEY:
         s_resting      = next_resting(s_resting);
-        s_splash_until = 0;   /* couper le splash */
+        s_splash_until = 0;   /* cut the splash */
         break;
     case OLED_EV_LAYER_CHANGED:
     case OLED_EV_ACTIVITY:
-        break;   /* plus d'idle-tama → ces événements n'ont plus d'effet */
+        break;   /* no more idle-tama → these events no longer have any effect */
     }
 }

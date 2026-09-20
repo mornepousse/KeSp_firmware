@@ -1,4 +1,4 @@
-/* Math d'animation LED pure — voir led_curve.h. Aucune dépendance hardware. */
+/* Pure LED animation math — see led_curve.h. No hardware dependency. */
 #include "led_curve.h"
 
 uint8_t led_reactive_brightness(uint32_t elapsed_ms)

@@ -1,13 +1,13 @@
-/* oled_screens.c — Manager d'écrans OLED piloté par oled_nav.
+/* oled_screens.c — OLED screen manager driven by oled_nav.
  *
- * Registre statique des 5 écrans (SPLASH, HOME, LAYER, STATS, TAMA).
- * Sur chaque tick : compare l'écran demandé par oled_nav_active() avec
- * l'écran courant ; si différent → destroy + build ; puis update().
- * Le lock LVGL est tenu par l'appelant (pas de lvgl_port_lock ici).
+ * Static registry of the 5 screens (SPLASH, HOME, LAYER, STATS, TAMA).
+ * On each tick: compares the screen requested by oled_nav_active() with
+ * the current screen; if different -> destroy + build; then update().
+ * The LVGL lock is held by the caller (no lvgl_port_lock here).
  *
- * oled_make_card() est défini ici (repris de l'ancien oled_backend.c)
- * et exporté via screens/oled_screen.h pour que les écrans puissent
- * l'appeler dans leur build().
+ * oled_make_card() is defined here (taken from the old oled_backend.c)
+ * and exported via screens/oled_screen.h so the screens can
+ * call it in their build().
  */
 #include "oled_screens.h"
 #include "oled_nav.h"
@@ -16,7 +16,7 @@
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
 
-/* ── Externs des écrans ──────────────────────────────────────────────── */
+/* ── Screen externs ──────────────────────────────────────────────── */
 extern const oled_screen_t screen_splash;
 extern const oled_screen_t screen_home;
 extern const oled_screen_t screen_stats;
@@ -28,9 +28,9 @@ static const oled_screen_t *s_screens[OLED_SCR_COUNT] = {
     [OLED_SCR_STATS]  = &screen_stats,
 };
 
-static oled_screen_id_t s_current = OLED_SCR_COUNT; /* aucun écran construit */
+static oled_screen_id_t s_current = OLED_SCR_COUNT; /* no screen built */
 
-/* ── oled_make_card (déplacé depuis l'ancien oled_backend) ──────────── */
+/* ── oled_make_card (moved from the old oled_backend) ──────────── */
 
 lv_obj_t *oled_make_card(lv_obj_t *parent, int x, int y, int w, int h, int radius)
 {
@@ -65,16 +65,16 @@ void oled_screens_tick(uint32_t now_ms)
 
     oled_screen_id_t id = oled_nav_active(now_ms);
 
-    /* Rebuilder uniquement sur changement d'écran (§3.3). */
+    /* Rebuild only on screen change (§3.3). */
     if (id != s_current) {
         if (s_current < OLED_SCR_COUNT)
             s_screens[s_current]->destroy();
-        /* Surface propre avant le build : certains renderers (tama_render) ne
-         * suppriment pas eux-mêmes leurs objets LVGL dans destroy() → sans ce
-         * clean, un reliquat de l'écran précédent resterait par-dessus le
-         * nouveau. Garantit une table rase quel que soit le screen sortant. */
+        /* Clean surface before the build: some renderers (tama_render) do not
+         * delete their own LVGL objects in destroy() -> without this
+         * clean, a leftover from the previous screen would remain on top of
+         * the new one. Guarantees a clean slate regardless of the outgoing screen. */
         lv_obj_clean(lv_scr_act());
-        lv_obj_clear_flag(lv_scr_act(), LV_OBJ_FLAG_SCROLLABLE);  /* pas de scrollbar/pan */
+        lv_obj_clear_flag(lv_scr_act(), LV_OBJ_FLAG_SCROLLABLE);  /* no scrollbar/pan */
         s_screens[id]->build(lv_scr_act());
         s_current = id;
     }

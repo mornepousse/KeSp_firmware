@@ -1,4 +1,4 @@
-/* stub: freertos/FreeRTOS.h — utilisé uniquement dans les builds hôte. */
+/* stub: freertos/FreeRTOS.h — used only in host builds. */
 #pragma once
 #include <stdint.h>
 typedef uint32_t TickType_t;

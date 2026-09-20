@@ -1,19 +1,19 @@
-/* Jauge batterie — lecture ADC de VBAT_SENSE. Voir batt_sense.h / batt_calc.h.
+/* Battery gauge — ADC read of VBAT_SENSE. See batt_sense.h / batt_calc.h.
  *
- * Matériel : GPIO13 = ADC2_CH2, pont 1 MΩ / 1 MΩ + 100 nF. ADC2 est utilisable
- * parce qu'il n'y a pas de WiFi sur le Niphargus (nRF24 seul) — c'est la seule
- * raison, et elle est structurelle. Le pont à 1 MΩ est haute impédance : c'est
- * le 100 nF qui fournit la charge à l'échantillonneur, d'où un petit délai avant
- * la rafale et une moyenne de 8 lectures.
+ * Hardware: GPIO13 = ADC2_CH2, 1 MΩ / 1 MΩ divider + 100 nF. ADC2 can be used
+ * because there is no WiFi on the Niphargus (nRF24 only) — that's the only
+ * reason, and it is structural. The 1 MΩ divider is high impedance: it's
+ * the 100 nF that supplies the sample-and-hold's charge, hence a small delay
+ * before the burst and an average of 8 readings.
  *
- * Calibration : la courbe d'usine de l'ESP32-S3 (adc_cali_curve_fitting) quand
- * elle est disponible ; sinon une conversion linéaire approchée, annoncée au
- * journal — une jauge à ±0,1 V reste utile, une jauge muette non. */
+ * Calibration: the ESP32-S3 factory curve (adc_cali_curve_fitting) when
+ * it's available; otherwise an approximated linear conversion, announced in
+ * the log — a gauge at ±0.1 V is still useful, a mute gauge isn't. */
 #include "batt_sense.h"
 #include "batt_calc.h"
 #include "board.h"
 #if CONFIG_KASE_VEILLE
-#include "veille_task.h"   /* hook jauge : une mesure au réveil */
+#include "veille_task.h"   /* gauge hook: one measurement on wake */
 #endif
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
@@ -28,15 +28,15 @@ static const char *TAG = "batt";
 #define BATT_SAMPLES    8
 
 static adc_oneshot_unit_handle_t s_unit;
-static adc_cali_handle_t         s_cali;      /* NULL = pas de calibration */
+static adc_cali_handle_t         s_cali;      /* NULL = no calibration */
 static adc_unit_t                s_unit_id;
 static adc_channel_t             s_chan;
 static esp_timer_handle_t        s_timer;
 
-static volatile uint8_t  s_dv;        /* dernière tension valide, 0 = inconnue */
-static volatile uint8_t  s_niveau;    /* batt_niveau_t : NORMAL / FAIBLE / CRITIQUE, avec hystérésis */
+static volatile uint8_t  s_dv;        /* last valid voltage, 0 = unknown */
+static volatile uint8_t  s_niveau;    /* batt_niveau_t: NORMAL / FAIBLE / CRITIQUE, with hysteresis */
 static volatile uint8_t  s_chg;       /* batt_chg_t */
-static volatile uint32_t s_last_ms;   /* horodatage de la dernière mesure valide */
+static volatile uint32_t s_last_ms;   /* timestamp of the last valid measurement */
 static batt_state_t      s_state;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
@@ -46,7 +46,7 @@ static uint32_t read_mv_once(void)
     int raw = 0, mv = 0;
     if (adc_oneshot_read(s_unit, s_chan, &raw) != ESP_OK) return 0;
     if (s_cali && adc_cali_raw_to_voltage(s_cali, raw, &mv) == ESP_OK) return (uint32_t)mv;
-    /* Sans calibration : 12 bits, atténuation 12 dB ≈ 0..3100 mV. Approché. */
+    /* Without calibration: 12 bits, 12 dB attenuation ≈ 0..3100 mV. Approximated. */
     return (uint32_t)raw * 3100u / 4095u;
 }
 
@@ -54,12 +54,12 @@ void batt_sense_sample_now(void)
 {
     if (!s_unit) return;
     uint32_t s[BATT_SAMPLES];
-    esp_rom_delay_us(200);                          /* le 100 nF se stabilise */
+    esp_rom_delay_us(200);                          /* the 100 nF settles */
     for (int i = 0; i < BATT_SAMPLES; i++) {
         s[i] = read_mv_once();
         esp_rom_delay_us(100);
     }
-    uint32_t mv = batt_mv_from_samples(s, BATT_SAMPLES);   /* 0 = rejeté */
+    uint32_t mv = batt_mv_from_samples(s, BATT_SAMPLES);   /* 0 = rejected */
     uint8_t  dv = batt_mv_to_dv_batt(mv);
     uint32_t t  = now_ms();
     s_chg = (uint8_t)batt_state_step(&s_state, mv, t);
@@ -79,7 +79,7 @@ static void timer_cb(void *arg) { (void)arg; batt_sense_sample_now(); }
 void batt_sense_init(void)
 {
 #if CONFIG_KASE_VEILLE
-    /* Une mesure au réveil : le timer était gelé pendant le sommeil. */
+    /* One measurement on wake: the timer was frozen during sleep. */
     static const veille_hook_t hook = { "jauge", NULL, batt_sense_sample_now };
     veille_hook_enregistrer(&hook);
 #endif

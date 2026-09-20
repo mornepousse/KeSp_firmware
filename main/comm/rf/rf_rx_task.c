@@ -1,14 +1,14 @@
 /*
- * Tâche RF du dongle : elle possède les deux radios NRF24 et rien d'autre.
+ * Dongle RF task: it owns both NRF24 radios and nothing else.
  *
- * Ce ne sont plus deux moitiés d'un même clavier. Le slot 1 porte le clavier —
- * la moitié maître du Niphargus, qui fait tourner son moteur keymap chez elle et
- * n'envoie ici que du HID déjà fini — et le slot 2 porte la souris Conchodytes.
- * Les deux appareils sont indépendants ; ce que rf_slot.h rend impossible à
- * oublier, c'est que la perte de l'un ne doit rien relâcher de l'autre.
+ * These are no longer two halves of the same keyboard. Slot 1 carries the
+ * keyboard — the Niphargus master half, which runs its own keymap engine at
+ * home and only sends already-finished HID here — and slot 2 carries the
+ * Conchodytes mouse. The two devices are independent; what rf_slot.h makes
+ * impossible to forget is that losing one must release nothing of the other.
  *
- * Il n'y a donc plus ni matrice, ni réconciliation de bitmap, ni cycle moteur
- * dans ce fichier : le dongle relaie et supervise.
+ * There is therefore no more matrix, bitmap reconciliation, or engine cycle
+ * in this file: the dongle relays and supervises.
  */
 
 /*
@@ -46,8 +46,8 @@ uint8_t rf_signal_q255(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
 #include "rf_driver.h"
 #include "rf_packet.h"
 #include "rf_slot.h"
-#include "dongle_engine.h"   /* fusion : moteur keymap embarqué (gardé en interne) */
-#include "batt_calc.h"      /* batt_soc_pct — SoC dérivé de la tension, côté dongle */
+#include "dongle_engine.h"   /* fusion: embedded keymap engine (kept internal) */
+#include "batt_calc.h"      /* batt_soc_pct — SoC derived from voltage, dongle side */
 #include "board_rf.h"
 #include "rf_pairing.h"   /* rf_pairing_load_set_id_dongle, rf_apply_set_id */
 #if CONFIG_KASE_NRF_LINE_TEST
@@ -67,15 +67,15 @@ uint8_t rf_signal_q255(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
 
 static const char *TAG = "rf_rx";
 
-/* Radio 1 → slot clavier, radio 2 → slot souris. Le nom dit le rôle ; la
- * configuration matérielle (broches, adresse, canal) reste nommée par la radio
- * physique dans board_rf.h, parce que c'est ce qui est sérigraphié sur la carte. */
+/* Radio 1 → keyboard slot, radio 2 → mouse slot. The name states the role; the
+ * hardware config (pins, address, channel) stays named by the physical radio
+ * in board_rf.h, because that is what is silkscreened on the board. */
 static rf_radio_t s_kbd, s_mouse;
 
-/* Présence de chaque slot : date du dernier paquet reçu, quel qu'il soit —
- * battement, trame d'état ou rapport HID. C'est aussi ce que lit le chien de
- * garde radio : se fier à l'âge du battement réarmerait une radio parfaitement
- * saine dès que la moitié cesse d'en émettre (cf. §7 bis du design du dongle). */
+/* Presence of each slot: timestamp of the last packet received, whatever it
+ * was — heartbeat, status frame, or HID report. This is also what the radio
+ * watchdog reads: trusting the heartbeat's age would re-arm a perfectly
+ * healthy radio as soon as the half stops sending them (cf. §7 bis of the dongle design). */
 static rf_slot_link_t s_link[RF_SLOT_COUNT];
 
 /* Current per-radio config (set_id-derived) — kept so the radio watchdog can
@@ -84,17 +84,17 @@ static rf_slot_link_t s_link[RF_SLOT_COUNT];
 static rf_radio_cfg_t s_kbd_cfg, s_mouse_cfg;
 static SemaphoreHandle_t s_evt_sem;
 
-/* Dernier link_q annoncé par chaque slot (battement ou trame d'état).
- * Lu par rf_rx_get_status() → CDC RF_STATUS. */
+/* Last link_q announced by each slot (heartbeat or status frame).
+ * Read by rf_rx_get_status() → CDC RF_STATUS. */
 static uint8_t s_link_q[RF_SLOT_COUNT];
 
 /* ── Pairing window state (driven inside rf_rx_task) ── */
 static volatile bool s_pairing_mode = false;
 static uint32_t s_pair_deadline_ms = 0;
 static uint8_t  s_pair_paired_count = 0;
-/* Les clés NVS d'appairage gardent leurs noms d'origine : les renommer
- * désapparierait le matériel déjà appairé pour un gain purement cosmétique.
- * `left` y désigne le slot 0x01 (clavier), `right` le slot 0x02 (souris). */
+/* The pairing NVS keys keep their original names: renaming them would
+ * unpair already-paired hardware for a purely cosmetic gain.
+ * `left` here designates slot 0x01 (keyboard), `right` slot 0x02 (mouse). */
 static uint8_t  s_pair_mac_left[6]  = {0};
 static uint8_t  s_pair_mac_right[6] = {0};
 #define RF_PAIR_WINDOW_MS 120000   /* 2 min — relaxed envelope for the manual BOOT-hold dance */
@@ -108,17 +108,17 @@ static void IRAM_ATTR nrf_irq_isr(void *arg)
     if (hpw) portYIELD_FROM_ISR();
 }
 
-/* Le dongle ne fait plus tourner de moteur : il reçoit du HID déjà fini et le
- * repousse à l'hôte. rebuild_press_arrays(), les callbacks de réconciliation et
- * run_engine_cycle() ont été retirés avec la matrice — voir
+/* The dongle no longer runs an engine: it receives already-finished HID and
+ * pushes it on to the host. rebuild_press_arrays(), the reconciliation
+ * callbacks and run_engine_cycle() were removed along with the matrix — see
  * docs/superpowers/specs/2026-08-19-dongle-role-niphargus-design.md
  *
- * Ce qui reste à surveiller : le silence d'un slot. Sans matrice à relâcher, le
- * repli se ramène à un rapport vide — sinon le dernier rapport reçu resterait
- * appliqué sur l'hôte indéfiniment.
+ * What remains to watch: a slot's silence. With no matrix to release, the
+ * fallback comes down to an empty report — otherwise the last report received
+ * would stay applied on the host indefinitely.
  *
- * Et il porte sur ce slot-là uniquement : une souris qui sort de portée ne doit
- * pas effacer la frappe en cours. C'est rf_slot_link_check() qui décide. */
+ * And it applies to that slot alone: a mouse going out of range must not
+ * clear the ongoing keystroke. rf_slot_link_check() is what decides. */
 static void apply_safe_action(rf_safe_action_t action)
 {
     static const uint8_t none[6] = {0};
@@ -126,21 +126,21 @@ static void apply_safe_action(rf_safe_action_t action)
     else if (action == RF_SAFE_RELEASE_BUTTONS) hid_send_mouse(0, 0, 0, 0);
 }
 
-/* Le cache batterie n'avait plus personne pour l'alimenter depuis que la
- * réconciliation des heartbeats a été retirée : la commande CDC BATTERY
- * répondait « inconnu » en permanence. La trame d'état le remplit à nouveau.
- * Elle ne porte que la tension — l'état de charge et la charge en cours restent
- * inconnus plutôt que devinés, parce que quatre octets étaient une contrainte
- * de conception et non un oubli. */
+/* The battery cache had no one left to feed it since heartbeat reconciliation
+ * was removed: the CDC BATTERY command replied "unknown" permanently. The
+ * status frame fills it again. It only carries the voltage — the charge
+ * state and ongoing charging stay unknown rather than being guessed, because
+ * four bytes was a design constraint and not an oversight.
+ */
 extern void dongle_cache_set_battery(uint8_t slot, uint8_t batt_dV,
                                      uint8_t soc_pct, uint8_t charging);
 
-/* Cache batterie indexé par MOITIÉ (0 = gauche, 1 = droite), PAS par slot : en
- * fusion les deux moitiés partagent le slot clavier et se distinguent par le
- * drapeau d'identité de STATUS. Deux conventions se rencontrent ici : la radio
- * dit « 0 = inconnu » (batt_dV), le cache et la CDC disent « 0xFF = inconnu » —
- * la traduction se fait à cette frontière et nulle part ailleurs. Le SoC est
- * DÉRIVÉ de la tension côté dongle (batt_soc_pct, pur), pas transporté. */
+/* Battery cache indexed by HALF (0 = left, 1 = right), NOT by slot: under
+ * fusion the two halves share the keyboard slot and are distinguished by
+ * STATUS's identity flag. Two conventions meet here: the radio says "0 =
+ * unknown" (batt_dV), the cache and the CDC say "0xFF = unknown" — the
+ * translation happens at this boundary and nowhere else. The SoC is DERIVED
+ * from the voltage on the dongle side (batt_soc_pct, pure), not transported. */
 static void cache_battery_half(uint8_t half, uint8_t batt_dV, uint8_t charging)
 {
     uint8_t idx = (half == RF_HALF_RIGHT) ? 1 : 0;
@@ -148,63 +148,63 @@ static void cache_battery_half(uint8_t half, uint8_t batt_dV, uint8_t charging)
     dongle_cache_set_battery(idx, batt_dV, batt_soc_pct(batt_dV), charging);
 }
 
-/* ── Vider les paquets en attente sur une radio ── */
+/* ── Drain pending packets on a radio ── */
 static void drain_radio(rf_radio_t *radio, uint8_t slot)
 {
     uint8_t buf[32];
     while (rf_driver_rx_available(radio)) {
         uint16_t n = rf_driver_read_rx(radio, buf, sizeof(buf));
         if (n == 0) break;
-        /* Tout paquet vaut preuve de vie, pas seulement les battements. */
+        /* Every packet counts as proof of life, not just heartbeats. */
         rf_slot_link_rx(&s_link[slot], (uint32_t)(esp_timer_get_time() / 1000));
         uint8_t type = rf_packet_type(buf, n);
 #if CONFIG_KASE_DONGLE_FUSION
-        /* Sync auto de la keymap par ACK payload (phase 3). Sur divergence
-         * connue, on charge la charge qui partira dans l'ACK de la PROCHAINE
-         * trame de la gauche : le CHUNK qu'elle vient de demander (SYNC_REQ),
-         * sinon la BEACON qui lui apprend qu'une keymap l'attend. Rechargée à
-         * CHAQUE trame — une excursion oob_tx vide la FIFO TX du PRX, donc toute
-         * charge en attente ; et le nRF24 n'en garde que trois. Synchronisé →
-         * rien n'est chargé : l'ACK repart nu, coût nul.
-         * Go/no-go prouvé au banc le 2026-09-13 (canal retour vivant, 11/11). */
-        /* ⚠ Seulement après une trame DE LA GAUCHE. La droite partage le slot
-         * clavier (même adresse KaSe.01) : une charge chargée après SA trame
-         * partirait dans SON ACK, jetée par elle — un chunk perdu par trame
-         * droite, et le pull de la gauche stagne sous frappe bilatérale (revue
-         * 2026-09-13). STATUS et SYNC_REQ ne viennent que de la gauche ; MATRIX
-         * porte l'identité de moitié. */
+        /* Auto keymap sync via ACK payload (phase 3). On a known divergence,
+         * we load the payload that will go out in the ACK of the NEXT frame
+         * from the left half: the CHUNK it just requested (SYNC_REQ), else the
+         * BEACON telling it a keymap is waiting for it. Reloaded on EVERY
+         * frame — an oob_tx excursion empties the PRX's TX FIFO, hence any
+         * pending payload; and the nRF24 only keeps three. In sync → nothing
+         * is loaded: the ACK goes out bare, zero cost.
+         * Go/no-go proven on the bench on 2026-09-13 (return channel alive, 11/11). */
+        /* ⚠ Only after a frame FROM THE LEFT half. The right half shares the
+         * keyboard slot (same address KaSe.01): a payload loaded after ITS
+         * frame would go out in ITS ACK, discarded by it — a chunk lost per
+         * right-half frame, and the left half's pull stalls under bilateral
+         * typing (review 2026-09-13). STATUS and SYNC_REQ only come from the
+         * left half; MATRIX carries the half identity. */
         rf_matrix_t lm;
         bool de_la_gauche = (type == PKT_TYPE_STATUS) || (type == PKT_TYPE_SYNC_REQ) ||
                             (type == PKT_TYPE_MATRIX && rf_decode_matrix(buf, n, &lm) &&
                              lm.half == RF_HALF_LEFT);
-        /* La charge d'ACK est CONSTRUITE ici mais CHARGÉE en fin de tour : une
-         * excursion oob_tx (réémission droite→gauche) vide la FIFO TX du PRX,
-         * et une charge chargée avant elle part à la poubelle (banc
-         * 2026-09-14, vu avec une trame d'écran depuis retirée). */
+        /* The ACK payload is BUILT here but LOADED at the end of the pass: an
+         * oob_tx excursion (right→left re-emission) empties the PRX's TX
+         * FIFO, and a payload loaded before it goes to waste (bench
+         * 2026-09-14, seen with a screen frame since removed). */
         uint8_t  ap[32];
         uint16_t apl = 0;
         if (slot == RF_SLOT_KBD && de_la_gauche && dongle_sync_active()) {
-            uint8_t req_next = SYNC_N_CHUNKS;   /* défaut : balise */
+            uint8_t req_next = SYNC_N_CHUNKS;   /* default: beacon */
             rf_sync_req_t q;
             if (type == PKT_TYPE_SYNC_REQ && rf_decode_sync_req(buf, n, &q)) req_next = q.next;
             apl = dongle_sync_ack_for(req_next, ap);
         }
 #endif
-        /* PKT_TYPE_KEY (matrice brute) et PKT_TYPE_TRACKPAD (gestuelle brute) ne
-         * sont plus traités : plus personne ne les émet depuis le retrait des
-         * anciennes moitiés, et le Niphargus envoie du HID déjà fini. Le dongle
-         * ne décode plus aucune matrice — c'est ce qui rend impossible
-         * l'existence de deux moteurs keymap dans le système. */
+        /* PKT_TYPE_KEY (raw matrix) and PKT_TYPE_TRACKPAD (raw gesture) are no
+         * longer handled: nothing emits them any more since the old halves
+         * were removed, and the Niphargus sends already-finished HID. The
+         * dongle no longer decodes any matrix — which is what makes the
+         * existence of two keymap engines in the system impossible. */
         if (type == PKT_TYPE_STATUS) {
-            /* Trame de repos : batterie et qualité du lien, aucun état de touche. */
+            /* Idle frame: battery and link quality, no key state. */
             rf_status_t st;
             if (rf_decode_status(buf, n, &st)) {
                 s_link_q[slot] = st.link_q;
                 cache_battery_half(st.half, st.batt_dV, st.charging);
 #if CONFIG_KASE_DONGLE_FUSION
-                /* La gauche annonce son mode ET l'empreinte de sa keymap par
-                 * STATUS sur le slot clavier. Garde-fou de sync : le dongle
-                 * compare à la sienne (config_fp=0 = non annoncée, en mode USB). */
+                /* The left half announces its mode AND its keymap's fingerprint
+                 * via STATUS on the keyboard slot. Sync safeguard: the dongle
+                 * compares it to its own (config_fp=0 = not announced, in USB mode). */
                 if (slot == RF_SLOT_KBD) {
                     dongle_engine_set_left_usb(st.mode_usb);
                     if (st.config_fp != 0) dongle_engine_note_left_fp(st.config_fp);
@@ -212,19 +212,19 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
 #endif
             }
         } else if (type == PKT_TYPE_HEARTBEAT) {
-            /* Ancien format, conservé le temps que le Niphargus le remplace :
-             * son bitmap n'est plus lu, il n'y a plus de matrice ici. */
+            /* Old format, kept until the Niphargus replaces it: its bitmap is
+             * no longer read, there is no more matrix here. */
             rf_heartbeat_t h;
             if (rf_decode_heartbeat(buf, n, &h)) {
                 s_link_q[slot] = h.link_q;
-                cache_battery_half(RF_HALF_LEFT, h.batt_dV, 0);   /* ancien format : gauche seule */
+                cache_battery_half(RF_HALF_LEFT, h.batt_dV, 0);   /* old format: left half only */
             }
         } else if (type == PKT_TYPE_HIDREPORT) {
-            /* Le clavier a déjà fait tourner son moteur : on pousse tel quel.
-             * En mode fusion le CLAVIER n'émet plus de HID fini (il envoie sa
-             * matrice brute, voir PKT_TYPE_MATRIX) — mais la SOURIS Conchodytes,
-             * elle, continue d'émettre du HID fini sur son slot. Ce chemin reste
-             * donc nécessaire dans les deux modes. */
+            /* The keyboard has already run its engine: pushed on as-is.
+             * Under fusion mode the KEYBOARD no longer emits finished HID (it
+             * sends its raw matrix, see PKT_TYPE_MATRIX) — but the
+             * Conchodytes MOUSE keeps emitting finished HID on its slot. This
+             * path therefore stays necessary in both modes. */
             uint8_t sub, mod, kb[6], btn; int8_t x, y, w;
             if (rf_decode_hidreport(buf, n, &sub, &mod, kb, &btn, &x, &y, &w)) {
                 if (sub == RF_HID_SUB_KBD)        hid_send_keyboard(mod, kb);
@@ -233,29 +233,29 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
         }
 #if CONFIG_KASE_DONGLE_FUSION
         else if (type == PKT_TYPE_MATRIX) {
-            /* Fusion : demi-matrice brute d'une moitié. On la remet au moteur
-             * embarqué, qui fusionne les deux moitiés et sort le HID. */
+            /* Fusion: a half's raw half-matrix. We hand it to the embedded
+             * engine, which merges the two halves and outputs the HID. */
             rf_matrix_t m;
             if (rf_decode_matrix(buf, n, &m)) {
-                /* La gauche qui émet du BRUT est en mode sans-fil : le dongle tape.
-                 * (En mode USB elle n'émet pas de matrice, elle annonce par STATUS.) */
+                /* A left half emitting RAW is in wireless mode: the dongle types.
+                 * (In USB mode it emits no matrix, it announces via STATUS.) */
                 if (m.half == RF_HALF_LEFT) dongle_engine_set_left_usb(false);
                 dongle_engine_on_matrix(&m);
 
-                /* Mode USB-gauche : réémettre la demi-matrice de la DROITE vers la
-                 * gauche (RF_CH_HALF_LINK / KaSe.03), en heartbeat que l'écoute de
-                 * la gauche décode. Excursion PRX→PTX→PRX sur la radio clavier.
+                /* Left-USB mode: re-emit the RIGHT half's half-matrix toward
+                 * the left half (RF_CH_HALF_LINK / KaSe.03), as a heartbeat that
+                 * the left half's listening decodes. PRX→PTX→PRX excursion on the keyboard radio.
                  *
-                 * ⚠ RÉÉMETTRE SUR CHANGEMENT SEULEMENT — pas chaque trame.
-                 * Réémettre chaque trame (la droite rafraîchit ses maintiens ~10/s
-                 * ET retransmet) monopolisait la radio du dongle en excursions : il
-                 * cessait d'écouter, donc d'ACQUITTER la droite → la droite
-                 * retransmettait en boucle → spirale, ACK effondré (bug banc
-                 * 2026-09-13, « la droite meurt à chaque branchement USB »). On ne
-                 * réémet donc qu'au CHANGEMENT du bitmap, plus un rafraîchissement
-                 * BORNÉ (100 ms) tant qu'une touche est tenue — le dongle reste en
-                 * écoute l'essentiel du temps. Même règle que half_link : muet au
-                 * repos, entretenu sur maintien. */
+                 * ⚠ RE-EMIT ONLY ON CHANGE — not every frame.
+                 * Re-emitting every frame (the right half reaffirms its holds
+                 * ~10/s AND retransmits) monopolized the dongle's radio in
+                 * excursions: it stopped listening, hence stopped ACKing the
+                 * right half → the right half kept retransmitting in a loop →
+                 * spiral, ACK collapsed (bench bug 2026-09-13, "the right half
+                 * dies on every USB plug-in"). So we only re-emit on a bitmap
+                 * CHANGE, plus a BOUNDED refresh (100 ms) as long as a key is
+                 * held — the dongle stays listening most of the time. Same
+                 * rule as half_link: silent at rest, kept alive on hold. */
                 if (m.half == RF_HALF_RIGHT && dongle_engine_left_usb()) {
                     static uint8_t  s_reemit_last[RF_HALF_BITMAP_BYTES];
                     static uint32_t s_reemit_ms;
@@ -281,8 +281,8 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
                 }
             }
         }
-        /* Après toute excursion : la charge d'ACK (sync) pour la PROCHAINE
-         * trame de la gauche, voir plus haut. */
+        /* After any excursion: the ACK payload (sync) for the NEXT frame from
+         * the left half, see above. */
         if (apl) rf_driver_load_ack_payload(radio, 0, ap, (uint8_t)apl);
 #endif
     }
@@ -290,7 +290,7 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
 
 bool rf_rx_pair_start(uint8_t reset, uint16_t *set_id_out, uint8_t *paired_count_out)
 {
-    if (!s_kbd.present) return false;   /* la radio 1 porte le rendez-vous d'appairage */
+    if (!s_kbd.present) return false;   /* radio 1 carries the pairing rendezvous */
 
     if (reset) {
         rf_pairing_reset_dongle();
@@ -362,25 +362,25 @@ static bool rf_rx_pairing_service(void)
         uint8_t slot = 0;
         bool is_dup = rf_pairing_match_slot(mac, s_pair_mac_left, s_pair_mac_right, &slot);
         if (!is_dup) {
-            /* Le périphérique déclare son propre slot (identité de carte) →
-             * l'ordre d'appairage n'a plus d'importance. slot=0 → repli positionnel. */
+            /* The device declares its own slot (board identity) → the
+             * pairing order no longer matters. slot=0 → positional fallback. */
             if (!rf_pairing_resolve_slot(declared_slot, s_pair_paired_count, &slot)) continue; /* full */
         }
 
         /* Persist (new pairings only bump count).
          *
-         * ⚠ NE PAS ACQUITTER UN APPAIRAGE QU'ON N'A PAS SU ENREGISTRER.
+         * ⚠ DO NOT ACK A PAIRING WE FAILED TO RECORD.
          *
-         * Le retour de rf_pairing_save_peer_dongle() était ignoré ici. Constaté
-         * au banc le 2026-08-26 avec la souris Conchodytes : la NVS du dongle
-         * refusait ses écritures, l'ACK partait quand même, et le périphérique
-         * repartait convaincu d'être appairé — set_id et slot enregistrés de son
-         * côté — pendant que le dongle n'en gardait aucune trace et continuait
-         * d'écouter le rendez-vous. Les deux émettaient sur des adresses
-         * différentes, zéro paquet passait, et RIEN ne le signalait.
+         * The return value of rf_pairing_save_peer_dongle() used to be
+         * ignored here. Observed on the bench on 2026-08-26 with the
+         * Conchodytes mouse: the dongle's NVS refused its writes, the ACK
+         * went out anyway, and the device went off convinced it was paired —
+         * set_id and slot recorded on its side — while the dongle kept no
+         * trace of it and kept listening for the rendezvous. Both transmitted
+         * on different addresses, zero packets got through, and NOTHING signaled it.
          *
-         * Un échec bruyant vaut mieux qu'un appairage fantôme : sans ACK, le
-         * périphérique réessaie puis abandonne en le disant. */
+         * A loud failure is better than a phantom pairing: without an ACK,
+         * the device retries then gives up, saying so. */
         if (!is_dup) {
             uint8_t new_count = s_pair_paired_count + 1;
             esp_err_t err = rf_pairing_save_peer_dongle(slot, mac, new_count);
@@ -388,7 +388,7 @@ static bool rf_rx_pairing_service(void)
                 ESP_LOGE(TAG, "appairage NON enregistre (slot=0x%02X) : %s "
                               "— pas d'ACK, la NVS du dongle est en echec",
                          slot, esp_err_to_name(err));
-                continue;   /* pas d'ACK : voir le commentaire ci-dessus */
+                continue;   /* no ACK: see the comment above */
             }
             if (slot == 0x01) memcpy(s_pair_mac_left,  mac, 6);
             else              memcpy(s_pair_mac_right, mac, 6);
@@ -412,14 +412,14 @@ static bool rf_rx_pairing_service(void)
     return true;
 }
 
-/* ── Chien de garde radio — réarmer une radio muette trop longtemps ──────────
- * Les modules NRF24 (clones) se figent avec le temps : ils cessent d'acquitter
- * et de recevoir alors que le SPI répond toujours (observé : ack% → 0, seul un
- * redémarrage du dongle rétablissait le lien). Au-delà de RF_REARM_SILENCE_MS
- * sans le moindre paquet, on réécrit la configuration RX — pas de redémarrage.
- * Limité en cadence, et sans effet si le périphérique est simplement éteint. */
-/* Constantes déplacées dans rf_slot.h : c'est un contrat avec le clavier,
- * qui doit connaître le budget de silence qu'il ne faut pas dépasser. */
+/* ── Radio watchdog — re-arm a radio silent too long ──────────────────────
+ * NRF24 modules (clones) freeze over time: they stop ACKing and receiving
+ * while the SPI still responds (observed: ack% → 0, only a dongle reboot
+ * restored the link). Past RF_REARM_SILENCE_MS without a single packet, we
+ * rewrite the RX config — no reboot. Rate-limited, and has no effect if the
+ * device is simply switched off. */
+/* Constants moved into rf_slot.h: it is a contract with the keyboard,
+ * which must know the silence budget it must not exceed. */
 
 
 
@@ -446,19 +446,19 @@ static void rf_rx_watchdog(uint32_t now)
 static void rf_rx_task(void *arg)
 {
     (void)arg;
-    /* ⚠ ÉTAIT À 10 ms. Ce n'est en principe qu'un repli — l'IRQ de chaque radio
-     * réveille `s_evt_sem` (voir nrf_irq_isr) — mais dans les faits c'est lui qui
-     * gouvernait, et il PLAFONNE LE DÉBIT : la FIFO de réception d'un nRF24 ne
-     * tient que 3 paquets, et un paquet arrivant FIFO pleine n'est pas acquitté,
-     * donc perdu. Trois paquets par réveil, c'est 300/s au mieux.
+    /* ⚠ USED TO BE 10 ms. In principle this is only a fallback — each radio's
+     * IRQ wakes `s_evt_sem` (see nrf_irq_isr) — but in practice it was the one
+     * governing, and it CAPS THE THROUGHPUT: an nRF24's receive FIFO only
+     * holds 3 packets, and a packet arriving with a full FIFO is not ACKed,
+     * hence lost. Three packets per wake-up is 300/s at best.
      *
-     * Invisible avec un clavier, qui produit quelques événements par seconde.
-     * Une souris émet à 1 kHz PENDANT LES GESTES. Mesuré au banc le 2026-08-26 :
-     * 8356 trames émises, 3135 acceptées — 37,5 %, très exactement les 3 sur 10
-     * que laisse passer une fenêtre de 10 ms.
+     * Invisible with a keyboard, which produces a few events per second.
+     * A mouse transmits at 1 kHz DURING GESTURES. Measured on the bench on
+     * 2026-08-26: 8356 frames sent, 3135 accepted — 37.5%, exactly the 3 out
+     * of 10 that a 10 ms window lets through.
      *
-     * 1 ms porte le plafond à ~3000/s. Le dongle est alimenté par l'USB : un
-     * réveil par milliseconde ne coûte rien ici, contrairement au côté souris. */
+     * 1 ms raises the cap to ~3000/s. The dongle is USB-powered: a wake-up
+     * every millisecond costs nothing here, unlike on the mouse side. */
     const TickType_t tick_period = pdMS_TO_TICKS(1);
     for (;;) {
         xSemaphoreTake(s_evt_sem, tick_period);
@@ -473,9 +473,9 @@ static void rf_rx_task(void *arg)
 
         uint32_t now = esp_timer_get_time() / 1000;
 
-        /* Perte de lien → repli, sur ce slot seulement. hb_check_timeout() ne
-         * convenait plus : il parcourait un bitmap de matrice qui n'existe plus
-         * ici, et n'aurait donc jamais rien relâché. */
+        /* Link lost → fallback, on that slot only. hb_check_timeout() no
+         * longer fit: it walked a matrix bitmap that no longer exists here,
+         * and would therefore never have released anything. */
         rf_safe_action_t a_kbd =
             rf_slot_link_check(&s_link[RF_SLOT_KBD], RF_SLOT_KBD, now, RF_LINK_LOST_MS);
         if (a_kbd != RF_SAFE_NONE) ESP_LOGW(TAG, "lien clavier perdu → touches relâchées");
@@ -486,7 +486,7 @@ static void rf_rx_task(void *arg)
         if (a_mouse != RF_SAFE_NONE) ESP_LOGW(TAG, "lien souris perdu → boutons relâchés");
         apply_safe_action(a_mouse);
 
-        rf_rx_watchdog(now);   /* réparer une radio figée, sans redémarrage */
+        rf_rx_watchdog(now);   /* fix a frozen radio, without a reboot */
     }
 }
 
@@ -516,8 +516,8 @@ bool rf_rx_start(void)
         set_id = rf_compute_set_id();
         ESP_LOGW(TAG, "no NVS pairs — using computed set_id 0x%04X for RX", set_id);
     }
-    rf_apply_set_id(&kcfg, set_id, 0x01);   /* clavier → slot 0x01 */
-    rf_apply_set_id(&mcfg, set_id, 0x02);   /* souris  → slot 0x02 */
+    rf_apply_set_id(&kcfg, set_id, 0x01);   /* keyboard → slot 0x01 */
+    rf_apply_set_id(&mcfg, set_id, 0x02);   /* mouse    → slot 0x02 */
     s_kbd_cfg = kcfg; s_mouse_cfg = mcfg;   /* keep live config for the radio watchdog */
 
     /* Load paired peer MACs from NVS at boot: rf_rx_pair_start() alone used to
@@ -568,8 +568,8 @@ bool rf_rx_start(void)
     ESP_LOGI(TAG, "RF RX démarrée (clavier=%d souris=%d)", s_kbd.present, s_mouse.present);
 
 #if CONFIG_KASE_DONGLE_FUSION
-    /* Fusion : démarrer le moteur keymap embarqué. drain_radio lui remet les
-     * demi-matrices ; il fusionne et sort le HID. */
+    /* Fusion: start the embedded keymap engine. drain_radio hands it the
+     * half-matrices; it merges them and outputs the HID. */
     dongle_engine_start();
 #endif
 
@@ -578,9 +578,9 @@ bool rf_rx_start(void)
 
 void rf_rx_get_status(rf_link_status_t *out)
 {
-    /* L'âge rapporté est celui du dernier paquet reçu, pas du dernier battement :
-     * c'est ce que la tâche suit désormais, et un lien actif n'envoie plus de
-     * battements du tout (cf. la cadence adaptative, §5 du design du dongle). */
+    /* The reported age is that of the last packet received, not the last
+     * heartbeat: that is what the task now tracks, and an active link no
+     * longer sends any heartbeats at all (cf. the adaptive cadence, §5 of the dongle design). */
     uint32_t now = esp_timer_get_time() / 1000;
     out->link_kbd   = s_link[RF_SLOT_KBD].up;
     out->link_mouse = s_link[RF_SLOT_MOUSE].up;

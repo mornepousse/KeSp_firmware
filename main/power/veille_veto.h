@@ -1,29 +1,29 @@
 #pragma once
-/* Vetos de veille — logique pure, testée host (test/test_veille_veto.c).
+/* Sleep vetoes — pure logic, tested on host (test/test_veille_veto.c).
  *
- * Un veto est un verrou NOMMÉ, sur le modèle des verrous esp_pm : le module
- * qui a une raison d'empêcher la veille la déclare, la veille n'interroge
- * personne. Jusqu'au 2026-09-18 la décision était prise dans deux tâches avec
- * deux règles (gauche : usb || lien ; droite : lien) — chaque nouveau blocage
- * exigeait de retrouver les deux endroits.
+ * A veto is a NAMED lock, on the model of esp_pm locks: the module that
+ * has a reason to prevent sleep declares it, sleep does not ask anyone.
+ * Until 2026-09-18 the decision was made in two tasks with two rules
+ * (left: usb || link; right: link) — every new blocker required finding
+ * both places.
  *
- * C'est un ÉTAT par nom, pas un compteur : chaque module ne pose que le sien
- * et le lève quand sa raison disparaît ; poser deux fois puis lever une fois
- * = levé. Le câblage FreeRTOS (section critique, tâche) est dans
- * veille_task.c ; ici rien que la table de vérité. */
+ * It is a STATE per name, not a counter: each module only sets its own
+ * and clears it when its reason disappears; setting it twice then
+ * clearing once = cleared. The FreeRTOS wiring (critical section, task)
+ * is in veille_task.c; here nothing but the truth table. */
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
 typedef enum {
-    VEILLE_VETO_USB  = 1u << 0,   /* hôte USB prêt (gauche : clavier HID, l'hôte attend) */
-    VEILLE_VETO_LIEN = 1u << 1,   /* 5 V du TRRS actif : une moitié charge l'autre */
-    VEILLE_VETO_SYNC = 1u << 2,   /* tirage de keymap par ACK payload en cours */
-    VEILLE_VETO_TEST = 1u << 3,   /* mode test matrice (CDC) */
-    VEILLE_VETO_PAIR = 1u << 4,   /* appairage actif : radio_pair_round tient la puce ~150 ms par tour,
-                                   * 30-40 s sans que personne ne tape — endormie, radio_sleep coupait
-                                   * la puce sous la tâche d'appairage (revue 2026-09-20) */
+    VEILLE_VETO_USB  = 1u << 0,   /* USB host ready (left: HID keyboard, the host is waiting) */
+    VEILLE_VETO_LIEN = 1u << 1,   /* TRRS 5 V active: one half is charging the other */
+    VEILLE_VETO_SYNC = 1u << 2,   /* keymap pull via ACK payload in progress */
+    VEILLE_VETO_TEST = 1u << 3,   /* matrix test mode (CDC) */
+    VEILLE_VETO_PAIR = 1u << 4,   /* pairing active: radio_pair_round holds the chip ~150 ms per round,
+                                   * 30-40 s without anyone typing — asleep, radio_sleep was cutting
+                                   * the chip out from under the pairing task (review 2026-09-20) */
 } veille_veto_t;
 
 typedef struct { uint32_t actifs; } veille_vetos_t;
@@ -36,9 +36,9 @@ static inline void veille_veto_poser(veille_vetos_t *v, veille_veto_t quoi, bool
 
 static inline bool veille_bloquee(const veille_vetos_t *v) { return v->actifs != 0; }
 
-/* Noms des vetos actifs pour le battement de coeur : "usb+lien", "-" si
- * aucun. Borné à n octets (n ≥ 2), tronqué proprement au-delà — les cinq
- * tiennent dans les 24 octets du HB ("usb+lien+sync+test+pair" = 23). */
+/* Names of active vetoes for the heartbeat: "usb+lien", "-" if
+ * none. Bounded to n bytes (n >= 2), cleanly truncated beyond that — the five
+ * fit within the HB's 24 bytes ("usb+lien+sync+test+pair" = 23). */
 static inline const char *veille_vetos_str(const veille_vetos_t *v, char *out, size_t n)
 {
     static const struct { veille_veto_t q; const char *nom; } noms[] = {

@@ -5,12 +5,12 @@
 #include <string.h>
 
 /* ── RX handoff lock (audit E5) ──────────────────────────────────────
- * ks_rx_feed() (tâche callback USB) et ks_process_one() (tâche cdc_cmd)
- * tournent sur des tâches différentes. Le buffer d'assemblage était aussi le
- * buffer de dispatch → un hôte qui pipeline (n'attend pas la réponse) pouvait
- * faire dispatcher un payload en cours de réécriture (jamais re-CRC comme un
- * tout). On copie la frame validée dans ready_frame sous mutex ; feed ne la
- * réécrit pas tant qu'elle n'est pas consommée. */
+ * ks_rx_feed() (USB callback task) and ks_process_one() (cdc_cmd task)
+ * run on different tasks. The assembly buffer used to also be the
+ * dispatch buffer → a host that pipelines (doesn't wait for the response)
+ * could get a payload dispatched while it was still being overwritten
+ * (never re-CRC'd as a whole). The validated frame is now copied into
+ * ready_frame under a mutex; feed does not rewrite it until consumed. */
 #ifndef TEST_HOST
 #include "freertos/semphr.h"
 static SemaphoreHandle_t s_rx_mutex = NULL;
@@ -195,8 +195,8 @@ static struct {
     uint8_t  payload[KS_PAYLOAD_MAX];
 } bin_rx;
 
-/* Frame validée en attente de dispatch — copiée depuis bin_rx sous ks_rx_lock().
- * Découple l'assemblage (bin_rx, écrit uniquement par feed) du dispatch. */
+/* Validated frame waiting for dispatch — copied from bin_rx under ks_rx_lock().
+ * Decouples assembly (bin_rx, written only by feed) from dispatch. */
 static struct {
     uint8_t  cmd_id;
     uint16_t payload_len;
@@ -286,7 +286,7 @@ uint16_t ks_rx_feed(const char *data, uint16_t len)
             consumed = i + 1;
             uint8_t expected = ks_crc8(bin_rx.payload, bin_rx.payload_len);
             if (b == expected) {
-                /* Copie atomique de la frame validée pour le dispatcher. */
+                /* Atomic copy of the validated frame for the dispatcher. */
                 ks_rx_lock();
                 if (!ready_frame.ready) {
                     ready_frame.cmd_id      = bin_rx.cmd_id;
@@ -347,8 +347,8 @@ bool ks_process_one(void)
     if (!have)
         return false;
 
-    /* Dispatch depuis ready_frame : feed ne le réécrit pas tant que ready est
-     * vrai, donc payload reste stable pendant toute la commande (audit E5). */
+    /* Dispatch from ready_frame: feed does not rewrite it while ready is
+     * true, so payload stays stable for the whole command (audit E5). */
     uint8_t        cmd_id      = ready_frame.cmd_id;
     uint16_t       payload_len = ready_frame.payload_len;
     const uint8_t *payload     = ready_frame.payload;

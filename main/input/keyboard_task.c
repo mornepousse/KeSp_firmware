@@ -3,7 +3,7 @@
 #include "keyboard_task.h"
 #include "keyboard_cadence.h"
 #if CONFIG_KASE_VEILLE
-#include "veille_task.h"   /* veto TEST (mode test matrice) */
+#include "veille_task.h"   /* TEST veto (matrix test mode) */
 #endif
 #include "tinyusb.h"
 #include "key_processor.h"
@@ -23,10 +23,10 @@
 #include "matrix_scan.h"
 #include "hid_transport.h"
 #include "usb_hid.h"        /* usb_try_remote_wakeup */
-#include "usb_presence.h"   /* usb_presence_cable (cadence) ; kbd_active_route sous KBD_WIRELESS */
+#include "usb_presence.h"   /* usb_presence_cable (cadence); kbd_active_route under KBD_WIRELESS */
 #if CONFIG_KASE_KBD_WIRELESS
 #if CONFIG_KASE_HAS_DISPLAY && !CONFIG_KASE_VEILLE
-#include "v2d_sleep.h"      /* voir la garde du CMakeLists : depend de l'ecran, exclu avec B7 */
+#include "v2d_sleep.h"      /* see the CMakeLists guard: depends on the screen, excluded with B7 */
 #endif
 #endif
 #include "esp_log.h"
@@ -58,15 +58,15 @@ void vTaskKeyboard(void *pvParameters)
         if (keyboard_task_handle == NULL)
             keyboard_task_handle = xTaskGetCurrentTaskHandle();
 
-        /* 10 ms tant qu'une minuterie peut courir (tap-hold, tap-dance, leader,
-         * mode test, USB), 100 ms au repos : voir keyboard_cadence.h. Un
-         * changement de matrice notifie la tâche, la première touche n'attend
-         * pas. */
+        /* 10 ms as long as a timer might be running (tap-hold, tap-dance, leader,
+         * test mode, USB), 100 ms at rest: see keyboard_cadence.h. A
+         * matrix change notifies the task, the first keystroke doesn't
+         * wait. */
         {
             extern volatile bool matrix_test_mode;
             uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
             uint32_t attente = kbd_cadence_attente_ms(now, get_last_activity_time_ms(),
-                                                      usb_presence_cable(), matrix_test_mode);   /* même règle que routage, lien, veille */
+                                                      usb_presence_cable(), matrix_test_mode);   /* same rule as routing, link, sleep */
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(attente));
         }
 
@@ -75,9 +75,9 @@ void vTaskKeyboard(void *pvParameters)
         tap_dance_tick();
 
 #if CONFIG_KASE_DONGLE_FUSION && CONFIG_KASE_KBD_WIRELESS
-        /* Fusion, gauche en USB (phase 2 4b) : la droite est réémise par le
-         * dongle et reçue par kbd_relay en écoute USB. Même logique que le maître
-         * pré-fusion — sur changement distant, refusionner et taper en local. */
+        /* Fusion, left over USB (phase 2 4b): the right is re-transmitted by the
+         * dongle and received by kbd_relay listening over USB. Same logic as the
+         * pre-fusion master — on remote change, re-merge and type locally. */
         if (kbd_relay_remote_changed()) {
             matrix_apply_remote();
             build_keycode_report();
@@ -150,11 +150,11 @@ void vTaskKeyboard(void *pvParameters)
 
         /* Matrix changed → full processing cycle.
          *
-         * Le drapeau est consommé AVANT la lecture de l'état (matrix_flag_take
-         * fait le test et l'effacement ensemble). Le code effaçait après, si bien
-         * qu'un callback de scan tombant pendant build_keycode_report() voyait son
-         * front écrasé et perdu — audit F3. Voir matrix_flag.h pour le
-         * raisonnement complet. */
+         * The flag is consumed BEFORE the state is read (matrix_flag_take
+         * does the test and the clear together). The code used to clear it after, so
+         * that a scan callback landing during build_keycode_report() would see its
+         * edge overwritten and lost — audit F3. See matrix_flag.h for the
+         * full reasoning. */
         if (matrix_flag_take(&stat_matrix_changed)) {
             /* A keypress while the USB host is suspended (PC asleep, cable in) →
              * remote-wakeup so the key wakes the PC. Not gated on KBD_WIRELESS:
@@ -174,15 +174,15 @@ void vTaskKeyboard(void *pvParameters)
             }
         }
 
-        /* La veille (B7) n'est plus évaluée ici : power/veille_task.c, une tâche
-         * unique aux deux moitiés, à vetos (USB, lien, sync, test) et hooks. */
+        /* Sleep (B7) is no longer evaluated here: power/veille_task.c, a single
+         * task shared by both halves, with vetos (USB, link, sync, test) and hooks. */
 
 #if CONFIG_KASE_KBD_WIRELESS && CONFIG_KASE_HAS_DISPLAY && !CONFIG_KASE_VEILLE
         /* RF-mode idle → light-sleep (USB stays awake). v2d_sleep_enter() blocks
          * until a keypress wakes it, then restores everything.
-         * Ecran obligatoire : v2d_sleep_enter() eteint l'OLED. ⚠ Exclu des
-         * boards a veille B7 (Niphargus) : deux sommeils dans la meme boucle se
-         * marchaient dessus et avalaient la touche de reveil (2026-09-16). */
+         * Screen required: v2d_sleep_enter() turns off the OLED. ⚠ Excluded from
+         * boards with B7 sleep (Niphargus): two sleeps in the same loop used to
+         * step on each other and swallow the wakeup keystroke (2026-09-16). */
         {
             uint32_t idle = (uint32_t)(esp_timer_get_time() / 1000)
                           - get_last_activity_time_ms();

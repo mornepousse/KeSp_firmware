@@ -1,12 +1,12 @@
-/* oled_kpm.c — Fenêtre glissante KPM (extrait de l'ancien oled_backend). */
+/* oled_kpm.c — sliding KPM window (extracted from the old oled_backend). */
 #include "oled_kpm.h"
 #include <string.h>
 
-static uint32_t s_count;                        /* frappes depuis le dernier échantillon */
-static uint32_t s_history[OLED_KPM_WINDOW];    /* historique circulaire (valeurs/s) */
-static int      s_idx;                          /* prochain index d'écriture */
-static uint32_t s_current_kpm;                 /* somme des OLED_KPM_WINDOW derniers */
-static uint32_t s_last_sample_ms;              /* horodatage du dernier échantillon */
+static uint32_t s_count;                        /* keystrokes since the last sample */
+static uint32_t s_history[OLED_KPM_WINDOW];    /* circular history (values/s) */
+static int      s_idx;                          /* next write index */
+static uint32_t s_current_kpm;                 /* sum of the last OLED_KPM_WINDOW */
+static uint32_t s_last_sample_ms;              /* timestamp of the last sample */
 
 void oled_kpm_reset(void)
 {
@@ -24,7 +24,7 @@ void oled_kpm_notify_keypress(void)
 
 void oled_kpm_tick(uint32_t now_ms)
 {
-    /* Premier appel après reset : ancrer le compteur de temps. */
+    /* First call after reset: anchor the time counter. */
     if (s_last_sample_ms == 0) {
         s_last_sample_ms = now_ms;
         return;
@@ -32,13 +32,13 @@ void oled_kpm_tick(uint32_t now_ms)
 
     if ((now_ms - s_last_sample_ms) < OLED_KPM_SAMPLE_MS) return;
 
-    /* Pousser l'échantillon courant dans la fenêtre circulaire. */
+    /* Push the current sample into the circular window. */
     s_history[s_idx] = s_count;
     s_idx            = (s_idx + 1) % (int)OLED_KPM_WINDOW;
     s_count          = 0;
     s_last_sample_ms = now_ms;
 
-    /* Recalcul du KPM : somme de toute la fenêtre. */
+    /* Recompute the KPM: sum of the whole window. */
     uint32_t total = 0;
     for (int i = 0; i < (int)OLED_KPM_WINDOW; i++) total += s_history[i];
     s_current_kpm = total;

@@ -7,38 +7,38 @@
 /* Start RF radios + rx task. Returns false if neither radio is present. */
 bool rf_rx_start(void);
 
-/* Diagnostic de lien exposé par CDC.
+/* Link diagnostic exposed over CDC.
  *
- * Les deux slots ne sont plus deux moitiés d'un même clavier : le premier porte
- * le clavier (moitié maître Niphargus), le second la souris Conchodytes. Voir
+ * The two slots are no longer two halves of the same keyboard: the first carries
+ * the keyboard (Niphargus master half), the second the Conchodytes mouse. See
  * comm/rf/rf_slot.h. */
 typedef struct {
     bool link_kbd, link_mouse;
-    /* Âge du dernier paquet reçu, quel qu'il soit — pas seulement des battements :
-     * un lien actif n'en envoie plus. */
+    /* Age of the last packet received, whatever its kind — not only heartbeats:
+     * an active link no longer sends any. */
     uint32_t age_kbd_ms, age_mouse_ms;
     uint32_t pkt_rx_kbd, pkt_rx_mouse;
     uint32_t pkt_dup_kbd, pkt_dup_mouse;
-    /* Dernier link_q annoncé par chaque slot. 0 si rien reçu encore
-     * (conservateur = meilleur score de retransmission). */
+    /* Last link_q announced by each slot. 0 if nothing received yet
+     * (conservative = best retransmission score). */
     uint8_t link_q_kbd;
     uint8_t link_q_mouse;
-    /* Présence PHYSIQUE des deux modules nRF24, telle que le probe SPI l'a
-     * établie au démarrage. Distincte de l'état du lien : une radio présente
-     * peut n'avoir aucun pair, mais une radio ABSENTE n'écoutera jamais rien.
+    /* PHYSICAL presence of the two nRF24 modules, as established by the SPI
+     * probe at startup. Distinct from link state: a present radio
+     * may have no peer, but an ABSENT radio will never listen to anything.
      *
-     * Sans cette information, un dongle dont la radio 2 n'est pas montée est
-     * indiscernable d'un dongle dont la souris est hors de portée — et la
-     * souris, elle, émet dans le vide sans que rien ne le dise. */
+     * Without this information, a dongle whose radio 2 is not mounted is
+     * indistinguishable from a dongle whose mouse is out of range — and the
+     * mouse, for its part, transmits into the void with nothing to say so. */
     bool radio_kbd_present;
     bool radio_mouse_present;
 } rf_link_status_t;
 
 void rf_rx_get_status(rf_link_status_t *out);
 
-/* Copie les MAC WiFi appairées des deux slots (copie vivante : chargée au boot,
- * rafraîchie à chaque appairage réussi), pour ne jamais dépendre d'un cache NVS
- * périmé. MAC toute à zéro = ce slot n'est pas appairé. */
+/* Copies the paired WiFi MACs of both slots (live copy: loaded at boot,
+ * refreshed on every successful pairing), so as never to depend on a stale
+ * NVS cache. An all-zero MAC = this slot is not paired. */
 void rf_rx_copy_peer_macs(uint8_t mac_kbd[6], uint8_t mac_mouse[6]);
 
 /* Signal quality derivation — pure function, host-testable.
@@ -47,10 +47,10 @@ void rf_rx_copy_peer_macs(uint8_t mac_kbd[6], uint8_t mac_mouse[6]);
 uint8_t rf_signal_q255(bool link_up, uint32_t hb_age_ms, uint8_t link_q);
 
 /* Begin a pairing window (called from the CDC KS_CMD_RF_PAIR_START handler).
- * reset=1 → efface d'abord les MAC appairées et paired_count en NVS. Bascule la
- * radio 1 sur le rendez-vous d'appairage (RF_PAIR_ADDR/RF_PAIR_CHANNEL) en PRX et
- * ouvre une fenêtre pilotée par rf_rx_task. Rend le set_id calculé et le
- * paired_count courant. */
+ * reset=1 → first clears the paired MACs and paired_count in NVS. Switches
+ * radio 1 to the pairing rendezvous (RF_PAIR_ADDR/RF_PAIR_CHANNEL) in PRX and
+ * opens a window driven by rf_rx_task. Returns the computed set_id and the
+ * current paired_count. */
 bool rf_rx_pair_start(uint8_t reset, uint16_t *set_id_out, uint8_t *paired_count_out);
 
 #endif /* RF_RX_TASK_H */

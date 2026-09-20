@@ -343,9 +343,9 @@ void tinyusb_cdc_acm_init(void)
     ESP_LOGI(TAG_UD, "CDC ACM initialization DONE");
 }
 
-/* Événements de la pile : montage / démontage de l'hôte. Le DFS tient l'APB à
- * 80 MHz tant qu'un hôte est là (la PLL est coupée à 40 MHz oisif, l'USB en a
- * besoin) — sur événement, pas par poll. */
+/* Stack events: host mount / unmount. The DFS holds the APB at
+ * 80 MHz as long as a host is present (the PLL is cut off at idle 40 MHz, USB
+ * needs it) — on event, not by polling. */
 static void usb_event_cb(tinyusb_event_t *event, void *arg)
 {
     (void)arg;
@@ -359,7 +359,7 @@ void tinyusb_hid_init(void)
 
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
     tusb_cfg.descriptor.device = &device_descriptor;
-    tusb_cfg.event_cb = usb_event_cb;   /* montage/démontage → DFS (pm_dfs_usb_event) */
+    tusb_cfg.event_cb = usb_event_cb;   /* mount/unmount → DFS (pm_dfs_usb_event) */
 #if CONFIG_KASE_DEVICE_ROLE_DONGLE
     /* Dongle: use personality-selected descriptor */
     tusb_cfg.descriptor.string = dongle_string_descriptor;

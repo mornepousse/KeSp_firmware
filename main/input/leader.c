@@ -36,14 +36,14 @@ static uint8_t entry_seq_len(int i)
     return len;
 }
 
-/* Le buffer courant est-il le préfixe STRICT d'une séquence configurée plus
- * longue ? Si oui, résoudre tout de suite occulterait la séquence longue
- * (ex. [A] configuré tuerait [A,B]). */
+/* Is the current buffer a STRICT prefix of a longer configured
+ * sequence? If so, resolving right away would shadow the longer sequence
+ * (e.g. a configured [A] would kill [A,B]). */
 static bool buffer_is_prefix_of_longer(void)
 {
     for (int i = 0; i < LEADER_MAX_ENTRIES; i++) {
         if (entries[i].result == 0) continue;
-        if (entry_seq_len(i) <= buf_len) continue;   /* pas plus longue */
+        if (entry_seq_len(i) <= buf_len) continue;   /* not longer */
         bool pref = true;
         for (int j = 0; j < buf_len; j++) {
             if (entries[i].sequence[j] != buffer[j]) { pref = false; break; }
@@ -53,10 +53,10 @@ static bool buffer_is_prefix_of_longer(void)
     return false;
 }
 
-/* Cherche une correspondance EXACTE (même longueur, même contenu) et résout.
- * defer_on_prefix : appelé sur un feed → ne pas résoudre si le buffer est encore
- * le préfixe d'une séquence plus longue (attendre la suite). Au timeout, appelé
- * avec false → on résout ce qu'on a. */
+/* Looks for an EXACT match (same length, same content) and resolves.
+ * defer_on_prefix: called on a feed → do not resolve if the buffer is still
+ * the prefix of a longer sequence (wait for more). On timeout, called
+ * with false → resolve what we have. */
 static void try_match(bool defer_on_prefix)
 {
     if (defer_on_prefix && buffer_is_prefix_of_longer())
@@ -123,7 +123,7 @@ bool leader_feed(uint8_t keycode)
     if (buf_len < LEADER_MAX_SEQ_LEN) {
         buffer[buf_len++] = keycode;
         last_key_ms = now_ms();
-        try_match(true);   /* feed : différer si préfixe d'une séquence plus longue */
+        try_match(true);   /* feed: defer if prefix of a longer sequence */
         return true;
     }
 
@@ -140,7 +140,7 @@ bool leader_tick(void)
 
     if ((now_ms() - last_key_ms) >= LEADER_TIMEOUT_MS) {
         /* Timeout — try match with current buffer, then cancel */
-        if (buf_len > 0) try_match(false);   /* timeout : résoudre ce qu'on a */
+        if (buf_len > 0) try_match(false);   /* timeout: resolve what we have */
         cancel();
         return resolved_flag;
     }

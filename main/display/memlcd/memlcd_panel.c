@@ -1,15 +1,15 @@
-/* Voir memlcd_panel.h. Protocole Sharp memory-LCD (app note LS013B7DH03,
- * lemia doc 6845 p. 10-12, figures 6-9), tel que le SPI MSB-first de l'ESP32
- * l'émet :
- *   write  : [0x80|VCOM] ( [rev8(adresse 1..68)] [20 octets pixels] [0x00] )×n [0x00]
+/* See memlcd_panel.h. Sharp memory-LCD protocol (app note LS013B7DH03,
+ * lemia doc 6845 p. 10-12, figures 6-9), as the ESP32's MSB-first SPI
+ * transmits it:
+ *   write  : [0x80|VCOM] ( [rev8(address 1..68)] [20 pixel bytes] [0x00] )×n [0x00]
  *   vcom   : [VCOM] [0x00]
  *   clear  : [0x20|VCOM] [0x00]
- * Le premier bit clocké est M0 (mode), puis M1 (VCOM), M2 (clear), 5 bits
- * dummy : le mot de commande part donc BRUT (bit 7 = M0). L'adresse de ligne
- * se lit CA0 en premier (table 6 p. 10) : elle seule passe par rev8. Les
- * pixels partent D1 en premier, D = L → noir.
- * Géométrie : 68 lignes × 160 pixels (catalogue Sharp, lemia doc 6844 p. 5) ;
- * le portrait 68 × 160 est transposé par memlcd_fb_to_panel. */
+ * The first bit clocked is M0 (mode), then M1 (VCOM), M2 (clear), 5 dummy
+ * bits: the command word therefore goes out RAW (bit 7 = M0). The line address
+ * is read CA0 first (table 6 p. 10): it alone goes through rev8. The
+ * pixels go out D1 first, D = L → black.
+ * Geometry: 68 lines × 160 pixels (Sharp catalog, lemia doc 6844 p. 5);
+ * the 68 × 160 portrait is transposed by memlcd_fb_to_panel. */
 #include "memlcd_panel.h"
 #include "board.h"
 #include "rf_bus.h"
@@ -21,26 +21,26 @@
 
 static const char *TAG = "memlcd";
 
-#define CMD_WRITE 0x80   /* M0, premier bit clocké */
+#define CMD_WRITE 0x80   /* M0, first bit clocked */
 #define CMD_VCOM  0x40   /* M1 */
 #define CMD_CLEAR 0x20   /* M2 */
-#define LINES_PER_XFER 17          /* 68 = 4 × 17 : 4 transactions par image */
-#define SPI_HZ 1000000   /* 1 MHz : marge sous les 2 MHz du panneau, câble breakout */
+#define LINES_PER_XFER 17          /* 68 = 4 × 17: 4 transactions per image */
+#define SPI_HZ 1000000   /* 1 MHz: margin below the panel's 2 MHz, breakout cable */
 
 static spi_device_handle_t s_dev;
-static uint8_t s_vcom;                       /* 0 ou CMD_VCOM, basculé à chaque trame */
+static uint8_t s_vcom;                       /* 0 or CMD_VCOM, toggled on every frame */
 static uint8_t s_buf[2 + (MEMLCD_PANEL_LINE_BYTES + 2) * LINES_PER_XFER];
-static uint8_t s_panel[MEMLCD_PANEL_LINES * MEMLCD_PANEL_LINE_BYTES];   /* image transposée */
+static uint8_t s_panel[MEMLCD_PANEL_LINES * MEMLCD_PANEL_LINE_BYTES];   /* transposed image */
 
-static inline void cs(bool on) { gpio_set_level(BOARD_LCD_CS_GPIO, on ? 1 : 0); }  /* actif HAUT */
+static inline void cs(bool on) { gpio_set_level(BOARD_LCD_CS_GPIO, on ? 1 : 0); }  /* active HIGH */
 
 static bool xfer(const uint8_t *tx, size_t n)
 {
     spi_transaction_t t = { .length = n * 8, .tx_buffer = tx };
-    cs(true);  esp_rom_delay_us(6);                  /* tsSCS : CS haut avant SCK */
+    cs(true);  esp_rom_delay_us(6);                  /* tsSCS: CS high before SCK */
     bool ok = spi_device_polling_transmit(s_dev, &t) == ESP_OK;
-    esp_rom_delay_us(2);  cs(false);                 /* thSCS : SCK fini avant CS bas */
-    esp_rom_delay_us(2);                              /* twSCSL : CS bas minimum */
+    esp_rom_delay_us(2);  cs(false);                 /* thSCS: SCK finished before CS low */
+    esp_rom_delay_us(2);                              /* twSCSL: minimum CS low */
     return ok;
 }
 
@@ -53,23 +53,23 @@ void memlcd_cs_idle(void)
 
 esp_err_t memlcd_panel_init(void)
 {
-    if (s_dev) return ESP_OK;   /* déjà attaché (init différée ré-appelée) */
+    if (s_dev) return ESP_OK;   /* already attached (deferred init called again) */
     memlcd_cs_idle();
     spi_device_interface_config_t dev = {
         .clock_speed_hz = SPI_HZ,
         .mode = 0,
-        .spics_io_num = -1,                          /* CS manuel, comme la radio */
+        .spics_io_num = -1,                          /* manual CS, like the radio */
         .queue_size = 1,
         .command_bits = 0, .address_bits = 0,
     };
     esp_err_t e = spi_bus_add_device(rf_bus_host(), &dev, &s_dev);
-    if (e == ESP_ERR_INVALID_STATE) { s_dev = NULL; return e; }   /* bus pas encore créé par la radio : réessayer */
+    if (e == ESP_ERR_INVALID_STATE) { s_dev = NULL; return e; }   /* bus not yet created by the radio: retry */
     if (e != ESP_OK) { ESP_LOGE(TAG, "spi_bus_add_device: %d", (int)e); s_dev = NULL; return e; }
-    /* En light sleep l'ESP ISOLE ses broches (sleep_gpio : « isolate all GPIO
-     * pins ») : CS, SCK et MOSI flotteraient sur les entrées CMOS du panneau,
-     * qui consomment à mi-tension. Configuration de sommeil : entrée tirée BAS
-     * (CS bas = écran désélectionné, comme au boot). Appliquée d'elle-même à
-     * chaque sommeil, les pulls internes restant actifs (Kconfig
+    /* In light sleep the ESP ISOLATES its pins (sleep_gpio: "isolate all GPIO
+     * pins"): CS, SCK and MOSI would float onto the panel's CMOS inputs,
+     * which draw current at mid-voltage. Sleep configuration: input pulled LOW
+     * (CS low = screen deselected, as at boot). Applied by itself on
+     * every sleep, the internal pulls staying active (Kconfig
      * ESP_SLEEP_GPIO_ENABLE_INTERNAL_RESISTORS). */
     const gpio_num_t dodo[] = { BOARD_LCD_CS_GPIO, BOARD_NRF_SCK, BOARD_NRF_MOSI };
     for (unsigned i = 0; i < sizeof dodo / sizeof dodo[0]; i++) {
@@ -105,7 +105,7 @@ bool memlcd_panel_vcom_tick(void)
 bool memlcd_panel_write_lines(uint16_t first, uint16_t count, const uint8_t *lines)
 {
     if (!s_dev || !lines || first + count > MEMLCD_PANEL_LINES) return false;
-    if (!rf_bus_lock(5)) return false;               /* radio occupée : on cède, tick suivant */
+    if (!rf_bus_lock(5)) return false;               /* radio busy: yield, next tick */
     s_vcom ^= CMD_VCOM;
     bool ok = true;
     for (uint16_t done = 0; done < count && ok; done += LINES_PER_XFER) {
@@ -114,12 +114,12 @@ bool memlcd_panel_write_lines(uint16_t first, uint16_t count, const uint8_t *lin
         s_buf[p++] = (uint8_t)(CMD_WRITE | s_vcom);
         for (uint16_t i = 0; i < n; i++) {
             uint16_t ligne = (uint16_t)(first + done + i);
-            s_buf[p++] = memlcd_rev8((uint8_t)(ligne + 1));           /* adresses 1..68, CA0 en premier */
+            s_buf[p++] = memlcd_rev8((uint8_t)(ligne + 1));           /* addresses 1..68, CA0 first */
             memcpy(&s_buf[p], lines + (size_t)(done + i) * MEMLCD_PANEL_LINE_BYTES, MEMLCD_PANEL_LINE_BYTES);
             p += MEMLCD_PANEL_LINE_BYTES;
-            s_buf[p++] = 0x00;                                         /* 8 ck dummy après chaque ligne */
+            s_buf[p++] = 0x00;                                         /* 8 dummy clocks after each line */
         }
-        s_buf[p++] = 0x00;                                             /* 8 ck dummy de fin de trame */
+        s_buf[p++] = 0x00;                                             /* 8 dummy clocks at end of frame */
         ok = xfer(s_buf, p);
         if (!ok) ESP_LOGE(TAG, "spi_device_polling_transmit KO (transaction de %u octets)", (unsigned)p);
     }
@@ -134,9 +134,9 @@ bool memlcd_panel_show(const uint8_t *fb)
     return memlcd_panel_write_lines(0, MEMLCD_PANEL_LINES, s_panel);
 }
 
-/* Mire de bring-up, ASYMÉTRIQUE pour trancher l'orientation d'un coup d'œil :
- * cadre de 1 px, pavé plein 16 × 16 dans le coin HAUT-GAUCHE du portrait,
- * damier 8 px ailleurs. Pavé en bas ou à droite → BOARD_LCD_ROTATE_180. */
+/* Bring-up test pattern, ASYMMETRIC to settle orientation at a glance:
+ * 1 px frame, solid 16 × 16 block in the TOP-LEFT corner of the portrait,
+ * 8 px checkerboard elsewhere. Block at bottom or right → BOARD_LCD_ROTATE_180. */
 void memlcd_panel_test_pattern(void)
 {
     static uint8_t fb[MEMLCD_H * MEMLCD_LINE_BYTES];

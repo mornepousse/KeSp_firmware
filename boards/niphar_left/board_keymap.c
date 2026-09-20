@@ -1,25 +1,25 @@
-/* Keymap par défaut — Niphargus, LES DEUX moitiés.
+/* Default keymap — Niphargus, BOTH halves.
  *
- * La gauche est le seul moteur keymap du clavier : elle porte les keycodes des
- * 52 touches alors qu'elle n'en balaie que 26. D'où KEYMAP_COLS = 14 quand
- * MATRIX_COLS vaut 7 — colonnes 0-6 pour cette moitié, 7-13 pour la droite,
- * dont la coordonnée reçue par radio se décale de MATRIX_COLS.
+ * The left half is the keyboard's only keymap engine: it carries the keycodes
+ * for all 52 keys even though it only scans 26. Hence KEYMAP_COLS = 14 when
+ * MATRIX_COLS is 7 — columns 0-6 for this half, 7-13 for the right, whose
+ * radio-received coordinate is offset by MATRIX_COLS.
  *
- * 26 touches par moitié, en rangées de 7/7/6/6 : les positions manquantes des
- * deux dernières rangées sont K_NO, de chaque côté.
+ * 26 keys per half, in rows of 7/7/6/6: the missing positions of the last
+ * two rows are K_NO, on each side.
  *
- * ⚠ CÔTÉ DROIT, CES TROUS SONT EN COLONNE 7, PAS EN COLONNE 13. Les deux
- * moitiés sont le même PCB retourné : la colonne courte de la droite est sa
- * colonne PHYSIQUE 6, qui porte la colonne keymap 13 - 6 = 7
- * (half_col_to_keymap). Jusqu'au 2026-09-07 les K_NO étaient en colonne 13 et
- * les rangées 2 et 3 décalées d'un cran : K_N était injoignable, et la touche
- * la plus extérieure de la droite ne produisait rien. Les rangées 0 et 1,
- * pleines sur les sept colonnes, ne trahissaient rien — d'où une panne qui ne
- * se voyait que sur la rangée du bas.
+ * ⚠ ON THE RIGHT SIDE, THESE GAPS ARE IN COLUMN 7, NOT COLUMN 13. The two
+ * halves are the same PCB flipped over: the right's short column is its
+ * PHYSICAL column 6, which carries keymap column 13 - 6 = 7
+ * (half_col_to_keymap). Until 2026-09-07 the K_NO were in column 13 and
+ * rows 2 and 3 were shifted by one notch: K_N was unreachable, and the
+ * outermost key on the right produced nothing. Rows 0 and 1, full across
+ * all seven columns, gave nothing away — hence a fault that only showed
+ * up on the bottom row.
  *
- * Deux positions de pouce à droite (colonnes 12 et 13) restent sans affectation
- * d'usine : elles existent physiquement, à provisionner par USB. La vraie keymap est
- * provisionnée par USB (KS_CMD_*) ; celle-ci n'est que le repli d'usine. */
+ * Two thumb positions on the right (columns 12 and 13) are left with no
+ * factory assignment: they physically exist, to be provisioned over USB. The
+ * real keymap is provisioned over USB (KS_CMD_*); this one is only the factory fallback. */
 #include "keymap.h"
 #include "key_definitions.h"
 #include "keyboard_config.h"
@@ -33,7 +33,7 @@ char default_layout_names[LAYERS][MAX_LAYOUT_NAME_LENGTH] = {
 #define XXXXXXX K_NO
 
 uint16_t keymaps[LAYERS][MATRIX_ROWS][KEYMAP_COLS] = {
-    {   /* 0 — MAIN            ── gauche (0-6) ──          ── droite (7-13) ── */
+    {   /* 0 — MAIN            ── left (0-6) ──          ── right (7-13) ── */
         {K_TAB,   K_Q, K_W, K_E, K_R, K_T, K_LBRC,   K_Y, K_U, K_I, K_O, K_P,    K_BSPC,   K_DEL},
         {K_ESC,   K_A, K_S, K_D, K_F, K_G, K_RBRC,   K_H, K_J, K_K, K_L, K_SCLN, K_QUOT,   K_ENT},
         {K_LSHIFT,K_Z, K_X, K_C, K_V, K_B, XXXXXXX,  XXXXXXX, K_N, K_M, K_COMM, K_DOT, K_SLSH, K_RSHIFT},
