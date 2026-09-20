@@ -11,7 +11,9 @@ cmake_minimum_required(VERSION 3.16)
 #      BOARD is then the folder's name unless given). The firmware is a dependency
 #      the user pins; their board lives in their own repository.
 if(DEFINED BOARD_DIR AND NOT BOARD_DIR STREQUAL "")
-    get_filename_component(BOARD_DIR "${BOARD_DIR}" ABSOLUTE)
+    if(NOT IS_ABSOLUTE "${BOARD_DIR}")
+        set(BOARD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${BOARD_DIR}")   # relative = from the project dir
+    endif()
     if(NOT DEFINED BOARD)
         get_filename_component(BOARD "${BOARD_DIR}" NAME)
     endif()

@@ -41,7 +41,11 @@ jobs:
         with:
           esp_idf_version: ${{ env.IDF_VERSION }}
           target: esp32s3
+          # The env: block does not reach the container — the lock is
+          # authoritative, the manager must not query the registry (LVGL 9
+          # manifests vs our LVGL 8 config: "Missing required kconfig option").
           command: >
+            export IDF_COMPONENT_CHECK_NEW_VERSION=0 &&
             idf.py -B build_${{ matrix.board }} -DBOARD=${{ matrix.board }}
             -DSDKCONFIG=build_${{ matrix.board }}/sdkconfig
             -DPROJECT_VER=${{ env.PROJECT_VER }} build
@@ -62,17 +66,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create a board from the template outside the tree
+      - name: Create a board from the template outside boards/
+        # Only the workspace is mounted in the build container, so the board
+        # lives in .ci_boards/ of the checkout — outside boards/, which is
+        # what -DBOARD_DIR is about (relative paths resolve from the project dir).
         run: |
-          mkdir -p "$RUNNER_TEMP/myboards"
-          scripts/new-board.sh ci_board "$RUNNER_TEMP/myboards"
-          echo "BOARD_DIR=$RUNNER_TEMP/myboards/ci_board" >> "$GITHUB_ENV"
+          mkdir -p .ci_boards
+          scripts/new-board.sh ci_board .ci_boards
       - name: Build it with -DBOARD_DIR
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: ${{ env.IDF_VERSION }}
           target: esp32s3
-          command: idf.py -B build_ci_board -DBOARD_DIR=${{ env.BOARD_DIR }} -DSDKCONFIG=build_ci_board/sdkconfig build
+          command: >
+            export IDF_COMPONENT_CHECK_NEW_VERSION=0 &&
+            idf.py -B build_ci_board -DBOARD_DIR=.ci_boards/ci_board -DSDKCONFIG=build_ci_board/sdkconfig build
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
