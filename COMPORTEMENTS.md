@@ -355,7 +355,12 @@ means a test, or a line.
   the wait leaves, the counter stays, the last pushed state is forgotten)
   and on resume the current state is pushed once more — without this, up
   to 7 stale transitions from the right (typed during USB) were replayed
-  at unplug time: ghost keystrokes (review 2026-09-20). Bench 2026-09-19:
+  at unplug time: ghost keystrokes (review 2026-09-20). The left-USB mode is
+  taken from the LEFT's STATUS only: the right shares the slot and sends a
+  battery STATUS every 30 s with mode_usb=false, which flipped the dongle
+  back to "wireless" for ~200 ms each time and made it type the held key
+  (bench 2026-09-20: 9 reports emitted in two minutes of typing with the
+  left on USB, expected 0). Bench 2026-09-19:
   one minute of fast two-handed typing, 699 frames, 182 reports, 0
   overwrites (536 in one evening with the old engine), nothing lost in
   use. The dongle counts RE-PRESSES (the same key pressed again < 30 ms

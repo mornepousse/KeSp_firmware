@@ -204,8 +204,13 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
 #if CONFIG_KASE_DONGLE_FUSION
                 /* The left half announces its mode AND its keymap's fingerprint
                  * via STATUS on the keyboard slot. Sync safeguard: the dongle
-                 * compares it to its own (config_fp=0 = not announced, in USB mode). */
-                if (slot == RF_SLOT_KBD) {
+                 * compares it to its own (config_fp=0 = not announced, in USB mode).
+                 * ⚠ The RIGHT shares the slot and sends a battery STATUS every 30 s
+                 * with mode_usb=false: taking the mode from it flipped the dongle
+                 * back to "wireless" for ~200 ms at each one, and it typed the key
+                 * held at that moment (bench 2026-09-20: 9 reports emitted while the
+                 * left was on USB). Only the LEFT's word counts. */
+                if (slot == RF_SLOT_KBD && st.half == RF_HALF_LEFT) {
                     dongle_engine_set_left_usb(st.mode_usb);
                     if (st.config_fp != 0) dongle_engine_note_left_fp(st.config_fp);
                 }
