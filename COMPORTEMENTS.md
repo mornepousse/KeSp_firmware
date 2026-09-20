@@ -212,6 +212,16 @@ means a test, or a line.
 - [test:test_kp_slot_recycle_ne_gele_pas_le_keycode] A recycled key slot
   does not keep the keycode from the previous cycle. Otherwise a released
   key kept emitting the old code.
+- [test:test_kp_held_key_keeps_the_layer_it_was_pressed_on] A key keeps the
+  keycode of the layer it was PRESSED on until it is released — the layer is
+  latched at press time, per physical key (QMK's rule). Arrows on MO(2),
+  Right arrow on the 'U' position: releasing MO a hair before the arrow used
+  to re-resolve the held key on the base layer and type a 'u' (2026-09-20).
+  Mirror case ([test:test_kp_key_pressed_before_mo_keeps_the_base_layer]):
+  a key held before the MO keeps its base keycode while the layer is active.
+  LT ([test:test_kp_key_that_resolves_an_lt_hold_is_on_the_lt_layer]): the
+  key that resolves an LT as a hold is read on the LT layer from its first
+  report (before: the base character was typed once, then the layer one).
 - [test:test_take_consumes_the_signal] A matrix edge is never lost during
   reading: the signal is taken, consumed, never overwritten by the next
   read.

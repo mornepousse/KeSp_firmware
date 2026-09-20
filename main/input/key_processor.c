@@ -40,6 +40,20 @@ uint16_t extra_keycodes[6] = {0};
 static uint8_t mk_mods = 0;
 static uint8_t mk_slot_mods[6] = {0};
 
+/* Layer LATCHED at press time, per physical key. A key keeps the keycode of
+ * the layer it was pressed on until it is released — QMK's rule. Without
+ * it the report was re-resolved on the current layer every cycle: arrows on
+ * MO(2), Right arrow on the 'U' position, MO released a hair before the
+ * arrow → a 'u' typed (2026-09-20). The mirror case holds too: a key held
+ * before the MO keeps its base keycode while the layer is active. */
+static uint8_t press_layer[MATRIX_ROWS][KEYMAP_COLS];
+static bool is_new_press(uint8_t row, uint8_t col);
+static uint8_t layer_for_key(uint8_t row, uint8_t col, uint8_t active_layer)
+{
+    if (is_new_press(row, col)) press_layer[row][col] = active_layer;
+    return press_layer[row][col];
+}
+
 static uint8_t prev_press_row[6] = {INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS,
                                      INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS};
 static uint8_t prev_press_col[6] = {INVALID_KEY_POS, INVALID_KEY_POS, INVALID_KEY_POS,
@@ -341,7 +355,8 @@ void build_keycode_report(void)
     uint8_t physical_mods = 0;
     for (uint8_t i = 0; i < 6; i++) {
         if (current_press_col[i] == INVALID_KEY_POS) continue;
-        uint16_t mkc = keymaps[active_layer][current_press_row[i]][current_press_col[i]];
+        uint16_t mkc = keymaps[layer_for_key(current_press_row[i], current_press_col[i], active_layer)]
+                              [current_press_row[i]][current_press_col[i]];
         if (mkc >= 0xE0 && mkc <= 0xE7)
             physical_mods |= (uint8_t)(1u << (mkc - 0xE0));
     }
@@ -358,7 +373,7 @@ void build_keycode_report(void)
 
         uint8_t row = current_press_row[i];
         uint8_t col = current_press_col[i];
-        uint16_t kc = keymaps[active_layer][row][col];
+        uint16_t kc = keymaps[layer_for_key(row, col, active_layer)][row][col];   /* latched at press */
 
         /* This slot is rebuilt from scratch: we clear it BEFORE filling it.
          * Without this, an absorbed key (layer changer, held tap-hold,
@@ -446,6 +461,24 @@ void build_keycode_report(void)
         wpm_record_keypress();
         /* Re-read mods: tap_hold_interrupt() may have just activated a MT hold */
         th_mods = tap_hold_get_active_mods();
+        /* An LT just resolved as a HOLD because of a key pressed THIS cycle: that
+         * key belongs to the LT layer ("hold on other key press"), not to the
+         * base layer it was read from — before the latch it typed the base
+         * character once, then switched. Re-latch this cycle's new presses on
+         * the LT layer and re-resolve the plain keycodes already in the report;
+         * anything that is not a plain HID code is absorbed this cycle and
+         * resolves fully next cycle from the latched layer. */
+        int8_t lt_after = tap_hold_get_active_layer();
+        if (lt_after >= 0 && lt_after != lt_layer) {
+            for (uint8_t i = 0; i < 6; i++) {
+                uint8_t row = current_press_row[i], col = current_press_col[i];
+                if (col == INVALID_KEY_POS || !is_new_press(row, col) || keycodes[i] == 0) continue;
+                press_layer[row][col] = (uint8_t)lt_after;
+                uint16_t kc2 = keymaps[lt_after][row][col];
+                if (kc2 == K_NO) kc2 = keymaps[last_layer][row][col];
+                keycodes[i] = (kc2 != 0 && kc2 <= 0xFF) ? (uint8_t)kc2 : 0;
+            }
+        }
     }
 
     /* Key override: remove from the report the trigger modifiers (e.g. the Shift

@@ -439,6 +439,82 @@ static void test_kp_double_mo_resolves_from_base_layer(void)
 }
 
 /* 19. K_SEC_CONFIRM : press → authorize pending request, absorbed (not emitted) */
+/* A key keeps the keycode of the layer it was PRESSED on until it is
+ * released — even if the layer key goes away first. The bug (2026-09-20):
+ * arrows on MO(2), Right arrow on the 'U' position; releasing MO(2) a hair
+ * before the arrow re-resolved the held key on the base layer and typed a
+ * 'u'. Same rule as QMK: the layer is latched at press time. */
+#define T_KC_U      0x18u
+#define T_KC_RIGHT  0x4Fu
+static void test_kp_held_key_keeps_the_layer_it_was_pressed_on(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_MO_L1;
+    keymaps[0][0][1] = T_KC_U;        /* base: U */
+    keymaps[1][0][1] = T_KC_RIGHT;    /* layer 1: Right arrow on the same key */
+    press_key(0, 0, 0);
+    build_keycode_report();           /* MO held -> layer 1 */
+    press_key(1, 0, 1);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_RIGHT), "pressed under MO: Right arrow");
+    /* MO released first, the arrow key still held */
+    current_press_row[0] = INVALID_KEY_POS; current_press_col[0] = INVALID_KEY_POS; current_press_stat[0] = 0;
+    build_keycode_report();           /* release cycle: the layer is restored at its end */
+    TEST_ASSERT_EQ(current_layout, 0, "MO released -> back to layer 0");
+    build_keycode_report();           /* next cycle, arrow still held, layer 0 active */
+    TEST_ASSERT(keycode_in_report(T_KC_RIGHT), "held key STAYS Right arrow after the MO release");
+    TEST_ASSERT(!keycode_in_report(T_KC_U), "no 'u' typed by the layer change");
+    /* release the arrow, press the same key again: now it is a U */
+    release_all_keys();
+    build_keycode_report();
+    press_key(1, 0, 1);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_U), "a new press on layer 0 is a U");
+}
+
+/* The mirror case: a key held BEFORE the MO keeps its base keycode while the
+ * layer is active — its assignment does not change under the finger. */
+static void test_kp_key_pressed_before_mo_keeps_the_base_layer(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_MO_L1;
+    keymaps[0][0][1] = T_KC_U;
+    keymaps[1][0][1] = T_KC_RIGHT;
+    press_key(1, 0, 1);
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_U), "pressed on base: U");
+    press_key(0, 0, 0);
+    build_keycode_report();           /* MO pressed while U is held */
+    TEST_ASSERT_EQ(current_layout, 1, "MO held -> layer 1");
+    TEST_ASSERT(keycode_in_report(T_KC_U), "the held key stays a U");
+    TEST_ASSERT(!keycode_in_report(T_KC_RIGHT), "it does not turn into Right arrow");
+}
+
+/* LT resolved as a hold BY the key pressed during its tapping term: that key
+ * is read on the LT layer from its first report — before, the base character
+ * was typed once, then the layer one. */
+static void test_kp_key_that_resolves_an_lt_hold_is_on_the_lt_layer(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = 0x4000u | (1u << 8) | 0x2Cu;   /* K_LT(1, Space) */
+    keymaps[0][0][1] = 0x06u;   /* C on the base layer */
+    keymaps[1][0][1] = T_KC_B;  /* B on layer 1 */
+    press_key(0, 0, 0);
+    build_keycode_report();
+    press_key(1, 0, 1);
+    build_keycode_report();
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "the second key resolves the LT as a hold");
+    TEST_ASSERT(keycode_in_report(T_KC_B), "and it is read on the LT layer: B");
+    TEST_ASSERT(!keycode_in_report(0x06), "never a C");
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_B) && !keycode_in_report(0x06), "still B on the next cycle");
+    /* LT released first, the key still held: it stays a B */
+    current_press_row[0] = INVALID_KEY_POS; current_press_col[0] = INVALID_KEY_POS; current_press_stat[0] = 0;
+    build_keycode_report();
+    build_keycode_report();
+    TEST_ASSERT(keycode_in_report(T_KC_B) && !keycode_in_report(0x06), "LT released, the held key stays a B");
+}
+
 static void test_kp_sec_confirm_authorizes(void)
 {
     reset_kp_state();
@@ -655,6 +731,9 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_multi_key_press);
     TEST_RUN(test_kp_macro_does_not_starve_to);
     TEST_RUN(test_kp_double_mo_resolves_from_base_layer);
+    TEST_RUN(test_kp_held_key_keeps_the_layer_it_was_pressed_on);
+    TEST_RUN(test_kp_key_pressed_before_mo_keeps_the_base_layer);
+    TEST_RUN(test_kp_key_that_resolves_an_lt_hold_is_on_the_lt_layer);
     TEST_RUN(test_kp_sec_confirm_authorizes);
     TEST_RUN(test_kp_macro_inline_injects_steps);
     TEST_RUN(test_kp_macro_empty_name_noop);
