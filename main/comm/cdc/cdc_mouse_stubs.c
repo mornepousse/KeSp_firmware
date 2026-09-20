@@ -6,7 +6,7 @@
  * come from input/key_stats.c and input/key_features.c, which a mouse
  * does not compile — it has no keys.
  *
- * The mouse already shares cdc_niphar_slave_stubs.c for everything missing
+ * The mouse already shares cdc_split_scanner_stubs.c for everything missing
  * on both sides (display, BLE, keymap engine). These two symbols cannot
  * go there: the Niphargus slave has a matrix and defines them for real,
  * which would give a duplicate at link time. Hence this separate file,

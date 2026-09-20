@@ -1,6 +1,6 @@
 /*
  * status_display_* stubs — keyboard role WITHOUT screen (Niphargus left,
- * KASE_NIPHAR_MASTER: CONFIG_KASE_HAS_DISPLAY=n via its Kconfig override,
+ * KASE_SPLIT_MASTER: CONFIG_KASE_HAS_DISPLAY=n via its Kconfig override,
  * see main/Kconfig.projbuild).
  *
  * status_display_* calls are scattered across the keystroke path

@@ -34,7 +34,7 @@ uint8_t current_layout = 0;
  * Under KASE_DONGLE_FUSION the dongle runs the keymap engine. It therefore
  * compiles the KEYBOARD block of the CDC protocol, which references globals
  * that matrix_scan.c provides on a keyboard — but it has no local matrix.
- * We provide them here, as cdc_niphar_slave_stubs.c does for the right half.
+ * We provide them here, as cdc_split_scanner_stubs.c does for the right half.
  * matrix_test_*: the matrix test command is inert without a matrix.
  * layer_changed: no screen to notify on this role (for now). */
 #if CONFIG_KASE_DONGLE_FUSION

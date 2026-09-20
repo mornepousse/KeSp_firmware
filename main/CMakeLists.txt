@@ -178,8 +178,8 @@ endif()
 # Niphargus et la souris Conchodytes ont exactement les mêmes trous, donc le
 # même fichier de bouchons. Le nom du fichier ne mentionne que le premier des
 # deux — voir son en-tête.
-if(CONFIG_KASE_DEVICE_ROLE_NIPHAR_SLAVE OR CONFIG_KASE_DEVICE_ROLE_MOUSE)
-    list(APPEND srcs "comm/cdc/cdc_niphar_slave_stubs.c")
+if(CONFIG_KASE_DEVICE_ROLE_SPLIT_SCANNER OR CONFIG_KASE_DEVICE_ROLE_MOUSE)
+    list(APPEND srcs "comm/cdc/cdc_split_scanner_stubs.c")
 endif()
 
 # RF RX (NRF24) — dongle role only

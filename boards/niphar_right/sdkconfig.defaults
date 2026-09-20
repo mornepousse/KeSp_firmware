@@ -1,9 +1,9 @@
-CONFIG_KASE_DEVICE_ROLE_NIPHAR_SLAVE=y
+CONFIG_KASE_DEVICE_ROLE_SPLIT_SCANNER=y
 
 # Pas de BLE : le budget d'alimentation l'interdit (HT7833, pics radio hors
 # budget). La config et les mises à jour passent par USB.
 # KASE_HAS_BLE est un bool SANS prompt (main/Kconfig.projbuild) : il n'est PAS
-# surchargeable ici, le gate réel est le `default n if KASE_DEVICE_ROLE_NIPHAR_SLAVE`
+# surchargeable ici, le gate réel est le `default n if KASE_DEVICE_ROLE_SPLIT_SCANNER`
 # dans le Kconfig. CONFIG_BT_ENABLED=n coupe la pile Bluedroid elle-même
 # (héritée de sdkconfig.defaults) — c'est ce qui a un effet.
 CONFIG_BT_ENABLED=n

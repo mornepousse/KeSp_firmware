@@ -2,7 +2,7 @@
  * Stubs for symbols that cdc_binary_cmds.c references but are not compiled in
  * the Niphargus right-half (slave) role: no display backend, no BLE.
  *
- * Compiled only when CONFIG_KASE_DEVICE_ROLE_NIPHAR_SLAVE=y. Provides
+ * Compiled only when CONFIG_KASE_DEVICE_ROLE_SPLIT_SCANNER=y. Provides
  * no-op implementations so the link succeeds. The corresponding KS_CMD_*
  * commands are inert on this board — the right half has no CDC config role
  * (it is a matrix/display scanner, not the USB endpoint).

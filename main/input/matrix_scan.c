@@ -177,7 +177,7 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
     /* Fusion, LEFT side: this half no longer runs the engine nor sends
      * finished HID (the dongle handles that) — it emits its RAW half-matrix
      * to the dongle, on change, the same way the right does towards the dongle.
-     * KBD_WIRELESS identifies the left (the right is NIPHAR_SLAVE and will earn
+     * KBD_WIRELESS identifies the left (the right is the SPLIT_SCANNER role and will earn
      * its own path at the bench). The mirror is NOT applied here: each half
      * emits its physical coordinates, the dongle sorts them out (half_col_to_keymap). */
     {

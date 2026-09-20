@@ -1,10 +1,10 @@
 CONFIG_KASE_DEVICE_ROLE_KEYBOARD=y
-CONFIG_KASE_NIPHAR_MASTER=y
+CONFIG_KASE_SPLIT_MASTER=y
 
 # Pas de BLE : le budget d'alimentation l'interdit (HT7833, pics radio hors
 # budget). La config et les mises à jour passent par USB.
 # KASE_HAS_BLE est un bool SANS prompt (main/Kconfig.projbuild) : il n'est PAS
-# surchargeable ici, le gate réel est le `default n if KASE_NIPHAR_MASTER` dans
+# surchargeable ici, le gate réel est le `default n if KASE_SPLIT_MASTER` dans
 # le Kconfig. CONFIG_BT_ENABLED=n coupe la pile Bluedroid elle-même (héritée de
 # sdkconfig.defaults) — c'est ce qui a un effet.
 CONFIG_BT_ENABLED=n

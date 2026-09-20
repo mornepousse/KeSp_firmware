@@ -7,9 +7,11 @@ choice KASE_DEVICE_ROLE
         Selects the type of device this firmware runs on.
         KEYBOARD     = standalone keyboard with local matrix (V1, V2, V2D).
         DONGLE       = USB receiver dongle for split wireless setup.
-        NIPHAR_SLAVE = Niphargus right half: local matrix + Sharp LCD, no
-                        keymap engine, no HID output (see KASE_NIPHAR_MASTER
-                        for the left/master half, which reuses KEYBOARD).
+        SPLIT_SCANNER = the scanning half of a split (Niphargus right):
+                        local matrix, optional screen, no keymap engine, no
+                        HID output — it sends its half-matrix (see
+                        KASE_SPLIT_MASTER for the other half, which reuses
+                        KEYBOARD).
         MOUSE        = Conchodytes mouse: PMW3389 sensor, three clicks and a
                         wheel, mouse HID reports relayed to the dongle's slot
                         2. No matrix, no keymap, no display.
@@ -20,8 +22,8 @@ config KASE_DEVICE_ROLE_KEYBOARD
 config KASE_DEVICE_ROLE_DONGLE
     bool "Dongle (RX from halves)"
 
-config KASE_DEVICE_ROLE_NIPHAR_SLAVE
-    bool "Niphargus right half (slave: matrix + Sharp LCD, no keymap engine)"
+config KASE_DEVICE_ROLE_SPLIT_SCANNER
+    bool "Split scanner half (matrix + optional screen, no keymap engine — Niphargus right)"
 
 config KASE_DEVICE_ROLE_MOUSE
     bool "Conchodytes mouse (PMW3389 sensor + clicks, HID relay to slot 2)"
@@ -78,7 +80,7 @@ config KASE_NO_KEYMAP_ENGINE
 config KASE_HAS_LOCAL_MATRIX
     bool
     default y if KASE_DEVICE_ROLE_KEYBOARD
-    default y if KASE_DEVICE_ROLE_NIPHAR_SLAVE
+    default y if KASE_DEVICE_ROLE_SPLIT_SCANNER
     default n
     help
         Compiles matrix_scan.c and keyboard_task.c local-scan path.
@@ -185,7 +187,7 @@ config KASE_VEILLE_DIAG
 
 config KASE_KEY_STATS
     bool "Typing statistics (counters, bigrams, WPM, NVS)"
-    default n if KASE_NIPHAR_MASTER || KASE_DEVICE_ROLE_NIPHAR_SLAVE
+    default n if KASE_SPLIT_MASTER || KASE_DEVICE_ROLE_SPLIT_SCANNER
     default y
     depends on !KASE_NO_KEYMAP_ENGINE
     help
@@ -261,12 +263,12 @@ config KASE_MATRIX_LOG_CONSOLE
 config KASE_HAS_DISPLAY
     bool
     default y if KASE_DISPLAY_MEMLCD
-    default n if KASE_NIPHAR_MASTER
+    default n if KASE_SPLIT_MASTER
     default y if KASE_DEVICE_ROLE_KEYBOARD
     default n
     help
         Compiles display backends and status display task. Niphargus left
-        (KASE_NIPHAR_MASTER) has no screen at all (J12 unpopulated — see
+        (KASE_SPLIT_MASTER) has no screen at all (J12 unpopulated — see
         docs/NIPHARGUS_V2_HARDWARE.md) and must take priority over the
         KEYBOARD-role default: Kconfig honors the first satisfied `default`
         in source order, so this override has to come first.
@@ -295,8 +297,8 @@ config KASE_HAS_BLE
     # wired keyboard", yet the Niphargus halves are wireless (nRF24). The
     # symbol would lie about what it describes.
     default n if KASE_NO_RADIO
-    default n if KASE_NIPHAR_MASTER
-    default n if KASE_DEVICE_ROLE_NIPHAR_SLAVE
+    default n if KASE_SPLIT_MASTER
+    default n if KASE_DEVICE_ROLE_SPLIT_SCANNER
     default y if KASE_DEVICE_ROLE_KEYBOARD && !KASE_KBD_WIRELESS
     default n
     help
@@ -304,8 +306,8 @@ config KASE_HAS_BLE
         mode (KASE_KBD_WIRELESS): a smart keyboard reaches the host through the
         M.2 dongle over USB, so its own BLE radio is redundant — and dropping it
         frees ~80KB heap and removes its 2.4GHz activity near the NRF relay.
-        Also disabled on both Niphargus halves (KASE_NIPHAR_MASTER,
-        KASE_DEVICE_ROLE_NIPHAR_SLAVE): the power budget (HT7833, radio peaks)
+        Also disabled on both Niphargus halves (KASE_SPLIT_MASTER,
+        KASE_DEVICE_ROLE_SPLIT_SCANNER): the power budget (HT7833, radio peaks)
         does not allow for it — config and updates go over USB. Both `default`
         lines above must stay before the KEYBOARD-role default: Kconfig honors
         the first satisfied `default` in source order, same mechanism as
@@ -320,12 +322,12 @@ config KASE_KBD_WIRELESS
       over NRF24 and exchanges config over ESP-NOW, instead of acting as its own
       USB device. Wired keyboards (V1/V2) leave this off.
 
-config KASE_NIPHAR_MASTER
-    bool "Niphargus: this board is the LEFT half (master)"
+config KASE_SPLIT_MASTER
+    bool "Split master half (the half with the keymap engine — Niphargus left)"
     default n
     depends on KASE_DEVICE_ROLE_KEYBOARD
     help
-      Left half of the Niphargus. It reuses the KEYBOARD role (local matrix,
+      Master half of a split (the Niphargus left). It reuses the KEYBOARD role (local matrix,
       keymap engine, USB HID, binary CDC) and adds what is specific to the
       split: receiving the right half's matrix (wired TRRS link, wireless
       nRF24) and emitting the final HID report to the dongle. It's the only
@@ -346,7 +348,7 @@ config KASE_VBUS_SENSE
 config KASE_HAS_RF_TX
     bool
     default y if KASE_DEVICE_ROLE_MOUSE
-    default y if KASE_DEVICE_ROLE_NIPHAR_SLAVE
+    default y if KASE_DEVICE_ROLE_SPLIT_SCANNER
     default n
     help
         Compiles the nRF24 driver's TRANSMITTER mode (PTX): rf_driver_init_tx,

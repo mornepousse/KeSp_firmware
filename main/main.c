@@ -128,7 +128,7 @@ static void cpu_time_logger_task(void *arg) {
 #endif
 
 #if CONFIG_KASE_HAS_DISPLAY
-#if CONFIG_KASE_DEVICE_ROLE_NIPHAR_SLAVE && CONFIG_KASE_DISPLAY_MEMLCD
+#if CONFIG_KASE_DEVICE_ROLE_SPLIT_SCANNER && CONFIG_KASE_DISPLAY_MEMLCD
 /* RIGHT half display: minimal task, see the call in app_main (slave
  * role). The keyboard task below drives the engine and stats, which are absent here. */
 static void memlcd_slave_display_task(void *arg) {
@@ -460,7 +460,7 @@ void app_main(void) {
     if (err != ESP_OK)
       ESP_LOGE(TAG, "mouse_task_start failed: %s", esp_err_to_name(err));
   }
-#elif CONFIG_KASE_DEVICE_ROLE_NIPHAR_SLAVE
+#elif CONFIG_KASE_DEVICE_ROLE_SPLIT_SCANNER
   /* --- Niphargus RIGHT half: a scanner, nothing else. ---
    *
    * The spec describes it as "a scanner that reports its raw matrix": it

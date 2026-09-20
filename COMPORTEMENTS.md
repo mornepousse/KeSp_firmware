@@ -343,6 +343,13 @@ means a test, or a line.
   round-trip ACK (40/40, match=1 twice).
 
 ## Fusion — engine routing
+- [test:test_board_contract_niphar_left] Kconfig roles are named after what a
+  board does, not after a board: `KASE_SPLIT_MASTER` (the half with the
+  keymap engine — Niphargus left) and `KASE_DEVICE_ROLE_SPLIT_SCANNER` (the
+  half that only sends its matrix — Niphargus right) replaced
+  `KASE_NIPHAR_MASTER` / `KASE_DEVICE_ROLE_NIPHAR_SLAVE` on 2026-09-20;
+  `cdc_split_scanner_stubs.c` likewise. Pure rename: the 7 binaries are
+  byte-identical after regenerating every sdkconfig.
 
 - [test:test_gauche_par_usb] Without a USB host, the left doesn't type
   locally: it transmits its raw data, the dongle types. On the RF route,
