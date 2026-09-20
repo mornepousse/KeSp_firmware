@@ -82,6 +82,10 @@ the board folder, flash, pairing, remapping, reading the heartbeat and
   battery divider, TRRS), the four files of a board, build and flash
   (plain ESP-IDF, no Nix required), pairing with the dongle, remapping with
   KeSp_controller, what the heartbeat and `rfstat` tell you.
+- **Decided 2026-09-20 (option 1)**: clarify, don't rename yet — README says
+  KeSp is the firmware, KaSe/Niphargus/Conchodytes are boards, `KASE_*` is a
+  historical prefix. The rename to `KESP_*` (Kconfig prefix, release names,
+  KeSp_controller aligned) is deferred to a major version.
 - One name. Today KaSe / KeSp / Niphargus / Conchodytes are four names for
   one project — and "kase" is used everywhere for the firmware (`KASE_*`
   Kconfig, `kase_*` boards, `KaSe_` binaries) although KaSe is a keyboard and

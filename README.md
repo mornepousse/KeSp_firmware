@@ -7,6 +7,13 @@ dongle.
 
 > KeSp provides the framework. Your board definition provides the hardware specifics.
 
+**Names.** *KeSp* is the firmware. *KaSe* (V1, V2), *Niphargus* (the split)
+and *Conchodytes* (the mouse) are boards. The `KASE_*` Kconfig prefix, the
+`kase_*` board folders and the `KaSe_vX.Y.Z_*.bin` release names predate that
+distinction — KaSe was the first keyboard this firmware ran on — and are kept
+as-is for now; a rename to `KESP_*` is planned for a major version
+(`docs/ROADMAP_MAKE_YOUR_OWN.md`, item 4).
+
 **Seven board targets** share the codebase via `boards/<name>/` and per-board
 Kconfig gates: `kase_v1` (round display), `kase_v2` (OLED), `kase_v2_debug`
 (V2 + debug overrides), `kase_dongle` (USB receiver), `conchodytes` (a PMW3389
