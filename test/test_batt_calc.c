@@ -103,7 +103,9 @@ static void test_niveau_batterie_avec_hysteresis(void)
     n = batt_niveau_step(n, 32); TEST_ASSERT(n == BATT_CRITIQUE, "3,2 V : critique");
     n = batt_niveau_step(n, 33); TEST_ASSERT(n == BATT_CRITIQUE, "3,3 V : reste critique");
     n = batt_niveau_step(n, 34); TEST_ASSERT(n == BATT_FAIBLE, "3,4 V : faible");
-    n = batt_niveau_step(n, 0);  TEST_ASSERT(n == BATT_NORMAL, "jauge muette : normal");
+    n = batt_niveau_step(n, 0);  TEST_ASSERT(n == BATT_FAIBLE, "echantillon rejete : niveau conserve (pas de FAIBLE->normale->FAIBLE)");
+    TEST_ASSERT(batt_niveau_step(BATT_CRITIQUE, 0) == BATT_CRITIQUE, "echantillon rejete en critique : reste critique");
+    TEST_ASSERT(batt_niveau_step(BATT_NORMAL, 0) == BATT_NORMAL, "jauge muette depuis le boot : normal");
     n = batt_niveau_step(BATT_NORMAL, 31); TEST_ASSERT(n == BATT_CRITIQUE, "chute directe : critique d'un coup");
 }
 

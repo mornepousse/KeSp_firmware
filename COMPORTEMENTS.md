@@ -237,9 +237,14 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   Banc 2026-09-19 : gauche USB + TRRS → `etat=2 5V=1`, 490 sondes / 485 ACK,
   refus de veille `lien=1` ; débranché → `etat=0 5V=0` en < 1 s.
 - [test:test_veille_veto] Registre de vetos de veille (`power/veille_veto.h`,
-  pur) : un état par nom (usb, lien, sync, test), un veto posé bloque toute
-  veille, lever un veto absent est sans effet, noms bornés pour le HB. Câblage
-  dans la tâche de veille unique (Task 7 du plan structure énergie).
+  pur) : un état par nom (usb, lien, sync, test, pair), un veto posé bloque toute
+  veille, lever un veto absent est sans effet, noms bornés pour le HB (les cinq
+  tiennent dans ses 24 octets). Câblage dans la tâche de veille unique (Task 7
+  du plan structure énergie). Le veto `pair` est posé par les deux tâches
+  d'appairage actif (`kbd_pairing_task`, `half_fusion_pairing_task`) : chaque
+  tour tient la puce ~150 ms pendant 30-40 s sans qu'on tape — sans lui, à 15 s
+  d'inactivité `radio_sleep` manquait le verrou et coupait la puce sous la
+  tâche d'appairage (revue 2026-09-20).
 
 ## Niphargus — radio : une puce, un propriétaire
 
@@ -264,6 +269,13 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   section critique) ; toute répétition part avec son snapshot + génération.
   Le sommeil du propriétaire est idempotent (le profond rappelle les hooks
   après le léger) et ne rend au réveil que le verrou qu'il a pris.
+  Côté DROITE, INDISPO (verrou manqué, puce endormie) est traité comme PERIME :
+  rien n'est parti, donc ni numéro de séquence consommé, ni « sans ACK » pour
+  l'écran, ni pas de la FSM de repli — huit verrous manqués de suite
+  basculaient la cible vers la gauche sans qu'une trame ait été refusée
+  (revue 2026-09-20). La bascule se décide sur le snapshot de la cible pris
+  sous `s_etat_mux` (avant/après le pas), pas en relisant l'état vivant du
+  propriétaire (`radio_cible` n'est plus qu'un oracle de test).
   Le hook « relais » de la gauche (timer de rafraîchissement) est enregistré
   AVANT celui du propriétaire : au réveil (ordre inverse) la radio est debout
   avant que le timer ne reparte. La cadence de la tâche clavier lit la présence
@@ -287,7 +299,11 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   l'adresse dérivée du set_id : avant le propriétaire, l'écoute partait sur la
   mauvaise adresse et la première excursion la corrigeait par accident. Le
   timer du relais s'arrête au sommeil par un hook local (sinon ses ticks
-  compteraient des « indisponibles » et fausseraient « dongle vu »). Banc
+  compteraient des « indisponibles » et fausseraient « dongle vu »). La
+  demi-matrice de la droite reçue en écoute USB (`s_remote_bm` + drapeau) est
+  écrite par la tâche esp_timer et lue par le scan et la tâche clavier : les
+  deux vont ensemble sous `s_left_mux`, le drapeau ne peut pas être vu avant
+  les octets (revue 2026-09-20). Banc
   2026-09-19, quatre scénarios : batterie (98,3 % ACK gauche seule, 5 réveils
   avec radio réarmée), USB simultané (la droite sort par la gauche), retour
   (98,6 %), sync par ACK aller-retour (40/40, match=1 deux fois).
@@ -323,7 +339,12 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   de « dernier état gagne ». Un état identique au dernier poussé (réaffirmation
   de maintien) n'est pas une transition ; pleine, la file fond les nouveaux
   dans son dernier slot et le COMPTE : `transitions_ecrasees` (CDC
-  RF_STATUS[27..30]) ne mesure plus que ce débordement. Banc 2026-09-19 : une
+  RF_STATUS[27..30]) ne mesure plus que ce débordement. Dongle MUET (gauche en
+  USB) : la file est VIDÉE à chaque cycle (`fusion_file_vider` : l'attente
+  part, le compteur reste, le dernier poussé est oublié) et à la reprise
+  l'état courant est repoussé une fois — sans ça, jusqu'à 7 transitions
+  périmées de la droite (tapées pendant l'USB) étaient rejouées au
+  débranchement : frappes fantômes (revue 2026-09-20). Banc 2026-09-19 : une
   minute de frappe rapide à deux mains, 699 trames, 182 rapports, 0 écrasement
   (536 en une soirée avec l'ancien moteur), rien de perdu à l'usage. Le dongle
   compte les RÉ-APPUIS (même touche ré-enfoncée < 30 ms après son relâchement,
@@ -396,9 +417,11 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   30 s sans s'empêcher de dormir ; une tension inconnue s'affiche « inconnue »
   (0xFF), jamais 0 V ; en charge, PLEINE apparaît après le plateau.
 - [test:test_batt_calc] Niveau de batterie à hystérésis (`batt_niveau_step`) :
-  FAIBLE sous 3,5 V, CRITIQUE sous 3,3 V, remontée avec 0,1 V de marge, jauge
-  muette (0) = normal ; le journal dit « batterie : FAIBLE/CRITIQUE/normale (dV) »
-  à chaque changement.
+  FAIBLE sous 3,5 V, CRITIQUE sous 3,3 V, remontée avec 0,1 V de marge ; un
+  échantillon rejeté (0) CONSERVE le niveau (un NORMAL forcé faisait
+  FAIBLE→normale→FAIBLE, log et seuil de veille compris, le temps d'une mesure),
+  une jauge muette depuis le boot reste normale ; le journal dit « batterie :
+  FAIBLE/CRITIQUE/normale (dV) » à chaque changement.
 - [smoke:Jauge batterie] Batterie FAIBLE : la tension reste affichée telle
   quelle (pas de clignotement : un redessin de plus pour rien), la jauge garde
   sa lecture avec une bordure ÉPAISSIE (c'est l'alerte), et la moitié ne se déclare plus

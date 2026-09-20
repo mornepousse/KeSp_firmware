@@ -67,6 +67,8 @@ bool radio_mode_set(radio_mode_t mode, const rf_radio_cfg_t *cfg);
  * garde d'une puce figée (clone nRF24 qui n'acquitte plus rien jusqu'au reset). */
 bool radio_rearmer(void);
 radio_mode_t          radio_mode(void);
+/* Oracle des tests host et diagnostic : lecture NON atomique de l'état vivant.
+ * Une politique ne décide pas dessus — elle sait ce qu'elle a demandé. */
 const rf_radio_cfg_t *radio_cible(void);
 
 /* Émission — PTX SEULEMENT (refusée en PRX : passer par l'excursion).

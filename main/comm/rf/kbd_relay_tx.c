@@ -226,6 +226,27 @@ static void kbd_relay_refresh_cb(void *arg)
     kbd_relay_timer_set(kbd_relay_cadence_ms(reparation, tenu, sync, ecoute_usb));
 }
 #if CONFIG_KASE_DONGLE_FUSION
+/* La demi-matrice de la droite est écrite ici (tâche esp_timer, via le
+ * propriétaire) et lue par le callback de scan et la tâche clavier : les
+ * quatre octets et le drapeau vont ensemble sous s_left_mux — le drapeau ne
+ * doit pas pouvoir être vu avant les octets. */
+static void remote_poser(const uint8_t *bm)
+{
+    taskENTER_CRITICAL(&s_left_mux);
+    if (memcmp(s_remote_bm, bm, RF_HALF_BITMAP_BYTES) != 0) {
+        memcpy(s_remote_bm, bm, RF_HALF_BITMAP_BYTES);
+        s_remote_changed = true;
+    }
+    taskEXIT_CRITICAL(&s_left_mux);
+}
+/* Silence de la droite ou sortie de l'écoute : relâcher ce qu'elle tenait
+ * (une moitié muette ne laisse pas une touche collée) ; sans effet si rien
+ * n'était tenu. */
+static void remote_relacher(void)
+{
+    static const uint8_t rien[RF_HALF_BITMAP_BYTES];
+    remote_poser(rien);
+}
 /* Consommateur des trames de la droite (réémises par le dongle sur KaSe.03),
  * appelé par le propriétaire sous son verrou : vidange périodique et vidange
  * AVANT chaque excursion. */
@@ -234,10 +255,7 @@ static void kbd_relay_rx_droite(const uint8_t *rb, uint16_t rn, void *ctx)
     uint32_t now = *(uint32_t *)ctx;
     rf_heartbeat_t h;
     if (!rf_decode_heartbeat(rb, rn, &h)) return;
-    if (memcmp(s_remote_bm, h.bitmap, RF_HALF_BITMAP_BYTES) != 0) {
-        memcpy(s_remote_bm, h.bitmap, RF_HALF_BITMAP_BYTES);
-        s_remote_changed = true;
-    }
+    remote_poser(h.bitmap);
     s_remote_ms = now;
 }
 #endif
@@ -278,11 +296,7 @@ static void kbd_relay_refresh_body(void)
         /* Silence de la droite → relâcher ce qu'elle tenait (même prudence que le
          * dongle : une moitié muette ne laisse pas une touche collée). */
         {
-            bool held = (s_remote_bm[0] | s_remote_bm[1] | s_remote_bm[2] | s_remote_bm[3]) != 0;
-            if (held && (uint32_t)(now - s_remote_ms) >= HALF_LINK_TIMEOUT_MS) {
-                memset(s_remote_bm, 0, RF_HALF_BITMAP_BYTES);
-                s_remote_changed = true;
-            }
+            if ((uint32_t)(now - s_remote_ms) >= HALF_LINK_TIMEOUT_MS) remote_relacher();
         }
         /* Annonce du mode au dongle par excursion : le propriétaire VIDE la FIFO
          * dans notre consommateur AVANT de partir (l'excursion finit par un
@@ -309,8 +323,7 @@ static void kbd_relay_refresh_body(void)
         if (radio_mode_set(RADIO_PTX, &s_kbd_cfg)) {
             /* On quitte l'écoute : relâcher le distant, sinon une touche de la
              * droite resterait figée dans la fusion locale jusqu'au retour USB. */
-            memset(s_remote_bm, 0, RF_HALF_BITMAP_BYTES);
-            s_remote_changed = true;
+            remote_relacher();
             ESP_LOGW(TAG, "fusion : retour emission PTX vers le dongle");
         }
     }
@@ -453,6 +466,11 @@ static void kbd_pairing_task(void *arg)
     bool acked = false;
     int win_ce = -1;
 
+#if CONFIG_KASE_VEILLE
+    /* Chaque tour tient la puce ~150 ms et personne ne tape pendant l'appairage :
+     * sans veto, à 15 s d'inactivité radio_sleep coupait la puce sous cette tâche. */
+    veille_veto(VEILLE_VETO_PAIR, true);
+#endif
     for (unsigned ci = 0; ci < sizeof(ce_cand) / sizeof(ce_cand[0]) && !acked; ci++) {
         int ce = ce_cand[ci];
         ESP_LOGW(TAG, "pairing: trying CE=GPIO%d ...", ce);
@@ -479,6 +497,9 @@ static void kbd_pairing_task(void *arg)
     }
     ESP_LOGE(TAG, "pairing: no CE candidate worked — REQ never reached the dongle "
                   "(check CE wiring / dongle window)");
+#if CONFIG_KASE_VEILLE
+    veille_veto(VEILLE_VETO_PAIR, false);
+#endif
     vTaskDelete(NULL);
 }
 
@@ -561,14 +582,19 @@ const char *veille_hb_suffixe(void)
  * ce que faisait le maître pré-fusion en écoutant la droite en direct. */
 bool kbd_relay_remote_pressed(uint8_t row, uint8_t col)
 {
-    return rf_bitmap_get(s_remote_bm, row, col);
+    taskENTER_CRITICAL(&s_left_mux);
+    bool p = rf_bitmap_get(s_remote_bm, row, col);
+    taskEXIT_CRITICAL(&s_left_mux);
+    return p;
 }
 
 /* L'état distant a-t-il changé depuis le dernier appel ? Consomme le drapeau. */
 bool kbd_relay_remote_changed(void)
 {
+    taskENTER_CRITICAL(&s_left_mux);
     bool ch = s_remote_changed;
     s_remote_changed = false;
+    taskEXIT_CRITICAL(&s_left_mux);
     return ch;
 }
 #endif

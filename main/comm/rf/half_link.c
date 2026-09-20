@@ -115,6 +115,11 @@ static void half_fusion_pairing_task(void *arg)
 
     rf_pair_ack_t ack;
     bool acked = false;
+#if CONFIG_KASE_VEILLE
+    /* 40 s de tours qui tiennent la puce 150 ms chacun, sans frappe : sans veto,
+     * à 15 s d'inactivité radio_sleep coupait la puce sous cette tâche. */
+    veille_veto(VEILLE_VETO_PAIR, true);
+#endif
     /* ~30 s de tentatives : laisse le temps d'ouvrir la fenêtre du dongle. */
     for (int i = 0; i < 200 && !acked; i++) {
         uint8_t rxb[32]; uint16_t n = 0;
@@ -134,6 +139,9 @@ static void half_fusion_pairing_task(void *arg)
     }
     ESP_LOGE(TAG, "fusion appairage : pas d'ACK — ouvrir la fenêtre du dongle "
                   "(KS_CMD_RF_PAIR_START) puis redémarrer la droite");
+#if CONFIG_KASE_VEILLE
+    veille_veto(VEILLE_VETO_PAIR, false);
+#endif
     vTaskDelete(NULL);
 }
 #endif /* CONFIG_KASE_DONGLE_FUSION */
@@ -235,8 +243,6 @@ bool half_link_tx_init(void)
 
 static bool half_link_tx_frame(const uint8_t *buf, uint8_t n);
 static bool half_link_tx_frame_si(const uint8_t *buf, uint8_t n, radio_valide_cb_t encore_valide, void *ctx);
-
-static bool half_link_tx_frame_si(const uint8_t *buf, uint8_t n, radio_valide_cb_t encore_valide, void *ctx);
 bool half_link_tx_matrix_si(const uint8_t *bitmap, radio_valide_cb_t encore_valide, void *ctx)
 {
     if (!radio_presente()) return false;
@@ -306,7 +312,11 @@ static bool half_link_tx_frame_si(const uint8_t *buf, uint8_t n, radio_valide_cb
     /* 50 ms : une émission ESB au pire cas (ARC=15, ARD=500 µs) tient en ~13 ms.
      * Le propriétaire tient le verrou sur toute la transaction, CSN compris. */
     radio_tx_t r = radio_emettre(buf, n, NULL, NULL, 50, encore_valide, ctx);
-    if (r == RADIO_TX_PERIME) return false;   /* état dépassé : ni un refus, ni un envoi — la FSM n'en sait rien */
+    /* PERIME (état dépassé) et INDISPO (verrou pris, puce endormie) : RIEN n'est
+     * parti — ni un refus, ni un envoi. La FSM de repli ne doit pas l'apprendre :
+     * huit verrous manqués de suite basculaient la cible vers la gauche sans
+     * qu'une seule trame ait été refusée par le dongle (revue 2026-09-20). */
+    if (r == RADIO_TX_PERIME || r == RADIO_TX_INDISPO) return false;
     s_seq++;                                  /* la trame est partie : ce numéro est consommé */
     bool ack = (r == RADIO_TX_ACK);
     if (ack) s_sans_ack_ecran = 0; else if (s_sans_ack_ecran < 255) s_sans_ack_ecran++;
@@ -323,22 +333,20 @@ static bool half_link_tx_frame_si(const uint8_t *buf, uint8_t n, radio_valide_cb
     /* En fusion, le réarmement DOUBLE comme repli : il bascule vers l'autre
      * auditeur (dongle ↔ gauche-USB directe). Décision pure et testée
      * (half_tx_target_step, test/test_half_tx_target.c). */
-    bool bascule;
+    bool bascule; half_tx_target_t avant, apres;
     taskENTER_CRITICAL(&s_etat_mux);
+    avant   = s_tx_fsm.cible;
     bascule = half_tx_target_step(&s_tx_fsm, ack, HALF_TX_SWITCH_FAILS);
+    apres   = s_tx_fsm.cible;
     taskEXIT_CRITICAL(&s_etat_mux);
     if (bascule) {
-        const rf_radio_cfg_t *tgt = (s_tx_fsm.cible == HALF_TX_TO_LEFT) ? &s_cfg_left : &s_cfg_dongle;
         /* Même cible qu'avant (puce figée) : radio_mode_set serait idempotent,
-         * radio_rearmer réécrit quand même. */
-        const rf_radio_cfg_t *cur = radio_cible();
-        bool meme = cur->channel == tgt->channel && cur->addr_suffix == tgt->addr_suffix
-                 && memcmp(cur->rx_addr, tgt->rx_addr, sizeof cur->rx_addr) == 0;
-        if (meme) radio_rearmer();                 /* puce figée : réécrire la même config */
-        else      radio_mode_set(RADIO_PTX, tgt);  /* nouvelle cible */
+         * radio_rearmer réécrit quand même. La décision se prend sur le snapshot
+         * pris sous s_etat_mux — pas en relisant l'état vivant du propriétaire. */
+        if (apres == avant) radio_rearmer();
+        else                radio_mode_set(RADIO_PTX, apres == HALF_TX_TO_LEFT ? &s_cfg_left : &s_cfg_dongle);
         ESP_LOGW(TAG, "repli : bascule TX -> %s (rearme, %u sans ACK)",
-                 s_tx_fsm.cible == HALF_TX_TO_LEFT ? "GAUCHE KaSe.03 (heartbeat)"
-                                                   : "DONGLE KaSe.01 (matrix)",
+                 apres == HALF_TX_TO_LEFT ? "GAUCHE KaSe.03 (heartbeat)" : "DONGLE KaSe.01 (matrix)",
                  (unsigned)HALF_TX_SWITCH_FAILS);
     }
 #else

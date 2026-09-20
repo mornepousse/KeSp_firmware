@@ -21,6 +21,9 @@ typedef enum {
     VEILLE_VETO_LIEN = 1u << 1,   /* 5 V du TRRS actif : une moitié charge l'autre */
     VEILLE_VETO_SYNC = 1u << 2,   /* tirage de keymap par ACK payload en cours */
     VEILLE_VETO_TEST = 1u << 3,   /* mode test matrice (CDC) */
+    VEILLE_VETO_PAIR = 1u << 4,   /* appairage actif : radio_pair_round tient la puce ~150 ms par tour,
+                                   * 30-40 s sans que personne ne tape — endormie, radio_sleep coupait
+                                   * la puce sous la tâche d'appairage (revue 2026-09-20) */
 } veille_veto_t;
 
 typedef struct { uint32_t actifs; } veille_vetos_t;
@@ -34,12 +37,14 @@ static inline void veille_veto_poser(veille_vetos_t *v, veille_veto_t quoi, bool
 static inline bool veille_bloquee(const veille_vetos_t *v) { return v->actifs != 0; }
 
 /* Noms des vetos actifs pour le battement de coeur : "usb+lien", "-" si
- * aucun. Borné à n octets (n ≥ 2), tronqué proprement au-delà. */
+ * aucun. Borné à n octets (n ≥ 2), tronqué proprement au-delà — les cinq
+ * tiennent dans les 24 octets du HB ("usb+lien+sync+test+pair" = 23). */
 static inline const char *veille_vetos_str(const veille_vetos_t *v, char *out, size_t n)
 {
     static const struct { veille_veto_t q; const char *nom; } noms[] = {
         { VEILLE_VETO_USB, "usb" }, { VEILLE_VETO_LIEN, "lien" },
         { VEILLE_VETO_SYNC, "sync" }, { VEILLE_VETO_TEST, "test" },
+        { VEILLE_VETO_PAIR, "pair" },
     };
     if (n == 0) return "";
     out[0] = '\0';

@@ -44,6 +44,12 @@ static void test_noms_pour_le_hb(void)
     veille_veto_poser(&v, VEILLE_VETO_SYNC, true);
     veille_veto_poser(&v, VEILLE_VETO_TEST, true);
     TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "usb+lien+sync+test") == 0, "les quatre");
+    veille_veto_poser(&v, VEILLE_VETO_PAIR, true);
+    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "usb+lien+sync+test+pair") == 0, "les cinq tiennent dans 24 octets");
+    veille_veto_poser(&v, VEILLE_VETO_USB, false); veille_veto_poser(&v, VEILLE_VETO_LIEN, false);
+    veille_veto_poser(&v, VEILLE_VETO_SYNC, false); veille_veto_poser(&v, VEILLE_VETO_TEST, false);
+    TEST_ASSERT(veille_bloquee(&v), "l'appairage seul bloque la veille");
+    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "pair") == 0, "pair");
     char petit[6];
     TEST_ASSERT(strlen(veille_vetos_str(&v, petit, sizeof petit)) < sizeof petit, "borne : jamais de debordement");
 }

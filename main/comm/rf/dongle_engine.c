@@ -289,7 +289,21 @@ static void dongle_engine_task(void *arg)
                 hid_send_keyboard(0, none);   /* relâche les touches du dongle */
             }
             prev_types = false;
+            /* Muet, mais la droite continue d'alimenter la file : sans la vider,
+             * jusqu'à 7 transitions périmées (les touches tapées pendant l'USB)
+             * étaient REJOUÉES au retour sans-fil — frappes fantômes au
+             * débranchement (revue 2026-09-20). On jette, s_fusion reste juste. */
+            xSemaphoreTake(s_mux, portMAX_DELAY);
+            fusion_file_vider(&s_file);
+            xSemaphoreGive(s_mux);
             continue;
+        }
+        if (!prev_types) {
+            /* Reprise : appliquer l'état COURANT une fois (une touche tenue à
+             * l'instant du débranchement doit être tapée), puis on rejoue au fil. */
+            xSemaphoreTake(s_mux, portMAX_DELAY);
+            fusion_file_push(&s_file, &s_fusion);
+            xSemaphoreGive(s_mux);
         }
         prev_types = true;
 

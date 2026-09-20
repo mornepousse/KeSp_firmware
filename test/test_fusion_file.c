@@ -64,6 +64,25 @@ static void test_debordement_ecrase_le_plus_recent_et_compte(void)
     fusion_file_pop(&f, &out); TEST_ASSERT(out.left.bitmap[0] == 99, "le dernier slot porte le plus recent");
 }
 
+/* Dongle muet (gauche en USB) : la droite continue d'alimenter la file. Sans
+ * vidange, jusqu'à 7 transitions périmées étaient rejouées au retour sans-fil
+ * (touches fantômes au débranchement, revue 2026-09-20). Vider jette l'attente,
+ * garde le compteur de débordements, et oublie le dernier poussé : l'état
+ * courant repoussé à la reprise ne doit pas être dédoublonné. */
+static void test_vider_jette_l_attente_et_laisse_repousser_le_courant(void)
+{
+    fusion_file_t f; fusion_file_init(&f);
+    for (uint8_t i = 1; i <= FUSION_FILE_CAP + 1; i++) { fusion_state_t e = etat(i, 0); fusion_file_push(&f, &e); }
+    TEST_ASSERT_EQ(f.ecrasees, 1, "un debordement compte avant");
+    fusion_state_t courant = etat(FUSION_FILE_CAP + 1, 0), out;
+    fusion_file_vider(&f);
+    TEST_ASSERT_EQ(fusion_file_en_attente(&f), 0, "plus rien en attente");
+    TEST_ASSERT_EQ(f.ecrasees, 1, "le compteur de debordements survit");
+    TEST_ASSERT(fusion_file_push(&f, &courant), "le courant repousse n'est pas dedoublonne");
+    TEST_ASSERT(fusion_file_pop(&f, &out) && out.left.bitmap[0] == FUSION_FILE_CAP + 1, "et c'est lui qu'on rejoue");
+    TEST_ASSERT(!fusion_file_pop(&f, &out), "lui seul");
+}
+
 void test_fusion_file(void)
 {
     TEST_SUITE("file de transitions du moteur du dongle");
@@ -71,4 +90,5 @@ void test_fusion_file(void)
     TEST_RUN(test_appui_puis_relachement_ne_fondent_pas);
     TEST_RUN(test_identiques_consecutifs_ne_comptent_qu_une_fois);
     TEST_RUN(test_debordement_ecrase_le_plus_recent_et_compte);
+    TEST_RUN(test_vider_jette_l_attente_et_laisse_repousser_le_courant);
 }

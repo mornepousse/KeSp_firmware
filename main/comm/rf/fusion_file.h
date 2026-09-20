@@ -60,4 +60,14 @@ static inline bool fusion_file_pop(fusion_file_t *f, fusion_state_t *out)
 }
 
 static inline uint8_t  fusion_file_en_attente(const fusion_file_t *f) { return f->n; }
+
+/* Jeter ce qui attend sans rien rejouer (dongle muet : la droite continue
+ * d'alimenter la file). Le compteur de débordements survit ; le dernier poussé
+ * est oublié pour que l'état courant, repoussé à la reprise, passe le
+ * dédoublonnage. */
+static inline void fusion_file_vider(fusion_file_t *f)
+{
+    f->tete = f->n = 0;
+    f->dernier_valide = false;
+}
 static inline uint32_t fusion_file_ecrasees(const fusion_file_t *f)   { return f->ecrasees; }

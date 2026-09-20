@@ -105,7 +105,7 @@ bool radio_rearmer(void)
     return true;
 }
 radio_mode_t          radio_mode(void)  { return s_mode; }
-const rf_radio_cfg_t *radio_cible(void) { return &s_cible; }
+const rf_radio_cfg_t *radio_cible(void) { return &s_cible; }   /* tests / diagnostic seulement */
 
 radio_tx_t radio_emettre(const uint8_t *buf, uint8_t len, uint8_t *ack, uint8_t *ack_len,
                          uint32_t timeout_ms, radio_valide_cb_t encore_valide, void *ctx)
