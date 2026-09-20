@@ -72,5 +72,16 @@ half of a split that carries the engine), `KASE_DEVICE_ROLE_SPLIT_SCANNER`
 | `conchodytes` | Conchodytes mouse — PMW3389, clicks, wheel |
 | `_template` | the template (`new-board.sh` copies it; CMake refuses to build it) |
 
-Out-of-tree boards (`-DBOARD_DIR=…`) are the next step of
-`docs/ROADMAP_MAKE_YOUR_OWN.md`.
+## A board outside the repository
+
+Keep your board in your own repository and this firmware as a pinned
+dependency (submodule, or a checkout at a tag):
+
+```bash
+scripts/new-board.sh my_board /path/to/my_repo        # creates /path/to/my_repo/my_board/
+idf.py -B build_my_board -DBOARD_DIR=/path/to/my_repo/my_board -DSDKCONFIG=build_my_board/sdkconfig build
+```
+
+`BOARD` is the folder's name unless you pass `-DBOARD=` too. The four files are
+the same; the host contract test is not registered for you (it lives here) —
+copy a `test/test_board_contract_*.c` into your own test setup if you want it.

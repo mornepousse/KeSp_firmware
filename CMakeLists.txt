@@ -4,11 +4,26 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
-# Board selection: idf.py -DBOARD=kase_v1 build
-if(NOT DEFINED BOARD)
-    set(BOARD "kase_v2_debug" CACHE STRING "Target board")
+# Board selection — two forms:
+#   idf.py -DBOARD=kase_v1 build                     a board of this repository (boards/<name>/)
+#   idf.py -DBOARD_DIR=/path/to/my_board build       a board kept OUTSIDE the repository
+#     (same four files: board.h, board_keymap.c, board_layout.c, sdkconfig.defaults;
+#      BOARD is then the folder's name unless given). The firmware is a dependency
+#      the user pins; their board lives in their own repository.
+if(DEFINED BOARD_DIR AND NOT BOARD_DIR STREQUAL "")
+    get_filename_component(BOARD_DIR "${BOARD_DIR}" ABSOLUTE)
+    if(NOT DEFINED BOARD)
+        get_filename_component(BOARD "${BOARD_DIR}" NAME)
+    endif()
+    set(BOARD "${BOARD}" CACHE STRING "Target board" FORCE)
+    set(BOARD_DIR "${BOARD_DIR}" CACHE INTERNAL "")
+    message(STATUS "Out-of-tree board '${BOARD}': ${BOARD_DIR}")
+else()
+    if(NOT DEFINED BOARD)
+        set(BOARD "kase_v2_debug" CACHE STRING "Target board")
+    endif()
+    set(BOARD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD}" CACHE INTERNAL "")
 endif()
-set(BOARD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD}" CACHE INTERNAL "")
 if(BOARD STREQUAL "_template")
     message(FATAL_ERROR "boards/_template is the template: create a board with scripts/new-board.sh <name>")
 endif()

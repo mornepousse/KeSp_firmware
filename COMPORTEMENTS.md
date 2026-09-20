@@ -247,6 +247,11 @@ means a test, or a line.
   of the name (the template's comment listed them and used to select the
   memory-LCD). Proven 2026-09-20 with a demo board: contract test runs, the
   full check builds 8 boards, the 7 existing binaries unchanged.
+- [smoke:New board from the template] A board may live OUTSIDE the
+  repository: `idf.py -DBOARD_DIR=/path/to/board` builds it (BOARD = the
+  folder's name unless given), `scripts/new-board.sh <name> <parent>` creates
+  it there. Proven 2026-09-20: a template board in /tmp built from its folder
+  alone, PRODUCT_NAME in the image.
 - [test:test_take_consumes_the_signal] A matrix edge is never lost during
   reading: the signal is taken, consumed, never overwritten by the next
   read.

@@ -4,16 +4,28 @@
 # discovered from boards/*/sdkconfig.defaults) and the release script find it
 # from there. Only the host test needs two lines registered (test/CMakeLists.txt,
 # test/test_main.c) — done here.
+# Out of the tree: scripts/new-board.sh <name> /path/to/parent creates
+# /path/to/parent/<name>/ for a board kept in its own repository, built with
+# idf.py -DBOARD_DIR=/path/to/parent/<name>. No host test is registered then
+# (the contract test lives in this repository); copy test_board_contract_*.c
+# into your own test setup if you want it.
 set -euo pipefail
-name="${1:?usage: scripts/new-board.sh <name>   (lowercase letters, digits, underscore)}"
+name="${1:?usage: scripts/new-board.sh <name> [/path/to/parent]   (lowercase letters, digits, underscore)}"
+parent="${2:-}"
 [[ "$name" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "bad board name: $name" >&2; exit 2; }
 [ "$name" = "_template" ] && { echo "_template is the template" >&2; exit 2; }
 root="$(cd "$(dirname "$0")/.." && pwd)"
-dst="$root/boards/$name"
+if [ -n "$parent" ]; then dst="$(cd "$parent" && pwd)/$name"; else dst="$root/boards/$name"; fi
 [ -e "$dst" ] && { echo "$dst already exists" >&2; exit 1; }
 
 cp -r "$root/boards/_template" "$dst"
 sed -i "s/__BOARD_NAME__/$name/g" "$dst"/*
+
+if [ -n "$parent" ]; then
+    echo "created $dst (out of tree)"
+    echo "build: idf.py -B build_$name -DBOARD_DIR=$dst -DSDKCONFIG=build_$name/sdkconfig build"
+    exit 0
+fi
 
 # Host contract test: one translation unit per board (test/board_contract.inc).
 cat > "$root/test/test_board_contract_$name.c" <<EOC

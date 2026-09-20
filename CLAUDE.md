@@ -252,7 +252,7 @@ the netlist).
 
 **Standardisation roadmap (2026-09-20)**: `docs/ROADMAP_MAKE_YOUR_OWN.md` —
 board = one folder (**done 2026-09-20**, `boards/README.md`), out-of-tree
-boards (`-DBOARD_DIR`), GitHub Actions CI + release on tag, a "make your own"
+boards (`-DBOARD_DIR`, **done 2026-09-20**), GitHub Actions CI + release on tag, a "make your own"
 document and a single project name (KaSe is a keyboard, KeSp the firmware —
 "kase" is everywhere, to be sorted out there).
 

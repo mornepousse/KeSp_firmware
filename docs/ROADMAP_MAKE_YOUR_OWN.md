@@ -34,6 +34,10 @@ from any mention of its name (now a real `#define`).
 
 ## 2. The board out of the tree (QMK userspace / ZMK config-repo model)
 
+**`-DBOARD_DIR` done 2026-09-20** (`boards/README.md`): a template board created
+in `/tmp` built from its folder alone. Left for item 3: the release CI building
+such a board.
+
 - `-DBOARD_DIR=/path/to/my_board`: the user keeps board + keymap in their
   own repository; this firmware is a dependency they pin (submodule or
   `idf_component.yml` git source).
