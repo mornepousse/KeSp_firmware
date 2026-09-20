@@ -46,6 +46,9 @@ for i in "${!BOARDS[@]}"; do
 
     echo ""
     echo "======================================== $board"
+    # reconfigure: the version string (git describe) is captured at CMake
+    # configure time — an incremental build after `git tag` keeps the old one.
+    idf.py -B "$bdir" -DBOARD="$board" -DSDKCONFIG="$bdir/sdkconfig" reconfigure > /dev/null 2>&1
     idf.py -B "$bdir" -DBOARD="$board" -DSDKCONFIG="$bdir/sdkconfig" build 2>&1 | tail -3
 
     cp "$bdir/KeSp.bin" "$RELEASE_DIR/KaSe_${VERSION_TAG}_${hw}.bin"
