@@ -308,6 +308,7 @@ endif()
 set(priv_requires
     esp_driver_gpio
     esp_timer
+    keyboard_button   # components/keyboard_button — our patched copy, a project component (not managed)
     esp_adc           # jauge batterie (batt_sense) — inconditionnel, ~rien sans KASE_BATT_SENSE
     nvs_flash
     nvs_sec_provider  # NVS encryption HMAC scheme (CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC).

@@ -313,7 +313,18 @@ source it before `idf.py`). Stats: `ccache -s`.
 (2026-09-18) queries the registry on every configure and evaluates LVGL 9's
 manifests against our LVGL 8 sdkconfig → `MissingKconfigError:
 LV_USE_LIBJPEG_TURBO`, fatal. For a manual `idf.py` outside `check.sh`,
-export the same variable.
+export the same variable. **To change `main/idf_component.yml`** (which forces
+a re-solve of `dependencies.lock`), manager 2.2.2 cannot: use a newer one in a
+throw-away venv layered on the devshell python —
+`python3 -m venv --system-site-packages /tmp/icm && /tmp/icm/bin/pip install
+idf-component-manager==2.5.2 && /tmp/icm/bin/python $IDF_PATH/tools/idf.py -B
+build_<b> -DBOARD=<b> -DSDKCONFIG=build_<b>/sdkconfig reconfigure` — then READ
+the lock diff: a re-solve moves every `^` dependency to its latest (2026-09-20:
+TinyUSB 0.19 → 0.21 silently; now pinned `==0.19.0~3`, upgraded on purpose
+only). The lock must contain no `path:` — a local component listed in the
+manifest gets an absolute path of one machine and breaks every other checkout
+(the CI did). Local components are plain project components under
+`components/`, required by name from `main/CMakeLists.txt`.
 
 **Per-board defaults**: `boards/<name>/sdkconfig.defaults` is loaded on top of
 the root `sdkconfig.defaults` (CMake refuses a board without one — empty is
@@ -583,7 +594,9 @@ Managed via `main/idf_component.yml`:
 - `espressif/esp_lvgl_port`
 - `espressif/esp_lcd_gc9a01`
 - `joltwallet/littlefs`
-- `espressif/keyboard_button` (local in `components/`)
+- `keyboard_button`: NOT managed — our patched copy is the project component
+  `components/keyboard_button/` (a managed local override wrote an absolute
+  path of one machine into `dependencies.lock`, 2026-09-20)
 - `espressif/led_strip`
 
 Lock: `dependencies.lock` (tracked in git). To update:

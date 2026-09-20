@@ -1,10 +1,17 @@
 ## IDF Component Manager Manifest File
 dependencies:
   espressif/esp_tinyusb: ^2.0.1
+  # TinyUSB itself, pinned: a re-solve of the lock (2026-09-20) silently moved
+  # it 0.19.0~3 → 0.21.0~2 (+384 B of text, different USB symbols). The USB
+  # stack is upgraded on purpose, with a bench pass, not by a lock refresh.
+  espressif/tinyusb: "==0.19.0~3"
   idf: ^5.0
   lvgl/lvgl: ^8
   espressif/esp_lvgl_port: ^2.6.0
   espressif/esp_lcd_gc9a01: "^1.0.0"
   joltwallet/littlefs: ^1.20.1
-  espressif/keyboard_button: ^1.0.0
+  # keyboard_button is NOT managed: our patched copy lives in
+  # components/keyboard_button (power-save fixes) and ESP-IDF picks it up as a
+  # project component. Listing it here made the lock record an absolute path of
+  # one machine, which no other checkout (CI, contributor) could configure.
   espressif/led_strip: ^3.0.0
