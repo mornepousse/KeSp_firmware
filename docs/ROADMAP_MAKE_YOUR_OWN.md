@@ -48,6 +48,13 @@ such a board.
 
 ## 3. CI on GitHub Actions
 
+**Written 2026-09-20** (`.github/workflows/ci.yml`): host tests + contract,
+7-board matrix, an out-of-tree template board, release on tag (14 artefacts,
+pre-release on a suffixed tag, embedded version checked against the tag).
+The old GitLab-mirror release job was removed (it clobbered the notes of
+v4.2.0-beta.1 with `null` while waiting for a GitLab release that no longer
+exists). Done when the first tag goes through it.
+
 - Build matrix of the 7 boards on every push and PR (ESP-IDF 5.5 docker
   image; ccache keyed on the lock file).
 - On a `v*` tag: build the 14 artefacts (`scripts/build_release.sh`) and

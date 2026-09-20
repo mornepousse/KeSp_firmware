@@ -252,7 +252,8 @@ the netlist).
 
 **Standardisation roadmap (2026-09-20)**: `docs/ROADMAP_MAKE_YOUR_OWN.md` —
 board = one folder (**done 2026-09-20**, `boards/README.md`), out-of-tree
-boards (`-DBOARD_DIR`, **done 2026-09-20**), GitHub Actions CI + release on tag, a "make your own"
+boards (`-DBOARD_DIR`, **done 2026-09-20**), GitHub Actions CI + release on tag
+(**`.github/workflows/ci.yml`, 2026-09-20**), a "make your own"
 document and a single project name (KaSe is a keyboard, KeSp the firmware —
 "kase" is everywhere, to be sorted out there).
 
@@ -624,8 +625,13 @@ in the CDC `VERSION` reply.
    flash at 0x20000) and `release/KaSe_vX.Y.Z_<HW>_full.bin` (bootloader +
    partitions + app + LittleFS, flash at 0x0) for the 7 boards: V1, V2,
    V2_Debug, Dongle, Niphargus_Left, Niphargus_Right, Conchodytes
-4. `glab release create vX.Y.Z release/KaSe_vX.Y.Z_*.bin --notes "…"` — the
-   GitLab→GitHub mirror carries the tag, the assets stay on GitLab
+4. The release is published on **GitHub** (the repo of record): the CI
+   (`.github/workflows/ci.yml`) builds the 14 artefacts on the tag and creates
+   the release — pre-release when the tag has a suffix — with generated notes;
+   then `gh release edit vX.Y.Z --notes-file <curated notes>`. Manual fallback:
+   `gh release create vX.Y.Z release/KaSe_vX.Y.Z_*.bin --repo mornepousse/KeSp_firmware --notes-file …`.
+   ⚠ Tags don't always ride the GitLab→GitHub mirror: `git push github vX.Y.Z`
+   (a tag advances no branch, it cannot stall the mirror).
 
 ### Smoke test
 

@@ -1,63 +1,123 @@
 name: CI
 
+# Host tests + the 7 boards on every push and PR; on a v* tag, the 14 release
+# artefacts (app + full image per board) and the GitHub release — pre-release
+# when the tag carries a suffix (v4.2.0-beta.1), Latest otherwise. Mirrors
+# scripts/check.sh and scripts/build_release.sh; the local pre-push stays the
+# author's safety net, this is the contributors'.
+
 on:
   push:
     branches: ['**']
     tags: ['v*']
   pull_request:
 
+env:
+  IDF_VERSION: v5.5.2
+  IDF_COMPONENT_CHECK_NEW_VERSION: "0"
+
 jobs:
   host-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build and run unit tests
-        run: |
-          cmake -S test -B test/build
-          cmake --build test/build
-          ./test/build/test_runner
+      - name: Host tests, behaviour contract, declared divergences
+        run: ./scripts/check.sh --fast --force
 
   build-firmware:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        board: [kase_v1, kase_v2, kase_v2_debug, kase_dongle, kase_half_left, kase_half_right]
+        board: [kase_v1, kase_v2, kase_v2_debug, kase_dongle, niphar_left, niphar_right, conchodytes]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # git describe --tags for the embedded version
+      - name: Version string (git describe on the runner — the build container has no trusted git)
+        run: echo "PROJECT_VER=$(git describe --tags --always --dirty)" >> "$GITHUB_ENV"
       - name: Build ${{ matrix.board }}
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.1
+          esp_idf_version: ${{ env.IDF_VERSION }}
           target: esp32s3
-          command: idf.py -B build_${{ matrix.board }} -DBOARD=${{ matrix.board }} -DSDKCONFIG=build_${{ matrix.board }}/sdkconfig build
-      - name: Upload firmware binary
+          command: >
+            idf.py -B build_${{ matrix.board }} -DBOARD=${{ matrix.board }}
+            -DSDKCONFIG=build_${{ matrix.board }}/sdkconfig
+            -DPROJECT_VER=${{ env.PROJECT_VER }} build
+      - name: Upload build (app + parts of the full image)
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.board }}
-          path: build_${{ matrix.board }}/KeSp.bin
+          name: build-${{ matrix.board }}
+          path: |
+            build_${{ matrix.board }}/KeSp.bin
+            build_${{ matrix.board }}/bootloader/bootloader.bin
+            build_${{ matrix.board }}/partition_table/partition-table.bin
+            build_${{ matrix.board }}/ota_data_initial.bin
+            build_${{ matrix.board }}/storage.bin
+          if-no-files-found: warn
+
+  # A board that lives outside the repository must keep building (boards/README.md).
+  build-out-of-tree-board:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create a board from the template outside the tree
+        run: |
+          mkdir -p "$RUNNER_TEMP/myboards"
+          scripts/new-board.sh ci_board "$RUNNER_TEMP/myboards"
+          echo "BOARD_DIR=$RUNNER_TEMP/myboards/ci_board" >> "$GITHUB_ENV"
+      - name: Build it with -DBOARD_DIR
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: esp32s3
+          command: idf.py -B build_ci_board -DBOARD_DIR=${{ env.BOARD_DIR }} -DSDKCONFIG=build_ci_board/sdkconfig build
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [host-tests, build-firmware]
+    needs: [host-tests, build-firmware, build-out-of-tree-board]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Download all firmware artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Prepare release binaries
+      - name: Merge the full images and name the artefacts
         run: |
+          pip install --quiet esptool
           TAG="${GITHUB_REF#refs/tags/}"
           mkdir -p release
-          cp artifacts/firmware-kase_v1/KeSp.bin "release/KaSe_${TAG}_V1.bin"
-          cp artifacts/firmware-kase_v2/KeSp.bin "release/KaSe_${TAG}_V2.bin"
-          cp artifacts/firmware-kase_v2_debug/KeSp.bin "release/KaSe_${TAG}_V2_Debug.bin"
-      - name: Create GitHub Release
+          declare -A HW=( [kase_v1]=V1 [kase_v2]=V2 [kase_v2_debug]=V2_Debug [kase_dongle]=Dongle
+                          [niphar_left]=Niphargus_Left [niphar_right]=Niphargus_Right [conchodytes]=Conchodytes )
+          for b in "${!HW[@]}"; do
+            d="artifacts/build-$b"; hw="${HW[$b]}"
+            cp "$d/KeSp.bin" "release/KaSe_${TAG}_${hw}.bin"
+            storage=(); [ -f "$d/storage.bin" ] && storage=(0x420000 "$d/storage.bin")
+            esptool.py --chip esp32s3 merge_bin -o "release/KaSe_${TAG}_${hw}_full.bin" \
+              --flash_mode dio --flash_freq 80m --flash_size 16MB \
+              0x0 "$d/bootloader/bootloader.bin" 0x8000 "$d/partition_table/partition-table.bin" \
+              0x19000 "$d/ota_data_initial.bin" 0x20000 "$d/KeSp.bin" "${storage[@]}"
+          done
+          ls -l release
+          # Embedded version must be the tag (fetch-depth 0 in the build job).
+          python3 - <<'PY'
+          import glob,os,sys
+          tag=os.environ["GITHUB_REF"].split("/")[-1]; bad=0
+          for f in glob.glob("release/KaSe_*_*.bin"):
+              if f.endswith("_full.bin"): continue
+              d=open(f,"rb").read(); v=d[0x30:0x50].split(b"\0")[0].decode()
+              print(f, v)
+              if v!=tag: bad=1
+          sys.exit(bad)
+          PY
+      - name: Publish the GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: release/*.bin
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
+          # Notes: the generated list is a starting point — edit the release
+          # afterwards with the curated notes (docs: CLAUDE.md, Release workflow).
