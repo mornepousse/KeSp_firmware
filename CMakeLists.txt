@@ -9,6 +9,9 @@ if(NOT DEFINED BOARD)
     set(BOARD "kase_v2_debug" CACHE STRING "Target board")
 endif()
 set(BOARD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD}" CACHE INTERNAL "")
+if(BOARD STREQUAL "_template")
+    message(FATAL_ERROR "boards/_template is the template: create a board with scripts/new-board.sh <name>")
+endif()
 if(NOT EXISTS "${BOARD_DIR}/board.h")
     message(FATAL_ERROR "Board '${BOARD}' not found: ${BOARD_DIR}/board.h does not exist")
 endif()
@@ -26,9 +29,11 @@ message(STATUS "Board defaults: ${_PER_BOARD_DEFAULTS}")
 
 # Detect display backend from board.h
 file(READ "${BOARD_DIR}/board.h" _board_h_content)
-if(_board_h_content MATCHES "BOARD_DISPLAY_BACKEND_MEMLCD")
+# A #define at the start of a line, not any mention: a comment listing the
+# backends (the template does) must not select one.
+if(_board_h_content MATCHES "\n#define[ \t]+BOARD_DISPLAY_BACKEND_MEMLCD")
     set(DISPLAY_BACKEND "memlcd" CACHE INTERNAL "")
-elseif(_board_h_content MATCHES "BOARD_DISPLAY_BACKEND_ROUND")
+elseif(_board_h_content MATCHES "\n#define[ \t]+BOARD_DISPLAY_BACKEND_ROUND")
     set(DISPLAY_BACKEND "round" CACHE INTERNAL "")
 else()
     set(DISPLAY_BACKEND "oled" CACHE INTERNAL "")

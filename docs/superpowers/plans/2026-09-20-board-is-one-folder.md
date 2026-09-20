@@ -31,6 +31,7 @@
   default that stopped being read.
 - [x] Task 1 done 2026-09-20: 7/7 identical, old mechanism vs new, regenerated sdkconfigs.
 - [x] Task 2 done 2026-09-20: bench left/right/V2D (rows, columns, wake per row) OK — the right re-flashed and re-tested after a stash-built stale binary was caught by the Task 3 oracle.
+- [x] Task 5 done 2026-09-20: template + new-board.sh + discovery; demo board built by the full check (8 boards); needed KASE_NO_DISPLAY and a stricter backend detection; 7/7 identical.
 - [x] Task 4 done 2026-09-20: KASE_SPLIT_MASTER / KASE_DEVICE_ROLE_SPLIT_SCANNER, sdkconfigs regenerated, 7/7 identical.
 - [x] Task 3 done 2026-09-20: 7 units green, bites on a duplicated V2 column, binaries identical to a HEAD rebuild (right: `cmp` empty).
 

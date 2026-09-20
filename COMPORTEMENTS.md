@@ -236,6 +236,17 @@ means a test, or a line.
   board declares them, pin tables consistent with MATRIX_ROWS/COLS and
   KEYMAP_COLS. Proven biting: a duplicated column on the V2 turns V2 and V2D
   red. The Niphargus pin tests keep their hardware-specific facts.
+- [smoke:New board from the template] A board is one folder:
+  `scripts/new-board.sh <name>` copies `boards/_template/` (board.h with the
+  pin tables and `BOARD_PINS(X)`, keymap, layout, sdkconfig.defaults, README)
+  and writes the board's contract test unit; `check.sh` discovers boards from
+  `boards/*/sdkconfig.defaults` (declared divergence), CMake refuses
+  `_template`, and a keyboard without a screen says so with
+  `KASE_NO_DISPLAY=y` instead of inheriting the V2 OLED. The display backend
+  is chosen by a real `#define BOARD_DISPLAY_BACKEND_*`, not by any mention
+  of the name (the template's comment listed them and used to select the
+  memory-LCD). Proven 2026-09-20 with a demo board: contract test runs, the
+  full check builds 8 boards, the 7 existing binaries unchanged.
 - [test:test_take_consumes_the_signal] A matrix edge is never lost during
   reading: the signal is taken, consumed, never overwritten by the next
   read.

@@ -147,3 +147,12 @@ in the PR/release.
 ## BLE (relevant boards)
 - [ ] Host pairing OK, types with no drop for 1 min
 - [ ] BT slot switch OK
+
+## Boards — tooling
+
+- [ ] New board from the template: `scripts/new-board.sh demo` creates
+      `boards/demo/` and `test/test_board_contract_demo.c`; without any other
+      edit `./scripts/check.sh --fast` runs its pin contract and
+      `./scripts/check.sh` builds it (8 boards). Then delete the folder, the
+      test unit and its two registration lines. Done 2026-09-20.
+

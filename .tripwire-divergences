@@ -6,3 +6,4 @@ scripts/check.sh	export IDF_CCACHE_ENABLE=1	project preamble: the 7 boards share
 scripts/check.sh	command -v idf.py	a missing tool is not a regression: without the devshell, the build phase skips itself while announcing it, instead of a red indistinguishable from broken code (doctrine v0.12.0)
 scripts/hooks/cc_session_start.sh	.kase-board	custom variant file, predates .tripwire-variant and referenced by .esp-dev.yml, CLAUDE.md and the kase-board-variant agent
 scripts/check.sh	export IDF_COMPONENT_CHECK_NEW_VERSION=0	project preamble: the 2.2.2 component manager crashes at configure time by evaluating the registry's LVGL 9 manifests against an LVGL 8 sdkconfig (LV_USE_LIBJPEG_TURBO); the lock is authoritative, no network needed at build time
+scripts/check.sh	mapfile -t ALL_VARIANTS	boards are discovered from boards/*/sdkconfig.defaults — a new board folder is its own registration (plan 2026-09-20 board-is-one-folder); the scaffold hard-codes the list

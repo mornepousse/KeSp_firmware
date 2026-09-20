@@ -260,18 +260,29 @@ config KASE_MATRIX_LOG_CONSOLE
         from CLAUDE.md: it's too slow for real typing. Off by default, never
         compiled in production.
 
+config KASE_NO_DISPLAY
+    bool "This board has no display"
+    default n
+    help
+        A keyboard without a screen: no display backend, no status display
+        task. Without this, the KEYBOARD role compiles the OLED backend by
+        default (the historical V2), which needs BOARD_DISPLAY_* macros the
+        board does not have. Boards with a screen leave this off and choose
+        their backend in board.h (BOARD_DISPLAY_BACKEND_OLED/ROUND) or with
+        KASE_DISPLAY_MEMLCD.
+
 config KASE_HAS_DISPLAY
     bool
     default y if KASE_DISPLAY_MEMLCD
+    default n if KASE_NO_DISPLAY
     default n if KASE_SPLIT_MASTER
     default y if KASE_DEVICE_ROLE_KEYBOARD
     default n
     help
-        Compiles display backends and status display task. Niphargus left
-        (KASE_SPLIT_MASTER) has no screen at all (J12 unpopulated — see
-        docs/NIPHARGUS_V2_HARDWARE.md) and must take priority over the
-        KEYBOARD-role default: Kconfig honors the first satisfied `default`
-        in source order, so this override has to come first.
+        Compiles display backends and status display task. Kconfig honors the
+        first satisfied `default` in source order: a memory-LCD wins, then an
+        explicit "no display", then the split-master rule (kept for a master
+        built without KASE_DISPLAY_MEMLCD), then the KEYBOARD-role default.
 
 config KASE_NO_RADIO
     bool "Strict wired keyboard: no BLE, no WiFi"

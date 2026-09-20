@@ -33,7 +33,10 @@ export IDF_CCACHE_ENABLE=1
 export IDF_COMPONENT_CHECK_NEW_VERSION=0
 
 # Variantes de build. Laisser vide pour un projet mono-cible.
-ALL_VARIANTS=(kase_v1 kase_v2 kase_v2_debug kase_dongle niphar_left niphar_right conchodytes)
+# KaSe : les cartes sont DÉCOUVERTES depuis boards/*/sdkconfig.defaults — un
+# nouveau dossier de carte est sa propre inscription (plan 2026-09-20
+# « a board is one folder »). _template est le gabarit de scripts/new-board.sh.
+mapfile -t ALL_VARIANTS < <(for d in boards/*/sdkconfig.defaults; do d="${d#boards/}"; d="${d%/sdkconfig.defaults}"; [ "$d" != "_template" ] && echo "$d"; done)
 
 # Modules (monorepo, optionnel) : quand un hook passe --changed <fichier>, la
 # phase rapide est routée sur le premier module dont le glob matche. Sans match
