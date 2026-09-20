@@ -194,6 +194,39 @@ uint32_t dongle_engine_transitions_ecrasees(void) { return fusion_file_ecrasees(
 static uint32_t s_gap_max_ms, s_gap_dernier_ms;
 uint32_t dongle_engine_gap_max_ms(void) { uint32_t g = s_gap_max_ms; s_gap_max_ms = 0; return g; }
 
+/* Détecteur de RÉ-APPUI : une touche relâchée puis ré-enfoncée en moins de
+ * DONGLE_REAPPUI_MS. Deux causes connues, toutes deux invisibles avant la file
+ * de transitions (le moteur échantillonnait à 10 ms) : une répétition périmée
+ * émise par une moitié après le relâchement (corrigé par radio_emettre PERIME,
+ * 2026-09-20) et un rebond mécanique plus long que l'anti-rebond des moitiés
+ * (3 → 5 ms le même jour). Compté et journalisé : au banc, ce qui reste après
+ * ces deux correctifs est le switch. */
+#define DONGLE_REAPPUI_MS 30u
+static uint32_t s_relache_ms[2][RF_HALF_ROWS * RF_HALF_COLS];
+static uint32_t s_reappuis;
+static uint8_t  s_reappui_half, s_reappui_key; static uint16_t s_reappui_ms;   /* le dernier : pour l'attribuer sans console */
+uint32_t dongle_engine_reappuis(void) { return s_reappuis; }
+void dongle_engine_dernier_reappui(uint8_t *half, uint8_t *key, uint16_t *delta_ms)
+{ *half = s_reappui_half; *key = s_reappui_key; *delta_ms = s_reappui_ms; }
+static void detecter_reappui(const half_state_t *avant, const rf_matrix_t *m, uint32_t now)
+{
+    unsigned h = (m->half == RF_HALF_RIGHT) ? 1 : 0;
+    for (uint8_t r = 0; r < RF_HALF_ROWS; r++)
+        for (uint8_t c = 0; c < RF_HALF_COLS; c++) {
+            bool etait = rf_bitmap_get(avant->bitmap, r, c), est = rf_bitmap_get(m->bitmap, r, c);
+            unsigned k = (unsigned)r * RF_HALF_COLS + c;
+            if (etait && !est) s_relache_ms[h][k] = now ? now : 1;
+            else if (!etait && est && s_relache_ms[h][k] && (uint32_t)(now - s_relache_ms[h][k]) < DONGLE_REAPPUI_MS) {
+                s_reappuis++;
+                s_reappui_half = (uint8_t)m->half; s_reappui_key = (uint8_t)k;
+                s_reappui_ms = (uint16_t)(now - s_relache_ms[h][k]);
+                ESP_LOGW(TAG, "re-appui #%lu : moitie %u (%u,%u) %lu ms apres son relachement",
+                         (unsigned long)s_reappuis, (unsigned)m->half, (unsigned)r, (unsigned)c,
+                         (unsigned long)(now - s_relache_ms[h][k]));
+            }
+        }
+}
+
 void dongle_engine_on_matrix(const rf_matrix_t *m)
 {
     if (!s_mux) return;
@@ -201,6 +234,7 @@ void dongle_engine_on_matrix(const rf_matrix_t *m)
                            : (m->half == RF_HALF_LEFT)  ? &s_fusion.left : NULL;
     xSemaphoreTake(s_mux, portMAX_DELAY);
     bool changed = hs && memcmp(hs->bitmap, m->bitmap, RF_HALF_BITMAP_BYTES) != 0;
+    if (changed) detecter_reappui(hs, m, now_ms());
     if (fusion_apply(&s_fusion, m, now_ms()) && changed) {
         uint32_t avant = fusion_file_ecrasees(&s_file);
         fusion_file_push(&s_file, &s_fusion);   /* rejouée par le moteur, dans l'ordre */

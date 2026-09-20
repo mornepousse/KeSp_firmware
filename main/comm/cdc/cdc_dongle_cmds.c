@@ -46,7 +46,7 @@ static inline void put_u32_le(uint8_t *p, uint32_t v)
 
 /* ── KS_CMD_RF_STATUS ───────────────────────────────────────────────
  * Request: no payload.
- * Response (43 bytes):
+ * Response (51 bytes):
  *   [0]    flags         bit0=lien clavier, bit1=lien souris,
  *                        bit2=radio 1 PRESENTE, bit3=radio 2 PRESENTE,
  *                        bits4-7=rsvd
@@ -80,7 +80,7 @@ static void bin_cmd_rf_status(uint8_t cmd, const uint8_t *p, uint16_t l)
     rf_link_status_t st;
     rf_rx_get_status(&st);
 
-    uint8_t buf[43];
+    uint8_t buf[51];
     buf[0] = (uint8_t)((st.link_kbd             ? 0x01 : 0) |
                        (st.link_mouse           ? 0x02 : 0) |
                        (st.radio_kbd_present    ? 0x04 : 0) |
@@ -107,6 +107,16 @@ static void bin_cmd_rf_status(uint8_t cmd, const uint8_t *p, uint16_t l)
         put_u16_le(&buf[37], (uint16_t)(ref > 0xFFFF ? 0xFFFF : ref));
         put_u16_le(&buf[39], (uint16_t)(rep > 0xFFFF ? 0xFFFF : rep));
         put_u16_le(&buf[41], (uint16_t)(rat > 0xFFFF ? 0xFFFF : rat));
+    }
+#if CONFIG_KASE_DONGLE_FUSION
+    put_u32_le(&buf[43], dongle_engine_reappuis());
+    { uint8_t h, k; uint16_t d; dongle_engine_dernier_reappui(&h, &k, &d);
+      buf[47] = h; buf[48] = k; put_u16_le(&buf[49], d); }
+#else
+    put_u32_le(&buf[43], 0);
+    buf[47] = buf[48] = 0; put_u16_le(&buf[49], 0);
+#endif
+    {
     }
 
     ks_respond(cmd, KS_STATUS_OK, buf, sizeof(buf));

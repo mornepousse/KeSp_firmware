@@ -161,7 +161,7 @@
 #define BOARD_MATRIX_SCAN_INTERVAL_US  1000
 #define BOARD_MATRIX_SETTLING_US       0
 #define BOARD_MATRIX_RECOVERY_US       0
-#define BOARD_DEBOUNCE_TICKS           3
+#define BOARD_DEBOUNCE_TICKS           5   /* 5 ms : le dongle rejoue chaque transition, il ne masque plus un rebond de 3-5 ms (2026-09-20) */
 
 /* ── USB ── */
 #define BOARD_USB_VID  0xCafe

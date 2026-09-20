@@ -56,6 +56,12 @@ void dongle_engine_get_coherence(uint32_t *own_fp, uint32_t *left_fp,
 uint32_t dongle_engine_transitions_ecrasees(void);
 /* Écart max entre deux tours du moteur depuis la dernière lecture (ms), remis à 0. */
 uint32_t dongle_engine_gap_max_ms(void);
+/* Ré-appuis d'une même touche < 30 ms après son relâchement (répétition
+ * périmée d'une moitié, ou rebond mécanique) — CDC RF_STATUS[43..46]. */
+uint32_t dongle_engine_reappuis(void);
+/* Le dernier ré-appui : moitié (RF_HALF_*), touche (row*7+col), délai en ms
+ * après le relâchement — CDC RF_STATUS[47..50]. */
+void dongle_engine_dernier_reappui(uint8_t *half, uint8_t *key, uint16_t *delta_ms);
 
 bool dongle_sync_active(void);
 

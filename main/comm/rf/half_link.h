@@ -295,6 +295,10 @@ bool half_link_tx_init(void);
 /* Émet l'état courant de la demi-matrice. Le numéro de séquence est géré en
  * interne. Retourne true si le paquet a été acquitté par la gauche. */
 bool half_link_tx_matrix(const uint8_t *bitmap);
+/* Même chose pour une RÉPÉTITION : `encore_valide` évalué sous le verrou radio,
+ * rien ne part si l'état est périmé (voir radio_emettre). */
+#include "radio_owner.h"
+bool half_link_tx_matrix_si(const uint8_t *bitmap, radio_valide_cb_t encore_valide, void *ctx);
 #if CONFIG_KASE_BATT_SENSE
 /* Jauge : un STATUS (tension, état de charge, identité DROITE) vers la cible
  * courante. Appelé par la tâche de rafraîchissement toutes les RF_BATT_PERIOD_MS

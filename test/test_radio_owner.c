@@ -134,7 +134,7 @@ static void test_compteurs(void)
     uint8_t b[4] = {0}; uint32_t ok, refus, indispo;
     radio_send(b, 4, 20); s_ack = false; radio_send(b, 4, 20); radio_send(b, 4, 20);
     radio_sleep(); radio_send(b, 4, 0); radio_wake();          /* endormie : indisponible, pas un refus */
-    radio_stats(&ok, &refus, &indispo);
+    radio_stats(&ok, &refus, &indispo, NULL);
     TEST_ASSERT(ok == 1 && refus == 2 && indispo == 1, "1 ok, 2 refus ESB, 1 indisponible");
 }
 
@@ -163,6 +163,51 @@ static void test_pair_round_revient_a_la_cible(void)
     TEST_ASSERT(radio_mode() == RADIO_PTX && radio_cible()->channel == 0x68, "cible restauree");
 }
 
+static bool pred_faux_sous_verrou(void *ctx)
+{
+    /* Le prédicat doit être évalué APRÈS la prise du verrou : sinon un état qui
+     * change entre l'évaluation et l'émission passerait quand même. */
+    *(bool *)ctx = !radio_lock(0);
+    return false;
+}
+static bool pred_vrai(void *ctx) { (void)ctx; return true; }
+
+static void test_emission_perimee_n_est_pas_emise(void)
+{
+    /* Le double appui du 2026-09-20 : une RÉPÉTITION du dernier état (appui)
+     * partait après le relâchement — la moitié avait relu l'état avant que le
+     * relâchement ne l'écrase, puis attendu le verrou derrière lui. Une
+     * émission dont l'état est périmé au moment où le verrou est acquis ne
+     * doit PAS toucher la puce. */
+    reset(); rf_radio_cfg_t d = cfg(0x68); radio_owner_init(&d, &FAKE); s_trace[0] = 0;
+    uint8_t b[4] = {0}; bool verrou_tenu = false; uint32_t ok, refus, indispo, perimes;
+    TEST_ASSERT(radio_emettre(b, 4, NULL, NULL, 20, pred_faux_sous_verrou, &verrou_tenu) == RADIO_TX_PERIME, "perimee");
+    TEST_ASSERT(verrou_tenu, "predicat evalue sous le verrou");
+    TEST_ASSERT(strcmp(s_trace, "") == 0, "rien n'a touche la puce");
+    TEST_ASSERT(radio_lock(0), "verrou rendu"); radio_unlock();
+    TEST_ASSERT(radio_emettre(b, 4, NULL, NULL, 20, pred_vrai, NULL) == RADIO_TX_ACK, "valide : emise");
+    TEST_ASSERT(strcmp(s_trace, "send;") == 0, s_trace);
+    radio_stats(&ok, &refus, &indispo, &perimes);
+    TEST_ASSERT(ok == 1 && refus == 0 && indispo == 0 && perimes == 1, "une perimee, une acquittee");
+}
+
+static void test_sommeil_idempotent_et_verrou_rendu(void)
+{
+    /* Le sommeil profond rappelle les hooks après le léger : dormir deux fois
+     * ne doit ni bloquer 50 ms ni rendre un verrou jamais pris. */
+    reset(); rf_radio_cfg_t d = cfg(0x68); radio_owner_init(&d, &FAKE); s_trace[0] = 0;
+    radio_sleep(); radio_sleep(); radio_wake(); radio_wake();
+    TEST_ASSERT(strcmp(s_trace, "pd;pu;ptx(68);") == 0, s_trace);
+    TEST_ASSERT(radio_lock(0), "verrou libre apres"); radio_unlock();
+    /* Verrou déjà tenu par un autre (émission longue) au moment de dormir :
+     * on éteint quand même, et le réveil ne rend PAS ce verrou-là. */
+    s_trace[0] = 0;
+    TEST_ASSERT(radio_lock(0), "un autre tient le verrou");
+    radio_sleep(); radio_wake();
+    TEST_ASSERT(strcmp(s_trace, "pd;pu;ptx(68);") == 0, s_trace);
+    TEST_ASSERT(!radio_lock(0), "le verrou de l'autre est toujours tenu"); radio_unlock();
+}
+
 void test_radio_owner(void)
 {
     TEST_SUITE("radio_owner : une puce, un proprietaire");
@@ -178,4 +223,6 @@ void test_radio_owner(void)
     TEST_RUN(test_compteurs);
     TEST_RUN(test_puce_absente);
     TEST_RUN(test_pair_round_revient_a_la_cible);
+    TEST_RUN(test_emission_perimee_n_est_pas_emise);
+    TEST_RUN(test_sommeil_idempotent_et_verrou_rendu);
 }

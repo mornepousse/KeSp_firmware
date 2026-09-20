@@ -252,6 +252,18 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   mode courant (power_up ne touche pas à CE) ; le verrou est tenu pendant tout
   le sommeil ; une puce absente au probe refuse tout sans la toucher. Vérifié
   sur la séquence d'appels au matériel (faux enregistreur, mordant).
+- [test:test_radio_owner] Une émission dont l'état est PÉRIMÉ n'est pas émise :
+  `radio_emettre` évalue `encore_valide` UNE FOIS LE VERROU ACQUIS et rend
+  PERIME sans toucher la puce (compteur à part des refus ESB et des
+  indisponibles). C'est ce qui ferme le double appui sur appui court du
+  2026-09-20 : une RÉPÉTITION (réparation bornée, réaffirmation à 100 ms)
+  relisait l'appui pendant que le callback de scan émettait le relâchement,
+  attendait le verrou derrière lui, puis émettait l'appui périmé — P, R, P, R,
+  que la file de transitions du dongle rejouait fidèlement. Les deux moitiés
+  tiennent une génération d'état (+1 par changement, AVANT l'émission, sous
+  section critique) ; toute répétition part avec son snapshot + génération.
+  Le sommeil du propriétaire est idempotent (le profond rappelle les hooks
+  après le léger) et ne rend au réveil que le verrou qu'il a pris.
 - [test:test_radio_owner] Un tour d'appairage (`radio_pair_round`) vise le
   rendez-vous, émet, écoute, puis REVIENT à la cible courante quoi qu'il
   arrive — une carte qui resterait sur le canal de rendez-vous n'acquitterait
@@ -309,7 +321,15 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   dans son dernier slot et le COMPTE : `transitions_ecrasees` (CDC
   RF_STATUS[27..30]) ne mesure plus que ce débordement. Banc 2026-09-19 : une
   minute de frappe rapide à deux mains, 699 trames, 182 rapports, 0 écrasement
-  (536 en une soirée avec l'ancien moteur), rien de perdu à l'usage.
+  (536 en une soirée avec l'ancien moteur), rien de perdu à l'usage. Le dongle
+  compte les RÉ-APPUIS (même touche ré-enfoncée < 30 ms après son relâchement,
+  RF_STATUS[43..46], le dernier attribué en [47..50] : moitié, touche, délai) :
+  la signature d'une répétition périmée ou d'un rebond mécanique, désormais
+  rejoués et non plus masqués par l'échantillonnage ; l'anti-rebond des moitiés
+  passe de 3 à 5 ms (2026-09-20). Banc : 13 ré-appuis en 5000 trames avec la
+  gauche non corrigée (« ppa », « pap », « paa » — p et a sont à gauche en
+  Dvorak) ; les deux corrigées : 1697 trames de « pa » enchaînés, 0 ré-appui,
+  0 écrasement, aucun doublon à l'écran.
   RF_STATUS[31..34] (écart moteur max) et [35..42] (USB parti/refusé,
   reprises) restent les témoins du maillon dongle→hôte.
 

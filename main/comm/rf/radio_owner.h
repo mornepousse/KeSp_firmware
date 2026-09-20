@@ -69,9 +69,24 @@ bool radio_rearmer(void);
 radio_mode_t          radio_mode(void);
 const rf_radio_cfg_t *radio_cible(void);
 
-/* Émission — PTX SEULEMENT (refusée en PRX : passer par l'excursion). Prend le
- * verrou (timeout_ms), retourne l'ACK. `_ap` rend la charge utile de l'ACK
- * (EN_ACK_PAY), *ack_len = 0 si l'ACK était nu ou l'envoi refusé. */
+/* Émission — PTX SEULEMENT (refusée en PRX : passer par l'excursion).
+ *   ACK      : partie et acquittée ;
+ *   REFUS    : partie, l'ESB l'a refusée (MAX_RT) ;
+ *   INDISPO  : rien n'est parti — verrou pris sous timeout_ms, mauvais mode,
+ *              puce endormie ou absente ;
+ *   PERIME   : rien n'est parti — `encore_valide(ctx)`, évalué UNE FOIS LE
+ *              VERROU ACQUIS, a dit que l'état à émettre n'est plus le courant.
+ * C'est ce dernier cas qui ferme la course « répétition d'un appui émise après
+ * le relâchement » (double appui sur appui court, banc 2026-09-20) : une
+ * répétition snapshotte l'état et sa génération, puis attend le verrou derrière
+ * l'émission du relâchement ; sans ce contrôle elle émettait l'appui périmé.
+ * `ack`/`ack_len` NULL → pas de charge d'ACK ; sinon EN_ACK_PAY, *ack_len = 0 si
+ * l'ACK était nu ou rien n'est parti. `encore_valide` NULL → toujours valide. */
+typedef enum { RADIO_TX_ACK = 0, RADIO_TX_REFUS, RADIO_TX_INDISPO, RADIO_TX_PERIME } radio_tx_t;
+typedef bool (*radio_valide_cb_t)(void *ctx);
+radio_tx_t radio_emettre(const uint8_t *buf, uint8_t len, uint8_t *ack, uint8_t *ack_len,
+                         uint32_t timeout_ms, radio_valide_cb_t encore_valide, void *ctx);
+/* Raccourcis : vrai si ACK. */
 bool radio_send(const uint8_t *buf, uint8_t len, uint32_t timeout_ms);
 bool radio_send_ap(const uint8_t *buf, uint8_t len, uint8_t *ack, uint8_t *ack_len, uint32_t timeout_ms);
 
@@ -95,11 +110,13 @@ bool radio_pair_round(const uint8_t rdv_addr[5], uint8_t rdv_ch, const uint8_t *
 void radio_ce_gpio(int gpio);
 #endif
 
-/* Veille : appelés par le hook enregistré à l'init (publics pour les tests). */
+/* Veille : appelés par le hook enregistré à l'init (publics pour les tests).
+ * Idempotents (le sommeil profond rappelle les hooks après le léger) ; le
+ * verrou n'est rendu au réveil que s'il a été pris au sommeil. */
 void radio_sleep(void);
 void radio_wake(void);
 
-/* Depuis le boot : émissions acquittées, refusées par l'ESB (MAX_RT), et
- * INDISPONIBLES (verrou pris, mauvais mode, puce endormie : rien n'est parti).
- * Pointeurs NULL acceptés. */
-void radio_stats(uint32_t *ok, uint32_t *refus, uint32_t *indispo);
+/* Depuis le boot : émissions acquittées, refusées par l'ESB (MAX_RT),
+ * INDISPONIBLES (verrou pris, mauvais mode, puce endormie : rien n'est parti)
+ * et PÉRIMÉES (état dépassé au moment du verrou : rien n'est parti). NULL ok. */
+void radio_stats(uint32_t *ok, uint32_t *refus, uint32_t *indispo, uint32_t *perimes);

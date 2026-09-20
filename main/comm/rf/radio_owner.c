@@ -32,7 +32,8 @@ static rf_radio_t     s_radio;
 static radio_hw_t     s_hw;
 static radio_mode_t   s_mode;
 static rf_radio_cfg_t s_cible;
-static uint32_t       s_ok, s_refus, s_indispo;
+static uint32_t       s_ok, s_refus, s_indispo, s_perimes;
+static bool           s_endormie, s_verrou_sommeil;
 
 #ifndef TEST_HOST
 static const radio_hw_t radio_hw_defaut = {
@@ -53,7 +54,8 @@ bool radio_owner_init(const rf_radio_cfg_t *cible, const radio_hw_t *hw)
     s_hw = *hw;
 #endif
     memset(&s_radio, 0, sizeof s_radio);
-    s_mode = RADIO_ETEINTE; s_ok = s_refus = s_indispo = 0;
+    s_mode = RADIO_ETEINTE; s_ok = s_refus = s_indispo = s_perimes = 0;
+    s_endormie = s_verrou_sommeil = false;
     lock_create();
     if (s_hw.init_tx(&s_radio, cible) != ESP_OK || !s_radio.present) return false;
     s_cible = *cible; s_mode = RADIO_PTX;
@@ -105,25 +107,25 @@ bool radio_rearmer(void)
 radio_mode_t          radio_mode(void)  { return s_mode; }
 const rf_radio_cfg_t *radio_cible(void) { return &s_cible; }
 
+radio_tx_t radio_emettre(const uint8_t *buf, uint8_t len, uint8_t *ack, uint8_t *ack_len,
+                         uint32_t timeout_ms, radio_valide_cb_t encore_valide, void *ctx)
+{
+    if (ack_len) *ack_len = 0;
+    if (!s_radio.present || s_mode != RADIO_PTX) { s_indispo++; return RADIO_TX_INDISPO; }   /* en PRX : excursion */
+    if (!lock_take(timeout_ms)) { s_indispo++; return RADIO_TX_INDISPO; }
+    if (encore_valide && !encore_valide(ctx)) {   /* SOUS le verrou : l'état a-t-il été dépassé pendant l'attente ? */
+        lock_give(); s_perimes++; return RADIO_TX_PERIME;
+    }
+    bool ok = (ack && ack_len) ? s_hw.send_ap(&s_radio, buf, len, ack, ack_len)
+                               : s_hw.send(&s_radio, buf, len);
+    if (ok) s_ok++; else s_refus++;
+    lock_give();
+    return ok ? RADIO_TX_ACK : RADIO_TX_REFUS;
+}
 bool radio_send(const uint8_t *buf, uint8_t len, uint32_t timeout_ms)
-{
-    if (!s_radio.present || s_mode != RADIO_PTX) { s_indispo++; return false; }   /* en PRX : excursion */
-    if (!lock_take(timeout_ms)) { s_indispo++; return false; }
-    bool ok = s_hw.send(&s_radio, buf, len);
-    if (ok) s_ok++; else s_refus++;
-    lock_give();
-    return ok;
-}
+{ return radio_emettre(buf, len, NULL, NULL, timeout_ms, NULL, NULL) == RADIO_TX_ACK; }
 bool radio_send_ap(const uint8_t *buf, uint8_t len, uint8_t *ack, uint8_t *ack_len, uint32_t timeout_ms)
-{
-    *ack_len = 0;
-    if (!s_radio.present || s_mode != RADIO_PTX) { s_indispo++; return false; }
-    if (!lock_take(timeout_ms)) { s_indispo++; return false; }
-    bool ok = s_hw.send_ap(&s_radio, buf, len, ack, ack_len);
-    if (ok) s_ok++; else s_refus++;
-    lock_give();
-    return ok;
-}
+{ return radio_emettre(buf, len, ack, ack_len, timeout_ms, NULL, NULL) == RADIO_TX_ACK; }
 
 static void vider(radio_rx_cb_t cb, void *ctx)   /* verrou tenu, mode PRX */
 {
@@ -176,16 +178,19 @@ void radio_ce_gpio(int gpio) { if (lock_take(50)) { s_radio.cfg.pin_ce = gpio; s
 
 void radio_sleep(void)
 {
-    if (!s_radio.present) return;
-    (void)lock_take(50);              /* GARDÉ pendant tout le sommeil */
+    if (!s_radio.present || s_endormie) return;   /* le profond rappelle les hooks après le léger */
+    s_verrou_sommeil = lock_take(50);             /* GARDÉ pendant tout le sommeil */
+    if (!s_verrou_sommeil) LOGW("sommeil sans le verrou : une emission de plus de 50 ms le tenait");
     s_hw.power_down(&s_radio);
+    s_endormie = true;
 }
 void radio_wake(void)
 {
-    if (!s_radio.present) return;
+    if (!s_radio.present || !s_endormie) return;
     s_hw.power_up(&s_radio);
     if (s_mode != RADIO_ETEINTE) appliquer(s_mode, &s_cible);   /* power_up ne touche pas à CE */
-    lock_give();
+    if (s_verrou_sommeil) lock_give();            /* jamais rendre un verrou qu'on n'a pas pris */
+    s_verrou_sommeil = false; s_endormie = false;
 }
-void radio_stats(uint32_t *ok, uint32_t *refus, uint32_t *indispo)
-{ if (ok) *ok = s_ok; if (refus) *refus = s_refus; if (indispo) *indispo = s_indispo; }
+void radio_stats(uint32_t *ok, uint32_t *refus, uint32_t *indispo, uint32_t *perimes)
+{ if (ok) *ok = s_ok; if (refus) *refus = s_refus; if (indispo) *indispo = s_indispo; if (perimes) *perimes = s_perimes; }

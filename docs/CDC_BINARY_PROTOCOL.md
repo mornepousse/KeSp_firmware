@@ -521,7 +521,7 @@ Pour savoir si le pairing a abouti, poller `RF_PAIR_LIST` apres ~5–30 s : `pai
 Snapshot complet de l'etat du lien radio pour les deux moities. Idempotent, sans effet de bord — peut etre poll a 1–2 Hz pour piloter un indicateur de barres dans le soft.
 
 - Request: payload vide
-- Response: `43 bytes` (27 à l'origine, puis 31, 35 ; un client qui ne lit que les premiers octets reste juste)
+- Response: `51 bytes` (27 à l'origine, puis 31, 35, 43, 47 ; un client qui ne lit que les premiers octets reste juste)
 
 | Offset | Type   | Champ           | Description                                                |
 |-------:|--------|-----------------|------------------------------------------------------------|
@@ -540,6 +540,10 @@ Snapshot complet de l'etat du lien radio pour les deux moities. Idempotent, sans
 | 37..38 | u16 LE | `kb_usb_refuses` | rapports clavier USB refusés (point d'accès muet 2,5 ms) |
 | 39..40 | u16 LE | `reprises` | bus USB suspendu à l'envoi : réveils distants demandés |
 | 41..42 | u16 LE | `reprises_ratees` | idem, bus toujours suspendu 100 ms après |
+| 43..46 | u32 LE | `reappuis` | fusion : ré-appuis d'une même touche < 30 ms après son relâchement (répétition périmée émise par une moitié, ou rebond mécanique plus long que l'anti-rebond) — 0 attendu depuis le 2026-09-20 |
+| 47 | u8 | `reappui_half` | dernier ré-appui : moitié (1 gauche, 2 droite) |
+| 48 | u8 | `reappui_key` | dernier ré-appui : touche, `row*7+col` (coordonnées de la moitié) |
+| 49..50 | u16 LE | `reappui_ms` | dernier ré-appui : délai après le relâchement, ms |
 
 **Mapping recommande pour 4 barres de signal :**
 ```

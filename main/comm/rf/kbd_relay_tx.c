@@ -101,6 +101,17 @@ static uint32_t         s_remote_ms;
  * piège que half_link côté droite). */
 static uint8_t          s_last_left_bm[RF_HALF_BITMAP_BYTES];
 static uint32_t         s_last_left_ms;
+/* Génération de l'état local : +1 à chaque CHANGEMENT, sous s_left_mux, AVANT
+ * l'émission. Une répétition (réparation bornée, réaffirmation à 100 ms)
+ * snapshotte état + génération et n'est émise par le propriétaire que si la
+ * génération n'a pas bougé quand il acquiert le verrou (radio_emettre PERIME).
+ * Sans ça : le timer relisait l'appui pendant que le callback de scan émettait
+ * le relâchement, attendait le verrou derrière lui, puis émettait l'appui
+ * périmé — P, R, P, R : un double appui sur appui court, que la file de
+ * transitions du dongle rejouait fidèlement (banc 2026-09-20). */
+static volatile uint32_t s_last_left_gen;
+static portMUX_TYPE      s_left_mux = portMUX_INITIALIZER_UNLOCKED;
+static bool gen_valide(void *ctx) { return s_last_left_gen == *(const uint32_t *)ctx; }
 #endif
 static bool s_paired = false;
 
@@ -126,35 +137,38 @@ static uint8_t  s_status_seq;
 
 #if CONFIG_KASE_DONGLE_FUSION
 /* Le tirage de keymap par ACK payload est dans keymap_pull.c. */
-/* Émission brute d'une demi-matrice SANS armer la réémission — voir plus bas. */
-static void send_matrix_frame(uint8_t half, const uint8_t *bitmap);
+/* Émission brute d'une demi-matrice SANS armer la réémission — voir plus bas.
+ * Retourne true si la trame est partie. */
+static bool send_matrix_frame(uint8_t half, const uint8_t *bitmap, radio_valide_cb_t encore_valide, void *ctx);
 #endif
 
-static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
+/* Émission vers le dongle. `encore_valide` (ou NULL) : pour une RÉPÉTITION,
+ * le propriétaire l'évalue sous le verrou et n'émet pas un état périmé.
+ * Retourne true si la trame est PARTIE (acquittée ou refusée). */
+static bool kbd_tx_emettre(const uint8_t *buf, uint8_t len, radio_valide_cb_t encore_valide, void *ctx)
 {
-    if (!radio_presente()) return;
+    if (!radio_presente()) return false;
     if (radio_mode() != RADIO_PTX) {
         /* Route USB : la puce écoute la droite, le callback de scan n'émet pas
          * en principe (route-gated). Si on arrive ici, c'est un croisement de
          * route : compté, pas émis. */
         s_tx_sans_mutex++;
-        return;
+        return false;
     }
     {
         /* Canal retour ACK payload (sync auto keymap) : on récupère ce que le
          * dongle a glissé dans l'ACK. */
         uint8_t ack[32];
         uint8_t ack_n = 0;
-        uint32_t indispo_avant, indispo_apres;
-        radio_stats(NULL, NULL, &indispo_avant);
-        bool ok = radio_send_ap(buf, len, ack, &ack_n, 20);
-        radio_stats(NULL, NULL, &indispo_apres);
-        if (indispo_apres != indispo_avant) {   /* rien n'est parti : verrou pris, puce endormie */
+        radio_tx_t r = radio_emettre(buf, len, ack, &ack_n, 20, encore_valide, ctx);
+        if (r == RADIO_TX_PERIME) return false;   /* l'état a changé pendant l'attente : le nouveau est déjà parti */
+        if (r == RADIO_TX_INDISPO) {              /* rien n'est parti : verrou pris, puce endormie */
             s_tx_sans_mutex++;
             ESP_LOGW(TAG, "rapport ABANDONNE (radio indisponible) — remis %u, perdus %u+%u",
                      (unsigned)s_tx_remis, (unsigned)s_tx_sans_mutex, (unsigned)s_tx_refuses);
-            return;
+            return false;
         }
+        bool ok = (r == RADIO_TX_ACK);
 #if CONFIG_KASE_DONGLE_FUSION
         keymap_pull_on_ack(ack, ack_n);   /* balise ou chunk glissé dans l'ACK */
 #endif
@@ -173,8 +187,10 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len)
             ESP_LOGW(TAG, "HID->dongle : %u remis, %u sans mutex, %u refuses",
                      (unsigned)s_tx_remis, (unsigned)s_tx_sans_mutex,
                      (unsigned)s_tx_refuses);
+        return true;
     }
 }
+static void kbd_tx_locked(const uint8_t *buf, uint8_t len) { (void)kbd_tx_emettre(buf, len, NULL, NULL); }
 
 /* esp_timer callback (10 ms): the single route poller, and the idempotent live
  * keyboard-state refresh. Polling here keeps the debounce + cached route fresh
@@ -308,13 +324,20 @@ static void kbd_relay_refresh_body(void)
      * banc 2026-09-13). Même règle que la droite (half_link_tx_refresh) : muet au
      * repos (bitmap vide → autonomie), entretenu sur maintien. */
     {
-        bool tenu = (s_last_left_bm[0] | s_last_left_bm[1] |
-                     s_last_left_bm[2] | s_last_left_bm[3]) != 0;
+        uint8_t bm[RF_HALF_BITMAP_BYTES]; uint32_t gen, dernier;
+        taskENTER_CRITICAL(&s_left_mux);
+        memcpy(bm, s_last_left_bm, RF_HALF_BITMAP_BYTES); gen = s_last_left_gen; dernier = s_last_left_ms;
+        taskEXIT_CRITICAL(&s_left_mux);
+        bool tenu = (bm[0] | bm[1] | bm[2] | bm[3]) != 0;
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-        if (tenu && (uint32_t)(now - s_last_left_ms) >= 100u) {
-            uint8_t bm[RF_HALF_BITMAP_BYTES];
-            memcpy(bm, s_last_left_bm, RF_HALF_BITMAP_BYTES);
-            kbd_relay_send_matrix(RF_HALF_LEFT, bm);   /* réaffirme + met à jour l'horodatage */
+        if (tenu && (uint32_t)(now - dernier) >= 100u) {
+            /* Réaffirmation : une RÉPÉTITION — périmée si l'état a changé
+             * entre ce snapshot et le verrou (le changement est déjà parti). */
+            if (send_matrix_frame(RF_HALF_LEFT, bm, gen_valide, &gen)) {
+                taskENTER_CRITICAL(&s_left_mux);
+                if (s_last_left_gen == gen) s_last_left_ms = now;
+                taskEXIT_CRITICAL(&s_left_mux);
+            }
             return;
         }
     }
@@ -332,8 +355,13 @@ static void kbd_relay_refresh_body(void)
 #if CONFIG_KASE_DONGLE_FUSION
         /* Fusion : ce qui se répète, c'est le DERNIER BITMAP — même vide, un
          * relâchement perdu se répare ainsi aussi, sans violer « muet au repos »
-         * puisque c'est borné. Jamais un rapport HID ici. */
-        send_matrix_frame(RF_HALF_LEFT, s_last_left_bm);
+         * puisque c'est borné. Jamais un rapport HID ici. Snapshot + génération :
+         * périmée si un changement passe entre ici et le verrou. */
+        uint8_t bm[RF_HALF_BITMAP_BYTES]; uint32_t gen;
+        taskENTER_CRITICAL(&s_left_mux);
+        memcpy(bm, s_last_left_bm, RF_HALF_BITMAP_BYTES); gen = s_last_left_gen;
+        taskEXIT_CRITICAL(&s_left_mux);
+        (void)send_matrix_frame(RF_HALF_LEFT, bm, gen_valide, &gen);
 #else
         uint8_t buf[9];
         rf_encode_hidreport_kbd(buf, s_last_mod, s_last_kb);
@@ -600,7 +628,7 @@ void kbd_relay_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
  * un maintien doit être ré-émis périodiquement. La cadence de rafraîchissement de
  * la matrice est une pièce du BANC (elle se règle contre le timeout réel du
  * dongle) — voir docs/superpowers/plans/2026-09-13-dongle-fusion-runtime.md. */
-static void send_matrix_frame(uint8_t half, const uint8_t *bitmap)
+static bool send_matrix_frame(uint8_t half, const uint8_t *bitmap, radio_valide_cb_t encore_valide, void *ctx)
 {
     rf_matrix_t m;
     m.half = half;
@@ -609,21 +637,26 @@ static void send_matrix_frame(uint8_t half, const uint8_t *bitmap)
     uint8_t buf[8];
     uint16_t n = rf_encode_matrix(buf, &m);
     uint32_t refus_avant = s_tx_refuses;
-    if (n) kbd_tx_locked(buf, (uint8_t)n);
+    bool partie = n && kbd_tx_emettre(buf, (uint8_t)n, encore_valide, ctx);
     /* Diagnostic permanent (rare, ~1 % au banc) : QUELLE trame l'ESB a refusée
      * après ses 15 retransmissions. C'est cette trame-là que la réémission
      * bornée ci-dessous répète — sans elle, un appui bref était perdu. */
     if (s_tx_refuses != refus_avant)
         ESP_LOGW(TAG, "MATRIX refusee bm=%02X%02X%02X%02X — repetee par la reemission bornee",
                  bitmap[0], bitmap[1], bitmap[2], bitmap[3]);
-    /* Mémorise l'état local pour la réaffirmation des maintiens (refresh_cb). */
-    memcpy(s_last_left_bm, bitmap, RF_HALF_BITMAP_BYTES);
-    s_last_left_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    return partie;
 }
 
 void kbd_relay_send_matrix(uint8_t half, const uint8_t *bitmap)
 {
-    send_matrix_frame(half, bitmap);
+    /* CHANGEMENT : l'état et sa génération sont posés AVANT l'émission — une
+     * répétition qui relirait l'ancien état pendant cet envoi se verra périmée. */
+    taskENTER_CRITICAL(&s_left_mux);
+    memcpy(s_last_left_bm, bitmap, RF_HALF_BITMAP_BYTES);
+    s_last_left_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    s_last_left_gen++;
+    taskEXIT_CRITICAL(&s_left_mux);
+    (void)send_matrix_frame(half, bitmap, NULL, NULL);
     /* Réémission BORNÉE armée au changement — KBD_RELAY_REPEATS × 10 ms, puis
      * silence. Une trame de CHANGEMENT refusée par l'ESB n'avait qu'une seule
      * chance : la réaffirmation à 100 ms ne couvre que les maintiens, donc un

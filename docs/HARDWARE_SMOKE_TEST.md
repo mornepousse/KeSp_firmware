@@ -77,6 +77,10 @@ dans la PR/release.
       gauche en USB → « fusion USB : ecoute la droite reemise (PRX ch=0x4F
       KaSe.03) » et la droite tape par la gauche ; USB retiré → « retour
       emission PTX vers le dongle », les deux tapent par le dongle
+- [ ] Appuis courts sans double : une minute de taps brefs sur les deux moitiés
+      → aucun caractère doublé à l'écran, `rfstat.py` (RF_STATUS[43..46])
+      `reappuis=0` ; un compteur qui monte sur une seule moitié = rebond de
+      switch (anti-rebond 5 ms), sur les deux = régression d'émission
 - [ ] Fusion — Sync keymap sans câble : modifier une couche du dongle (SETLAYER)
       → gauche en sans-fil, RIEN branché d'autre : en < 15 s la console gauche
       logue « sync keymap : balise » puis « 40/40 recus … enregistree en NVS »,

@@ -40,6 +40,11 @@ static uint8_t    s_seq;
  * enverrait une matrice qui n'a jamais existé — d'où le verrou, très court. */
 static uint8_t  s_etat_local[RF_HALF_BITMAP_BYTES];
 static uint32_t s_dernier_tx_ms;
+/* Génération de l'état local (+1 par CHANGEMENT, sous s_etat_mux) : une
+ * réaffirmation snapshotte état + génération, le propriétaire n'émet pas un
+ * état périmé (même course que la gauche, fenêtre plus courte : snapshot → verrou). */
+static volatile uint32_t s_etat_gen;
+static bool etat_valide(void *ctx) { return s_etat_gen == *(const uint32_t *)ctx; }
 static portMUX_TYPE s_etat_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_refresh_task;   /* notifiée sur changement : cadence rapide sans attendre */
 
@@ -229,8 +234,10 @@ bool half_link_tx_init(void)
 }
 
 static bool half_link_tx_frame(const uint8_t *buf, uint8_t n);
+static bool half_link_tx_frame_si(const uint8_t *buf, uint8_t n, radio_valide_cb_t encore_valide, void *ctx);
 
-bool half_link_tx_matrix(const uint8_t *bitmap)
+static bool half_link_tx_frame_si(const uint8_t *buf, uint8_t n, radio_valide_cb_t encore_valide, void *ctx);
+bool half_link_tx_matrix_si(const uint8_t *bitmap, radio_valide_cb_t encore_valide, void *ctx)
 {
     if (!radio_presente()) return false;
     uint8_t buf[16];
@@ -269,7 +276,7 @@ bool half_link_tx_matrix(const uint8_t *bitmap)
      * un sens (il faut un recepteur en face). */
     n = rf_encode_heartbeat(buf, &h);
 #endif
-    return half_link_tx_frame(buf, (uint8_t)n);
+    return half_link_tx_frame_si(buf, (uint8_t)n, encore_valide, ctx);
 }
 
 /* Émission d'UNE trame vers la cible courante, sous le verrou radio : envoi,
@@ -291,13 +298,17 @@ bool half_link_tx_dongle_vu(void)
 }
 #endif
 
-static bool half_link_tx_frame(const uint8_t *buf, uint8_t n)
+bool half_link_tx_matrix(const uint8_t *bitmap) { return half_link_tx_matrix_si(bitmap, NULL, NULL); }
+
+static bool half_link_tx_frame_si(const uint8_t *buf, uint8_t n, radio_valide_cb_t encore_valide, void *ctx)
 {
     if (!radio_presente()) return false;
     /* 50 ms : une émission ESB au pire cas (ARC=15, ARD=500 µs) tient en ~13 ms.
      * Le propriétaire tient le verrou sur toute la transaction, CSN compris. */
-    s_seq++;                       /* la trame part : ce numéro est consommé */
-    bool ack = radio_send(buf, n, 50);
+    radio_tx_t r = radio_emettre(buf, n, NULL, NULL, 50, encore_valide, ctx);
+    if (r == RADIO_TX_PERIME) return false;   /* état dépassé : ni un refus, ni un envoi — la FSM n'en sait rien */
+    s_seq++;                                  /* la trame est partie : ce numéro est consommé */
+    bool ack = (r == RADIO_TX_ACK);
     if (ack) s_sans_ack_ecran = 0; else if (s_sans_ack_ecran < 255) s_sans_ack_ecran++;
 
     /* Chien de garde radio. Un nRF24 (clone) se FIGE — sous un orage de
@@ -367,7 +378,7 @@ void half_link_tx_update(const uint8_t *bitmap, bool change)
 {
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
     uint8_t  etat[RF_HALF_BITMAP_BYTES];
-    uint32_t dernier;
+    uint32_t dernier, gen;
 
     /* La tâche de rafraîchissement passe bitmap = NULL : elle n'a rien de neuf
      * à annoncer, elle réaffirme ce qui est déjà là. C'est délibéré. Si elle
@@ -383,8 +394,9 @@ void half_link_tx_update(const uint8_t *bitmap, bool change)
     static half_tx_repeat_t s_rep;
     bool emettre;
     taskENTER_CRITICAL(&s_etat_mux);
-    if (change && bitmap) memcpy(s_etat_local, bitmap, RF_HALF_BITMAP_BYTES);
+    if (change && bitmap) { memcpy(s_etat_local, bitmap, RF_HALF_BITMAP_BYTES); s_etat_gen++; }
     memcpy(etat, s_etat_local, RF_HALF_BITMAP_BYTES);
+    gen = s_etat_gen;
     dernier = s_dernier_tx_ms;
     bool tenu = false;
     for (int i = 0; i < RF_HALF_BITMAP_BYTES; i++)
@@ -395,7 +407,7 @@ void half_link_tx_update(const uint8_t *bitmap, bool change)
 
     if (change && s_refresh_task) xTaskNotifyGive(s_refresh_task);   /* réveiller la cadence rapide */
     if (!emettre) return;
-    half_link_tx_matrix(etat);
+    half_link_tx_matrix_si(etat, etat_valide, &gen);   /* périmée si un changement passe avant le verrou */
 }
 
 /* Rafraîchissement des maintiens.
@@ -507,3 +519,5 @@ const char *veille_hb_suffixe(void)
     return buf;
 }
 #endif
+
+static bool half_link_tx_frame(const uint8_t *buf, uint8_t n) { return half_link_tx_frame_si(buf, n, NULL, NULL); }
