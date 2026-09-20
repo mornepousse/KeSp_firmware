@@ -53,7 +53,12 @@ such a board.
 pre-release on a suffixed tag, embedded version checked against the tag).
 The old GitLab-mirror release job was removed (it clobbered the notes of
 v4.2.0-beta.1 with `null` while waiting for a GitLab release that no longer
-exists). Done when the first tag goes through it.
+exists). First green run on `b5ae1d1c` (host tests, 7 boards, out-of-tree
+board). What it took: no `path:` in `dependencies.lock` (local components are
+project components), `IDF_COMPONENT_CHECK_NEW_VERSION=0` inside the container
+command, the out-of-tree board inside the checkout (`.ci_boards/`) and a
+`FORCE` on the `BOARD_DIR` cache entry. Left: the first tag through the
+release job.
 
 - Build matrix of the 7 boards on every push and PR (ESP-IDF 5.5 docker
   image; ccache keyed on the lock file).
