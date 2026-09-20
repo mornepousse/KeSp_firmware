@@ -251,10 +251,10 @@ Pinout: `docs/NIPHARGUS_V2_HARDWARE.md` (source of truth, checked against
 the netlist).
 
 **Standardisation roadmap (2026-09-20)**: `docs/ROADMAP_MAKE_YOUR_OWN.md` —
-board = one folder (defaults inside, template, generic contract test),
-out-of-tree boards (`-DBOARD_DIR`), GitHub Actions CI + release on tag, a
-"make your own" document and a single project name. All four wanted, in that
-order, none started.
+board = one folder (**done 2026-09-20**, `boards/README.md`), out-of-tree
+boards (`-DBOARD_DIR`), GitHub Actions CI + release on tag, a "make your own"
+document and a single project name (KaSe is a keyboard, KeSp the firmware —
+"kase" is everywhere, to be sorted out there).
 
 ## Board variants
 
@@ -278,8 +278,12 @@ order, none started.
   after 250 ms
 - **conchodytes**: mouse (PMW3389), dongle slot 2
 
-Each variant lives under `boards/<name>/` with `board.h`, `board_keymap.c`,
-`board_layout.c`. V2D inherits from V2 via `#include "../kase_v2/board.h"`.
+Each board lives under `boards/<name>/` with `board.h`, `board_keymap.c`,
+`board_layout.c` and `sdkconfig.defaults` — **a board is one folder**, see
+`boards/README.md` (2026-09-20: `scripts/new-board.sh`, `boards/_template/`,
+pin tables `BOARD_ROW_PINS`/`BOARD_COL_PINS` read by the core, `BOARD_PINS(X)`
+checked by the generic contract test, boards discovered by `check.sh`). V2D
+inherits from V2 via `#include "../kase_v2/board.h"`.
 
 ## Build system
 

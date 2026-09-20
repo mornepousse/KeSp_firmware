@@ -9,8 +9,11 @@ between core and board, and the front door for a newcomer.
 
 ## 1. A board is one folder — nothing else to touch
 
-Plan: `docs/superpowers/plans/2026-09-20-board-is-one-folder.md` (6 tasks,
-written 2026-09-20, not started).
+**Done 2026-09-20** (commits 27385978..HEAD, plan
+`docs/superpowers/plans/2026-09-20-board-is-one-folder.md`): see
+`boards/README.md`. Learned on the way: a KEYBOARD-role board could not say
+"no screen" (`KASE_NO_DISPLAY` added) and CMake picked the display backend
+from any mention of its name (now a real `#define`).
 
 - Move `sdkconfig.defaults.<name>` from the repository root into
   `boards/<name>/`; CMake finds it from `-DBOARD=<name>`.
@@ -59,8 +62,11 @@ written 2026-09-20, not started).
   (plain ESP-IDF, no Nix required), pairing with the dongle, remapping with
   KeSp_controller, what the heartbeat and `rfstat` tell you.
 - One name. Today KaSe / KeSp / Niphargus / Conchodytes are four names for
-  one project: pick a firmware name, keep board names for boards, rename
-  the repository and the binaries accordingly.
+  one project — and "kase" is used everywhere for the firmware (`KASE_*`
+  Kconfig, `kase_*` boards, `KaSe_` binaries) although KaSe is a keyboard and
+  KeSp the firmware (noticed 2026-09-20). Pick a firmware name, keep board
+  names for boards, rename the repository, the Kconfig prefix and the
+  binaries accordingly — a bulk rename, to plan on its own.
 - Done when: someone who has never seen the repository follows the
   document to a typing board without asking a question.
 
