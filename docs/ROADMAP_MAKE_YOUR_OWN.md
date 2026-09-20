@@ -9,6 +9,9 @@ between core and board, and the front door for a newcomer.
 
 ## 1. A board is one folder — nothing else to touch
 
+Plan: `docs/superpowers/plans/2026-09-20-board-is-one-folder.md` (6 tasks,
+written 2026-09-20, not started).
+
 - Move `sdkconfig.defaults.<name>` from the repository root into
   `boards/<name>/`; CMake finds it from `-DBOARD=<name>`.
 - `boards/_template/`: `board.h` commented field by field (matrix pins and
