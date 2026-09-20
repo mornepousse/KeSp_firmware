@@ -4,6 +4,10 @@
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO" || exit 0
+# Débrayage : TRIPWIRE_OFF=1 (par session) ou un fichier .tripwire-off à la racine
+# (par dépôt, à ne pas committer) coupe ce hook net, sans rien désinstaller.
+[ "${TRIPWIRE_OFF:-0}" = "1" ] && exit 0
+[ -e .tripwire-off ] && exit 0
 CTX=""
 if [ "$(git config --get core.hooksPath 2>/dev/null)" != "scripts/hooks" ]; then
   if git config core.hooksPath scripts/hooks 2>/dev/null; then

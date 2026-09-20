@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tripwire-template: v0.14.0
+# tripwire-template: v0.15.0
 # Tripwire anti-régression KaSe — source unique de vérité du "quoi vérifier".
 # Généré par /tripwire:init. Adapter ICI ; les hooks ne font qu'appeler ce script.
 # Modes:
@@ -53,9 +53,6 @@ TEST_COUNT_CMD="grep -rho 'TEST_ASSERT' test/ | wc -l"
 # Avis TDD (optionnel) : formes grep -E des chemins source et test. Vides -> inerte.
 SRC_GREP="^main/|^boards/"
 TEST_GREP="^test/"
-# Contrat de comportements : document du smoke test materiel, ou doivent
-# apparaitre les gardes [smoke:X] de COMPORTEMENTS.md.
-SMOKE_DOC="docs/HARDWARE_SMOKE_TEST.md"
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YEL=$'\033[1;33m'; NC=$'\033[0m'
 fail() { echo "${RED}✗ $*${NC}" >&2; }
@@ -120,7 +117,6 @@ fingerprint() {
 }
 KEY="$MODE${SINGLE_VARIANT:+-$SINGLE_VARIANT}$SCOPE_KEY"
 [ "${TRIPWIRE_RATCHET_STRICT:-0}" = "1" ] && KEY="$KEY-strict"   # un run strict ne skippe que contre un vert strict
-[ "${TRIPWIRE_CONTRAT_STRICT:-0}" = "1" ] && KEY="$KEY-contrat"  # idem pour la question du contrat (Stop, pre-push)
 STAMP="$GITDIR/tripwire/green-$KEY"
 FP="$(fingerprint)"
 if [ "$FORCE" != "1" ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP" 2>/dev/null)" = "$FP" ]; then
@@ -178,7 +174,7 @@ check_divergences() {
 
 # ---- Contrat de comportements : une garde ne disparaît pas en silence ----
 # COMPORTEMENTS.md (committé) : puces taguées [test:X] (X doit apparaître dans un
-# fichier de test), [smoke:X] (X doit apparaître dans SMOKE_DOC) ou [NON GARDÉ]
+# fichier de test), [smoke:X] (note manuelle, jamais vérifiée ici) ou [NON GARDÉ]
 # (l'aveu, compté et ratcheté dans .tripwire-nongardes comme le ratchet de
 # tests). Toute autre ligne est de la prose. Absent -> inerte.
 check_comportements() {
@@ -200,15 +196,7 @@ check_comportements() {
           echo "  → rétablir le test, ou passer la ligne en [NON GARDÉ] si l'aveu est assumé (il est compté)." >&2
           rc=1
         fi ;;
-      smoke:*)
-        arg="${tag#smoke:}"
-        if [ -z "$SMOKE_DOC" ] || [ ! -f "$SMOKE_DOC" ]; then
-          fail "comportement ligne $n : garde [smoke:$arg] invérifiable — SMOKE_DOC ${SMOKE_DOC:+introuvable ($SMOKE_DOC)}${SMOKE_DOC:-non défini dans check.sh}"; rc=1
-        elif ! grep -qF -- "$arg" "$SMOKE_DOC"; then
-          fail "comportement ligne $n a perdu sa garde : « $arg » n'apparaît pas dans $SMOKE_DOC"
-          echo "  → l'ajouter au smoke test, ou passer la ligne en [NON GARDÉ] si l'aveu est assumé (il est compté)." >&2
-          rc=1
-        fi ;;
+      smoke:*) ;;   # note de vérification manuelle (release) : jamais vérifiée ici
       NON*|*:*)
         fail "comportement ligne $n : tag inconnu [$tag] — attendu [test:X], [smoke:X] ou [NON GARDÉ]"; rc=1 ;;
       *) ;;   # lien markdown ou prose entre crochets : pas un tag
@@ -318,10 +306,11 @@ if [ -n "$TEST_COUNT_CMD" ]; then
   fi
 fi
 
-# ---- Source modifiée sans test : avis TDD, ou question forcée du contrat ----
-# Sans COMPORTEMENTS.md : avis, jamais bloquant. Avec : la question doit avoir
-# une réponse — un test, ou une ligne au contrat (gardée ou [NON GARDÉ]). Sans
-# réponse, avis en mode normal, rouge si TRIPWIRE_CONTRAT_STRICT=1 (Stop, pre-push).
+# ---- Source modifiée sans test : un avis, jamais un rouge ----
+# Avec COMPORTEMENTS.md, l'avis demande quel comportement est touché. Il a été
+# bloquant au Stop pendant une semaine sur un vrai projet : 17 blocages, 66
+# commits taxés d'une ligne au contrat. Le rouge du contrat est réservé à une
+# garde [test:X] qui disparaît.
 if [ -n "$SRC_GREP" ] && [ -n "$TEST_GREP" ]; then
   CH="$( { git diff --name-only HEAD; git ls-files -o --exclude-standard; } 2>/dev/null | sort -u)"
   if [ -n "$CH" ]; then
@@ -329,8 +318,7 @@ if [ -n "$SRC_GREP" ] && [ -n "$TEST_GREP" ]; then
     NTST="$(printf '%s\n' "$CH" | grep -cE "$TEST_GREP" || true)"
     if [ "$NSRC" -gt 0 ] 2>/dev/null && [ "$NTST" -eq 0 ] 2>/dev/null; then
       if [ -f COMPORTEMENTS.md ] && ! printf '%s\n' "$CH" | grep -qx 'COMPORTEMENTS.md'; then
-        MSG="contrat: $NSRC source(s) modifiée(s), ni test ni COMPORTEMENTS.md touché — quel comportement ce changement touche-t-il, et quel test le garde ? L'ajouter au contrat (gardé, ou [NON GARDÉ] assumé) avant de conclure."
-        if [ "${TRIPWIRE_CONTRAT_STRICT:-0}" = "1" ]; then fail "$MSG"; rc=1; else info "⚠ $MSG"; fi
+        info "⚠ $NSRC source(s) sans test — quel comportement de COMPORTEMENTS.md ? (avis)"
       elif [ ! -f COMPORTEMENTS.md ]; then
         info "⚠ TDD: $NSRC fichier(s) source modifié(s) sans test modifié — test d'abord ?"
       fi

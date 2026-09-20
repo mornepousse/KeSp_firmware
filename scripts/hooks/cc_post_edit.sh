@@ -3,6 +3,10 @@
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO" || exit 1
+# Débrayage : TRIPWIRE_OFF=1 (par session) ou un fichier .tripwire-off à la racine
+# (par dépôt, à ne pas committer) coupe ce hook net, sans rien désinstaller.
+[ "${TRIPWIRE_OFF:-0}" = "1" ] && exit 0
+[ -e .tripwire-off ] && exit 0
 # python3 requis pour parser le JSON du hook ; sans lui le hook est inactif (signalé).
 command -v python3 >/dev/null 2>&1 || { echo "tripwire: python3 absent, hook PostToolUse inactif" >&2; exit 0; }
 FP="$(python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("tool_input",{}).get("file_path",""))' 2>/dev/null)"
@@ -41,11 +45,11 @@ case "$FP" in
     fi
     ;;
   *)
-    # La question forcée. Elle remplace l'avis TDD de check.sh, qui n'arrivait
-    # jamais jusqu'ici : le hook ne relaie la sortie du check que sur rouge.
+    # La question, en une ligne : chaque octet ici est un token à chaque édition.
+    # Un avis, jamais un blocage — le Stop ne l'impose plus.
     if [ -f "$REPO/COMPORTEMENTS.md" ]; then
       python3 -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":sys.argv[1]}}, ensure_ascii=False))' \
-        "tripwire: source modifiée — quel comportement de COMPORTEMENTS.md ce changement touche-t-il, et quel test le garde ? Si aucun : l'ajouter au contrat (gardé, ou [NON GARDÉ] assumé) avant de conclure. Le Stop bloquera sinon."
+        "tripwire: source sans test — quel comportement de COMPORTEMENTS.md ? (avis)"
     fi
     ;;
 esac
