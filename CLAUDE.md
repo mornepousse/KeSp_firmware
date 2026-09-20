@@ -250,6 +250,12 @@ Open items (2026-09-19):
 Pinout: `docs/NIPHARGUS_V2_HARDWARE.md` (source of truth, checked against
 the netlist).
 
+**Standardisation roadmap (2026-09-20)**: `docs/ROADMAP_MAKE_YOUR_OWN.md` —
+board = one folder (defaults inside, template, generic contract test),
+out-of-tree boards (`-DBOARD_DIR`), GitHub Actions CI + release on tag, a
+"make your own" document and a single project name. All four wanted, in that
+order, none started.
+
 ## Board variants
 
 - **V1**: round SPI display (GC9A01), LED strip, legacy pinout
