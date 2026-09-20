@@ -424,7 +424,7 @@ void test_link_handshake(void)
     test_ack_en_up_entretient_le_lien();
     test_up_sans_usb_ne_sonde_pas();
     test_la_periode_tient_sous_le_timeout();
-    printf("\n-- poignée de main 5 V du lien --\n");
+    printf("\n-- link 5V handshake --\n");
     test_starts_dead();
     test_probed_answers_and_closes_its_own_switch();
     test_probed_while_probing_still_pairs();

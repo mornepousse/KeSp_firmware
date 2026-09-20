@@ -151,7 +151,7 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
         for (int c = 0; c < MATRIX_COLS; c++)
             if (new_state[r][c] != prev_matrix_state[r][c])
                 ESP_LOGW(TAG, "MTX r=%d c=%d %s", r, c,
-                         new_state[r][c] ? "appui" : "relache");
+                         new_state[r][c] ? "pressed" : "released");
 #endif
 
 #if CONFIG_KASE_HALF_LINK_TX
@@ -622,7 +622,7 @@ void matrix_wake_capture(void)
     }
     /* One line per wake: what the capture found. It's this line that
      * proved, on 2026-09-11, that the left did see the wake key. */
-    ESP_LOGI(TAG, "reveil : %u touche(s) capturee(s)", filled);
+    ESP_LOGI(TAG, "wake: %u key(s) captured", filled);
 #if CONFIG_KASE_VEILLE_DIAG
     if (filled == 0) {
         /* Empty capture on a GPIO wake: report what EACH pass read, to
@@ -634,7 +634,7 @@ void matrix_wake_capture(void)
         for (int r = 0; r < MATRIX_ROWS; r++)
             for (int c = 0; c < MATRIX_COLS; c++, k++) { l1[k] = st1[r][c] ? '1' : '.'; l2[k] = st2[r][c] ? '1' : '.'; }
         l1[k] = l2[k] = '\0';
-        ESP_LOGW(TAG, "  capture vide : passe1=%s passe2=%s", l1, l2);
+        ESP_LOGW(TAG, "  empty capture: pass1=%s pass2=%s", l1, l2);
     }
 #endif
     for (uint8_t i = 0; i < filled; i++)
@@ -704,7 +704,7 @@ bool matrix_wake_reconcile(void)
     }
 #endif
     matrix_flag_signal(&stat_matrix_changed);
-    ESP_LOGW(TAG, "reveil : touche relachee avant le premier balayage, relachement publie");
+    ESP_LOGW(TAG, "wake: key released before the first scan, release published");
     return true;
 }
 

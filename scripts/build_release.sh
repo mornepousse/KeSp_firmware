@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# Construit les binaires de release des 3 claviers et les rassemble dans release/.
+# Builds the release binaries for the 3 keyboards and gathers them in release/.
 #
-# Usage : ./scripts/build_release.sh vX.Y.Z
-# Sortie : release/KaSe_<version>_<HW>.bin       (app seule, à flasher en 0x20000)
-#          release/KaSe_<version>_<HW>_full.bin  (image complète, à flasher en 0x0)
+# Usage: ./scripts/build_release.sh vX.Y.Z
+# Output: release/KaSe_<version>_<HW>.bin       (app only, flash at 0x20000)
+#         release/KaSe_<version>_<HW>_full.bin  (full image, flash at 0x0)
 #
-# ── Pourquoi ce script a été réécrit (2026-08-19) ────────────────────────────
-# La version précédente lançait `idf.py -DBOARD=<board> build` sans -B ni
-# -DSDKCONFIG : les trois boards se construisaient dans le MÊME dossier build/
-# avec le sdkconfig racine. Deux conséquences, toutes deux silencieuses :
+# ── Why this script was rewritten (2026-08-19) ───────────────────────────────
+# The previous version ran `idf.py -DBOARD=<board> build` without -B or
+# -DSDKCONFIG: all three boards were built in the SAME build/ folder with the
+# root sdkconfig. Two consequences, both silent:
 #
-#   1. Fuite de configuration d'un board à l'autre — ce que CLAUDE.md interdit
-#      explicitement.
-#   2. Les `sdkconfig.defaults.<short>` par board n'étaient JAMAIS lus, parce
-#      qu'ils ne le sont qu'à la génération d'un sdkconfig neuf et qu'un
-#      sdkconfig racine existait déjà. Le V2D serait sorti avec le BLE compilé
-#      malgré sdkconfig.defaults.v2_debug.
+#   1. Config leakage from one board to another — which CLAUDE.md explicitly
+#      forbids.
+#   2. Per-board `sdkconfig.defaults.<short>` were NEVER read, because they
+#      are only read when generating a fresh sdkconfig, and a root sdkconfig
+#      already existed. The V2D would come out with BLE compiled in despite
+#      sdkconfig.defaults.v2_debug.
 #
-# D'où : un dossier de build ET un sdkconfig par board, comme le reste du dépôt.
+# Hence: one build folder AND one sdkconfig per board, like the rest of the repo.
 set -euo pipefail
 
 if [ -z "${IDF_PATH:-}" ]; then
@@ -47,9 +47,9 @@ for i in "${!BOARDS[@]}"; do
 
     cp "$bdir/KeSp.bin" "$RELEASE_DIR/KaSe_${VERSION_TAG}_${hw}.bin"
 
-    # Image complète : bootloader + table de partitions + otadata + app + storage.
-    # Se flashe en 0x0 après un erase_flash ; requise après tout changement de
-    # table de partitions.
+    # Full image: bootloader + partition table + otadata + app + storage.
+    # Flashes at 0x0 after an erase_flash; required after any partition
+    # table change.
     ( cd "$bdir" && esptool.py --chip esp32s3 merge_bin \
         -o "$RELEASE_DIR/KaSe_${VERSION_TAG}_${hw}_full.bin" \
         --flash_mode dio --flash_freq 80m --flash_size 16MB \
@@ -66,13 +66,13 @@ echo ""
 echo "======================================== artefacts"
 ls -lh "$RELEASE_DIR"/KaSe_"$VERSION_TAG"_*.bin | awk '{print "  "$5"\t"$9}'
 
-# Garde-fou : le V2D ne doit pas embarquer le BLE (sdkconfig.defaults.v2_debug).
-# Si ce contrôle échoue, c'est que les defaults par board n'ont pas été pris —
-# exactement la panne silencieuse que la réécriture de ce script corrige.
+# Safeguard: the V2D must not embed BLE (sdkconfig.defaults.v2_debug).
+# If this check fails, the per-board defaults were not picked up — exactly
+# the silent failure this script's rewrite fixes.
 if grep -q "^CONFIG_BT_ENABLED=y" build_kase_v2_debug/sdkconfig 2>/dev/null; then
     echo ""
-    echo "ERREUR : le V2D embarque le BLE — sdkconfig.defaults.v2_debug n'a pas été pris." >&2
-    echo "         Supprimer build_kase_v2_debug/sdkconfig et relancer." >&2
+    echo "ERROR: the V2D embeds BLE — sdkconfig.defaults.v2_debug was not picked up." >&2
+    echo "       Delete build_kase_v2_debug/sdkconfig and rerun." >&2
     exit 1
 fi
-echo "  ✓ V2D sans BLE (defaults par board bien pris en compte)"
+echo "  ✓ V2D without BLE (per-board defaults correctly applied)"

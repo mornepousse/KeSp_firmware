@@ -36,13 +36,13 @@ static inline void veille_veto_poser(veille_vetos_t *v, veille_veto_t quoi, bool
 
 static inline bool veille_bloquee(const veille_vetos_t *v) { return v->actifs != 0; }
 
-/* Names of active vetoes for the heartbeat: "usb+lien", "-" if
+/* Names of active vetoes for the heartbeat: "usb+link", "-" if
  * none. Bounded to n bytes (n >= 2), cleanly truncated beyond that — the five
- * fit within the HB's 24 bytes ("usb+lien+sync+test+pair" = 23). */
+ * fit within the HB's 24 bytes ("usb+link+sync+test+pair" = 23). */
 static inline const char *veille_vetos_str(const veille_vetos_t *v, char *out, size_t n)
 {
     static const struct { veille_veto_t q; const char *nom; } noms[] = {
-        { VEILLE_VETO_USB, "usb" }, { VEILLE_VETO_LIEN, "lien" },
+        { VEILLE_VETO_USB, "usb" }, { VEILLE_VETO_LIEN, "link" },
         { VEILLE_VETO_SYNC, "sync" }, { VEILLE_VETO_TEST, "test" },
         { VEILLE_VETO_PAIR, "pair" },
     };

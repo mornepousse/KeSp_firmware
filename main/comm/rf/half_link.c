@@ -131,14 +131,14 @@ static void half_fusion_pairing_task(void *arg)
     if (acked) {
         /* We ALWAYS save the keyboard slot: the right shares the left's
          * address, whatever slot the dongle returns. */
-        ESP_LOGW(TAG, "fusion appairage : ACK set_id=0x%04X — sauvegarde + reboot",
+        ESP_LOGW(TAG, "fusion pairing: ACK set_id=0x%04X — saving + reboot",
                  ack.set_id);
         rf_pairing_save_half(ack.set_id, RF_ADDR_KBD_DONGLE, ack.dongle_wifi_mac);
         vTaskDelay(pdMS_TO_TICKS(500));
         esp_restart();
     }
-    ESP_LOGE(TAG, "fusion appairage : pas d'ACK — ouvrir la fenêtre du dongle "
-                  "(KS_CMD_RF_PAIR_START) puis redémarrer la droite");
+    ESP_LOGE(TAG, "fusion pairing: no ACK — open the dongle window "
+                  "(KS_CMD_RF_PAIR_START) then restart the right");
 #if CONFIG_KASE_VEILLE
     veille_veto(VEILLE_VETO_PAIR, false);
 #endif
@@ -166,9 +166,9 @@ bool half_link_tx_init(void)
         cfg.addr_suffix = RF_ADDR_KBD_DONGLE;
         rf_apply_set_id(&cfg, set_id, RF_ADDR_KBD_DONGLE);
         fusion_unpaired = (set_id == 0 || set_id == 0xFFFF);
-        ESP_LOGW(TAG, "fusion : TX vers le dongle ch=0x%02X suffixe=0x%02X set_id=0x%04X%s",
+        ESP_LOGW(TAG, "fusion: TX to dongle ch=0x%02X suffix=0x%02X set_id=0x%04X%s",
                  cfg.channel, cfg.addr_suffix, set_id,
-                 fusion_unpaired ? " (NON APPAIRE — appairage actif)" : "");
+                 fusion_unpaired ? " (UNPAIRED — pairing active)" : "");
     }
 #endif
 #if CONFIG_KASE_DONGLE_FUSION
@@ -179,10 +179,10 @@ bool half_link_tx_init(void)
     /* The owner initializes the chip in PTX toward the target and registers
      * its own sleep hook itself (power-down, lock kept; re-armed on wake). */
     if (!radio_owner_init(&cfg, NULL)) {
-        ESP_LOGE(TAG, "TX init echouee — la moitie droite restera muette");
+        ESP_LOGE(TAG, "TX init failed — the right half will stay silent");
         return false;
     }
-    ESP_LOGI(TAG, "TX pret : ch=0x%02X addr=KaSe.%02X", cfg.channel, cfg.addr_suffix);
+    ESP_LOGI(TAG, "TX ready: ch=0x%02X addr=KaSe.%02X", cfg.channel, cfg.addr_suffix);
 #if CONFIG_KASE_VEILLE && CONFIG_KASE_BATT_SENSE
     /* On wake: a STATUS right away, the voltage may have moved. */
     static const veille_hook_t hook_status = { "status", NULL, half_link_apres_reveil };
@@ -194,7 +194,7 @@ bool half_link_tx_init(void)
         /* No probe or normal emission as long as there is no set_id: we would
          * target the factory address and the dongle would not acknowledge. We
          * launch active pairing, which restarts the board once the ACK is received. */
-        ESP_LOGW(TAG, "fusion : appairage actif au dongle — ouvrir sa fenêtre");
+        ESP_LOGW(TAG, "fusion: active pairing with dongle — open its window");
         xTaskCreate(half_fusion_pairing_task, "half_pair", 4096, NULL, 5, NULL);
         return true;
     }
@@ -219,10 +219,10 @@ bool half_link_tx_init(void)
             vTaskDelay(pdMS_TO_TICKS(20));
         }
         if (ok == 0) {
-            ESP_LOGE(TAG, "epreuve : 0/%d acquittes — PERSONNE N'ECOUTE sur ch=0x%02X",
+            ESP_LOGE(TAG, "trial: 0/%d acked — NOBODY IS LISTENING on ch=0x%02X",
                      N, cfg.channel);
         } else {
-            ESP_LOGW(TAG, "epreuve : %d/%d acquittes — LA GAUCHE ECOUTE", ok, N);
+            ESP_LOGW(TAG, "trial: %d/%d acked — THE LEFT IS LISTENING", ok, N);
             /* THE measurement of R1. The acknowledgment alone says nothing about deafness:
              * the ESB retransmits up to 15 times, so a packet gets through even if the
              * left was deaf on the first try. What betrays the deafness
@@ -232,7 +232,7 @@ bool half_link_tx_init(void)
              * A ratio close to zero means the switch is not noticeable;
              * a high ratio measures exactly what the bet costs. */
             if (rf_tx_count)
-                ESP_LOGW(TAG, "R1 : %u retransmissions pour %u paquets = %u.%02u par paquet",
+                ESP_LOGW(TAG, "R1: %u retransmissions for %u packets = %u.%02u per packet",
                          (unsigned)rf_tx_retr_sum, (unsigned)rf_tx_count,
                          (unsigned)(rf_tx_retr_sum / rf_tx_count),
                          (unsigned)((rf_tx_retr_sum * 100 / rf_tx_count) % 100));
@@ -345,8 +345,8 @@ static bool half_link_tx_frame_si(const uint8_t *buf, uint8_t n, radio_valide_cb
          * taken under s_etat_mux — not by re-reading the owner's live state. */
         if (apres == avant) radio_rearmer();
         else                radio_mode_set(RADIO_PTX, apres == HALF_TX_TO_LEFT ? &s_cfg_left : &s_cfg_dongle);
-        ESP_LOGW(TAG, "repli : bascule TX -> %s (rearme, %u sans ACK)",
-                 apres == HALF_TX_TO_LEFT ? "GAUCHE KaSe.03 (heartbeat)" : "DONGLE KaSe.01 (matrix)",
+        ESP_LOGW(TAG, "fallback: switch TX -> %s (rearmed, %u without ACK)",
+                 apres == HALF_TX_TO_LEFT ? "LEFT KaSe.03 (heartbeat)" : "DONGLE KaSe.01 (matrix)",
                  (unsigned)HALF_TX_SWITCH_FAILS);
     }
 #else
@@ -356,7 +356,7 @@ static bool half_link_tx_frame_si(const uint8_t *buf, uint8_t n, radio_valide_cb
     } else if (++s_sans_ack >= 30) {
         s_sans_ack = 0;
         radio_rearmer();
-        ESP_LOGW(TAG, "chien de garde : radio TX rearmee (30 envois sans ACK)");
+        ESP_LOGW(TAG, "watchdog: radio TX rearmed (30 sends without ACK)");
     }
 #endif
 
@@ -368,7 +368,7 @@ static bool half_link_tx_frame_si(const uint8_t *buf, uint8_t n, radio_valide_cb
     envois++;
     if (ack) acquittes++;
     if ((envois % 10) == 0)
-        ESP_LOGW(TAG, "TX %u envois, %u acquittes (%u%%)",
+        ESP_LOGW(TAG, "TX %u sent, %u acked (%u%%)",
                  (unsigned)envois, (unsigned)acquittes,
                  (unsigned)(acquittes * 100 / envois));
     return ack;
@@ -492,11 +492,11 @@ bool half_link_tx_refresh_start(void)
     BaseType_t r = xTaskCreate(half_link_tx_refresh_task, "half_tx_rfr",
                                3072, NULL, 4, &s_refresh_task);
     if (r != pdPASS) {
-        ESP_LOGE(TAG, "tache de rafraichissement non creee — les maintiens de "
-                      "plus de %u ms seront relaches a tort", HALF_LINK_TIMEOUT_MS);
+        ESP_LOGE(TAG, "refresh task not created — holds of "
+                      "more than %u ms will be wrongly released", HALF_LINK_TIMEOUT_MS);
         return false;
     }
-    ESP_LOGI(TAG, "rafraichissement des maintiens : %u ms (relache a %u ms)",
+    ESP_LOGI(TAG, "hold refresh: %u ms (released at %u ms)",
              HALF_TX_REFRESH_MS, HALF_LINK_TIMEOUT_MS);
     return true;
 }
@@ -523,7 +523,7 @@ const char *veille_hb_suffixe(void)
 #if CONFIG_KASE_BATT_SENSE
     batt = batt_sense_dv();
 #endif
-    snprintf(buf, sizeof buf, " lien=%d batt=%u dV", lien, batt);
+    snprintf(buf, sizeof buf, " link=%d batt=%u dV", lien, batt);
     return buf;
 }
 #endif

@@ -55,10 +55,10 @@ esp_err_t mouse_relay_init(void)
     uint16_t set_id = rf_pairing_load_set_id_half(BOARD_NRF_ADDR_SUFFIX, &slot);
     if (set_id) {
         rf_apply_set_id(&cfg, set_id, slot);
-        ESP_LOGI(TAG, "appairage restaure : set_id=0x%04X slot=0x%02X", set_id, slot);
+        ESP_LOGI(TAG, "pairing restored: set_id=0x%04X slot=0x%02X", set_id, slot);
     } else {
-        ESP_LOGW(TAG, "non appairee — les rapports seront jetes. Ouvrir la "
-                      "fenetre du dongle (KS_CMD_RF_PAIR_START) puis appairer.");
+        ESP_LOGW(TAG, "unpaired — reports will be dropped. Open the "
+                      "dongle window (KS_CMD_RF_PAIR_START) then pair.");
     }
 
     esp_err_t err = rf_driver_init_tx(&s_radio, &cfg);
@@ -70,8 +70,8 @@ esp_err_t mouse_relay_init(void)
         /* The probe reads CONFIG/RF_SETUP and rejects all-zero as well as
          * all-one. On this board, the 0xFF meant "module not
          * powered" for hours — a cold solder joint on its 3.3 V. */
-        ESP_LOGE(TAG, "la radio ne repond pas : registres incoherents. "
-                      "Verifier l'alimentation du module U8.");
+        ESP_LOGE(TAG, "the radio does not respond: incoherent registers. "
+                      "Check the power supply of module U8.");
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -92,8 +92,8 @@ esp_err_t mouse_relay_init(void)
     rf_driver_set_retr(&s_radio, 0x00);
 
     s_paired = (set_id != 0);
-    ESP_LOGI(TAG, "radio prete, canal 0x%02X, %s",
-             cfg.channel, s_paired ? "appairee" : "NON appairee");
+    ESP_LOGI(TAG, "radio ready, channel 0x%02X, %s",
+             cfg.channel, s_paired ? "paired" : "NOT paired");
 
     return ESP_OK;
 }
@@ -154,7 +154,7 @@ esp_err_t mouse_relay_pair(void)
     static const uint8_t pair_addr[5] = RF_PAIR_ADDR;
     rf_radio_cfg_t cfg = mouse_nrf_cfg();
 
-    ESP_LOGI(TAG, "appairage : emission sur le rendez-vous canal 0x%02X",
+    ESP_LOGI(TAG, "pairing: sending on rendezvous channel 0x%02X",
              RF_PAIR_CHANNEL);
 
     for (int essai = 1; essai <= 20; essai++) {
@@ -168,19 +168,19 @@ esp_err_t mouse_relay_pair(void)
         if (n) {
             rf_pair_ack_t a;
             if (rf_decode_pair_ack(rep, n, &a)) {
-                ESP_LOGI(TAG, "ACK recu : set_id=0x%04X slot=0x%02X dongle=%02X:%02X:%02X:%02X:%02X:%02X",
+                ESP_LOGI(TAG, "ACK received: set_id=0x%04X slot=0x%02X dongle=%02X:%02X:%02X:%02X:%02X:%02X",
                          a.set_id, a.slot, a.dongle_wifi_mac[0], a.dongle_wifi_mac[1],
                          a.dongle_wifi_mac[2], a.dongle_wifi_mac[3],
                          a.dongle_wifi_mac[4], a.dongle_wifi_mac[5]);
                 esp_err_t e = rf_pairing_save_half(a.set_id, a.slot, a.dongle_wifi_mac);
                 if (e != ESP_OK) {
-                    ESP_LOGE(TAG, "sauvegarde NVS : %s", esp_err_to_name(e));
+                    ESP_LOGE(TAG, "NVS save: %s", esp_err_to_name(e));
                     return e;
                 }
-                ESP_LOGW(TAG, "appairee. Redemarrer pour que le lien s'active.");
+                ESP_LOGW(TAG, "paired. Restart for the link to activate.");
                 return ESP_OK;
             }
-            ESP_LOGW(TAG, "reponse de %u octets, mais ce n'est pas un PAIR_ACK", n);
+            ESP_LOGW(TAG, "response of %u bytes, but it is not a PAIR_ACK", n);
         }
 
         /* `ack` is the nRF's TX_DS: it says that SOMEONE acknowledged the
@@ -188,14 +188,14 @@ esp_err_t mouse_relay_pair(void)
          * Distinguishing the two helps diagnosis — no ACK at all points to
          * range, channel or address; ACK but no reply means the dongle's
          * window is closed. */
-        ESP_LOGI(TAG, "essai %d/20 : %s, pas de PAIR_ACK",
-                 essai, ack ? "trame acquittee au niveau radio" : "aucun acquittement");
+        ESP_LOGI(TAG, "attempt %d/20: %s, no PAIR_ACK",
+                 essai, ack ? "frame acked at radio level" : "no acknowledgment");
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 
     /* Puts the radio back on its working address before returning. */
     rf_driver_set_channel(&s_radio, cfg.channel);
-    ESP_LOGE(TAG, "appairage echoue apres 20 essais. La fenetre du dongle "
-                  "est-elle ouverte (KS_CMD_RF_PAIR_START) ?");
+    ESP_LOGE(TAG, "pairing failed after 20 attempts. Is the dongle window "
+                  "open (KS_CMD_RF_PAIR_START)?");
     return ESP_ERR_TIMEOUT;
 }

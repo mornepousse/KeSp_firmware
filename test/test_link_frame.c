@@ -190,7 +190,7 @@ static void test_crc_is_the_repo_one(void)
 
 void test_link_frame(void)
 {
-    printf("\n-- trame du lien inter-moitiés --\n");
+    printf("\n-- inter-half link frame --\n");
     test_roundtrip_matrix();
     test_roundtrip_control_frames();
     test_incomplete_input_asks_for_more();

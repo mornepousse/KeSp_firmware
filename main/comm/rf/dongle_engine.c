@@ -76,8 +76,8 @@ void dongle_engine_set_left_usb(bool usb)
 {
     if (usb != s_left_usb) {
         s_left_usb = usb;
-        ESP_LOGW(TAG, "mode gauche : %s", usb ? "USB (dongle se tait, réémet la droite)"
-                                              : "sans-fil (dongle tape)");
+        ESP_LOGW(TAG, "left mode: %s", usb ? "USB (dongle goes quiet, re-emits the right)"
+                                              : "wireless (dongle types)");
     }
 }
 
@@ -106,10 +106,10 @@ void dongle_engine_note_left_fp(uint32_t fp)
     if (!config_coherence_note(&s_coh, fp, now_ms())) return;  /* nothing new */
     uint32_t own = dongle_own_fp();
     if (config_fp_match(own, fp))
-        ESP_LOGI(TAG, "config cohérente gauche↔dongle : empreinte 0x%08X", (unsigned)fp);
+        ESP_LOGI(TAG, "config coherent left↔dongle: fingerprint 0x%08X", (unsigned)fp);
     else
-        ESP_LOGW(TAG, "DIVERGENCE de config : gauche=0x%08X dongle=0x%08X — keymaps "
-                      "désynchronisées, le dongle tape peut-être autre chose", (unsigned)fp,
+        ESP_LOGW(TAG, "config DIVERGENCE: left=0x%08X dongle=0x%08X — keymaps "
+                      "desynchronized, the dongle might be typing something else", (unsigned)fp,
                  (unsigned)own);
 }
 
@@ -220,7 +220,7 @@ static void detecter_reappui(const half_state_t *avant, const rf_matrix_t *m, ui
                 s_reappuis++;
                 s_reappui_half = (uint8_t)m->half; s_reappui_key = (uint8_t)k;
                 s_reappui_ms = (uint16_t)(now - s_relache_ms[h][k]);
-                ESP_LOGW(TAG, "re-appui #%lu : moitie %u (%u,%u) %lu ms apres son relachement",
+                ESP_LOGW(TAG, "re-press #%lu: half %u (%u,%u) %lu ms after its release",
                          (unsigned long)s_reappuis, (unsigned)m->half, (unsigned)r, (unsigned)c,
                          (unsigned long)(now - s_relache_ms[h][k]));
             }
@@ -239,7 +239,7 @@ void dongle_engine_on_matrix(const rf_matrix_t *m)
         uint32_t avant = fusion_file_ecrasees(&s_file);
         fusion_file_push(&s_file, &s_fusion);   /* replayed by the engine, in order */
         if (fusion_file_ecrasees(&s_file) != avant)
-            ESP_LOGW(TAG, "transition ecrasee (#%lu) : file pleine, moitie %u",
+            ESP_LOGW(TAG, "transition overwritten (#%lu): queue full, half %u",
                      (unsigned long)fusion_file_ecrasees(&s_file), (unsigned)m->half);
     }
     xSemaphoreGive(s_mux);
@@ -377,7 +377,7 @@ void dongle_engine_start(void)
     hid_report_init();
 
     xTaskCreatePinnedToCore(dongle_engine_task, "dongle_eng", 6144, NULL, 9, NULL, 0);
-    ESP_LOGI(TAG, "moteur keymap du dongle démarré (fusion)");
+    ESP_LOGI(TAG, "dongle keymap engine started (fusion)");
 }
 
 #endif /* CONFIG_KASE_DONGLE_FUSION */

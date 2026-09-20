@@ -69,9 +69,9 @@ void batt_sense_sample_now(void)
         uint8_t avant = s_niveau;
         s_niveau = (uint8_t)batt_niveau_step((batt_niveau_t)s_niveau, dv);
         if (s_niveau != avant)
-            ESP_LOGW(TAG, "batterie : %s (%u dV)", s_niveau == BATT_CRITIQUE ? "CRITIQUE" : s_niveau == BATT_FAIBLE ? "FAIBLE" : "normale", (unsigned)dv);
+            ESP_LOGW(TAG, "battery: %s (%u dV)", s_niveau == BATT_CRITIQUE ? "CRITICAL" : s_niveau == BATT_FAIBLE ? "LOW" : "normal", (unsigned)dv);
     }
-    ESP_LOGD(TAG, "%u mV (adc %u) -> %u dV, etat %u", (unsigned)mv, (unsigned)s[0], dv, s_chg);
+    ESP_LOGD(TAG, "%u mV (adc %u) -> %u dV, state %u", (unsigned)mv, (unsigned)s[0], dv, s_chg);
 }
 
 static void timer_cb(void *arg) { (void)arg; batt_sense_sample_now(); }
@@ -80,16 +80,16 @@ void batt_sense_init(void)
 {
 #if CONFIG_KASE_VEILLE
     /* One measurement on wake: the timer was frozen during sleep. */
-    static const veille_hook_t hook = { "jauge", NULL, batt_sense_sample_now };
+    static const veille_hook_t hook = { "gauge", NULL, batt_sense_sample_now };
     veille_hook_enregistrer(&hook);
 #endif
     if (adc_oneshot_io_to_channel(BOARD_VBAT_SENSE_GPIO, &s_unit_id, &s_chan) != ESP_OK) {
-        ESP_LOGE(TAG, "GPIO%d n'est pas une entree ADC — jauge desactivee", BOARD_VBAT_SENSE_GPIO);
+        ESP_LOGE(TAG, "GPIO%d is not an ADC input — gauge disabled", BOARD_VBAT_SENSE_GPIO);
         return;
     }
     adc_oneshot_unit_init_cfg_t ucfg = { .unit_id = s_unit_id, .ulp_mode = ADC_ULP_MODE_DISABLE };
     if (adc_oneshot_new_unit(&ucfg, &s_unit) != ESP_OK) {
-        ESP_LOGE(TAG, "ADC%d init KO — jauge desactivee", (int)s_unit_id + 1);
+        ESP_LOGE(TAG, "ADC%d init FAILED — gauge disabled", (int)s_unit_id + 1);
         s_unit = NULL;
         return;
     }
@@ -102,14 +102,14 @@ void batt_sense_init(void)
     };
     if (adc_cali_create_scheme_curve_fitting(&cal, &s_cali) != ESP_OK) {
         s_cali = NULL;
-        ESP_LOGW(TAG, "pas de calibration ADC : lecture approchee (+/-0,1 V)");
+        ESP_LOGW(TAG, "no ADC calibration: approximate reading (+/-0.1 V)");
     }
 
     batt_sense_sample_now();
     const esp_timer_create_args_t a = { .callback = timer_cb, .name = "batt" };
     if (esp_timer_create(&a, &s_timer) == ESP_OK)
         esp_timer_start_periodic(s_timer, BATT_PERIOD_US);
-    ESP_LOGI(TAG, "jauge : %u dV (etat %u), ADC%d ch%d, mesure toutes les 10 s",
+    ESP_LOGI(TAG, "gauge: %u dV (state %u), ADC%d ch%d, measuring every 10 s",
              s_dv, s_chg, (int)s_unit_id + 1, (int)s_chan);
 }
 

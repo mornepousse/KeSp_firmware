@@ -255,7 +255,7 @@ static bool try_attach(void)
     if (memlcd_panel_init() != ESP_OK) return false;   /* bus not there yet: retry on the next tick */
     s_attached = true;
     memlcd_panel_clear();
-    ESP_LOGI(TAG, "panneau attache (bus radio pret)");
+    ESP_LOGI(TAG, "panel attached (radio bus ready)");
     s_dirty = true;                                    /* push what LVGL has already rendered */
     return true;
 }
@@ -270,7 +270,7 @@ static bool memlcd_init(void)
 #if CONFIG_KASE_VEILLE
     /* Sleep (B7): frozen image and VCOM suspended while asleep; on wake,
      * flags only — the screen task pushes the image again on its tick. */
-    static const veille_hook_t hook = { "ecran", memlcd_sleep, memlcd_wake };
+    static const veille_hook_t hook = { "screen", memlcd_sleep, memlcd_wake };
     veille_hook_enregistrer(&hook);
 #endif
     return true;               /* never "KO": the attachment happens on the first update() */
@@ -305,8 +305,8 @@ static void memlcd_update(void)
         static uint16_t s_refus;
         if (s_fb_mux && xSemaphoreTake(s_fb_mux, pdMS_TO_TICKS(20)) != pdTRUE) return;   /* the flush takes care of it */
         if (!s_dirty) { xSemaphoreGive(s_fb_mux); return; }                             /* pushed in the meantime */
-        if (memlcd_panel_show(s_fb)) { if (s_refus >= 5) ESP_LOGW(TAG, "image poussee apres %u refus (bus occupe)", (unsigned)s_refus); s_refus = 0; s_dirty = false; }
-        else if (++s_refus == 20) ESP_LOGW(TAG, "20 refus de suite : le bus radio ne se libere pas pour l'ecran");
+        if (memlcd_panel_show(s_fb)) { if (s_refus >= 5) ESP_LOGW(TAG, "image pushed after %u refusals (bus busy)", (unsigned)s_refus); s_refus = 0; s_dirty = false; }
+        else if (++s_refus == 20) ESP_LOGW(TAG, "20 refusals in a row: the radio bus is not freeing up for the screen");
         xSemaphoreGive(s_fb_mux);
         return;
     }

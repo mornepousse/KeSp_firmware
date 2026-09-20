@@ -69,7 +69,7 @@ static void test_cadence_du_relais(void)
 
 void test_kbd_refresh(void)
 {
-    printf("\n-- repetition bornee du rapport HID (radio) --\n");
+    printf("\n-- bounded repetition of the HID report (radio) --\n");
     test_cadence_du_relais();
     test_repos_ne_reemet_pas();
     test_arme_puis_se_tait();

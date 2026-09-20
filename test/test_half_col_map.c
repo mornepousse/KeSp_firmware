@@ -67,7 +67,7 @@ static void test_le_miroir_est_le_decalage_de_la_colonne_symetrique(void)
 
 void test_half_col_map(void)
 {
-    printf("\n-- colonne keymap de la moitie distante (miroir) --\n");
+    printf("\n-- keymap column of the remote half (mirror) --\n");
     test_sans_miroir_c_est_un_simple_decalage();
     test_avec_miroir_l_ordre_s_inverse();
     test_le_mapping_reste_une_bijection();

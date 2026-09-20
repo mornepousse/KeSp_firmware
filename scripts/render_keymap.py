@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Dessine une keymap (export KeSp_controller) sur la geometrie reelle du clavier.
+"""Draws a keymap (KeSp_controller export) on the keyboard's real geometry.
 
-    scripts/render_keymap.py <layers.json> <sortie.png> [--diff <autre.json>]
+    scripts/render_keymap.py <layers.json> <output.png> [--diff <other.json>]
 
-Une image par couche non vide. Avec --diff, les cases qui different de l'autre
-fichier sont colorees : vert = modifiee/ajoutee, rose = videe. C'est l'outil de
-brainstorm : on edite le JSON case par case, on rend, on compare — la
-proposition vit dans le fichier, pas dans la tete de qui la dessine.
+One image per non-empty layer. With --diff, cells that differ from the other
+file are colored: green = modified/added, pink = cleared. This is the
+brainstorming tool: the JSON is edited cell by cell, rendered, compared — the
+proposal lives in the file, not in the head of whoever is drawing it.
 
-Geometrie : compile boards/niphar_layout.inc via le preprocesseur C (KEYMAP_COLS=14).
-Keycodes : HID + familles de main/input/key_definitions.h (MO/TO, K_MK, macros).
-Rotation : r > 0 = sens horaire, comme Slint dans KeSp_controller.
+Geometry: compiles boards/niphar_layout.inc via the C preprocessor (KEYMAP_COLS=14).
+Keycodes: HID + families from main/input/key_definitions.h (MO/TO, K_MK, macros).
+Rotation: r > 0 = clockwise, same as Slint in KeSp_controller.
 """
 import sys, os, json, subprocess, tempfile, re
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,9 +35,9 @@ int main(void){{ printf("%s\\n", board_layout_json); return 0; }}
 HID = {4:'A',5:'B',6:'C',7:'D',8:'E',9:'F',10:'G',11:'H',12:'I',13:'J',14:'K',15:'L',16:'M',17:'N',
  18:'O',19:'P',20:'Q',21:'R',22:'S',23:'T',24:'U',25:'V',26:'W',27:'X',28:'Y',29:'Z',
  30:'1',31:'2',32:'3',33:'4',34:'5',35:'6',36:'7',37:'8',38:'9',39:'0',
- 40:'Entrée',41:'Échap',42:'Retour',43:'Tab',44:'Espace',45:'-',46:'=',47:'[',48:']',49:'\\',
+ 40:'Enter',41:'Esc',42:'Backsp',43:'Tab',44:'Space',45:'-',46:'=',47:'[',48:']',49:'\\',
  51:';',52:"'",53:'`',54:',',55:'.',56:'/',57:'Caps',58:'F1',59:'F2',60:'F3',61:'F4',62:'F5',63:'F6',
- 64:'F7',65:'F8',66:'F9',67:'F10',68:'F11',69:'F12',70:'Impr',73:'Ins',74:'Home',75:'PgUp',76:'Suppr',
+ 64:'F7',65:'F8',66:'F9',67:'F10',68:'F11',69:'F12',70:'PrtSc',73:'Ins',74:'Home',75:'PgUp',76:'Del',
  77:'End',78:'PgDn',79:'→',80:'←',81:'↓',82:'↑',224:'Ctrl',225:'Shift',226:'Alt',227:'GUI',
  228:'RCtrl',229:'RShift',230:'AltGr',231:'RGUI'}
 SHIFTED = {30:'!',31:'@',32:'#',33:'$',34:'%',35:'^',36:'&',37:'*',38:'(',39:')',45:'_',46:'+',
@@ -93,7 +93,7 @@ def rendre(chemin, sortie, ref=None):
     open(svg, 'w').write('\n'.join(o))
     subprocess.run(['inkscape', '--export-type=png', f'--export-filename={sortie}', '--export-dpi=96', svg],
                    check=True, capture_output=True)
-    print(f'{sortie} : {len(couches)} couche(s) — {", ".join(noms[i] for i in couches)}')
+    print(f'{sortie}: {len(couches)} layer(s) — {", ".join(noms[i] for i in couches)}')
 
 if __name__ == '__main__':
     a = sys.argv[1:]

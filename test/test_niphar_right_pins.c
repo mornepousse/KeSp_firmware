@@ -50,7 +50,7 @@
  * exist on this half — we make compilation fail rather than
  * let it pass silently. */
 #ifdef BOARD_HAS_TRACKPAD_LOCAL
-#error "le trackpad est sur la gauche uniquement : BOARD_HAS_TRACKPAD_LOCAL n'a rien à faire dans boards/niphar_right/board.h"
+#error "the trackpad is on the left only: BOARD_HAS_TRACKPAD_LOCAL has no business in boards/niphar_right/board.h"
 #endif
 
 /* Unwired GPIO: strapping and octal PSRAM. No board pin should
@@ -239,7 +239,7 @@ static void test_right_rf_geometry_matches_board(void)
 
 void test_niphar_right_pins(void)
 {
-    printf("\n-- brochage Niphargus DROITE (contrat netlist 2026-08-06) --\n");
+    printf("\n-- Niphargus RIGHT pinout (netlist contract 2026-08-06) --\n");
     test_right_matrix_table();
     test_right_matrix_geometry();
     test_right_peripheral_pins();

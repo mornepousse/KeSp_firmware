@@ -62,7 +62,7 @@ static void test_le_compteur_de_ms_peut_deborder(void)
 
 void test_rf_status_cadence(void)
 {
-    printf("\n-- cadence de la trame de supervision --\n");
+    printf("\n-- supervision frame cadence --\n");
     test_rien_avant_la_periode();
     test_emission_a_la_periode();
     test_la_marge_couvre_une_perte();

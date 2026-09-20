@@ -40,8 +40,8 @@ static bool s_usb_tenu;
 static void usb_hote(bool monte)
 {
     if (!s_usb_lock) return;
-    if (monte && !s_usb_tenu)       { esp_pm_lock_acquire(s_usb_lock); s_usb_tenu = true;  ESP_LOGI(TAG, "hote USB monte : APB tenu a 80 MHz"); }
-    else if (!monte && s_usb_tenu)  { esp_pm_lock_release(s_usb_lock); s_usb_tenu = false; ESP_LOGI(TAG, "hote USB parti : DFS libre"); }
+    if (monte && !s_usb_tenu)       { esp_pm_lock_acquire(s_usb_lock); s_usb_tenu = true;  ESP_LOGI(TAG, "USB host mounted: APB held at 80 MHz"); }
+    else if (!monte && s_usb_tenu)  { esp_pm_lock_release(s_usb_lock); s_usb_tenu = false; ESP_LOGI(TAG, "USB host gone: DFS free"); }
 }
 /* TinyUSB event (tinyusb_config_t.event_cb, set by usb_hid.c):
  * esp_tinyusb has tud_mount_cb/tud_umount_cb, we go through its relay. */
@@ -76,10 +76,10 @@ void pm_dfs_init(void)
     };
     esp_err_t e = esp_pm_configure(&cfg);
     if (e != ESP_OK) { ESP_LOGE(TAG, "esp_pm_configure: %s", esp_err_to_name(e)); return; }
-    ESP_ERROR_CHECK(esp_pm_lock_create(ESP_PM_APB_FREQ_MAX, 0, "usb_hote", &s_usb_lock));
+    ESP_ERROR_CHECK(esp_pm_lock_create(ESP_PM_APB_FREQ_MAX, 0, "usb_host", &s_usb_lock));
     usb_hote(tud_mounted());   /* in case the host enumerated before us */
-    ESP_LOGW(TAG, "DFS actif : %d MHz en travail, %d MHz oisif (PLL coupee) ; light sleep auto : %s ; hote USB => APB 80 MHz",
-             cfg.max_freq_mhz, cfg.min_freq_mhz, cfg.light_sleep_enable ? "OUI" : "non");
+    ESP_LOGW(TAG, "DFS active: %d MHz working, %d MHz idle (PLL cut) ; light sleep auto: %s ; USB host => APB 80 MHz",
+             cfg.max_freq_mhz, cfg.min_freq_mhz, cfg.light_sleep_enable ? "YES" : "no");
 }
 #else
 void pm_dfs_init(void) {}

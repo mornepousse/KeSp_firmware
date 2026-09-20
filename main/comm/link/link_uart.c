@@ -69,7 +69,7 @@ static void set_5v(bool on)
 #if CONFIG_KASE_VEILLE
     veille_veto(VEILLE_VETO_LIEN, on);   /* asleep, it would stop answering and the peer would reopen its 5 V */
 #endif
-    ESP_LOGW(TAG, "5 V %s — GPIO%d relu = %d", on ? "FERME" : "ouvert",
+    ESP_LOGW(TAG, "5 V %s — GPIO%d readback = %d", on ? "CLOSED" : "open",
              BOARD_LINK_5V_EN, gpio_get_level(BOARD_LINK_5V_EN));
 }
 
@@ -151,7 +151,7 @@ static void link_task(void *arg)
 
         if ((uint32_t)(now - dernier_bilan) >= 5000) {
             dernier_bilan = now;
-            ESP_LOGI(TAG, "etat=%d 5V=%d GPIO%d=%d | sondes tx %u rx %u | acks tx %u rx %u | bruit %u",
+            ESP_LOGI(TAG, "state=%d 5V=%d GPIO%d=%d | probes tx %u rx %u | acks tx %u rx %u | noise %u",
                      (int)s_hs.state, (int)s_hs.en_5v,
                      BOARD_LINK_5V_EN, gpio_get_level(BOARD_LINK_5V_EN),
                      (unsigned)s_probes_tx, (unsigned)s_probes_rx,
@@ -211,7 +211,7 @@ void link_uart_start(void)
     const int link_rx_pin = BOARD_LINK_TX;   /* swap: the real RX is on TX */
     ESP_ERROR_CHECK(uart_set_pin(BOARD_LINK_UART_NUM, BOARD_LINK_RX, BOARD_LINK_TX,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    ESP_LOGI(TAG, "UART%d TX=GPIO%d RX=GPIO%d (SWAP, cable droit)",
+    ESP_LOGI(TAG, "UART%d TX=GPIO%d RX=GPIO%d (SWAP, straight cable)",
              BOARD_LINK_UART_NUM, BOARD_LINK_RX, BOARD_LINK_TX);
 #else
     const int link_rx_pin = BOARD_LINK_RX;
@@ -232,5 +232,5 @@ void link_uart_start(void)
     memset(&s_usb_db, 0, sizeof(s_usb_db));
     s_usb_prev = false;
     xTaskCreate(link_task, "link", 3072, NULL, 4, NULL);
-    ESP_LOGI(TAG, "lien filaire pret, 5 V ouvert");
+    ESP_LOGI(TAG, "wired link ready, 5 V open");
 }

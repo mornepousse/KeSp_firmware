@@ -77,7 +77,7 @@ esp_err_t memlcd_panel_init(void)
         gpio_sleep_set_direction(dodo[i], GPIO_MODE_INPUT);
         gpio_sleep_set_pull_mode(dodo[i], GPIO_PULLDOWN_ONLY);
     }
-    ESP_LOGI(TAG, "panneau LS011B7DH03 : %d lignes x %d px, portrait %dx%d, CS GPIO%d actif haut, bus partage nRF24, broches tirees bas en veille",
+    ESP_LOGI(TAG, "panel LS011B7DH03: %d lines x %d px, portrait %dx%d, CS GPIO%d active high, bus shared with nRF24, pins pulled low in sleep",
              MEMLCD_PANEL_LINES, MEMLCD_PANEL_LINE_BYTES * 8, MEMLCD_W, MEMLCD_H, BOARD_LCD_CS_GPIO);
     return ESP_OK;
 }
@@ -121,7 +121,7 @@ bool memlcd_panel_write_lines(uint16_t first, uint16_t count, const uint8_t *lin
         }
         s_buf[p++] = 0x00;                                             /* 8 dummy clocks at end of frame */
         ok = xfer(s_buf, p);
-        if (!ok) ESP_LOGE(TAG, "spi_device_polling_transmit KO (transaction de %u octets)", (unsigned)p);
+        if (!ok) ESP_LOGE(TAG, "spi_device_polling_transmit KO (transaction of %u bytes)", (unsigned)p);
     }
     rf_bus_unlock();
     return ok;
@@ -151,5 +151,5 @@ void memlcd_panel_test_pattern(void)
         }
     }
     bool ok = memlcd_panel_show(fb);
-    ESP_LOGW(TAG, "mire %s", ok ? "ecrite (pave plein attendu en HAUT-GAUCHE)" : "REFUSEE (bus occupe ou panneau absent)");
+    ESP_LOGW(TAG, "test pattern %s", ok ? "written (solid block expected in TOP-LEFT)" : "REFUSED (bus busy or panel absent)");
 }

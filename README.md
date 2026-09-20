@@ -83,8 +83,8 @@ the matrix is scanned again). Deep sleep was **unreachable until 2026-09-15**:
 inactivity was only measured while awake, and a light-sleeping half sits in
 `esp_light_sleep_start()` until a key — which resets the counter. A timer wake
 at the deep threshold now performs the switch. Every wake logs how long the
-half actually slept, and both halves carry a heartbeat with `inactif=` and
-`dormi=X s/n`, because a night that loses 0.2 V (~20 mA) and a night at 244 µA
+half actually slept, and both halves carry a heartbeat with `idle=` and
+`slept=X s/n`, because a night that loses 0.2 V (~20 mA) and a night at 244 µA
 looked identical without that number. The radio is off from the light tier
 onward — listening costs 13.1 mA and the nRF24 has no low-power listening mode.
 
@@ -120,7 +120,7 @@ against the tickless rule — a 10 ms rest loop no longer compiles. Sleep is
 **one task** (`power/veille_task.c`), identical on both halves: modules that
 need the board awake post a named **veto** (usb, TRRS link, keymap sync, test
 mode), modules that own something to put to sleep register a **hook** (radio,
-screen, gauge), and the heartbeat says why the board is up: `HB … vetos=usb+lien`.
+screen, gauge), and the heartbeat says why the board is up: `HB … vetos=usb+link`.
 The right half's screen task went from 100 ms to 1 s, the TRRS link task
 blocks on the UART event queue instead of polling. All of it proven on both
 halves: wake with the key captured, 100 % ACK, link up and down, screens intact.

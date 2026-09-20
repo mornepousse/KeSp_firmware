@@ -38,7 +38,7 @@ void keymap_pull_on_ack(const uint8_t *ack, uint8_t ack_n)
             veille_veto(VEILLE_VETO_SYNC, true);   /* no sleep while pulling */
 #endif
             s_sync_target_fp = b.fp_target;
-            ESP_LOGW(TAG, "sync keymap : balise fp=0x%08X (la nôtre 0x%08X), %u chunks — pull",
+            ESP_LOGW(TAG, "sync keymap: beacon fp=0x%08X (ours 0x%08X), %u chunks — pull",
                      (unsigned)b.fp_target, (unsigned)own, (unsigned)b.n_chunks);
         }
     } else if (s_syncing && rf_decode_sync_chunk(ack, ack_n, &c)) {
@@ -72,9 +72,9 @@ bool keymap_pull_tick(void (*emettre)(const uint8_t *, uint8_t))
     if (a_enregistrer) {
         bool saved = save_keymaps((uint16_t *)keymaps, KEYMAP_BLOB_BYTES);
         uint32_t fp = config_fp_crc32((const uint8_t *)keymaps, KEYMAP_BLOB_BYTES);
-        ESP_LOGW(TAG, "sync keymap : 40/40 recus, fp=0x%08X %s (cible 0x%08X) — %s",
-                 (unsigned)fp, fp == cible ? "= cible" : "!= CIBLE", (unsigned)cible,
-                 saved ? "enregistree en NVS" : "ECHEC NVS");
+        ESP_LOGW(TAG, "sync keymap: 40/40 received, fp=0x%08X %s (target 0x%08X) — %s",
+                 (unsigned)fp, fp == cible ? "= target" : "!= TARGET", (unsigned)cible,
+                 saved ? "saved to NVS" : "NVS FAILURE");
 #if CONFIG_KASE_VEILLE
         veille_veto(VEILLE_VETO_SYNC, false);   /* pull done and saved */
 #endif

@@ -52,13 +52,13 @@
  * made to fail instead. (Until 2026-09-14 this test forbade ANY screen
  * macro: J12 was declared empty; the hardware changed, the contract follows.) */
 #ifndef BOARD_DISPLAY_BACKEND_MEMLCD
-#error "la gauche a un écran Sharp memory-LCD (J12 soudé) : BOARD_DISPLAY_BACKEND_MEMLCD manque dans boards/niphar_left/board.h"
+#error "the left has a Sharp memory-LCD screen (J12 soldered): BOARD_DISPLAY_BACKEND_MEMLCD is missing in boards/niphar_left/board.h"
 #endif
 #ifdef BOARD_DISPLAY_BACKEND_ROUND
-#error "la gauche n'a pas d'écran rond : BOARD_DISPLAY_BACKEND_ROUND changerait le backend choisi par CMakeLists.txt"
+#error "the left has no round screen: BOARD_DISPLAY_BACKEND_ROUND would change the backend chosen by CMakeLists.txt"
 #endif
 #ifdef BOARD_DISPLAY_BACKEND_OLED
-#error "la gauche n'a pas d'OLED : BOARD_DISPLAY_BACKEND_OLED changerait le backend choisi par CMakeLists.txt"
+#error "the left has no OLED: BOARD_DISPLAY_BACKEND_OLED would change the backend chosen by CMakeLists.txt"
 #endif
 
 /* Unwired GPIOs: strapping and octal PSRAM. No board pin must
@@ -243,7 +243,7 @@ static void test_ecran_memlcd_gauche(void)
 
 void test_niphar_left_pins(void)
 {
-    printf("\n-- brochage Niphargus GAUCHE (contrat netlist 2026-08-06) --\n");
+    printf("\n-- Niphargus LEFT pinout (netlist contract 2026-08-06) --\n");
     test_left_matrix_table();
     test_left_matrix_geometry();
     test_left_peripheral_pins();

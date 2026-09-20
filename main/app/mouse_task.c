@@ -80,9 +80,9 @@ typedef struct {
 } bouton_t;
 
 static bouton_t s_boutons[3] = {
-    { BOARD_SW_LEFT_GPIO,  BOARD_SW_LEFT_NC_GPIO,  false, "gauche", 0, 0 },
-    { BOARD_SW_RIGHT_GPIO, BOARD_SW_RIGHT_NC_GPIO, false, "droit",  0, 0 },
-    { BOARD_SW_MID_GPIO,   BOARD_SW_MID_NC_GPIO,   false, "milieu", 0, 0 },
+    { BOARD_SW_LEFT_GPIO,  BOARD_SW_LEFT_NC_GPIO,  false, "left",   0, 0 },
+    { BOARD_SW_RIGHT_GPIO, BOARD_SW_RIGHT_NC_GPIO, false, "right",  0, 0 },
+    { BOARD_SW_MID_GPIO,   BOARD_SW_MID_NC_GPIO,   false, "middle", 0, 0 },
 };
 
 static int32_t s_wheel;
@@ -232,8 +232,8 @@ static void mouse_task(void *arg)
      * 00 at startup is not abnormal in itself — it is a valid quadrature
      * state. What is abnormal is that it never changes. */
     if (enc_prev == 0)
-        ESP_LOGW(TAG, "molette : ENC_A et ENC_B a 0 au demarrage — LQ1 sature "
-                      "connu sur la v1, voir Conchodytes/NOTES-V2.md §1bis");
+        ESP_LOGW(TAG, "wheel: ENC_A and ENC_B at 0 on startup — LQ1 saturated, "
+                      "known on v1, see Conchodytes/NOTES-V2.md §1bis");
 
     while (1) {
         for (unsigned i = 0; i < 3; i++) {
@@ -247,7 +247,7 @@ static void mouse_task(void *arg)
             if (suivant != b->pressed) {
                 b->pressed = suivant;
                 b->fronts++;
-                ESP_LOGI(TAG, "clic %s : %s", b->nom, suivant ? "appuye" : "relache");
+                ESP_LOGI(TAG, "click %s: %s", b->nom, suivant ? "pressed" : "released");
             }
         }
 
@@ -345,15 +345,15 @@ static void mouse_task(void *arg)
          * the hardware. Will disappear once the task produces real HID reports. */
         if (n % 500 == 0) {
             ESP_LOGI(TAG, "dx=%+6ld dy=%+6ld SQUAL=%3u Shutter=%5u | G%d D%d M%d"
-                          " | molette %+5ld (rates %lu)",
+                          " | wheel %+5ld (rates %lu)",
                      (long)acc_dx, (long)acc_dy, last_squal, last_shutter,
                      s_boutons[0].pressed, s_boutons[1].pressed, s_boutons[2].pressed,
                      (long)s_wheel, (unsigned long)s_wheel_missed);
             if (mouse_relay_active()) {
                 uint32_t tx, ack;
                 mouse_relay_stats(&tx, &ack);
-                ESP_LOGI(TAG, "  radio : %lu trames, %lu acquittees (%lu%%) | "
-                              "reste dx=%ld dy=%ld | %lu ecretes | %lu rendues",
+                ESP_LOGI(TAG, "  radio: %lu frames, %lu acked (%lu%%) | "
+                              "remaining dx=%ld dy=%ld | %lu clipped | %lu refunded",
                          (unsigned long)tx, (unsigned long)ack,
                          (unsigned long)(tx ? ack * 100 / tx : 0),
                          (long)rf_dx, (long)rf_dy, (unsigned long)satur,
@@ -380,15 +380,15 @@ esp_err_t mouse_task_start(void)
          * clicks and the wheel remain readable. It is logged loudly and it
          * starts anyway — a mouse that clicks beats a dead mouse, and the
          * message says what to look at. */
-        ESP_LOGE(TAG, "capteur PMW3389 absent ou muet (%s) — clics et molette "
-                      "seuls", esp_err_to_name(err));
+        ESP_LOGE(TAG, "PMW3389 sensor absent or mute (%s) — clicks and wheel "
+                      "only", esp_err_to_name(err));
     }
 
     err = mouse_relay_init();
     if (err != ESP_OK) {
         /* A mouse without radio remains diagnosable over the serial port; it
          * is logged loudly and it starts anyway. */
-        ESP_LOGE(TAG, "radio absente ou muette (%s) — pas de lien avec le dongle",
+        ESP_LOGE(TAG, "radio absent or mute (%s) — no link with the dongle",
                  esp_err_to_name(err));
     } else if (!mouse_relay_active()) {
         /* Not paired: one attempt at startup. The dongle's window must be
@@ -400,7 +400,7 @@ esp_err_t mouse_task_start(void)
          * clicks, for example — rather than on every startup: a mouse
          * constantly trying to pair transmits on the rendezvous for nothing,
          * and on battery that has a cost. */
-        ESP_LOGW(TAG, "non appairee : tentative d'appairage au demarrage");
+        ESP_LOGW(TAG, "unpaired: attempting pairing at startup");
         mouse_relay_pair();
     }
 

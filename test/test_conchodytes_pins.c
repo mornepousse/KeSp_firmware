@@ -56,19 +56,19 @@
  * A stray macro here would describe a peripheral that does not exist on
  * this board — we fail the build rather than let it slide. */
 #ifdef BOARD_HAS_TRACKPAD_LOCAL
-#error "la souris n'a pas de trackpad : BOARD_HAS_TRACKPAD_LOCAL n'a rien a faire dans boards/conchodytes/board.h"
+#error "the mouse has no trackpad: BOARD_HAS_TRACKPAD_LOCAL has no business in boards/conchodytes/board.h"
 #endif
 /* MATRIX_ROWS/COLS come from test_framework.h and are therefore always
  * defined here: we guard on ROWS0/COLS0, which only exist in a keyboard's
  * board.h. */
 #ifdef ROWS0
-#error "la souris n'a aucun interrupteur en matrice : ROWS0 n'a rien a faire dans boards/conchodytes/board.h"
+#error "the mouse has no matrix switch: ROWS0 has no business in boards/conchodytes/board.h"
 #endif
 #ifdef COLS0
-#error "la souris n'a aucun interrupteur en matrice : COLS0 n'a rien a faire dans boards/conchodytes/board.h"
+#error "the mouse has no matrix switch: COLS0 has no business in boards/conchodytes/board.h"
 #endif
 #ifdef BOARD_DISPLAY_BACKEND_ROUND
-#error "la souris n'a pas d'ecran : BOARD_DISPLAY_BACKEND_ROUND n'a rien a faire dans boards/conchodytes/board.h"
+#error "the mouse has no display: BOARD_DISPLAY_BACKEND_ROUND has no business in boards/conchodytes/board.h"
 #endif
 
 /* GPIOs not wired on this board: strapping and octal PSRAM. */

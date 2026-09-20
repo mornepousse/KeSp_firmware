@@ -806,7 +806,7 @@ static void test_mk_sous_caps_word_un_seul_shift(void)
 
 void test_modified_key(void)
 {
-    printf("\n-- Modified Key : Shift+touche en une pression --\n");
+    printf("\n-- Modified Key: Shift+key in one press --\n");
     test_mk_press_shift_dans_le_modifier_et_1_dans_keycodes();
     test_mk_release_ne_laisse_rien();
     test_mk_ne_vole_pas_de_slot_quand_le_rapport_est_plein();

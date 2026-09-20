@@ -1,8 +1,8 @@
-# Écarts assumés du tripwire KaSe. Format : fichier<TAB>motif<TAB>pourquoi.
-# Une ligne perdue = check rouge : son diff est le mécanisme de review.
-scripts/check.sh	--fast|--host-only)	dialecte KaSe : --host-only = --fast standard. Référencé par README, CLAUDE.md, sept plans docs/superpowers et .claude/settings.local.json
-scripts/check.sh	--variant|--board)	dialecte KaSe : --board = --variant standard. Même surface de référence que l'alias --host-only
-scripts/check.sh	export IDF_CCACHE_ENABLE=1	préambule projet : les 7 boards partagent la plupart des composants, le cache croisé divise le temps du build full
-scripts/check.sh	command -v idf.py	un outil absent n'est pas une régression : sans devshell la phase de build se saute en l'annonçant au lieu de rendre un rouge indiscernable d'un code cassé (doctrine v0.12.0)
-scripts/hooks/cc_session_start.sh	.kase-board	fichier de variante custom, antérieur à .tripwire-variant et référencé par .esp-dev.yml, CLAUDE.md et l'agent kase-board-variant
-scripts/check.sh	export IDF_COMPONENT_CHECK_NEW_VERSION=0	préambule projet : le component manager 2.2.2 plante à la configuration en évaluant les manifestes LVGL 9 du registre contre un sdkconfig LVGL 8 (LV_USE_LIBJPEG_TURBO) ; le lock fait foi, pas de réseau au build
+# Accepted deviations from the KaSe tripwire. Format: file<TAB>pattern<TAB>why.
+# A lost line = red check: its diff is the review mechanism.
+scripts/check.sh	--fast|--host-only)	KaSe dialect: --host-only = standard --fast. Referenced by README, CLAUDE.md, seven docs/superpowers plans and .claude/settings.local.json
+scripts/check.sh	--variant|--board)	KaSe dialect: --board = standard --variant. Same reference surface as the --host-only alias
+scripts/check.sh	export IDF_CCACHE_ENABLE=1	project preamble: the 7 boards share most of their components, the cross-cache cuts the full build time
+scripts/check.sh	command -v idf.py	a missing tool is not a regression: without the devshell, the build phase skips itself while announcing it, instead of a red indistinguishable from broken code (doctrine v0.12.0)
+scripts/hooks/cc_session_start.sh	.kase-board	custom variant file, predates .tripwire-variant and referenced by .esp-dev.yml, CLAUDE.md and the kase-board-variant agent
+scripts/check.sh	export IDF_COMPONENT_CHECK_NEW_VERSION=0	project preamble: the 2.2.2 component manager crashes at configure time by evaluating the registry's LVGL 9 manifests against an LVGL 8 sdkconfig (LV_USE_LIBJPEG_TURBO); the lock is authoritative, no network needed at build time

@@ -102,7 +102,7 @@ static void test_grace_apres_reveil(void)
 
 void test_veille(void)
 {
-    printf("\n-- choix du niveau de veille (B7) --\n");
+    printf("\n-- sleep level choice (B7) --\n");
     test_activite_recente_ne_dort_pas();
     test_etage_leger();
     test_etage_profond();

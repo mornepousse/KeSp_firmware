@@ -10,9 +10,9 @@ choice KASE_DEVICE_ROLE
         NIPHAR_SLAVE = Niphargus right half: local matrix + Sharp LCD, no
                         keymap engine, no HID output (see KASE_NIPHAR_MASTER
                         for the left/master half, which reuses KEYBOARD).
-        MOUSE        = souris Conchodytes : capteur PMW3389, trois clics et une
-                        molette, rapports HID souris relayés au slot 2 du
-                        dongle. Aucune matrice, aucune keymap, aucun écran.
+        MOUSE        = Conchodytes mouse: PMW3389 sensor, three clicks and a
+                        wheel, mouse HID reports relayed to the dongle's slot
+                        2. No matrix, no keymap, no display.
 
 config KASE_DEVICE_ROLE_KEYBOARD
     bool "Keyboard (V1/V2/V2D)"
@@ -24,7 +24,7 @@ config KASE_DEVICE_ROLE_NIPHAR_SLAVE
     bool "Niphargus right half (slave: matrix + Sharp LCD, no keymap engine)"
 
 config KASE_DEVICE_ROLE_MOUSE
-    bool "Souris Conchodytes (capteur PMW3389 + clics, relais HID vers le slot 2)"
+    bool "Conchodytes mouse (PMW3389 sensor + clicks, HID relay to slot 2)"
 
 endchoice
 
@@ -33,46 +33,47 @@ config KASE_HAS_MOUSE_SENSOR
     default y if KASE_DEVICE_ROLE_MOUSE
     default n
     help
-        Compile le driver PMW3389 (main/periph/pmw3389.c) et son blob SROM.
+        Compiles the PMW3389 driver (main/periph/pmw3389.c) and its SROM blob.
 
-        Le blob fait 4 Ko de rodata à lui seul et n'a de sens que sur une carte
-        qui porte le capteur — d'où ce symbole plutôt qu'une compilation
-        inconditionnelle. Il est téléversé dans la puce à chaque démarrage :
-        c'est le firmware du capteur, pas une table de données.
+        The blob alone is 4 KB of rodata and only makes sense on a board that
+        carries the sensor — hence this symbol rather than an unconditional
+        compile. It is uploaded to the chip on every boot: it's the sensor's
+        firmware, not a data table.
 
-        ⚠ Le blob du PMW3389 n'est PAS celui du PMW3360 (99,6 % des octets
-        diffèrent). Les intervertir revient à charger le firmware d'une autre
-        puce dans le capteur.
+        ⚠ The PMW3389 blob is NOT the PMW3360's (99.6% of the bytes differ).
+        Swapping them means loading another chip's firmware into the sensor.
 
 config KASE_NO_KEYMAP_ENGINE
     bool
-    # Fusion : le dongle RETROUVE le moteur keymap (il fusionne deux demi-matrices
-    # brutes et sort le HID). Ce `default n` est en TÊTE parce que Kconfig retient
-    # le premier default satisfait — il gagne donc sur le `default y if DONGLE`
-    # ci-dessous quand KASE_DONGLE_FUSION est actif.
+    # Fusion: the dongle GETS BACK the keymap engine (it merges two raw
+    # half-matrices and outputs the HID). This `default n` comes FIRST because
+    # Kconfig keeps the first default satisfied — so it wins over the
+    # `default y if DONGLE` below whenever KASE_DONGLE_FUSION is active.
     default n if KASE_DONGLE_FUSION
     default y if KASE_DEVICE_ROLE_DONGLE
     default y if KASE_DEVICE_ROLE_MOUSE
     default n
     help
-        Vrai pour les rôles SANS matrice de touches : le dongle, qui reçoit du
-        HID déjà fini, et la souris Conchodytes, qui n'a que trois clics lus
-        individuellement. Ni keycodes, ni calques, ni statistiques par position,
-        ni bloc CLAVIER du protocole CDC.
+        True for roles WITHOUT a key matrix: the dongle, which receives
+        already-finished HID, and the Conchodytes mouse, which only has three
+        clicks read individually. No keycodes, no layers, no per-position
+        statistics, no CDC protocol KEYBOARD block.
 
-        ⚠ CE SYMBOLE EST NÉGATIF À DESSEIN. Ne pas le retourner en
-        KASE_HAS_KEYMAP_ENGINE : un booléen Kconfig à `n` est ABSENT de
-        sdkconfig.h, exactement comme sur le harnais de test hôte, où aucun
-        CONFIG_* n'existe. Le préprocesseur ne peut pas distinguer les deux.
+        ⚠ THIS SYMBOL IS NEGATIVE BY DESIGN. Do not flip it into
+        KASE_HAS_KEYMAP_ENGINE: a Kconfig boolean set to `n` is ABSENT from
+        sdkconfig.h, exactly like on the host test harness, where no CONFIG_*
+        exists at all. The preprocessor cannot tell the two apart.
 
-        Avec la forme négative, `#if !CONFIG_KASE_NO_KEYMAP_ENGINE` vaut vrai
-        quand le symbole est absent — donc sur l'hôte ET sur toute cible à
-        clavier, ce qui est le bon défaut dans les deux cas. Avec la forme
-        positive, l'hôte croirait n'avoir aucun moteur keymap et
-        input/key_processor.c ne compilerait plus. C'est arrivé le 2026-08-25.
+        With the negative form, `#if !CONFIG_KASE_NO_KEYMAP_ENGINE` is true
+        when the symbol is absent — so on the host AND on any keyboard
+        target, which is the right default in both cases. With the positive
+        form, the host would believe it has no keymap engine at all and
+        input/key_processor.c would stop compiling. That happened on
+        2026-08-25.
 
-        Il remplace la liste `!DONGLE && !MOUSE` qui était dispersée dans sept
-        fichiers ; un troisième rôle sans clavier ne touche que ce `default`.
+        It replaces the `!DONGLE && !MOUSE` list that used to be scattered
+        across seven files; a third keyboard-less role only touches this
+        `default`.
 
 config KASE_HAS_LOCAL_MATRIX
     bool
@@ -82,179 +83,180 @@ config KASE_HAS_LOCAL_MATRIX
     help
         Compiles matrix_scan.c and keyboard_task.c local-scan path.
 
-        La moitie droite du Niphargus scanne sa propre matrice : c'est meme sa
-        seule fonction, la spec la decrit comme "un scanner qui remonte sa
-        matrice brute". Elle n'a en revanche ni moteur keymap ni sortie HID.
+        The Niphargus right half scans its own matrix: it's even its only
+        function, the spec describes it as "a scanner that reports its raw
+        matrix". It has, however, neither keymap engine nor HID output.
 
 config KASE_DONGLE_FUSION
-    bool "Fusion au dongle : les deux moities emettent du BRUT, moteur au dongle"
+    bool "Fusion at the dongle: both halves emit RAW, engine runs at the dongle"
     default n
     help
-        Rearchitecture (design du 2026-09-12) : au lieu que la gauche fusionne et
-        envoie du HID fini, les deux moities emettent leur matrice BRUTE au
-        dongle, qui fusionne et fait tourner le moteur. Aucune moitie n'ecoute
-        sur batterie -> meilleure autonomie des deux cotes, et le reveil se fait
-        par le dongle (fin du « touche la gauche d'abord »).
+        Re-architecture (2026-09-12 design): instead of the left merging and
+        sending finished HID, both halves emit their RAW matrix to the
+        dongle, which merges and runs the engine. Neither half listens on
+        battery -> better battery life on both sides, and wake-up is driven
+        by the dongle (end of "touch the left first").
 
-        Deux moteurs (dongle + gauche autonome en USB) sans divergence : meme
-        code, config repliquee et versionnee dans les deux NVS, un seul moteur
-        actif a la fois selon le routage.
+        Two engines (dongle + left autonomous over USB) with no divergence:
+        same code, config replicated and versioned in both NVS, only one
+        engine active at a time depending on the routing.
 
-        Defaut OFF : le chemin actuel (gauche maitre, HID fini) reste en place et
-        fonctionne tant que ce drapeau n'est pas actif. Chantier phase par phase,
-        cf. docs/superpowers/plans/2026-09-12-dongle-fusion.md.
+        Default OFF: the current path (left as master, finished HID) stays in
+        place and works as long as this flag is inactive. Phased rollout, see
+        docs/superpowers/plans/2026-09-12-dongle-fusion.md.
 
 config KASE_LINK_FORCE_SOURCE
-    bool "Banc : forcer la moitie a se comporter en SOURCE 5 V (sans USB enumere)"
+    bool "Bench: force the half to behave as a 5V SOURCE (without USB enumeration)"
     default n
     depends on KASE_LINK_WIRE
     help
-        Diagnostic de charge. Le lien n'offre le 5 V que s'il se croit alimente,
-        et il le deduit de l'enumeration USB (tud_ready). Or on charge la droite
-        en branchant la gauche sur un CHARGEUR mural, qui n'enumere pas : le
-        firmware reste aveugle et ne ferme jamais le switch.
+        Charging diagnostic. The link only offers 5V if it believes itself
+        powered, and it infers that from USB enumeration (tud_ready). But the
+        right is charged by plugging the left into a wall CHARGER, which does
+        not enumerate: the firmware stays blind and never closes the switch.
 
-        Cette option force « USB present » en permanence : la moitie sonde et
-        ferme le 5 V sur ACK, quel que soit l'etat USB. Elle permet de valider
-        l'electrique de la charge par TRRS avant que le pont VBUS (GPIO33, pont
-        1M) ne soit peuple. A NE PAS laisser en production : une gauche a
-        batterie faible se mettrait a alimenter la droite.
+        This option forces "USB present" permanently: the half probes and
+        closes the 5V on ACK, regardless of USB state. It lets the TRRS
+        charging electrics be validated before the VBUS bridge (GPIO33, 1M
+        bridge) is populated. Do NOT leave this on in production: a
+        low-battery left would start powering the right.
 
 config KASE_LINK_WIRE
-    bool "Lien filaire TRRS : poignee de main et 5 V (brick B2)"
+    bool "Wired TRRS link: handshake and 5V (brick B2)"
     default n
     help
-        Transport UART1 du lien inter-moities sur le jack TRRS, et pilotage du
-        load switch LINK_5V_EN par la poignee de main de link_handshake.h. Le
-        5 V est mort par defaut et ne se ferme qu'apres un echange verifie
-        (sonde + ACK). Une moitie en charge reste eveillee : le lien bloque la
-        veille tant que son switch est ferme.
+        UART1 transport of the inter-half link over the TRRS jack, and
+        control of the LINK_5V_EN load switch via link_handshake.h's
+        handshake. 5V is off by default and only closes after a verified
+        exchange (probe + ACK). A half that is charging stays awake: the
+        link vetoes sleep as long as its switch is closed.
 
 config KASE_VEILLE
-    bool "Veille hybride : light sleep puis deep sleep (brick B7)"
+    bool "Hybrid sleep: light sleep then deep sleep (brick B7)"
     default n
     help
-        Deux etages. LEGER : light sleep, ~240 uA, etat conserve, reveil en
-        ~1 ms sur la matrice locale — assez bon marche pour etre tenu des
-        heures. PROFOND : deep sleep, ~8 uA, reveil par EXT1 sur les lignes,
-        au prix d'un redemarrage complet (~683 ms mesures au banc).
+        Two stages. LIGHT: light sleep, ~240 uA, state retained, ~1 ms
+        wake-up on the local matrix — cheap enough to hold for hours. DEEP:
+        deep sleep, ~8 uA, EXT1 wake-up on the lines, at the cost of a full
+        restart (~683 ms measured at the bench).
 
-        ⚠ La radio est eteinte des l'etage leger : ecouter coute 13,1 mA et le
-        nRF24 n'a pas de mode d'ecoute basse consommation. Une moitie endormie
-        n'entend donc PAS l'autre — apres une longue absence, la premiere
-        frappe doit etre sur la moitie qui parle a l'hote.
+        ⚠ The radio is turned off as early as the light stage: listening
+        costs 13.1 mA and the nRF24 has no low-power listening mode. A
+        sleeping half therefore does NOT hear the other — after a long
+        absence, the first keystroke must be on the half that talks to the
+        host.
 
 config KASE_VEILLE_LEGERE_S
-    int "Inactivite avant le light sleep (secondes)"
+    int "Inactivity before light sleep (seconds)"
     default 15
     depends on KASE_VEILLE
     help
-        Court : l'etage leger conserve l'etat et se reveille en ~1 ms sur la
-        touche, qui est capturee (22 reveils sur 22 au banc, 2026-09-15).
-        Eveillee et oisive, la carte tire ~28 mA a 160 MHz (ESP32-S3 datasheet
-        v2.2, table 5-9, p. 67) contre 0,24 mA endormie : chaque seconde
-        d'attente avant de dormir coute 100 fois une seconde de sommeil. A
-        60 s, une journee de frappe entrecoupee de pauses perdait ~0,2 V
-        (~13 mA de moyenne) ; 15 s en supprime les trois quarts.
+        Short: the light stage retains state and wakes up in ~1 ms on the
+        keystroke, which is captured (22 wake-ups out of 22 at the bench,
+        2026-09-15). Awake and idle, the board draws ~28 mA at 160 MHz
+        (ESP32-S3 datasheet v2.2, table 5-9, p. 67) against 0.24 mA asleep:
+        every second spent waiting before sleeping costs 100 times a second
+        of sleep. At 60 s, a day of typing interspersed with pauses was
+        losing ~0.2 V (~13 mA average); 15 s removes three quarters of that.
 
 config KASE_VEILLE_PROFONDE_S
-    int "Inactivite avant le deep sleep (secondes)"
+    int "Inactivity before deep sleep (seconds)"
     default 14400
     depends on KASE_VEILLE
     help
-        Long : 4 h par defaut. L'etage leger coute ~1 mAh sur quatre heures, il
-        n'y a donc aucune raison de se hater vers un reveil qui redemarre la
-        carte. Abaisser temporairement (30 s) pour eprouver le reveil EXT1 au
-        banc, sans quoi il faudrait attendre quatre heures.
+        Long: 4 h by default. The light stage costs ~1 mAh over four hours,
+        so there is no reason to rush toward a wake-up that restarts the
+        board. Lower it temporarily (30 s) to test the EXT1 wake-up at the
+        bench, otherwise it would mean waiting four hours.
 
 config KASE_VEILLE_DIAG
-    bool "Instrumentation de banc du reveil (chronos, lignes, echelle de relecture)"
+    bool "Bench instrumentation of wake-up (timings, lines, re-read ladder)"
     default n
     depends on KASE_VEILLE
     help
-        Banc de la « premiere touche legere perdue » (2026-09-16..19) : chronos
-        d'entree et de sortie du sommeil, niveau des lignes et masque GPIO a la
-        premiere instruction apres le reveil, relecture toutes les 10 ms pendant
-        150 ms quand la capture est vide, dump des deux passes de capture.
-        Hors option, le chemin de reveil reste : capture, relecture unique a
-        5 ms (un correctif, pas un diagnostic), recreation du pilote,
-        reconciliation. Indice acquis : le reveil part, la ligne est deja basse
-        13 ms plus tard, la touche n'est jamais vue en 156 ms — contact < 13 ms.
+        Bench for the "light first key lost" issue (2026-09-16..19): timings
+        for entering and leaving sleep, line levels and GPIO mask at the
+        first instruction after wake-up, re-read every 10 ms for 150 ms when
+        the capture is empty, dump of both capture passes. Without the
+        option, the wake-up path stays: capture, single re-read at 5 ms (a
+        fix, not a diagnostic), driver re-creation, reconciliation. Lead
+        gathered: wake-up starts, the line is already low 13 ms later, the
+        key is never seen within 156 ms — contact < 13 ms.
 
 config KASE_KEY_STATS
-    bool "Statistiques de frappe (compteurs, bigrammes, WPM, NVS)"
+    bool "Typing statistics (counters, bigrams, WPM, NVS)"
     default n if KASE_NIPHAR_MASTER || KASE_DEVICE_ROLE_NIPHAR_SLAVE
     default y
     depends on !KASE_NO_KEYMAP_ENGINE
     help
-        Compteurs par touche, bigrammes (17 Ko de RAM), WPM et leur sauvegarde
-        NVS. Coupe sur les moities du Niphargus : « pas de stats sur le
-        clavier, au mieux sur le dongle » (2026-09-16). Une sauvegarde NVS
-        coupe le cache d'instructions le temps d'une ecriture flash — balayage
-        et emission s'arretent, une frappe tombee dedans est perdue. Les
-        commandes CDC des stats repondent alors des zeros.
+        Per-key counters, bigrams (17 KB of RAM), WPM and their NVS save.
+        Disabled on the Niphargus halves: "no stats on the keyboard, at best
+        on the dongle" (2026-09-16). An NVS save stalls the instruction cache
+        for the duration of a flash write — scanning and emission stop, and a
+        keystroke caught in that window is lost. The stats CDC commands then
+        answer with zeros.
 
 config KASE_BATT_SENSE
-    bool "Jauge batterie : lecture ADC de VBAT_SENSE (moities Niphargus)"
+    bool "Battery gauge: ADC read of VBAT_SENSE (Niphargus halves)"
     default n
     help
-        Mesure la tension batterie toutes les 10 s et au reveil sur
-        BOARD_VBAT_SENSE_GPIO (pont 1M/1M + 100 nF, ADC2). Remontee au dongle
-        dans PKT_TYPE_STATUS avec l'identite de moitie ; exposee par la CDC
-        BATTERY. ADC2 exige l'absence de WiFi — vrai sur le Niphargus.
-        « En charge » n'est pas mesurable (pas de VBUS) : deduit d'un plateau
-        >= 4,15 V (pleine) ou d'une hausse de tension (en charge probable).
+        Measures battery voltage every 10 s and on wake-up on
+        BOARD_VBAT_SENSE_GPIO (1M/1M bridge + 100 nF, ADC2). Reported to the
+        dongle in PKT_TYPE_STATUS with the half's identity; exposed via the
+        BATTERY CDC. ADC2 requires no WiFi — true on the Niphargus.
+        "Charging" cannot be measured directly (no VBUS): inferred from a
+        plateau >= 4.15 V (full) or a rising voltage (charging likely).
 
 config KASE_DISPLAY_MEMLCD
-    bool "Ecran Sharp memory-LCD LS011B7DH03 (moities Niphargus, portrait 68x160)"
+    bool "Sharp memory-LCD LS011B7DH03 display (Niphargus halves, portrait 68x160)"
     default n
     help
-        Pilote + backend LVGL de l'ecran nice!view des moities. Le SPI est
-        PARTAGE avec le nRF24 : toute transaction ecran passe sous le verrou du
-        proprietaire de la radio (rf_bus_lock). CS actif haut, tenu bas des le
-        boot. Image gelee en light sleep, aucun reveil pour l'ecran. Rend
-        KASE_HAS_DISPLAY vrai (premier default satisfait).
+        Driver + LVGL backend for the halves' nice!view screen. The SPI bus
+        is SHARED with the nRF24: every screen transaction goes through the
+        radio owner's lock (rf_bus_lock). CS active-high, held low from boot.
+        Image frozen in light sleep, no wake-up for the screen. Makes
+        KASE_HAS_DISPLAY true (first satisfied default).
 
 config KASE_HALF_LINK_TX
-    bool "Lien inter-moities : emettre la demi-matrice (moitie droite)"
+    bool "Inter-half link: emit the half-matrix (right half)"
     default n
     depends on KASE_HAS_RF_TX
     help
-        Brick B3. La moitie droite emet sa demi-matrice sur le canal du lien
-        (RF_CH_HALF_LINK, cf. rf_slot.h) a chaque changement. Elle n'a ni moteur
-        keymap ni sortie HID : c'est un scanner.
+        Brick B3. The right half emits its half-matrix on the link channel
+        (RF_CH_HALF_LINK, see rf_slot.h) on every change. It has neither
+        keymap engine nor HID output: it's a scanner.
 
 config KASE_RF_FORCE_ROUTE
-    bool "Forcer le HID sur la radio meme quand l'USB est branche"
+    bool "Force HID over radio even when USB is plugged in"
     default n
     depends on KASE_KBD_WIRELESS
     help
-        Diagnostic de banc. En temps normal le routage est USB-first : USB
-        branche -> HID par USB, USB absent -> radio vers le dongle. Tester le
-        lien radio suppose donc de debrancher l'USB, donc une alimentation
-        batterie qui fonctionne.
+        Bench diagnostic. Normally routing is USB-first: USB plugged in ->
+        HID over USB, USB absent -> radio to the dongle. Testing the radio
+        link therefore requires unplugging the USB, hence a working battery
+        supply.
 
-        Cette option force KBD_OUT_RF en permanence : l'USB continue d'alimenter
-        la carte et de porter le CDC, mais les rapports HID partent par la
-        radio. Elle permet de valider le lien vers le dongle sans dependre de
-        l'alimentation batterie.
+        This option forces KBD_OUT_RF permanently: USB keeps powering the
+        board and carrying the CDC, but HID reports go out over radio. It
+        lets the link to the dongle be validated without depending on the
+        battery supply.
 
-        Le clavier ne tape donc PLUS par son propre USB tant qu'elle est active.
+        The keyboard therefore no longer types over its own USB while this
+        is active.
 
 config KASE_MATRIX_LOG_CONSOLE
-    bool "Journaliser chaque changement de matrice sur la console"
+    bool "Log every matrix change to the console"
     default n
     depends on KASE_HAS_LOCAL_MATRIX
     help
-        Diagnostic de banc. Chaque appui et chaque relachement sort en clair sur
-        la console sous la forme "MTX r=<ligne> c=<colonne> appui|relache",
-        sans passer par le CDC — utile quand l'USB de la carte n'est pas
-        exploitable, ou pour verifier une table de brochage contre le contrat
-        materiel.
+        Bench diagnostic. Every press and every release is printed in clear
+        on the console as "MTX r=<row> c=<col> press|release", bypassing the
+        CDC — useful when the board's USB is unusable, or to check a pinout
+        table against the hardware contract.
 
-        Enfreint volontairement la regle "pas de ESP_LOGI dans les callbacks de
-        scan matrice" du CLAUDE.md : c'est trop lent pour de la frappe reelle.
-        A n par defaut, jamais compile en production.
+        Deliberately breaks the "no ESP_LOGI in matrix scan callbacks" rule
+        from CLAUDE.md: it's too slow for real typing. Off by default, never
+        compiled in production.
 
 config KASE_HAS_DISPLAY
     bool
@@ -270,28 +272,28 @@ config KASE_HAS_DISPLAY
         in source order, so this override has to come first.
 
 config KASE_NO_RADIO
-    bool "Clavier filaire strict : ni BLE ni WiFi"
+    bool "Strict wired keyboard: no BLE, no WiFi"
     default n
     help
-      Retire la pile BLE d'un clavier qui ne sert qu'en USB. Gain : ~500 Ko de
-      binaire, la tâche Bluedroid et son activité 2,4 GHz en moins, et une
-      source de moins en concurrence avec le chemin de frappe.
-      Prix : le clavier perd le mode HID Bluetooth — la bascule usb_bl_state et
-      les keycodes Bluetooth (0x2900-0x2F00) deviennent des no-op.
+      Removes the BLE stack from a keyboard used only over USB. Gain: ~500 KB
+      of binary, one fewer Bluedroid task and its 2.4 GHz activity, and one
+      fewer source competing with the typing path.
+      Cost: the keyboard loses Bluetooth HID mode — the usb_bl_state switch
+      and the Bluetooth keycodes (0x2900-0x2F00) become no-ops.
 
-      À poser dans sdkconfig.defaults.<board>. Ce symbole a un PROMPT, donc il
-      est surchargeable depuis un sdkconfig ; KASE_HAS_BLE, lui, n'en a pas et
-      ne peut être forcé que par le `default n if` ci-dessous. Compléter avec
-      CONFIG_BT_ENABLED=n pour sortir aussi Bluedroid de la config.
+      Set in sdkconfig.defaults.<board>. This symbol has a PROMPT, so it can
+      be overridden from an sdkconfig; KASE_HAS_BLE has none and can only be
+      forced by the `default n if` below. Pair it with CONFIG_BT_ENABLED=n to
+      also drop Bluedroid from the config.
 
 config KASE_HAS_BLE
     bool
-    # Trois raisons INDEPENDANTES de couper le BLE, a garder toutes les trois :
-    # KASE_NO_RADIO est un choix par board pour un clavier strictement filaire
-    # (le V2D), tandis que les deux moities Niphargus le coupent par contrainte
-    # d'alimentation. Ne pas unifier sous KASE_NO_RADIO : son intitule dit
-    # "clavier filaire strict", or les moities Niphargus sont sans fil (nRF24).
-    # Le symbole mentirait sur ce qu'il decrit.
+    # Three INDEPENDENT reasons to cut BLE, all three worth keeping:
+    # KASE_NO_RADIO is a per-board choice for a strictly wired keyboard
+    # (the V2D), while the two Niphargus halves cut it under a power budget
+    # constraint. Do not unify under KASE_NO_RADIO: its name says "strict
+    # wired keyboard", yet the Niphargus halves are wireless (nRF24). The
+    # symbol would lie about what it describes.
     default n if KASE_NO_RADIO
     default n if KASE_NIPHAR_MASTER
     default n if KASE_DEVICE_ROLE_NIPHAR_SLAVE
@@ -323,11 +325,11 @@ config KASE_NIPHAR_MASTER
     default n
     depends on KASE_DEVICE_ROLE_KEYBOARD
     help
-      Moitié gauche du Niphargus. Elle réutilise le rôle KEYBOARD (matrice
-      locale, moteur keymap, USB HID, CDC binaire) et y ajoute ce qui est propre
-      au split : réception de la matrice de la moitié droite (lien TRRS en
-      filaire, nRF24 en sans-fil) et émission du rapport HID final vers le
-      dongle. C'est la seule moitié qui porte un moteur keymap.
+      Left half of the Niphargus. It reuses the KEYBOARD role (local matrix,
+      keymap engine, USB HID, binary CDC) and adds what is specific to the
+      split: receiving the right half's matrix (wired TRRS link, wireless
+      nRF24) and emitting the final HID report to the dongle. It's the only
+      half that carries a keymap engine.
 
 config KASE_VBUS_SENSE
     bool "Use a VBUS-sense GPIO for the USB-first auto-switch"
@@ -347,13 +349,13 @@ config KASE_HAS_RF_TX
     default y if KASE_DEVICE_ROLE_NIPHAR_SLAVE
     default n
     help
-        Compile le mode ÉMETTEUR (PTX) du driver nRF24 : rf_driver_init_tx,
-        rf_driver_send, et l'échange d'appairage hors bande.
+        Compiles the nRF24 driver's TRANSMITTER mode (PTX): rf_driver_init_tx,
+        rf_driver_send, and the out-of-band pairing exchange.
 
-        Ce symbole était référencé par comm/rf/rf_driver.h sans avoir jamais
-        été déclaré — seul KASE_KBD_WIRELESS ouvrait le bloc PTX. Le déclarer
-        ici donne à la souris le même accès sans passer par un symbole dont
-        l'intitulé parle de clavier.
+        This symbol used to be referenced by comm/rf/rf_driver.h without ever
+        being declared — only KASE_KBD_WIRELESS opened the PTX block.
+        Declaring it here gives the mouse the same access without going
+        through a symbol whose name talks about a keyboard.
 
 config KASE_HAS_RF_RX
     bool
@@ -366,32 +368,33 @@ config KASE_RF_CE_SCAN
     bool "Pairing: brute-force the NRF CE pin (bodged boards only)"
     default n
     help
-        Quand l'appairage echoue sur la broche CE configuree, essaie une liste
-        de GPIO candidats en les pilotant en sortie. Contournement herite du V2D
-        bricole a la main, ou le fil CE etait incertain.
+        When pairing fails on the configured CE pin, tries a list of
+        candidate GPIOs by driving them as output. Workaround inherited from
+        the hand-bodged V2D, where the CE wire was uncertain.
 
-        DANGEREUX sur une carte dont le brochage est connu : la liste
-        { 47, 45, 38, 39, 40, 33, 34, 35, 36 } touche, sur le Niphargus, le bus
-        SPI partage (38/39/40), le SDA du trackpad (47), une broche de strapping
-        interdite (45) et la PSRAM octale du N16R8 (35/36 — cf. datasheet
-        ESP32-S3-WROOM-1 p. 12).
+        DANGEROUS on a board with a known pinout: the list
+        { 47, 45, 38, 39, 40, 33, 34, 35, 36 } touches, on the Niphargus, the
+        shared SPI bus (38/39/40), the trackpad's SDA (47), a forbidden
+        strapping pin (45) and the N16R8's octal PSRAM (35/36 — see the
+        ESP32-S3-WROOM-1 datasheet p. 12).
 
-        La broche CE configuree par board.h est de toute facon toujours essayee
-        en premier, que cette option soit active ou non.
+        The CE pin configured by board.h is in any case always tried first,
+        whether this option is active or not.
 
 config KASE_NRF_PROBE
     bool "NRF probe at boot (does the radio answer?)"
     default n
     help
-        Diagnostic de banc. Au boot, configure les GPIO de la nRF24, ouvre le
-        bus SPI et lit les registres CONFIG et RF_SETUP. Un module absent ou mal
-        cable lit 0x00 ou 0xFF sur les deux, ce que rf_driver_probe() rejette.
+        Bench diagnostic. At boot, configures the nRF24's GPIOs, opens the
+        SPI bus and reads the CONFIG and RF_SETUP registers. A missing or
+        badly wired module reads 0x00 or 0xFF on both, which
+        rf_driver_probe() rejects.
 
-        N'installe aucune tache et ne relaie rien : ce n'est pas le lien radio,
-        qui reste le ressort de B3/B4 dans
+        Installs no task and relays nothing: it is not the radio link, which
+        remains the province of B3/B4 in
         docs/superpowers/specs/2026-08-19-niphargus-firmware-design.md.
 
-        Logue en ESP_LOGW (tag "rf_probe") — demande une console.
+        Logs via ESP_LOGW (tag "rf_probe") — requires a console.
 
 config KASE_NRF_LINE_TEST
     bool "NRF line short-circuit test at boot (bring-up diagnostic)"

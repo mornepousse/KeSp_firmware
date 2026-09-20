@@ -25,7 +25,7 @@
 #endif
 #include <stdio.h>
 
-static const char *TAG = "veille";
+static const char *TAG = "sleep";
 static veille_vetos_t s_vetos;
 static portMUX_TYPE   s_mux = portMUX_INITIALIZER_UNLOCKED;
 static veille_hook_t  s_hooks[VEILLE_HOOKS_MAX];
@@ -36,7 +36,7 @@ const char *__attribute__((weak)) veille_hb_suffixe(void) { return ""; }
 void veille_hook_enregistrer(const veille_hook_t *h)
 {
     if (s_n_hooks < VEILLE_HOOKS_MAX) { s_hooks[s_n_hooks++] = *h; return; }
-    ESP_LOGE(TAG, "trop de hooks : %s ignore (VEILLE_HOOKS_MAX=%d)", h->nom, VEILLE_HOOKS_MAX);
+    ESP_LOGE(TAG, "too many hooks: %s ignored (VEILLE_HOOKS_MAX=%d)", h->nom, VEILLE_HOOKS_MAX);
 }
 void veille_hooks_dormir(void)
 {
@@ -72,7 +72,7 @@ static void hb(uint32_t inactif_ms, const veille_vetos_t *v)
     esp_pm_dump_locks(stdout);   /* bench: light_sleep_counts, time per mode, locks */
     esp_timer_dump(stdout);      /* bench: who arms alarms too close together */
 #endif
-    ESP_LOGW(TAG, "HB up=%lus inactif=%lus dormi=%lus/%lu vetos=%s%s",
+    ESP_LOGW(TAG, "HB up=%lus idle=%lus slept=%lus/%lu vetos=%s%s",
              (unsigned long)(esp_timer_get_time() / 1000000), (unsigned long)(inactif_ms / 1000),
              (unsigned long)(dodo_ms / 1000), (unsigned long)dodo_n,
              veille_vetos_str(v, vb, sizeof vb), veille_hb_suffixe());
@@ -104,7 +104,7 @@ static void veille_task(void *arg)
         if (veille_bloquee(&v) && inactif >= veille_seuil_legere_ms()
             && (uint32_t)(now - dernier_refus) >= 30000u) {
             char vb[24]; dernier_refus = now;
-            ESP_LOGW(TAG, "veille REFUSEE depuis %lu s : vetos=%s",
+            ESP_LOGW(TAG, "sleep REFUSED for %lu s: vetos=%s",
                      (unsigned long)(inactif / 1000), veille_vetos_str(&v, vb, sizeof vb));
         }
         veille_pas(inactif, veille_bloquee(&v));   /* can block for hours (light sleep) */
@@ -114,6 +114,6 @@ static void veille_task(void *arg)
 
 void veille_task_start(void)
 {
-    xTaskCreatePinnedToCore(veille_task, "veille", 4096, NULL, 3, NULL, 0);
-    ESP_LOGI(TAG, "tache de veille : tick %u ms, %d hook(s)", (unsigned)VEILLE_TICK_MS, s_n_hooks);
+    xTaskCreatePinnedToCore(veille_task, "sleep", 4096, NULL, 3, NULL, 0);
+    ESP_LOGI(TAG, "sleep task: tick %u ms, %d hook(s)", (unsigned)VEILLE_TICK_MS, s_n_hooks);
 }

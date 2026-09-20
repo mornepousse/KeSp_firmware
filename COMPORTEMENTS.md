@@ -54,8 +54,7 @@ means a test, or a line.
   (timings, GPIO lines and mask on exit, 150 ms re-read window, dump of
   both passes) is under `CONFIG_KASE_VEILLE_DIAG` (default n). Outside that
   option, wake keeps: capture, single re-read at 5 ms, driver recreation,
-  reconciliation — the log line "reveil : n touche(s) capturee(s)" (wake: n
-  key(s) captured) and the summary "reveil apres N s" (wake after N s)
+  reconciliation — the log line "wake: n key(s) captured" and the summary "wake after N s"
   remain.
 - [smoke:First key after sleep] The key that wakes the board is captured,
   emitted and reconciled — never lost. Under fusion, the left emits the
@@ -67,8 +66,8 @@ means a test, or a line.
   tick. A first edge read during bounce (empty capture on a GPIO wake) is
   re-read 5 ms later before being declared a ghost — no going back to sleep
   that would swallow a brief tap; a real glitch (two empty captures) is
-  still rejected. An EMPTY capture logs both raw passes ("capture vide :
-  passe1=… passe2=…" — empty capture: pass1=… pass2=…): bounce (one full
+  still rejected. An EMPTY capture logs both raw passes ("empty capture:
+  pass1=… pass2=…"): bounce (one full
   pass), slow pre-contact or ghost (both empty) can be told apart in the
   log — "touche de réveil perdue sur la gauche, depuis toujours" (wake key
   lost on the left, always has been) (2026-09-16) is hunted with this, not
@@ -77,17 +76,14 @@ means a test, or a line.
   delay a key appears ("JAMAIS" [NEVER] = late wake or glitch; 10-20 ms =
   false early read; 100 ms+ = the next keypress) — the left sees 4 presses
   out of 5, the first one, the one that wakes it, is missing every time.
-  And a stopwatch on the BLIND WINDOW in the log ("chrono entree : radio /
-  pilote / armement / jusqu'au sommeil" — entry timing: radio / driver /
-  arming / until sleep, "chrono sortie : sommeil -> capture" — exit timing:
-  sleep -> capture): between destroying the driver and actual sleep, then
+  And a stopwatch on the BLIND WINDOW in the log ("entry timing: radio / driver / arming / until sleep",
+  "exit timing: sleep -> capture"): between destroying the driver and actual sleep, then
   between wake and capture, a key can neither be scanned nor wake the board
   — 160 to 570 ms of wake time around a sleep seen on the tick, to be
   pinned down. Measured: entry 9 ms, exit 6-8 ms (timer), that's not it.
   The same log line now also logs the RAW line levels at the very first
-  instruction after wake and the GPIO state register ("lignes a la
-  sortie=0x.. ; broches du reveil=0x.." — lines on exit=0x.. ; wake
-  pins=0x..): a trigger line already low on exit = slow GPIO wake; high but
+  instruction after wake and the GPIO state register ("lines at
+  exit=0x.. ; wake-up pins=0x.."): a trigger line already low on exit = slow GPIO wake; high but
   invisible to capture = false capture. A light tap after a long pause did
   not wake the left, a held press did. Measured on 2026-09-16 11:03: the
   line for "a" (GPIO2), the wake trigger, but LOW 7 ms later, the key only
@@ -183,10 +179,8 @@ means a test, or a line.
 - [smoke:A night on battery] A half holds a night on battery: on the order
   of a hundredth of a volt lost (244 µA), not 0.2 V (= ~20 mA: it didn't
   sleep — 2026-09-12 left, 2026-09-15 again). To READ it: every wake logs
-  "reveil apres N s de sommeil (cause=…) — cumul : n sommeils, X s dormies
-  sur Y s" (wake after N s of sleep (cause=…) — cumulative: n sleeps, X s
-  slept out of Y s), and the heartbeat carries "inactif=… dormi=X s/n
-  vetos=…" (idle=… slept=X s/n vetoes=…); a sleepless night reads without
+  "wake after N s of sleep (cause=…) — total: n sleeps, X s slept out of
+  Y s", and the heartbeat carries "idle=… slept=X s/n vetos=…"; a sleepless night reads without
   a multimeter, and a refusal reads by its name.
 - [smoke:A night on battery] The console is FLUSHED before
   `esp_light_sleep_start` (`uart_wait_tx_done`, ≤ 20 ms): the "light sleep"
@@ -194,14 +188,14 @@ means a test, or a line.
   log.
 - [smoke:Idle wake] A SINGLE sleep task (power/veille_task.c), identical on
   both halves, owns inactivity, the vetoes and the heartbeat ("HB up=
-  inactif= dormi= vetos=…" + role suffix: route/relay on the left,
+  idle= slept= vetos=…" + role suffix: route/relay on the left,
   link/batt on the right). A module with a reason to prevent sleep POSTS A
   VETO — usb (left only: TinyUSB event + tud_ready catch-up at 1 s), link
   (5 V TRRS active), sync (keymap pull), test (matrix test mode); a module
   with something to put to sleep REGISTERS A HOOK (radio, screen, gauge),
   called in order at sleep and in reverse order at wake, all BEFORE key
   capture. No module evaluates sleep anymore, sleep no longer calls any
-  module by name. Tick 1 s (sleep only kicks in at 15 s). "veille REFUSEE
+  module by name. Tick 1 s (sleep only kicks in at 15 s). "sleep REFUSED
   depuis N s : vetos=…" (sleep REFUSED for N s: vetoes=…) every 30 s while
   a veto holds.
 - [smoke:A night on battery] DEEP sleep is reachable: a timer wake at the
@@ -244,8 +238,8 @@ means a test, or a line.
   peer wakes it immediately; USB, a human event, is only polled at 1 s
   (`LINK_REPOS_MS`). A 10 ms tick only during handshake or with the link
   established. A UART overflow (floating TX from a sleeping peer) drains
-  and restarts. Bench 2026-09-19: left USB + TRRS → `etat=2 5V=1`, 490
-  probes / 485 ACKs, sleep refusal `lien=1`; unplugged → `etat=0 5V=0` in
+  and restarts. Bench 2026-09-19: left USB + TRRS → `state=2 5V=1`, 490
+  probes / 485 ACKs, sleep refusal `link=1`; unplugged → `state=0 5V=0` in
   < 1 s.
 - [test:test_veille_veto] Sleep veto registry (`power/veille_veto.h`,
   pure): one state per name (usb, lien, sync, test, pair), a posted veto
@@ -302,7 +296,7 @@ means a test, or a line.
   only builds frames (half-matrix, STATUS, target fallback through the
   pure FSM) and goes through radio_owner to transmit, switch target,
   re-arm, pair, sleep. Bench 2026-09-19: ACK 100 % / 97 %, four wakes with
-  key captured and radio re-armed, dongle unplugged → "repli : bascule TX
+  key captured and radio re-armed, dongle unplugged → "fallback: switch TX
   -> GAUCHE" (fallback: switch TX -> LEFT) then dongle back and 92 → 100 %
   ACK.
 - [smoke:Fusion — local engine dormant] The LEFT no longer touches the
@@ -443,12 +437,12 @@ means a test, or a line.
   rejected sample (0) KEEPS the level (a forced NORMAL was causing
   LOW→normal→LOW, log and sleep threshold included, for the duration of
   one reading), a gauge silent since boot stays normal; the log says
-  "batterie : FAIBLE/CRITIQUE/normale (dV)" (battery: LOW/CRITICAL/normal
+  "battery: LOW/CRITICAL/normal (dV)" (battery: LOW/CRITICAL/normal
   (dV)) on every change.
 - [smoke:Battery gauge] LOW battery: the voltage stays displayed as-is (no
   blinking: one more redraw for nothing), the gauge keeps its reading with
   a THICKENED border (that's the alert), and the half no longer declares
-  itself SOURCE of the 5 V TRRS (no probing, `etat=0 5V=0` even on USB).
+  itself SOURCE of the 5 V TRRS (no probing, `state=0 5V=0` even on USB).
   CRITICAL: on top of that, light sleep at 5 s instead of 15. No forced
   shutdown (the DW01A cuts at 2.5 V). Bench 2026-09-19 with shifted
   thresholds (4.4/4.3 then 4.4/4.1 V on a 4.2 V cell): CRITICAL → "light

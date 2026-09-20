@@ -166,7 +166,7 @@ static esp_err_t srom_upload(void)
     uint8_t srom_id = reg_read(REG_SROM_ID);
     ESP_LOGI(TAG, "SROM_ID = 0x%02X", srom_id);
     if (srom_id == 0x00) {
-        ESP_LOGE(TAG, "televersement SROM rate : le capteur ne suivra rien");
+        ESP_LOGE(TAG, "SROM upload failed: the sensor will not track anything");
         return ESP_ERR_INVALID_RESPONSE;
     }
 
@@ -281,11 +281,11 @@ esp_err_t pmw3389_init(void)
         /* The complement does not hold: this is not an unexpected chip, it
          * is the bus lying. A cut line, a stuck line, a wrong SPI mode, or
          * the nRF24 answering in place of the sensor. */
-        ESP_LOGE(TAG, "0x%02X ^ 0x%02X != 0xFF : le bus ment, pas la puce", id, inv);
+        ESP_LOGE(TAG, "0x%02X ^ 0x%02X != 0xFF: the bus is lying, not the chip", id, inv);
         return ESP_ERR_INVALID_RESPONSE;
     }
     if (id != PMW3389_PRODUCT_ID) {
-        ESP_LOGE(TAG, "0x%02X n'est pas un PMW3389 (attendu 0x%02X)",
+        ESP_LOGE(TAG, "0x%02X is not a PMW3389 (expected 0x%02X)",
                  id, PMW3389_PRODUCT_ID);
         return ESP_ERR_NOT_SUPPORTED;
     }
@@ -303,14 +303,14 @@ esp_err_t pmw3389_init(void)
      * The value in place is read BEFORE setting it — the datasheet's
      * register table gives the reset defaults, not what the SROM leaves. */
     uint8_t rl = reg_read(REG_RESOLUTION_L), rh = reg_read(REG_RESOLUTION_H);
-    ESP_LOGI(TAG, "resolution trouvee : L=0x%02X H=0x%02X", rl, rh);
+    ESP_LOGI(TAG, "resolution found: L=0x%02X H=0x%02X", rl, rh);
 
     pmw3389_set_cpi(BOARD_SNS_CPI);
     rl = reg_read(REG_RESOLUTION_L); rh = reg_read(REG_RESOLUTION_H);
-    ESP_LOGI(TAG, "resolution reglee a %d cpi : L=0x%02X H=0x%02X",
+    ESP_LOGI(TAG, "resolution set to %d cpi: L=0x%02X H=0x%02X",
              BOARD_SNS_CPI, rl, rh);
-    ESP_LOGI(TAG, "montage : BOARD_SNS_ROT_180=%d%s", BOARD_SNS_ROT_180,
-             BOARD_SNS_ROT_180 ? " (dx et dy nies)" : " (axes bruts)");
+    ESP_LOGI(TAG, "mounting: BOARD_SNS_ROT_180=%d%s", BOARD_SNS_ROT_180,
+             BOARD_SNS_ROT_180 ? " (dx and dy negated)" : " (raw axes)");
     return ESP_OK;
 }
 

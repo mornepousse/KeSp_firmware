@@ -45,9 +45,8 @@ in the PR/release.
       produces the first key with no delay or duplicate, holding a key then
       pressing another on the same row doesn't ghost, a key held at wake
       doesn't read across its whole row; sleeping between keystrokes: TRRS
-      link: left on USB + cable → left console "etat=2 5V=1" and the
-      right's ACKs climbing, "veille REFUSEE … vetos=usb+lien" (sleep
-      REFUSED … vetoes=usb+link); cable removed → "etat=0 5V=0" in under a
+      link: left on USB + cable → left console "state=2 5V=1" and the
+      right's ACKs climbing, "sleep REFUSED … vetos=usb+link"; cable removed → "state=0 5V=0" in under a
       second; left on USB alone: "vetos=usb" and never any sleep; USB
       removed: "vetos=-", sleep at 15 s, console "tache de veille : tick
       1000 ms, 3 hook(s)" (sleep task: tick 1000 ms, 3 hook(s)) at boot; at
@@ -55,10 +54,10 @@ in the PR/release.
       climbing (~90 per 10 s) and "light_sleep_reject_counts:0", typing
       stays instant
 - [ ] A night on battery: a half loses on the order of a hundredth of a
-      volt; 0.2 V = it didn't sleep. Console in the morning: "HB … dormi=X
+      volt; 0.2 V = it didn't sleep. Console in the morning: "HB … slept=X
       s/n vetos=-" (HB … slept=X s/n vetoes=-) with X ≈ the length of the
-      night, and "reveil apres N s de sommeil" (wake after N s of sleep)
-      consistent; after 4 h with no typing: "sommeil profond" (deep sleep)
+      night, and "wake after N s of sleep"
+      consistent; after 4 h with no typing: "deep sleep"
       then a restart on the first key (EXT1 wake, ~700 ms)
 - [ ] set_id survives an erase_flash
 - [ ] Fusion — local engine dormant: left on battery (RF route), type →
@@ -68,7 +67,7 @@ in the PR/release.
       raw (binaries coming from `build_niphar_left` / `build_niphar_right` /
       `build_kase_dongle` — not a `_fusion` folder)
 - [ ] Fusion — Config divergence reported: dongle keymap ≠ left's → dongle
-      console logs "DIVERGENCE de config" (config DIVERGENCE) and
+      console logs "config DIVERGENCE" and
       KS_CMD_CONFIG_COHERENCE returns match=0; identical keymaps → match=1
 - [ ] Fusion — ACK payload return channel: the dongle loads a known
       payload into the ACK (EN_ACK_PAY); the left, over wireless, reads it
@@ -76,14 +75,13 @@ in the PR/release.
       RX_DR never rises on the left side, automatic sync via ACK is
       impossible → fallback B
 - [ ] Radio — one owner: dongle UNPLUGGED, type on the right → right
-      console "repli : bascule TX -> GAUCHE KaSe.03" (fallback: switch TX ->
+      console "fallback: switch TX -> LEFT KaSe.03" (fallback: switch TX ->
       LEFT KaSe.03) (then GAUCHE/DONGLE oscillation if nobody's listening);
       dongle plugged back in → ACKs resume without a reset ("TX n envois, m
       acquittes" [TX n sent, m acked] ≥ 95 % cumulative); left on USB →
-      "fusion USB : ecoute la droite reemise (PRX ch=0x4F KaSe.03)" (USB
-      fusion: listening to the right retransmitted (PRX ch=0x4F KaSe.03))
-      and the right types through the left; USB removed → "retour emission
-      PTX vers le dongle" (back to PTX transmission towards the dongle),
+      "fusion USB: listening for the re-emitted right half (PRX ch=0x4F
+      KaSe.03)" and the right types through the left; USB removed → "fusion: back to PTX
+      emission toward the dongle",
       both type through the dongle
 - [ ] Short presses without doubling: one minute of brief taps on both
       halves → no doubled character on screen, `rfstat.py`
@@ -101,11 +99,11 @@ in the PR/release.
 ## Half (left / right)
 - [ ] Low battery: build a half with `BATT_FAIBLE_DV`/`BATT_CRITIQUE_DV`
       shifted above the real voltage (bench, do not commit) → console
-      "batterie : FAIBLE" (battery: LOW) then, when critical, "light sleep"
+      "battery: LOW" then, when critical, "light sleep"
       at ~5 s; screen: voltage unchanged, gauge readable with a thick
-      border (the alert); left on USB + TRRS → "etat=0 5V=0", 0 probes; real
+      border (the alert); left on USB + TRRS → "state=0 5V=0", 0 probes; real
       thresholds reflashed → the link comes back up
-- [ ] Battery gauge: console at boot "batt: jauge : NN dV" (batt: gauge:
+- [ ] Battery gauge: console at boot "batt: gauge: NN dV" (batt: gauge:
       NN dV) with NN plausible (36-42) and within ±0.1 V of a voltmeter on
       the battery; CDC BATTERY (dongle) gives BOTH halves with a fresh age
       (left ~1 s, right ≤ 30 s); the right still falls asleep at 15 s
@@ -128,7 +126,7 @@ in the PR/release.
       to life within the second following the first key after a sleep
 - [ ] First key after sleep: let the half fall asleep (15 s untouched),
       type ONE brief key → the character comes out (not swallowed) and
-      nothing stays stuck; console: "reveil : 1 touche(s) capturee(s)"
+      nothing stays stuck; console: "wake: 1 key(s) captured"
       (wake: 1 key(s) captured). To be done on the left AND the right, over
       wireless (fusion)
 - [ ] e-ink displays the 'PAIRED' splash at pairing

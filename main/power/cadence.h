@@ -23,7 +23,7 @@
 
 #define CADENCE_TICK_MS          10u   /* CONFIG_FREERTOS_HZ = 100 */
 #define CADENCE_REPOS_MIN_MS     30u   /* 3 ticks: CONFIG_FREERTOS_IDLE_TIME_BEFORE_SLEEP */
-#define CADENCE_REPOS_OK(ms) _Static_assert((ms) >= CADENCE_REPOS_MIN_MS, #ms " < 3 ticks : tue le light sleep automatique")
+#define CADENCE_REPOS_OK(ms) _Static_assert((ms) >= CADENCE_REPOS_MIN_MS, #ms " < 3 ticks: kills automatic light sleep")
 
 /* Keyboard task (left): tap-hold/tap-dance/leader timers, test mode,
  * remote fusion over USB. Notified by the scan on change. */

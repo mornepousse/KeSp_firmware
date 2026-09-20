@@ -61,7 +61,7 @@ static void test_bursts_collapse_to_one_take(void)
 
 void test_matrix_flag(void)
 {
-    printf("\n-- drapeau matrice (F3 : front perdu) --\n");
+    printf("\n-- matrix flag (F3: lost edge) --\n");
     test_idle_flag_has_nothing_to_take();
     test_take_consumes_the_signal();
     test_signal_during_the_read_survives();

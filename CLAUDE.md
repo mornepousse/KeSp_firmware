@@ -161,7 +161,7 @@ a key press, which resets the counter to zero. A TIMER wake at the deep
 threshold switches to deep sleep; a GPIO wake disarms it. And a night
 losing 0.2 V (~20 mA) is indistinguishable from a night at 244 µA without a
 number: every wake-up logs the duration slept, both halves carry a
-heartbeat `inactif=… dormi=X s/n` (idle=… slept=X s/n). Read that before
+heartbeat `idle=… slept=X s/n`. Read that before
 reaching for the multimeter.
 
 ⚠ **The ULP is ruled out by measurement**: 170 µA on its own (ESP32-S3

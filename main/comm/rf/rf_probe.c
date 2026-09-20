@@ -36,7 +36,7 @@ static void rf_probe_lines(void)
     };
     const int N = (int)(sizeof(ln) / sizeof(ln[0]));
 
-    ESP_LOGW(TAG, "--- test de lignes (%d lignes, bidirectionnel) ---", N);
+    ESP_LOGW(TAG, "--- line test (%d lines, bidirectional) ---", N);
     int shorts = 0;
     for (int a = 0; a < N; a++) {
         for (int b = 0; b < N; b++) {
@@ -56,7 +56,7 @@ static void rf_probe_lines(void)
             int lo = gpio_get_level(ln[b].gpio);
 
             if (hi == 1 && lo == 0 && a < b) {
-                ESP_LOGW(TAG, "PONT : %s(%d) <-> %s(%d)",
+                ESP_LOGW(TAG, "BRIDGE: %s(%d) <-> %s(%d)",
                          ln[a].name, ln[a].gpio, ln[b].name, ln[b].gpio);
                 shorts++;
             }
@@ -65,7 +65,7 @@ static void rf_probe_lines(void)
 
     /* Resting state of each line, floating input then pulled: distinguishes a
      * free line from one nailed to a supply rail or to ground. */
-    ESP_LOGW(TAG, "--- etat au repos (pu = avec pull-up, pd = avec pull-down) ---");
+    ESP_LOGW(TAG, "--- resting state (pu = with pull-up, pd = with pull-down) ---");
     for (int i = 0; i < N; i++) {
         gpio_reset_pin(ln[i].gpio);
         gpio_set_direction(ln[i].gpio, GPIO_MODE_INPUT);
@@ -83,17 +83,17 @@ static void rf_probe_lines(void)
          * short would panic for nothing. The other five lines, on the other
          * hand, are driven by the MCU and really must be free at rest. */
         const bool est_irq = (ln[i].gpio == BOARD_NRF_IRQ);
-        const char *verdict = (pu == 1 && pd == 0) ? "libre"
-                            : (pu == 0 && pd == 0) ? "CLOUEE A LA MASSE"
-                            : (pu == 1 && pd == 1) ? (est_irq ? "tenue haute (normal : IRQ au repos)"
-                                                             : "CLOUEE AU 3V3")
-                            : "incoherente";
-        ESP_LOGW(TAG, "%-4s (GPIO%2d) : pu=%d pd=%d -> %s",
+        const char *verdict = (pu == 1 && pd == 0) ? "free"
+                            : (pu == 0 && pd == 0) ? "STUCK TO GROUND"
+                            : (pu == 1 && pd == 1) ? (est_irq ? "held high (normal: IRQ at rest)"
+                                                             : "STUCK TO 3V3")
+                            : "inconsistent";
+        ESP_LOGW(TAG, "%-4s (GPIO%2d): pu=%d pd=%d -> %s",
                  ln[i].name, ln[i].gpio, pu, pd, verdict);
     }
 
     for (int i = 0; i < N; i++) gpio_reset_pin(ln[i].gpio);
-    ESP_LOGW(TAG, "--- fin test de lignes (%d pont(s)) ---", shorts);
+    ESP_LOGW(TAG, "--- end of line test (%d bridge(s)) ---", shorts);
 }
 
 void rf_probe_run(void)
@@ -113,7 +113,7 @@ void rf_probe_run(void)
         .shares_bus_first = true,
     };
 
-    ESP_LOGW(TAG, "=== probe nRF24 : sck=%d miso=%d mosi=%d csn=%d ce=%d irq=%d ===",
+    ESP_LOGW(TAG, "=== nRF24 probe: sck=%d miso=%d mosi=%d csn=%d ce=%d irq=%d ===",
              cfg.pin_sck, cfg.pin_miso, cfg.pin_mosi,
              cfg.pin_csn, cfg.pin_ce, cfg.pin_irq);
 
@@ -134,10 +134,10 @@ void rf_probe_run(void)
     cfg.addr_suffix = RF_ADDR_HALF_LINK;
     esp_err_t e = rf_driver_init_tx(&radio, &cfg);
     if (e != ESP_OK || !radio.present) {
-        ESP_LOGW(TAG, "=== PAS DE REPONSE (err=%s) ===", esp_err_to_name(e));
+        ESP_LOGW(TAG, "=== NO RESPONSE (err=%s) ===", esp_err_to_name(e));
         return;
     }
-    ESP_LOGW(TAG, "=== LA RADIO REPOND (init PTX OK, ch=%u) ===", cfg.channel);
+    ESP_LOGW(TAG, "=== THE RADIO RESPONDS (init PTX OK, ch=%u) ===", cfg.channel);
 
     const int N = 20;
     uint8_t pkt[8] = { 0xA5, 0, 0, 0, 0, 0, 0, 0 };
@@ -148,15 +148,15 @@ void rf_probe_run(void)
         if (rf_driver_send(&radio, pkt, sizeof(pkt))) acked++;
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    ESP_LOGW(TAG, "=== rafale TX : %d/%d acquittes, %u MAX_RT ===",
+    ESP_LOGW(TAG, "=== TX burst: %d/%d acked, %u MAX_RT ===",
              acked, N, (unsigned)(rf_tx_max_rt_count - max_rt_avant));
-    ESP_LOGW(TAG, "=== la carte a survecu a la rafale ===");
+    ESP_LOGW(TAG, "=== the board survived the burst ===");
 #else
     esp_err_t e = rf_driver_init(&radio, &cfg);
     if (e == ESP_OK && radio.present)
-        ESP_LOGW(TAG, "=== LA RADIO REPOND (init PRX OK) ===");
+        ESP_LOGW(TAG, "=== THE RADIO RESPONDS (init PRX OK) ===");
     else
-        ESP_LOGW(TAG, "=== PAS DE REPONSE (err=%s) — voir la ligne 'probe csn=' "
-                      "ci-dessus pour les valeurs lues ===", esp_err_to_name(e));
+        ESP_LOGW(TAG, "=== NO RESPONSE (err=%s) — see the 'probe csn=' line "
+                      "above for the values read ===", esp_err_to_name(e));
 #endif
 }

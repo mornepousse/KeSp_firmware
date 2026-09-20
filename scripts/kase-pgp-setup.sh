@@ -33,7 +33,7 @@ warn(){ printf '%s!%s %s\n' "$c_yel" "$c_0" "$*"; }
 die(){  printf '%s✗ %s%s\n' "$c_red" "$*" "$c_0" >&2; exit 1; }
 have(){ command -v "$1" >/dev/null 2>&1; }
 
-command -v gpg >/dev/null 2>&1 || die "gpg introuvable. Installe-le en natif (NixOS: programs.gnupg.agent + pkgs.gnupg). Voir docs/OPENPGP_CARD.md §0."
+command -v gpg >/dev/null 2>&1 || die "gpg not found. Install it natively (NixOS: programs.gnupg.agent + pkgs.gnupg). See docs/OPENPGP_CARD.md §0."
 
 # Interactive read that first restores the terminal to a sane (cooked) mode, so
 # a raw tty leaked by a prior expect/gpg session doesn't turn Enter into "^M".
@@ -48,7 +48,7 @@ ask(){  # ask "<prompt>" -> prints the reply on stdout
 # Always restore the tty afterwards (expect leaves it raw if interrupted).
 run_expect(){
   if have expect; then expect "$1"
-  else warn "expect absent → via nix-shell"; nix-shell -p expect --run "expect '$1'"
+  else warn "expect missing -> via nix-shell"; nix-shell -p expect --run "expect '$1'"
   fi
   local rc=$?; stty sane 2>/dev/null || true; return $rc
 }
@@ -75,7 +75,7 @@ ensure_card(){
 }
 
 require_card(){
-  ensure_card || die "carte injoignable. Dongle branché ? Règle udev 303a ? (docs/OPENPGP_CARD.md §0). CCID parfois figé → réessaie."
+  ensure_card || die "card unreachable. Dongle plugged in? udev rule 303a set up? (docs/OPENPGP_CARD.md §0). CCID sometimes wedges -> retry."
 }
 
 card_has_sig_key(){ gpg --card-status 2>/dev/null | grep -qiE '^Signature key \.+: [0-9A-F]'; }
@@ -83,7 +83,7 @@ card_has_sig_key(){ gpg --card-status 2>/dev/null | grep -qiE '^Signature key \.
 # ---------------------------------------------------------------- status
 cmd_status(){
   require_card
-  ok "carte détectée"
+  ok "card detected"
   gpg --card-status
 }
 
@@ -92,7 +92,7 @@ cmd_status(){
 # (the OpenPGP §7.2.16 escape hatch) then TERMINATE + ACTIVATE → defaults.
 cmd_reset(){
   require_card
-  warn "FACTORY RESET — efface TOUTES les clés de la carte et remet les PINs par défaut."
+  warn "FACTORY RESET — erases ALL keys on the card and restores the default PINs."
   # Safety interlock: if the card holds a real identity, refuse the easy/
   # automated path. KASE_YES / piped 'oui' must NEVER wipe a live identity —
   # that is exactly how the 2026-06-25 on-card identity (no backup) was lost
@@ -100,18 +100,18 @@ cmd_reset(){
   if card_has_sig_key; then
     local serial; serial="$(gpg --card-status 2>/dev/null \
                             | sed -n 's/^Serial number *[. ]*: *//p' | head -1)"
-    warn "⚠ Cette carte CONTIENT une identité (clé de signature présente)."
-    warn "  Le wipe est IRRÉVERSIBLE — assure-toi d'avoir un backup avant."
+    warn "⚠ This card HOLDS an identity (a signature key is present)."
+    warn "  The wipe is IRREVERSIBLE — make sure you have a backup first."
     if [ "${KASE_YES:-}" = "1" ]; then
-      die "refus: KASE_YES n'efface pas une carte qui contient des clés. Reset en interactif requis."
+      die "refused: KASE_YES will not wipe a card that holds keys. An interactive reset is required."
     fi
     stty sane 2>/dev/null || true
-    local r; read -rp "Pour confirmer, tape le n° de série de la carte (${serial:-?}) : " r </dev/tty
-    [ -n "$serial" ] && [ "$r" = "$serial" ] || die "série incorrecte — reset annulé (carte intacte)."
+    local r; read -rp "To confirm, type the card's serial number (${serial:-?}): " r </dev/tty
+    [ -n "$serial" ] && [ "$r" = "$serial" ] || die "wrong serial number — reset cancelled (card untouched)."
   else
-    [ "$(ask "Carte vierge. Taper 'oui' pour confirmer le reset :")" = "oui" ] || die "annulé."
+    [ "$(ask "Blank card. Type 'oui' to confirm the reset:")" = "oui" ] || die "cancelled."
   fi
-  info "Blocage des PINs puis terminate/activate…"
+  info "Blocking the PINs then terminate/activate..."
   # block PW1 (3 wrong VERIFY 0x81) + PW3 (3 wrong VERIFY 0x83), then E6 + 44.
   scd_apdu \
     "00A4040006 $AID_HEX" \
@@ -121,19 +121,19 @@ cmd_reset(){
   gpgconf --kill all >/dev/null 2>&1 || true; sleep 1
   require_card
   if gpg --card-status 2>/dev/null | grep -q 'PIN retry counter : 3 0 3' && ! card_has_sig_key; then
-    ok "carte remise à zéro (PINs défaut: PW1=$PW1_DEFAULT PW3=$PW3_DEFAULT)."
+    ok "card reset to zero (default PINs: PW1=$PW1_DEFAULT PW3=$PW3_DEFAULT)."
   else
-    die "reset incomplet — relance, ou fais 'gpg --card-edit → admin → factory-reset' à la main."
+    die "incomplete reset — rerun, or do 'gpg --card-edit -> admin -> factory-reset' by hand."
   fi
 }
 
 # ---------------------------------------------------------------- pins
 cmd_pins(){
   require_card
-  info "${c_bold}Changement des PINs${c_0} (défauts publics PW1=$PW1_DEFAULT / PW3=$PW3_DEFAULT)."
-  info "Dans le menu : ${c_bold}admin${c_0} → ${c_bold}passwd${c_0} → 1 (PW1 user) → 3 (PW3 admin) → q → quit."
-  warn "3 essais faux sur les DEUX PINs = carte bloquée (récup: $0 reset, qui efface tout)."
-  ask "Entrée pour ouvrir gpg --card-edit…" >/dev/null
+  info "${c_bold}Changing the PINs${c_0} (public defaults PW1=$PW1_DEFAULT / PW3=$PW3_DEFAULT)."
+  info "In the menu: ${c_bold}admin${c_0} -> ${c_bold}passwd${c_0} -> 1 (PW1 user) -> 3 (PW3 admin) -> q -> quit."
+  warn "3 wrong attempts on BOTH PINs = blocked card (recovery: $0 reset, which erases everything)."
+  ask "Press Enter to open gpg --card-edit..." >/dev/null
   gpg --card-edit
 }
 
@@ -141,14 +141,14 @@ cmd_pins(){
 cmd_generate(){
   require_card
   if card_has_sig_key; then
-    warn "Une clé de signature existe déjà sur la carte."
-    read -rp "La remplacer ? Il faudra '$0 reset' d'abord. Continuer le reset ? (oui/non) " a
-    [ "$a" = "oui" ] && cmd_reset || die "annulé."
+    warn "A signature key already exists on the card."
+    read -rp "Replace it? '$0 reset' will be needed first. Proceed with the reset? (oui/non) " a
+    [ "$a" = "oui" ] && cmd_reset || die "cancelled."
   fi
   local name email
-  name=$(ask "Nom complet (Real name) :")
-  email=$(ask "Email :")
-  [ -n "$name" ] && [ -n "$email" ] || die "nom et email requis."
+  name=$(ask "Full name (Real name):")
+  email=$(ask "Email:")
+  [ -n "$name" ] && [ -n "$email" ] || die "name and email required."
 
   cat > /tmp/.kase_gen.exp <<EXP
 set timeout 180
@@ -172,23 +172,23 @@ expect {
 expect eof
 EXP
   echo
-  warn "${c_bold}IMPORTANT — la TOUCHE physique :${c_0}"
-  warn "gpg va (1) te demander le PIN Admin puis User (fenêtre pinentry),"
-  warn "puis (2) auto-signer le certificat avec la clé de signature → ${c_bold}presse K_SEC_CONFIRM${c_0}"
-  warn "sur ta moitié dans les 15 s quand ça bloque. Sans la touche → échec (6985)."
-  ask "Prête ? Entrée pour lancer la génération…" >/dev/null
+  warn "${c_bold}IMPORTANT — the physical TOUCH:${c_0}"
+  warn "gpg will (1) ask you for the Admin PIN then the User PIN (pinentry window),"
+  warn "then (2) auto-sign the certificate with the signature key -> ${c_bold}press K_SEC_CONFIRM${c_0}"
+  warn "on your half within 15 s when it blocks. Without the touch -> failure (6985)."
+  ask "Ready? Press Enter to start the generation..." >/dev/null
 
   if run_expect /tmp/.kase_gen.exp | tee /tmp/.kase_gen.out | grep -q '__TIMEOUT__'; then
     rm -f /tmp/.kase_gen.exp
-    die "génération bloquée (timeout). PIN non saisi, ou touche non pressée à temps. Relance."
+    die "generation stuck (timeout). PIN not entered, or touch not pressed in time. Rerun."
   fi
   rm -f /tmp/.kase_gen.exp
   if card_has_sig_key; then
-    ok "identité générée sur la carte (signature + chiffrement + authentification)."
+    ok "identity generated on the card (signature + encryption + authentication)."
     cmd_git
     echo; cmd_ssh
   else
-    die "génération non confirmée — vérifie la sortie ci-dessus (touche pressée à temps ?)."
+    die "generation not confirmed — check the output above (touch pressed in time?)."
   fi
 }
 
@@ -197,11 +197,11 @@ cmd_git(){
   require_card
   local fpr
   fpr=$(gpg --list-keys --with-colons 2>/dev/null | awk -F: '/^fpr/{print $10; exit}')
-  [ -n "$fpr" ] || die "aucune clé dans le trousseau — génère d'abord ($0 generate)."
+  [ -n "$fpr" ] || die "no key in the keyring — generate one first ($0 generate)."
   git config --global user.signingkey "$fpr"
   git config --global commit.gpgsign true
   git config --global gpg.program gpg
-  ok "git signing configuré (clé $fpr). Chaque commit → PIN + touche. Vérif: git log --show-signature"
+  ok "git signing configured (key $fpr). Every commit -> PIN + touch. Check: git log --show-signature"
 }
 
 # ---------------------------------------------------------------- ssh
@@ -210,31 +210,31 @@ cmd_ssh(){
   if [ -z "${SSH_AUTH_SOCK:-}" ]; then
     export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket 2>/dev/null)"
     gpgconf --launch gpg-agent >/dev/null 2>&1 || true
-    warn "SSH_AUTH_SOCK n'était pas posé — fixé pour ce shell. Persistance: programs.gnupg.agent.enableSSHSupport + shell de login frais."
+    warn "SSH_AUTH_SOCK was not set — set for this shell. Persistence: programs.gnupg.agent.enableSSHSupport + a fresh login shell."
   fi
   gpg --card-status >/dev/null 2>&1
   local key
   key=$(ssh-add -L 2>/dev/null | grep -i 'cardno' | head -1)
   if [ -n "$key" ]; then
-    ok "clé SSH de la carte :"
+    ok "the card's SSH key:"
     echo "  $key"
-    info "→ colle cette ligne dans GitLab → Preferences → SSH Keys (ou GitHub → Settings → SSH keys)."
-    info "  Test ensuite : ssh -T git@gitlab.com"
+    info "-> paste this line into GitLab -> Preferences -> SSH Keys (or GitHub -> Settings -> SSH keys)."
+    info "  Then test: ssh -T git@gitlab.com"
   else
-    warn "ssh-add ne montre pas de clé carte."
-    info "  - carte sans clé AUTH ? → $0 generate"
-    info "  - 'has no identities' = carte vierge ; 'no connection' = SSH_AUTH_SOCK/agent (voir §0, conflit gnome-keyring)."
+    warn "ssh-add shows no card key."
+    info "  - card without an AUTH key? -> $0 generate"
+    info "  - 'has no identities' = blank card; 'no connection' = SSH_AUTH_SOCK/agent (see §0, gnome-keyring conflict)."
   fi
 }
 
 # ---------------------------------------------------------------- setup
 cmd_setup(){
-  info "${c_bold}=== Assistant configuration carte OpenPGP KaSe ===${c_0}"
+  info "${c_bold}=== KaSe OpenPGP card setup wizard ===${c_0}"
   cmd_status; echo
-  [ "$(ask "1/3 Changer les PINs maintenant ? (oui/non)")" = "oui" ] && { cmd_pins; echo; }
-  [ "$(ask "2/3 Générer ton identité SUR la carte ? (oui/non)")" = "oui" ] && { cmd_generate; echo; } \
-    || { warn "generate sauté — git/ssh nécessitent une clé."; return; }
-  ok "3/3 Terminé. Identité dev complète sur le dongle."
+  [ "$(ask "1/3 Change the PINs now? (oui/non)")" = "oui" ] && { cmd_pins; echo; }
+  [ "$(ask "2/3 Generate your identity ON the card? (oui/non)")" = "oui" ] && { cmd_generate; echo; } \
+    || { warn "generate skipped — git/ssh require a key."; return; }
+  ok "3/3 Done. Full dev identity on the dongle."
 }
 
 case "${1:-}" in
@@ -246,15 +246,15 @@ case "${1:-}" in
   git)      cmd_git ;;
   ssh)      cmd_ssh ;;
   *) cat <<USAGE
-kase-pgp-setup.sh — assistant carte OpenPGP du dongle KaSe
-Usage: $0 <commande>
-  status     détecte la carte (+ recovery CCID) et affiche son état
-  setup      assistant complet : PINs → generate → git → SSH/GitLab
-  generate   génère l'identité sur la carte (+ git + SSH)
-  reset      remet la carte à zéro (PINs par défaut, efface les clés)
-  pins       change les PINs (gpg --card-edit guidé)
-  git        configure la signature git avec la clé de la carte
-  ssh        affiche la clé SSH de la carte pour GitLab/GitHub
+kase-pgp-setup.sh — KaSe dongle OpenPGP card wizard
+Usage: $0 <command>
+  status     detects the card (+ CCID recovery) and prints its state
+  setup      full wizard: PINs -> generate -> git -> SSH/GitLab
+  generate   generates the identity on the card (+ git + SSH)
+  reset      resets the card to zero (default PINs, erases the keys)
+  pins       changes the PINs (guided gpg --card-edit)
+  git        configures git signing with the card's key
+  ssh        prints the card's SSH key for GitLab/GitHub
 Doc: docs/OPENPGP_CARD.md §0
 USAGE
      [ -z "${1:-}" ] && exit 0 || exit 1 ;;

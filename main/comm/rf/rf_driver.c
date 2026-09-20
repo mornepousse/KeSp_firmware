@@ -324,9 +324,9 @@ static void rf_claim_chip(int csn, const char *mode)
 {
     for (int i = 0; i < s_csn_n; i++) {
         if (s_csn_pris[i] == csn) {
-            ESP_LOGE(TAG, "CONFLIT : la radio CSN=%d est DEJA initialisee — "
-                          "cette init en %s ecrase la configuration precedente "
-                          "(canal, adresse, mode). Une puce, un proprietaire.",
+            ESP_LOGE(TAG, "CONFLICT: radio CSN=%d is ALREADY initialized — "
+                          "this init in %s mode overwrites the previous configuration "
+                          "(channel, address, mode). One chip, one owner.",
                      csn, mode);
             return;
         }

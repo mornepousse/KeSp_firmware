@@ -17,7 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-static const char *TAG = "veille";
+static const char *TAG = "sleep";
 
 /* Sleep summary since boot, to read back a night: veille_bilan(). */
 static uint32_t s_sommeils, s_dormi_ms;
@@ -149,13 +149,13 @@ void veille_legere_entrer(void)
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
     uint32_t dormi_ms = (uint32_t)(((uint64_t)esp_timer_get_time() - avant_us) / 1000);
 #if CONFIG_KASE_VEILLE_DIAG
-    ESP_LOGW(TAG, "chrono entree : radio %lld us, pilote %lld us, armement %lld us, jusqu'au sommeil %lld us",
+    ESP_LOGW(TAG, "entry timing: radio %lld us, driver %lld us, arming %lld us, until sleep %lld us",
              (long long)(t_radio - t_entree), (long long)(t_pilote - t_radio),
              (long long)(t_arme - t_pilote), (long long)((int64_t)avant_us - t_arme));
 #endif
     s_sommeils++; s_dormi_ms += dormi_ms;
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
-        ESP_LOGW(TAG, "%lu s de sommeil leger sans une touche : sommeil profond", (unsigned long)(dormi_ms / 1000));
+        ESP_LOGW(TAG, "%lu s of light sleep with no key: deep sleep", (unsigned long)(dormi_ms / 1000));
         veille_profonde_entrer();   /* does not return; the radio is already off */
     }
     { uint32_t t = (uint32_t)(esp_timer_get_time() / 1000); s_dernier_reveil_ms = t ? t : 1; }
@@ -163,7 +163,7 @@ void veille_legere_entrer(void)
      * and the mask says which row; any other cause is a wake-up we did not
      * ask for. And say HOW MUCH we slept: a night with 0.2 V lost
      * (= ~20 mA) is indistinguishable from a night at 244 µA without this figure. */
-    ESP_LOGW(TAG, "reveil apres %lu s de sommeil (cause=%d) — cumul : %lu sommeils, %lu s dormies sur %lu s",
+    ESP_LOGW(TAG, "wake after %lu s of sleep (cause=%d) — total: %lu sleeps, %lu s slept out of %lu s",
              (unsigned long)(dormi_ms / 1000), (int)esp_sleep_get_wakeup_cause(),
              (unsigned long)s_sommeils, (unsigned long)(s_dormi_ms / 1000),
              (unsigned long)(esp_timer_get_time() / 1000000));
@@ -187,7 +187,7 @@ void veille_legere_entrer(void)
      *    it stays stuck until the next event from this half. */
     veille_hooks_reveiller();     /* reverse order: the radio (~5 ms) is up BEFORE the capture, which transmits */
 #if CONFIG_KASE_VEILLE_DIAG
-    ESP_LOGW(TAG, "chrono sortie : sommeil -> capture %lld us ; lignes a la sortie=0x%X ; broches du reveil=0x%llX",
+    ESP_LOGW(TAG, "exit timing: sleep -> capture %lld us ; lines at exit=0x%X ; wake-up pins=0x%llX",
              (long long)(esp_timer_get_time() - t_sorti), (unsigned)lignes_sortie, (unsigned long long)masque_reveil);
 #endif
     matrix_wake_capture();
@@ -219,8 +219,8 @@ void veille_legere_entrer(void)
             matrix_wake_capture();
             if (matrix_wake_had_keys()) { trouve_ms = d + 6; break; }
         }
-        ESP_LOGW(TAG, "capture vide au reveil : touche %s", trouve_ms < 0 ? "JAMAIS vue en 156 ms" : "vue plus tard");
-        if (trouve_ms >= 0) ESP_LOGW(TAG, "  apparue a +%d ms apres le reveil", trouve_ms);
+        ESP_LOGW(TAG, "empty capture at wake: key %s", trouve_ms < 0 ? "NEVER seen in 156 ms" : "seen later");
+        if (trouve_ms >= 0) ESP_LOGW(TAG, "  appeared at +%d ms after wake", trouve_ms);
     }
 #endif
     matrix_disarm_key_wake();
@@ -235,12 +235,12 @@ void veille_legere_entrer(void)
     matrix_wake_wait_first_scan();
     if (matrix_wake_reconcile()) {
     }
-    ESP_LOGI(TAG, "reveil");
+    ESP_LOGI(TAG, "wake");
 }
 
 void veille_profonde_entrer(void)
 {
-    ESP_LOGW(TAG, "deep sleep — le reveil sera un redemarrage");
+    ESP_LOGW(TAG, "deep sleep — wake-up will be a restart");
 
     veille_hooks_dormir();        /* idempotent: coming from light sleep, the radio is already asleep */
     rtc_matrix_deinit();
@@ -313,13 +313,13 @@ void veille_pas(uint32_t inactif_ms, bool bloque)
      * The left half is not affected: HID keyboard, the host does not suspend it,
      * it never sleeps while plugged in. */
     if (niveau == VEILLE_LEGERE && tud_mounted()) {
-        ESP_LOGW(TAG, "USB monte : sommeil profond plutot que leger (PHY USB)");
+        ESP_LOGW(TAG, "USB mounted: deep sleep rather than light (USB PHY)");
         niveau = VEILLE_PROFONDE;
     }
 #endif
 
     switch (niveau) {
-    case VEILLE_PROFONDE: veille_profonde_entrer(); break;   /* ne revient pas */
+    case VEILLE_PROFONDE: veille_profonde_entrer(); break;   /* never returns */
     case VEILLE_LEGERE:   veille_legere_entrer();   break;
     case VEILLE_AUCUNE:   break;
     }

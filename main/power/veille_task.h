@@ -34,5 +34,5 @@ void veille_hooks_dormir(void);
 void veille_hooks_reveiller(void);
 
 /* Role suffix of the heartbeat (" route=RF relais=actif" on the left,
- * " lien=0 batt=39 dV" on the right). Default: "" empty. */
+ * " link=0 batt=39 dV" on the right). Default: "" empty. */
 const char *veille_hb_suffixe(void);

@@ -164,7 +164,7 @@ static bool kbd_tx_emettre(const uint8_t *buf, uint8_t len, radio_valide_cb_t en
         if (r == RADIO_TX_PERIME) return false;   /* state changed during the wait: the new one already went out */
         if (r == RADIO_TX_INDISPO) {              /* nothing went out: lock held, chip asleep */
             s_tx_sans_mutex++;
-            ESP_LOGW(TAG, "rapport ABANDONNE (radio indisponible) — remis %u, perdus %u+%u",
+            ESP_LOGW(TAG, "report ABANDONED (radio unavailable) — delivered %u, lost %u+%u",
                      (unsigned)s_tx_remis, (unsigned)s_tx_sans_mutex, (unsigned)s_tx_refuses);
             return false;
         }
@@ -182,9 +182,9 @@ static bool kbd_tx_emettre(const uint8_t *buf, uint8_t len, radio_valide_cb_t en
          * level when a keystroke gets lost without knowing where. */
         if (buf[0] == (PKT_TYPE_HIDREPORT << 4) && buf[1] == RF_HID_SUB_KBD)
             ESP_LOGD(TAG, "TX kbd mod=%02X kc=%02X %02X -> %s", buf[2], buf[3], buf[4],
-                     ok ? "ok" : "REFUSE");
+                     ok ? "ok" : "REFUSED");
         if (((s_tx_remis + s_tx_refuses) % 25) == 0)
-            ESP_LOGW(TAG, "HID->dongle : %u remis, %u sans mutex, %u refuses",
+            ESP_LOGW(TAG, "HID->dongle: %u delivered, %u without mutex, %u refused",
                      (unsigned)s_tx_remis, (unsigned)s_tx_sans_mutex,
                      (unsigned)s_tx_refuses);
         return true;
@@ -285,7 +285,7 @@ static void kbd_relay_refresh_body(void)
             link.channel     = RF_CH_HALF_LINK;
             link.addr_suffix = RF_ADDR_HALF_LINK;
             if (!radio_mode_set(RADIO_PRX, &link)) return;
-            ESP_LOGW(TAG, "fusion USB : ecoute la droite reemise (PRX ch=0x%02X KaSe.%02X)",
+            ESP_LOGW(TAG, "fusion USB: listening for the re-emitted right half (PRX ch=0x%02X KaSe.%02X)",
                      RF_CH_HALF_LINK, RF_ADDR_HALF_LINK);
         }
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
@@ -324,7 +324,7 @@ static void kbd_relay_refresh_body(void)
             /* Leaving listening mode: release the remote, otherwise a right
              * half key would stay frozen in the local fusion until the next USB return. */
             remote_relacher();
-            ESP_LOGW(TAG, "fusion : retour emission PTX vers le dongle");
+            ESP_LOGW(TAG, "fusion: back to PTX emission toward the dongle");
         }
     }
 #endif
@@ -526,7 +526,7 @@ void kbd_relay_init(void)
      * wake up in reverse order, so the radio is up before the timer starts
      * again (otherwise its first tick could land on a still-sleeping chip:
      * "radio unavailable" for nothing). */
-    static const veille_hook_t hook = { "relais", kbd_relay_sleep_prepare, kbd_relay_wake_restore };
+    static const veille_hook_t hook = { "relay", kbd_relay_sleep_prepare, kbd_relay_wake_restore };
     veille_hook_enregistrer(&hook);
 #endif
     /* The owner initializes the chip in PTX towards the dongle and registers
@@ -569,9 +569,9 @@ void kbd_relay_init(void)
 const char *veille_hb_suffixe(void)
 {
     static char buf[32];
-    snprintf(buf, sizeof buf, " route=%s relais=%s",
+    snprintf(buf, sizeof buf, " route=%s relay=%s",
              (kbd_active_route() == KBD_OUT_RF) ? "RF" : "USB",
-             kbd_relay_active() ? "actif" : "inactif");
+             kbd_relay_active() ? "active" : "inactive");
     return buf;
 }
 #endif
@@ -671,7 +671,7 @@ static bool send_matrix_frame(uint8_t half, const uint8_t *bitmap, radio_valide_
      * refused after its 15 retransmissions. This is the very frame the
      * bounded re-emission below repeats — without it, a brief press was lost. */
     if (s_tx_refuses != refus_avant)
-        ESP_LOGW(TAG, "MATRIX refusee bm=%02X%02X%02X%02X — repetee par la reemission bornee",
+        ESP_LOGW(TAG, "MATRIX refused bm=%02X%02X%02X%02X — repeated by the bounded re-emission",
                  bitmap[0], bitmap[1], bitmap[2], bitmap[3]);
     return partie;
 }

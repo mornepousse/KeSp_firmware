@@ -333,7 +333,7 @@ static void rf_rx_apply_paired_config(void)
         rf_driver_set_channel(&s_mouse,  mcfg.channel);
         rf_driver_set_rx_address(&s_mouse, maddr);
     }
-    ESP_LOGI(TAG, "hot-switch: set_id=0x%04X clavier ch=%u souris ch=%u",
+    ESP_LOGI(TAG, "hot-switch: set_id=0x%04X keyboard ch=%u mouse ch=%u",
              set_id, kcfg.channel, mcfg.channel);
 }
 
@@ -385,8 +385,8 @@ static bool rf_rx_pairing_service(void)
             uint8_t new_count = s_pair_paired_count + 1;
             esp_err_t err = rf_pairing_save_peer_dongle(slot, mac, new_count);
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "appairage NON enregistre (slot=0x%02X) : %s "
-                              "— pas d'ACK, la NVS du dongle est en echec",
+                ESP_LOGE(TAG, "pairing NOT recorded (slot=0x%02X): %s "
+                              "— no ACK, the dongle's NVS is failing",
                          slot, esp_err_to_name(err));
                 continue;   /* no ACK: see the comment above */
             }
@@ -432,15 +432,15 @@ static void rearm_if_silent(rf_radio_t *radio, const rf_radio_cfg_t *cfg,
     if ((uint32_t)(now - *last_rearm_ms) <= RF_REARM_SILENCE_MS) return;
     rf_driver_rearm_rx(radio, cfg);
     *last_rearm_ms = now;
-    ESP_LOGW(TAG, "chien de garde : radio %s réarmée (rien reçu depuis %lu ms)",
+    ESP_LOGW(TAG, "watchdog: radio %s rearmed (nothing received in %lu ms)",
              name, (unsigned long)(now - s_link[slot].last_rx_ms));
 }
 
 static void rf_rx_watchdog(uint32_t now)
 {
     static uint32_t s_kbd_rearm_ms = 0, s_mouse_rearm_ms = 0;
-    rearm_if_silent(&s_kbd,   &s_kbd_cfg,   RF_SLOT_KBD,   &s_kbd_rearm_ms,   now, "clavier");
-    rearm_if_silent(&s_mouse, &s_mouse_cfg, RF_SLOT_MOUSE, &s_mouse_rearm_ms, now, "souris");
+    rearm_if_silent(&s_kbd,   &s_kbd_cfg,   RF_SLOT_KBD,   &s_kbd_rearm_ms,   now, "keyboard");
+    rearm_if_silent(&s_mouse, &s_mouse_cfg, RF_SLOT_MOUSE, &s_mouse_rearm_ms, now, "mouse");
 }
 
 static void rf_rx_task(void *arg)
@@ -478,12 +478,12 @@ static void rf_rx_task(void *arg)
          * and would therefore never have released anything. */
         rf_safe_action_t a_kbd =
             rf_slot_link_check(&s_link[RF_SLOT_KBD], RF_SLOT_KBD, now, RF_LINK_LOST_MS);
-        if (a_kbd != RF_SAFE_NONE) ESP_LOGW(TAG, "lien clavier perdu → touches relâchées");
+        if (a_kbd != RF_SAFE_NONE) ESP_LOGW(TAG, "keyboard link lost → keys released");
         apply_safe_action(a_kbd);
 
         rf_safe_action_t a_mouse =
             rf_slot_link_check(&s_link[RF_SLOT_MOUSE], RF_SLOT_MOUSE, now, RF_LINK_LOST_MS);
-        if (a_mouse != RF_SAFE_NONE) ESP_LOGW(TAG, "lien souris perdu → boutons relâchés");
+        if (a_mouse != RF_SAFE_NONE) ESP_LOGW(TAG, "mouse link lost → buttons released");
         apply_safe_action(a_mouse);
 
         rf_rx_watchdog(now);   /* fix a frozen radio, without a reboot */
@@ -548,7 +548,7 @@ bool rf_rx_start(void)
     rf_driver_verify_rx(&s_mouse, &mcfg);
 
     if (!s_kbd.present && !s_mouse.present) {
-        ESP_LOGE(TAG, "aucune radio NRF présente — RF désactivée");
+        ESP_LOGE(TAG, "no NRF radio present — RF disabled");
         return false;
     }
 
@@ -565,7 +565,7 @@ bool rf_rx_start(void)
     }
 
     xTaskCreatePinnedToCore(rf_rx_task, "rf_rx", 8192, NULL, 10, NULL, 0);
-    ESP_LOGI(TAG, "RF RX démarrée (clavier=%d souris=%d)", s_kbd.present, s_mouse.present);
+    ESP_LOGI(TAG, "RF RX started (keyboard=%d mouse=%d)", s_kbd.present, s_mouse.present);
 
 #if CONFIG_KASE_DONGLE_FUSION
     /* Fusion: start the embedded keymap engine. drain_radio hands it the

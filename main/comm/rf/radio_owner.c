@@ -135,7 +135,7 @@ static void vider(radio_rx_cb_t cb, void *ctx)   /* lock held, PRX mode */
         if (!n) break;
         if (cb) cb(b, n, ctx); else perdues++;
     }
-    if (perdues) LOGW("%lu trame(s) lue(s) sans consommateur avant l'excursion", (unsigned long)perdues);
+    if (perdues) LOGW("%lu frame(s) read with no consumer before the excursion", (unsigned long)perdues);
 }
 void radio_rx_drain(radio_rx_cb_t cb, void *ctx)
 {
@@ -180,7 +180,7 @@ void radio_sleep(void)
 {
     if (!s_radio.present || s_endormie) return;   /* deep sleep calls the hooks again after light sleep */
     s_verrou_sommeil = lock_take(50);             /* HELD for the whole sleep */
-    if (!s_verrou_sommeil) LOGW("sommeil sans le verrou : une emission de plus de 50 ms le tenait");
+    if (!s_verrou_sommeil) LOGW("sleep without the lock: a send lasting more than 50 ms was holding it");
     s_hw.power_down(&s_radio);
     s_endormie = true;
 }

@@ -40,12 +40,12 @@ static void test_noms_pour_le_hb(void)
     TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "-") == 0, "none -> -");
     veille_veto_poser(&v, VEILLE_VETO_USB, true);
     veille_veto_poser(&v, VEILLE_VETO_LIEN, true);
-    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "usb+lien") == 0, "usb+lien");
+    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "usb+link") == 0, "usb+link");
     veille_veto_poser(&v, VEILLE_VETO_SYNC, true);
     veille_veto_poser(&v, VEILLE_VETO_TEST, true);
-    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "usb+lien+sync+test") == 0, "all four");
+    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "usb+link+sync+test") == 0, "all four");
     veille_veto_poser(&v, VEILLE_VETO_PAIR, true);
-    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "usb+lien+sync+test+pair") == 0, "all five fit in 24 bytes");
+    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "usb+link+sync+test+pair") == 0, "all five fit in 24 bytes");
     veille_veto_poser(&v, VEILLE_VETO_USB, false); veille_veto_poser(&v, VEILLE_VETO_LIEN, false);
     veille_veto_poser(&v, VEILLE_VETO_SYNC, false); veille_veto_poser(&v, VEILLE_VETO_TEST, false);
     TEST_ASSERT(veille_bloquee(&v), "pairing alone blocks sleep");

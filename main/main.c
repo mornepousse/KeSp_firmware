@@ -110,12 +110,12 @@ static void cpu_time_logger_task(void *arg) {
       esp_pm_dump_locks(stdout);   /* bench: time spent per mode (light sleep, APB min/max) */
 #endif
 #if CONFIG_KASE_KBD_WIRELESS
-      ESP_LOGW(TAG, "HB up=%us inactif=%us dormi=%us/%u route=%s relais=%s", (unsigned)up_s,
+      ESP_LOGW(TAG, "HB up=%us idle=%us slept=%us/%u route=%s relay=%s", (unsigned)up_s,
                (unsigned)inactif_s, (unsigned)(dodo_ms / 1000), (unsigned)dodo_n,
                (kbd_active_route() == KBD_OUT_RF) ? "RF" : "USB",
-               kbd_relay_active() ? "actif" : "inactif");
+               kbd_relay_active() ? "active" : "inactive");
 #else
-      ESP_LOGW(TAG, "HB up=%us inactif=%us dormi=%us/%u", (unsigned)up_s, (unsigned)inactif_s,
+      ESP_LOGW(TAG, "HB up=%us idle=%us slept=%us/%u", (unsigned)up_s, (unsigned)inactif_s,
                (unsigned)(dodo_ms / 1000), (unsigned)dodo_n);
 #endif
     }
@@ -134,7 +134,7 @@ static void cpu_time_logger_task(void *arg) {
 static void memlcd_slave_display_task(void *arg) {
   (void)arg;
   const display_backend_t *be = display_get_backend();
-  if (!be || !be->init()) { ESP_LOGW(TAG, "ecran droite : init KO"); vTaskDelete(NULL); return; }
+  if (!be || !be->init()) { ESP_LOGW(TAG, "right screen: init KO"); vTaskDelete(NULL); return; }
   for (;;) { be->update(); vTaskDelay(pdMS_TO_TICKS(MEMLCD_DROITE_PERIODE_MS)); }
 }
 #endif
@@ -224,9 +224,9 @@ void app_main(void) {
   {
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause == ESP_SLEEP_WAKEUP_EXT1)
-      ESP_LOGW(TAG, "reveil EXT1 : une touche a sorti la carte du sommeil profond");
+      ESP_LOGW(TAG, "EXT1 wake: a key pulled the board out of deep sleep");
     else if (cause != ESP_SLEEP_WAKEUP_UNDEFINED)
-      ESP_LOGW(TAG, "reveil de veille, cause=%d", (int)cause);
+      ESP_LOGW(TAG, "sleep wake, cause=%d", (int)cause);
   }
   /* BEFORE any matrix configuration: the columns may still be
    * frozen by the RTC hold set before deep sleep. */
@@ -272,13 +272,13 @@ void app_main(void) {
   {
     esp_err_t nvs = nvs_flash_init();
     if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-      ESP_LOGW(TAG, "NVS a effacer et reinitialiser (%s)", esp_err_to_name(nvs));
+      ESP_LOGW(TAG, "NVS to erase and reinitialize (%s)", esp_err_to_name(nvs));
       ESP_ERROR_CHECK(nvs_flash_erase());
       nvs = nvs_flash_init();
     }
     if (nvs != ESP_OK)
-      ESP_LOGE(TAG, "NVS indisponible : %s — appairage et config ne seront pas "
-                    "persistes", esp_err_to_name(nvs));
+      ESP_LOGE(TAG, "NVS unavailable: %s — pairing and config will not be "
+                    "persisted", esp_err_to_name(nvs));
   }
 
   kase_tinyusb_init();
@@ -453,12 +453,12 @@ void app_main(void) {
    * of these modules for this role. The task does not yet produce an HID
    * report — relaying to the dongle's slot 2 is the next milestone, with its
    * own spec. */
-  ESP_LOGI(TAG, "Role souris : capteur + clics + molette");
+  ESP_LOGI(TAG, "Mouse role: sensor + clicks + wheel");
   {
     extern esp_err_t mouse_task_start(void);
     esp_err_t err = mouse_task_start();
     if (err != ESP_OK)
-      ESP_LOGE(TAG, "mouse_task_start a echoue : %s", esp_err_to_name(err));
+      ESP_LOGE(TAG, "mouse_task_start failed: %s", esp_err_to_name(err));
   }
 #elif CONFIG_KASE_DEVICE_ROLE_NIPHAR_SLAVE
   /* --- Niphargus RIGHT half: a scanner, nothing else. ---
@@ -472,7 +472,7 @@ void app_main(void) {
    * ever initializing it: the matrix stayed silent and the pinout was
    * unverifiable. Transmitting to the left half is B3's job, not yet
    * written. */
-  ESP_LOGI(TAG, "Role esclave Niphargus : scan matrice seul");
+  ESP_LOGI(TAG, "Niphargus slave role: scan matrix only");
 #if CONFIG_KASE_HALF_LINK_TX
   /* BEFORE matrix_setup(): the scan callback will transmit from the first press,
    * and it needs a radio that is ready. */
