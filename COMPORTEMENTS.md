@@ -264,6 +264,10 @@ hook par édition la pose, le Stop bloque. Y répondre = un test, ou une ligne.
   section critique) ; toute répétition part avec son snapshot + génération.
   Le sommeil du propriétaire est idempotent (le profond rappelle les hooks
   après le léger) et ne rend au réveil que le verrou qu'il a pris.
+  Le hook « relais » de la gauche (timer de rafraîchissement) est enregistré
+  AVANT celui du propriétaire : au réveil (ordre inverse) la radio est debout
+  avant que le timer ne reparte. La cadence de la tâche clavier lit la présence
+  USB par `usb_presence_cable()`, la même règle que le routage, le lien et la veille.
 - [test:test_radio_owner] Un tour d'appairage (`radio_pair_round`) vise le
   rendez-vous, émet, écoute, puis REVIENT à la cible courante quoi qu'il
   arrive — une carte qui resterait sur le canal de rendez-vous n'acquitterait

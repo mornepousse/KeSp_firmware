@@ -499,6 +499,15 @@ void kbd_relay_init(void)
     uint16_t set_id = rf_pairing_load_set_id_half(BOARD_NRF_ADDR_SUFFIX, &slot);
     rf_apply_set_id(&nrf_cfg, set_id, slot);
 
+#if CONFIG_KASE_VEILLE
+    /* Veille (B7) : le timer de rafraîchissement s'arrête et repart avec la
+     * carte ; la puce elle-même est au hook du propriétaire. Enregistré AVANT
+     * le propriétaire : les hooks se réveillent en ordre inverse, la radio est
+     * donc debout avant que le timer ne reparte (sinon son premier tick pouvait
+     * tomber sur une puce encore endormie : « radio indisponible » pour rien). */
+    static const veille_hook_t hook = { "relais", kbd_relay_sleep_prepare, kbd_relay_wake_restore };
+    veille_hook_enregistrer(&hook);
+#endif
     /* Le propriétaire initialise la puce en PTX vers le dongle et enregistre
      * lui-même son hook de veille (power-down, verrou gardé ; réveil réarmé). */
     if (!radio_owner_init(&nrf_cfg, NULL)) {
@@ -531,12 +540,6 @@ void kbd_relay_init(void)
     };
     if (esp_timer_create(&ta, &s_refresh_timer) == ESP_OK)
         kbd_relay_timer_set(KBD_RELAY_REFRESH_MS);
-#if CONFIG_KASE_VEILLE
-    /* Veille (B7) : le timer de rafraîchissement s'arrête et repart avec la
-     * carte ; la puce elle-même est au hook du propriétaire. */
-    static const veille_hook_t hook = { "relais", kbd_relay_sleep_prepare, kbd_relay_wake_restore };
-    veille_hook_enregistrer(&hook);
-#endif
 }
 
 #if CONFIG_KASE_VEILLE

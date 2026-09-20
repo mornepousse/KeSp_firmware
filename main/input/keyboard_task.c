@@ -23,8 +23,8 @@
 #include "matrix_scan.h"
 #include "hid_transport.h"
 #include "usb_hid.h"        /* usb_try_remote_wakeup */
+#include "usb_presence.h"   /* usb_presence_cable (cadence) ; kbd_active_route sous KBD_WIRELESS */
 #if CONFIG_KASE_KBD_WIRELESS
-#include "usb_presence.h"   /* kbd_active_route */
 #if CONFIG_KASE_HAS_DISPLAY && !CONFIG_KASE_VEILLE
 #include "v2d_sleep.h"      /* voir la garde du CMakeLists : depend de l'ecran, exclu avec B7 */
 #endif
@@ -66,7 +66,7 @@ void vTaskKeyboard(void *pvParameters)
             extern volatile bool matrix_test_mode;
             uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
             uint32_t attente = kbd_cadence_attente_ms(now, get_last_activity_time_ms(),
-                                                      tud_ready(), matrix_test_mode);
+                                                      usb_presence_cable(), matrix_test_mode);   /* même règle que routage, lien, veille */
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(attente));
         }
 
