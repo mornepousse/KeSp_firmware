@@ -412,7 +412,7 @@ gpgconf --kill all      # then: gpg --card-status  (should show 0 keys, PINs 3 0
   ```
 
 - **Firmware-side logs** (the dongle is `CONSOLE_NONE` by default). Temporarily add to
-  `sdkconfig.defaults.dongle`:
+  `boards/kase_dongle/sdkconfig.defaults`:
 
   ```
   CONFIG_ESP_CONSOLE_UART_DEFAULT=y
@@ -435,7 +435,7 @@ rollout.
 (`esptool read_flash 0x9000 0x10000`) yields the private keys in cleartext
 (empirically confirmed). With it, the `nvs` partition is XTS-AES ciphertext, the
 key derived from an eFuse HMAC key auto-generated on-chip (read-protected, never
-leaves the part). Config in `sdkconfig.defaults.dongle`; validated on the spare
+leaves the part). Config in `boards/kase_dongle/sdkconfig.defaults`; validated on the spare
 board (entropy 7.89, 0 cleartext strings). Spec:
 `docs/superpowers/specs/2026-06-25-dongle-nvs-encryption-design.md`.
 

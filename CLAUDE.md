@@ -310,6 +310,11 @@ manifests against our LVGL 8 sdkconfig → `MissingKconfigError:
 LV_USE_LIBJPEG_TURBO`, fatal. For a manual `idf.py` outside `check.sh`,
 export the same variable.
 
+**Per-board defaults**: `boards/<name>/sdkconfig.defaults` is loaded on top of
+the root `sdkconfig.defaults` (CMake refuses a board without one — empty is
+fine). Nothing at the repository root names a board: the folder is the whole
+registration (2026-09-20, plan "a board is one folder").
+
 **Important**: with `-DSDKCONFIG=build_kase_<name>/sdkconfig`, each board
 has its sdkconfig isolated in its build folder — no more config leakage
 between boards. The legacy `sdkconfig` at the root remains that of a

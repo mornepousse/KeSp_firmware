@@ -12,10 +12,10 @@
 #
 #   1. Config leakage from one board to another — which CLAUDE.md explicitly
 #      forbids.
-#   2. Per-board `sdkconfig.defaults.<short>` were NEVER read, because they
+#   2. Per-board `boards/<name>/sdkconfig.defaults` were NEVER read, because they
 #      are only read when generating a fresh sdkconfig, and a root sdkconfig
 #      already existed. The V2D would come out with BLE compiled in despite
-#      sdkconfig.defaults.v2_debug.
+#      boards/kase_v2_debug/sdkconfig.defaults.
 #
 # Hence: one build folder AND one sdkconfig per board, like the rest of the repo.
 set -euo pipefail
@@ -76,12 +76,12 @@ echo ""
 echo "======================================== artefacts"
 ls -lh "$RELEASE_DIR"/KaSe_"$VERSION_TAG"_*.bin | awk '{print "  "$5"\t"$9}'
 
-# Safeguard: the V2D must not embed BLE (sdkconfig.defaults.v2_debug).
+# Safeguard: the V2D must not embed BLE (boards/kase_v2_debug/sdkconfig.defaults).
 # If this check fails, the per-board defaults were not picked up — exactly
 # the silent failure this script's rewrite fixes.
 if grep -q "^CONFIG_BT_ENABLED=y" build_kase_v2_debug/sdkconfig 2>/dev/null; then
     echo ""
-    echo "ERROR: the V2D embeds BLE — sdkconfig.defaults.v2_debug was not picked up." >&2
+    echo "ERROR: the V2D embeds BLE — boards/kase_v2_debug/sdkconfig.defaults was not picked up." >&2
     echo "       Delete build_kase_v2_debug/sdkconfig and rerun." >&2
     exit 1
 fi

@@ -343,7 +343,7 @@ means a test, or a line.
   Matrix test mode (CDC) keeps control. "Only load the local keymap with
   USB" (2026-09-16): it's execution that gets conditioned, not the code.
 - [smoke:Fusion — local engine dormant] FUSION is the DEFAULT configuration
-  of the three Niphargus boards (sdkconfig.defaults.niphar_left/right,
+  of the three Niphargus boards (boards/niphar_left|right/sdkconfig.defaults,
   dongle): what `scripts/check.sh` builds at pre-push is what gets
   flashed. Until 2026-09-18 the check was guarding the pre-fusion left
   (HALF_LINK_RX) while the boards were running unguarded `*_fusion`

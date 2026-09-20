@@ -156,7 +156,7 @@ ykchalresp -1 -x <hex-challenge>   # press K_SEC_CONFIRM when it waits
 The firmware **builds** but real USB behaviour can only be confirmed on the device:
 
 1. **Reflash properly so `CONFIG_TINYUSB_HID_COUNT=2` takes effect** — it is set in
-   `sdkconfig.defaults.dongle`; do `idf.py -B build_kase_dongle reconfigure` (or a clean
+   `boards/kase_dongle/sdkconfig.defaults`; do `idf.py -B build_kase_dongle reconfigure` (or a clean
    build / full flash) so the 2nd HID interface enumerates.
 2. Confirm the dongle still enumerates its **keyboard + mouse + CDC** as before, **plus** a
    new HID interface ("KaSe Dongle OTP").

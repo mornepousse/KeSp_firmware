@@ -1,0 +1,1 @@
+# No per-board override: the root sdkconfig.defaults is this board's whole config.

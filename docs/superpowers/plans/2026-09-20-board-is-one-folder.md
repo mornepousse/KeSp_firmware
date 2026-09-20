@@ -19,10 +19,17 @@
 - Reference hashes are taken **before** the first task and kept in the scratchpad:
   ```bash
   for b in kase_v1 kase_v2 kase_v2_debug kase_dongle niphar_left niphar_right conchodytes; do
-    python3 -c "import hashlib;d=bytearray(open('build_$b/KeSp.bin','rb').read());d[0x20:0x120]=b'\0'*0x100;print(hashlib.sha256(d).hexdigest()[:16],'$b')"
+    python3 -c "import hashlib;d=bytearray(open('build_$b/KeSp.bin','rb').read());d[0x20:0x120]=b'\0'*0x100;d[-33:]=b'\0'*33;print(hashlib.sha256(d).hexdigest()[:16],'$b')"
   done > /tmp/ref_hashes.txt
   ```
   (build all 7 first with `./scripts/check.sh --force` inside the devshell). The same loop after a task must print the same lines.
+  ⚠ Both masks are needed (learned in Task 1): the app descriptor carries the
+  `git describe` string (`-dirty` appears as soon as the tree has uncommitted
+  changes) and the ELF sha; the image's last 33 bytes are its checksum + SHA-256
+  and follow the descriptor. Build the reference and the candidate from a
+  regenerated `build_<board>/sdkconfig` (`rm` it first) — a stale one hides a
+  default that stopped being read.
+- [x] Task 1 done 2026-09-20: 7/7 identical, old mechanism vs new, regenerated sdkconfigs.
 
 ---
 
