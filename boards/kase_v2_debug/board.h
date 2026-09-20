@@ -45,3 +45,17 @@
 
 #undef PRODUCT_NAME
 #define PRODUCT_NAME  "KaSe V2 Debug"
+
+/* The V2 list plus the bodged wiring: nRF24 on the flying wires, VBUS sense.
+ * COLS7/COLS8 are already overridden above — the list names the macros, so
+ * the contract sees the V2D values. */
+#undef BOARD_PINS
+#define BOARD_PINS(X) \
+    X(ROWS0) X(ROWS1) X(ROWS2) X(ROWS3) X(ROWS4) \
+    X(COLS0) X(COLS1) X(COLS2) X(COLS3) X(COLS4) X(COLS5) X(COLS6) \
+    X(COLS7) X(COLS8) X(COLS9) X(COLS10) X(COLS11) X(COLS12) \
+    X(BOARD_DISPLAY_I2C_SDA) X(BOARD_DISPLAY_I2C_SCL) \
+    X(BOARD_NRF_SPI_MOSI) X(BOARD_NRF_SPI_MISO) X(BOARD_NRF_SPI_SCK) \
+    X(BOARD_NRF_CSN_GPIO) X(BOARD_NRF_CE_GPIO) X(BOARD_NRF_IRQ_GPIO) \
+    X(BOARD_VBUS_SENSE_GPIO)
+

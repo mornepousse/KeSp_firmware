@@ -228,6 +228,14 @@ means a test, or a line.
   initializer of matrix_scan.c/veille.c and the GPIO_NUM_NC padding of the
   Niphargus boards are gone (2026-09-20). Bench: left, right and V2D, one key
   per row and column, sleep and wake by a key on each row.
+- [test:test_board_contract_niphar_left] Every board passes the same pin
+  contract from its `BOARD_PINS(X)` list (`test/board_contract.inc`, one test
+  unit per board): no GPIO used twice, numbers in 0..48, no strapping pin
+  (0/3/45/46 — waived by the legacy KaSe V1/V2 pinouts, said so in their
+  board.h), no native-USB pin (19/20) nor octal-PSRAM pin (35-37) when the
+  board declares them, pin tables consistent with MATRIX_ROWS/COLS and
+  KEYMAP_COLS. Proven biting: a duplicated column on the V2 turns V2 and V2D
+  red. The Niphargus pin tests keep their hardware-specific facts.
 - [test:test_take_consumes_the_signal] A matrix edge is never lost during
   reading: the signal is taken, consumed, never overwritten by the next
   read.

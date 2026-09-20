@@ -83,3 +83,12 @@
 #define BOARD_USB_PID             0x4001
 
 #endif /* BOARD_H */
+
+/* Every GPIO this board drives or reads — the generic board contract
+ * (test/board_contract.inc) checks the list: no GPIO twice, valid numbers,
+ * no strapping pin, reserved pins respected. Add here whatever you add above. */
+#define BOARD_USES_NATIVE_USB 1
+#define BOARD_PINS(X) \
+    X(BOARD_NRF_SPI_MOSI) X(BOARD_NRF_SPI_MISO) X(BOARD_NRF_SPI_SCK) \
+    X(BOARD_NRF1_CSN_GPIO) X(BOARD_NRF1_CE_GPIO) X(BOARD_NRF1_IRQ_GPIO) \
+    X(BOARD_NRF2_CSN_GPIO) X(BOARD_NRF2_CE_GPIO) X(BOARD_NRF2_IRQ_GPIO)

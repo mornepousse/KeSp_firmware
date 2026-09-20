@@ -30,7 +30,8 @@
   regenerated `build_<board>/sdkconfig` (`rm` it first) — a stale one hides a
   default that stopped being read.
 - [x] Task 1 done 2026-09-20: 7/7 identical, old mechanism vs new, regenerated sdkconfigs.
-- [x] Task 2 done 2026-09-20: bench left/right/V2D (rows, columns, wake per row) OK; new reference hashes = the Task 2 build.
+- [x] Task 2 done 2026-09-20: bench left/right/V2D (rows, columns, wake per row) OK — the right re-flashed and re-tested after a stash-built stale binary was caught by the Task 3 oracle.
+- [x] Task 3 done 2026-09-20: 7 units green, bites on a duplicated V2 column, binaries identical to a HEAD rebuild (right: `cmp` empty).
 
 ---
 

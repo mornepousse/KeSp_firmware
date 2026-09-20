@@ -46,6 +46,16 @@
 #define BOARD_COL_PINS { COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6, \
                          COLS7, COLS8, COLS9, COLS10, COLS11, COLS12 }
 
+/* Every GPIO this board drives or reads — the generic board contract
+ * (test/board_contract.inc) checks the list: no GPIO twice, valid numbers,
+ * no strapping pin, reserved pins respected. Add here whatever you add above. */
+#define BOARD_PINS_WAIVE_STRAPPING 1   /* legacy pinout: GPIO3/46 in the matrix, boot-safe by wiring */
+#define BOARD_PINS(X) \
+    X(ROWS0) X(ROWS1) X(ROWS2) X(ROWS3) X(ROWS4) \
+    X(COLS0) X(COLS1) X(COLS2) X(COLS3) X(COLS4) X(COLS5) X(COLS6) \
+    X(COLS7) X(COLS8) X(COLS9) X(COLS10) X(COLS11) X(COLS12) \
+    X(BOARD_DISPLAY_I2C_SDA) X(BOARD_DISPLAY_I2C_SCL)
+
 /* ── Display configuration ─────────────────────────────────── */
 #define BOARD_DISPLAY_BACKEND_OLED
 #define BOARD_DISPLAY_BUS           DISPLAY_BUS_I2C
