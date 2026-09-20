@@ -72,6 +72,11 @@ release job.
 
 ## 4. The front door
 
+**Document done 2026-09-20**: `docs/MAKE_YOUR_OWN.md` (hardware, toolchain,
+the board folder, flash, pairing, remapping, reading the heartbeat and
+`rfstat`), plus the two bench tools promoted to `scripts/` (`kesp_cdc.py`,
+`console-capture.py`). Left: the name.
+
 - `docs/MAKE_YOUR_OWN.md`: hardware requirements (ESP32-S3, nRF24L01+,
   COL → switch → diode → ROW for key wake-up, optional Sharp memory-LCD,
   battery divider, TRRS), the four files of a board, build and flash

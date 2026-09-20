@@ -389,14 +389,12 @@ Full protocol reference: [`docs/CDC_BINARY_PROTOCOL.md`](docs/CDC_BINARY_PROTOCO
 
 ## Adding a new board
 
-1. Create `boards/<name>/board.h` with hardware macros (GPIOs, display, USB IDs, etc.)
-2. Create `boards/<name>/board_keymap.c` and `board_layout.c` — **keyboard roles
-   only.** A board with no switches must not declare a matrix to make the build
-   pass; see `boards/kase_dongle/` for what a non-keyboard role looks like.
-3. Build with an isolated sdkconfig:
-   `idf.py -B build_<name> -DBOARD=<name> -DSDKCONFIG=build_<name>/sdkconfig build`
-
-See `boards/kase_v2/board.h` for a minimal example, `CONTRIBUTING.md` for conventions.
+A board is one folder. `scripts/new-board.sh <name>` creates it from
+`boards/_template/` (pins, matrix tables, `BOARD_PINS(X)` checked by the host
+contract test, keymap, layout, `sdkconfig.defaults`); `check.sh` and the CI
+discover it from there, `-DBOARD_DIR=` builds one kept outside the repository.
+Walkthrough from bare hardware to a remapped keyboard: **`docs/MAKE_YOUR_OWN.md`**;
+file-by-file reference: `boards/README.md`.
 
 ---
 
@@ -408,6 +406,8 @@ See `boards/kase_v2/board.h` for a minimal example, `CONTRIBUTING.md` for conven
 | [`docs/CDC_BINARY_PROTOCOL.md`](docs/CDC_BINARY_PROTOCOL.md) | Binary protocol reference (all commands) |
 | [`docs/KEYCODE_MAP.md`](docs/KEYCODE_MAP.md) | Keycode encoding specification |
 | [`docs/CDC_KEYSTATS_PROTOCOL.md`](docs/CDC_KEYSTATS_PROTOCOL.md) | Stats/bigrams binary format details |
+| [`docs/MAKE_YOUR_OWN.md`](docs/MAKE_YOUR_OWN.md) | From bare hardware to a remapped keyboard: board folder, flash, pairing, diagnostics |
+| [`boards/README.md`](boards/README.md) | A board is one folder — the files, the pin tables and the contract |
 | [`docs/NIPHARGUS_V2_HARDWARE.md`](docs/NIPHARGUS_V2_HARDWARE.md) | Niphargus pinout — verified against the netlist |
 | [`docs/HARDWARE_SMOKE_TEST.md`](docs/HARDWARE_SMOKE_TEST.md) | Bench checklist to run before a merge or release |
 
