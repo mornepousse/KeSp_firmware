@@ -589,9 +589,23 @@ pins to detach bootloader functions (UART0, secondary SPI flash).
 
 ## Release workflow
 
-1. Bump the version via git tag `vX.Y.Z`
-2. `./scripts/check.sh` must be green (all 7 boards build)
-3. Merge binaries with `esptool.py merge_bin` for the `_full.bin` files
-4. `glab release create vX.Y.Z <files...>` (app + full)
+Driven by `/tripwire:release`. Version source: the git tag only (no VERSION
+file, no manifest duplicating it).
+
+1. Working tree clean, `./scripts/check.sh` green (all 7 boards build)
+2. Smoke test (below), then `git tag vX.Y.Z && git push && git push --tags`
+3. `scripts/build_release.sh vX.Y.Z` → `release/KaSe_vX.Y.Z_<HW>.bin` (app,
+   flash at 0x20000) and `release/KaSe_vX.Y.Z_<HW>_full.bin` (bootloader +
+   partitions + app + LittleFS, flash at 0x0) for the 7 boards: V1, V2,
+   V2_Debug, Dongle, Niphargus_Left, Niphargus_Right, Conchodytes
+4. `glab release create vX.Y.Z release/KaSe_vX.Y.Z_*.bin --notes "…"` — the
+   GitLab→GitHub mirror carries the tag, the assets stay on GitLab
+
+### Smoke test
+
+`docs/HARDWARE_SMOKE_TEST.md` is the checklist; the mandatory items are the
+`[smoke:X]` guards of `COMPORTEMENTS.md` (each X is a title in that document).
+Walk them on the boards at hand before tagging; a board that is not on the
+bench ships as "build only", said so in the release notes.
 
 See `docs/` for detailed protocols and keycodes.

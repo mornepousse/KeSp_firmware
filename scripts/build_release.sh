@@ -30,8 +30,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 RELEASE_DIR="$PROJECT_DIR/release"
 
-BOARDS=("kase_v1" "kase_v2" "kase_v2_debug")
-HW_NAMES=("V1" "V2" "V2_Debug")
+BOARDS=("kase_v1" "kase_v2" "kase_v2_debug" "kase_dongle" "niphar_left" "niphar_right" "conchodytes")
+HW_NAMES=("V1" "V2" "V2_Debug" "Dongle" "Niphargus_Left" "Niphargus_Right" "Conchodytes")
+# Nix devshell ships `esptool`, the classic install ships `esptool.py`.
+ESPTOOL="$(command -v esptool || command -v esptool.py)"
+export IDF_COMPONENT_CHECK_NEW_VERSION=0
 
 mkdir -p "$RELEASE_DIR"
 cd "$PROJECT_DIR"
@@ -50,14 +53,18 @@ for i in "${!BOARDS[@]}"; do
     # Full image: bootloader + partition table + otadata + app + storage.
     # Flashes at 0x0 after an erase_flash; required after any partition
     # table change.
-    ( cd "$bdir" && esptool.py --chip esp32s3 merge_bin \
+    # The dongle and the mouse have no LittleFS image (no keymap storage): the
+    # storage partition is left blank in their full image.
+    storage_arg=()
+    [ -f "$bdir/storage.bin" ] && storage_arg=(0x420000 storage.bin)
+    ( cd "$bdir" && "$ESPTOOL" --chip esp32s3 merge_bin \
         -o "$RELEASE_DIR/KaSe_${VERSION_TAG}_${hw}_full.bin" \
         --flash_mode dio --flash_freq 80m --flash_size 16MB \
         0x0 bootloader/bootloader.bin \
         0x8000 partition_table/partition-table.bin \
         0x19000 ota_data_initial.bin \
         0x20000 KeSp.bin \
-        0x420000 storage.bin > /dev/null )
+        "${storage_arg[@]}" > /dev/null )
 
     echo "  -> release/KaSe_${VERSION_TAG}_${hw}.bin (+ _full)"
 done
