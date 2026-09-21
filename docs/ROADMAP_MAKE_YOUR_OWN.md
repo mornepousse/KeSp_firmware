@@ -61,7 +61,12 @@ such a board.
   (2026-09-21): **the template is for other people's keyboards, the author's
   boards stay in the core** as its reference boards; Conchodytes stays out
   because it is another product. Not to be reopened without a second
-  maintainer.
+  maintainer. **Conchodytes goes further (same day): a dedicated firmware**
+  (Rust `esp-hal`, bare metal — its reasons are a small self-contained
+  project, not performance, which the 1 ms USB poll of the dongle bounds
+  anyway), sharing only the slot-2 radio contract, now written down:
+  `docs/DONGLE_MOUSE_CONTRACT.md`. The `MOUSE` role stays in KeSp until that
+  firmware pairs and clicks.
   Original note:
   — `kesp-keyboard-template`: one example board (the template filled in), this
   firmware as a submodule pinned on a release, a GitHub workflow calling a

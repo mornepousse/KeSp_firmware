@@ -30,6 +30,16 @@ means a test, or a line.
 - [smoke:NRF doesn't wedge after 5 min] The right has a radio watchdog. A
   frozen nRF24 is relaunched; there is no more permanent death of the link.
 
+- [test:test_mouse_slot_vectors] The dongle's slot 2 is a published contract
+  (`docs/DONGLE_MOUSE_CONTRACT.md`, vectors in
+  `docs/contracts/mouse_slot_vectors.json`): HID mouse frame `50 01 btn dx dy
+  wheel`, `PAIR_REQ` v2 with `RF_DEV_MOUSE = 2`, `PAIR_ACK` with a big-endian
+  `set_id`, address `'K' 'S' set_id slot` and channel `80 + 2·(set_id % 20) +
+  1`, rendezvous `KSPR\xff` / 0x28, factory 0x52, loss of the slot after
+  2.5 s releases the buttons only. A foreign firmware (the Conchodytes rewrite
+  in Rust, 2026-09-21) is built against these bytes: changing one changes the
+  document, the generator and the test in the same commit.
+
 <!-- Other radio invariants still need to be written down (Mae, 2026-09-13). -->
 
 ## Sleep — wake

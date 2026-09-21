@@ -29,6 +29,7 @@ add_executable(test_runner
     test_leader.c
     ../main/input/leader.c
     test_rf_packet.c
+    test_mouse_slot_vectors.c
     test_heartbeat.c
     ../main/comm/rf/heartbeat.c
     test_trackpad_map.c
