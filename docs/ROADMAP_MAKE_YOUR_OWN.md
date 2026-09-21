@@ -41,6 +41,17 @@ such a board.
 - `-DBOARD_DIR=/path/to/my_board`: the user keeps board + keymap in their
   own repository; this firmware is a dependency they pin (submodule or
   `idf_component.yml` git source).
+- **Next (decided 2026-09-21, not started): a forkable template repository**
+  — `kesp-keyboard-template`: one example board (the template filled in), this
+  firmware as a submodule pinned on a release, a GitHub workflow calling a
+  reusable `workflow_call` workflow of this repository to build and publish
+  that board's binaries, a ten-line README ("Use this template → rename →
+  fill board.h → push → download"). The visible signal that anyone can make
+  their keyboard, without splitting the author's boards out of the core (the
+  7-board pre-push stays). Estimated one day: ½ reusable workflow, ½ template
+  repository + docs. Splitting Niphargus/KaSe/Conchodytes into their own
+  repositories was costed at 2-3 days plus a permanent cross-repo tax and
+  declined for now.
 - Later, only if there is demand: the core published as an ESP-IDF
   component (registry); the user's repo holds nothing but the board.
 - Done when: a board living outside the repository builds and flashes with
