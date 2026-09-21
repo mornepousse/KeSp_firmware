@@ -1,0 +1,104 @@
+name: Build a KeSp board (reusable)
+
+# Called by a keyboard repository that keeps ITS board in `boards/<name>/` and
+# this firmware as a git submodule (see mornepousse/kesp-keyboard-template):
+#
+#   jobs:
+#     firmware:
+#       uses: mornepousse/KeSp_firmware/.github/workflows/build-board.yml@main
+#       with: { board: my_keyboard }
+#       permissions: { contents: write }     # for the release on a tag
+#
+# Builds the board with -DBOARD_DIR (the board never enters this repository),
+# uploads the app and the full flash image as artifacts, and on a `v*` tag of
+# the CALLER creates the release in the caller's repository — pre-release
+# when the tag carries a suffix (v1.0.0-beta.1).
+
+on:
+  workflow_call:
+    inputs:
+      board:
+        description: "Board folder name under boards_path (boards/<board>/board.h …)"
+        required: true
+        type: string
+      boards_path:
+        description: "Directory of the caller holding the board folders"
+        required: false
+        type: string
+        default: boards
+      firmware_path:
+        description: "Directory of the caller where this firmware is checked out (submodule)"
+        required: false
+        type: string
+        default: firmware
+      idf_version:
+        description: "ESP-IDF docker tag"
+        required: false
+        type: string
+        default: v5.5.2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0                 # the caller's tags name the firmware version
+
+      - name: Sanity — the board and the firmware are where the inputs say
+        run: |
+          test -f "${{ inputs.boards_path }}/${{ inputs.board }}/board.h" || { echo "::error::${{ inputs.boards_path }}/${{ inputs.board }}/board.h not found"; exit 1; }
+          test -f "${{ inputs.boards_path }}/${{ inputs.board }}/sdkconfig.defaults" || { echo "::error::${{ inputs.boards_path }}/${{ inputs.board }}/sdkconfig.defaults not found (may be empty)"; exit 1; }
+          test -f "${{ inputs.firmware_path }}/CMakeLists.txt" || { echo "::error::${{ inputs.firmware_path }}/CMakeLists.txt not found — is the firmware submodule checked out?"; exit 1; }
+          echo "PROJECT_VER=$(git describe --tags --always --dirty)" >> "$GITHUB_ENV"
+          echo "firmware: $(git -C '${{ inputs.firmware_path }}' describe --tags --always)"
+
+      - name: Build ${{ inputs.board }}
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ inputs.idf_version }}
+          target: esp32s3
+          path: ${{ inputs.firmware_path }}
+          # BOARD_DIR relative = from the firmware's project dir (the caller's
+          # board folder is next to it). The lock is authoritative: no registry.
+          command: >
+            export IDF_COMPONENT_CHECK_NEW_VERSION=0 &&
+            idf.py -B build_${{ inputs.board }}
+            -DBOARD_DIR=../${{ inputs.boards_path }}/${{ inputs.board }}
+            -DSDKCONFIG=build_${{ inputs.board }}/sdkconfig
+            -DPROJECT_VER=${{ env.PROJECT_VER }} build
+
+      - name: App and full flash image
+        run: |
+          pip install --quiet esptool
+          B="${{ inputs.firmware_path }}/build_${{ inputs.board }}"
+          mkdir -p out
+          cp "$B/KeSp.bin" "out/${{ inputs.board }}_${PROJECT_VER}.bin"
+          storage=(); [ -f "$B/storage.bin" ] && storage=(0x420000 "$B/storage.bin")
+          esptool.py --chip esp32s3 merge_bin -o "out/${{ inputs.board }}_${PROJECT_VER}_full.bin" \
+            --flash_mode dio --flash_freq 80m --flash_size 16MB \
+            0x0 "$B/bootloader/bootloader.bin" 0x8000 "$B/partition_table/partition-table.bin" \
+            0x19000 "$B/ota_data_initial.bin" 0x20000 "$B/KeSp.bin" "${storage[@]}"
+          ls -l out
+          python3 - <<'PY'
+          import glob,os
+          for f in glob.glob("out/*.bin"):
+              if f.endswith("_full.bin"): continue
+              d=open(f,"rb").read(); print(f, "embedded version:", d[0x30:0x50].split(b"\0")[0].decode())
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.board }}
+          path: out/*.bin
+
+      - name: Release (on a v* tag of the caller)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.bin
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
