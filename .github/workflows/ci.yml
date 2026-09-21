@@ -1,6 +1,6 @@
 name: CI
 
-# Host tests + the 7 boards on every push and PR; on a v* tag, the 14 release
+# Host tests + the in-tree boards on every push and PR; on a v* tag, the release
 # artefacts (app + full image per board) and the GitHub release — pre-release
 # when the tag carries a suffix (v4.2.0-beta.1), Latest otherwise. Mirrors
 # scripts/check.sh and scripts/build_release.sh; the local pre-push stays the
@@ -29,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: [kase_v1, kase_v2, kase_v2_debug, kase_dongle, niphar_left, niphar_right, conchodytes]
+        board: [kase_v1, kase_v2, kase_v2_debug, kase_dongle, niphar_left, niphar_right]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -99,7 +99,7 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           mkdir -p release
           declare -A HW=( [kase_v1]=V1 [kase_v2]=V2 [kase_v2_debug]=V2_Debug [kase_dongle]=Dongle
-                          [niphar_left]=Niphargus_Left [niphar_right]=Niphargus_Right [conchodytes]=Conchodytes )
+                          [niphar_left]=Niphargus_Left [niphar_right]=Niphargus_Right )
           for b in "${!HW[@]}"; do
             d="artifacts/build-$b"; hw="${HW[$b]}"
             cp "$d/KeSp.bin" "release/KaSe_${TAG}_${hw}.bin"

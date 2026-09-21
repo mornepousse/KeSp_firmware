@@ -69,8 +69,12 @@ half of a split that carries the engine), `KASE_DEVICE_ROLE_SPLIT_SCANNER`
 | `kase_dongle` | USB receiver, two nRF24 (keyboard slot 1, mouse slot 2), runs the fusion engine |
 | `niphar_left` | Niphargus left half — split master, memory-LCD, trackpad, TRRS link |
 | `niphar_right` | Niphargus right half — split scanner, memory-LCD, TRRS link |
-| `conchodytes` | Conchodytes mouse — PMW3389, clicks, wheel |
 | `_template` | the template (`new-board.sh` copies it; CMake refuses to build it) |
+
+Out of the tree since 2026-09-21: the **Conchodytes** mouse —
+[Conchodytes-firmware](https://github.com/mornepousse/Conchodytes-firmware)
+(board + pinned submodule + CI on the reusable workflow), the first board to
+live in its own repository; its `MOUSE` role code stays in the core.
 
 ## A board outside the repository
 

@@ -33,7 +33,7 @@ set(srcs
 # personne n'y référence keymaps[] ni default_layout_names[].
 # La souris est exclue pour la meme raison que le dongle : elle n'a aucun
 # interrupteur en matrice. Ses trois clics sont lus individuellement par paires
-# NO+NC, et boards/conchodytes/board.h ne declare donc ni ROWSn ni COLSn.
+# NO+NC, and its board.h (in the Conchodytes repository since 2026-09-21) declares no ROWSn/COLSn.
 if(NOT CONFIG_KASE_NO_KEYMAP_ENGINE)
     list(APPEND srcs
         "${BOARD_DIR}/board_keymap.c"

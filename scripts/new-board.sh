@@ -41,9 +41,9 @@ cat > "$root/test/test_board_contract_$name.c" <<EOC
 #define BOARD_CONTRACT_FN   test_board_contract_$name
 #include "board_contract.inc"
 EOC
-sed -i "s|^\(    test_board_contract_conchodytes.c\)$|\1\n    test_board_contract_$name.c|" "$root/test/CMakeLists.txt"
-sed -i "s|^\(extern void test_board_contract_conchodytes(void);\)$|\1\nextern void test_board_contract_$name(void);|" "$root/test/test_main.c"
-sed -i "s|^\(    test_board_contract_conchodytes();\)$|\1\n    test_board_contract_$name();|" "$root/test/test_main.c"
+sed -i "s|^\(    test_board_contract_niphar_right.c\)$|\1\n    test_board_contract_$name.c|" "$root/test/CMakeLists.txt"
+sed -i "s|^\(extern void test_board_contract_niphar_right(void);\)$|\1\nextern void test_board_contract_$name(void);|" "$root/test/test_main.c"
+sed -i "s|^\(    test_board_contract_niphar_right();\)$|\1\n    test_board_contract_$name();|" "$root/test/test_main.c"
 
 echo "created boards/$name/ and test/test_board_contract_$name.c"
 echo "next: edit boards/$name/board.h (pins, BOARD_PINS), then"

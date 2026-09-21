@@ -281,7 +281,9 @@ decided: KeSp is the firmware, KaSe/Niphargus/Conchodytes are boards, the
   100 ms** — since the scan callback only fires on change, a held key
   would otherwise produce nothing more and the left would release it
   after 250 ms
-- **conchodytes**: mouse (PMW3389), dongle slot 2
+- **conchodytes**: mouse (PMW3389), dongle slot 2 — **out of the tree since
+  2026-09-21**: `mornepousse/Conchodytes-firmware` (board + this firmware as a
+  pinned submodule + CI on `build-board.yml`); the `MOUSE` role code stays here
 
 Each board lives under `boards/<name>/` with `board.h`, `board_keymap.c`,
 `board_layout.c` and `sdkconfig.defaults` — **a board is one folder**, see
@@ -302,11 +304,12 @@ idf.py -B build_kase_v2_debug -DBOARD=kase_v2_debug -DSDKCONFIG=build_kase_v2_de
 CMake parameter: `-DBOARD=<name>` (not `-DBOARD_VARIANT`). Each board has
 its own build folder (`build_kase_<name>/`) **and its own `sdkconfig`** via
 `-DSDKCONFIG=build_kase_<name>/sdkconfig` — this is what avoids config
-leakage between boards (see Anti-regression workflow). 7 boards total: V1,
-V2, V2D, dongle, niphar_left, niphar_right, conchodytes. To check
+leakage between boards (see Anti-regression workflow). 6 in-tree boards: V1,
+V2, V2D, dongle, niphar_left, niphar_right (Conchodytes builds from its
+own repository). To check
 everything at once: `./scripts/check.sh`.
 
-**ccache**: `check.sh` exports `IDF_CCACHE_ENABLE=1` — the 7 boards share
+**ccache**: `check.sh` exports `IDF_CCACHE_ENABLE=1` — the boards share
 most of their components, so after the 1st board the rest reuse the
 compiled objects (big win on the full build + pre-push). For your
 interactive builds, add `export IDF_CCACHE_ENABLE=1` to your shell (or
@@ -502,7 +505,7 @@ Single source of truth: `scripts/check.sh` (tripwire scaffold v0.13.0;
 declared in `.tripwire-divergences`).
 - `./scripts/check.sh --fast` — host CMake tests (~seconds)
 - `./scripts/check.sh --variant <name>` — fast + build of one board
-- `./scripts/check.sh` — fast + all 7 boards (sdkconfig isolated per board)
+- `./scripts/check.sh` — fast + every in-tree board, discovered from `boards/*/sdkconfig.defaults` (sdkconfig isolated per board)
 - Skip-if-already-green: unchanged state since the last green → immediate
   exit; `--force` to rerun anyway.
 - On red: the failing command's detail is in
@@ -640,12 +643,12 @@ promise of "no bugs" — maturity is said by the suffix:
 `git describe` reads `v4.2.0-beta.1-12-gabcd` between two tags, in the HB and
 in the CDC `VERSION` reply.
 
-1. Working tree clean, `./scripts/check.sh` green (all 7 boards build)
+1. Working tree clean, `./scripts/check.sh` green (every in-tree board builds)
 2. Smoke test (below), then `git tag vX.Y.Z && git push && git push --tags`
 3. `scripts/build_release.sh vX.Y.Z` → `release/KaSe_vX.Y.Z_<HW>.bin` (app,
    flash at 0x20000) and `release/KaSe_vX.Y.Z_<HW>_full.bin` (bootloader +
-   partitions + app + LittleFS, flash at 0x0) for the 7 boards: V1, V2,
-   V2_Debug, Dongle, Niphargus_Left, Niphargus_Right, Conchodytes
+   partitions + app + LittleFS, flash at 0x0) for the in-tree boards: V1, V2,
+   V2_Debug, Dongle, Niphargus_Left, Niphargus_Right
 4. The release is published on **GitHub** (the repo of record): the CI
    (`.github/workflows/ci.yml`) builds the 14 artefacts on the tag and creates
    the release — pre-release when the tag has a suffix — with generated notes;

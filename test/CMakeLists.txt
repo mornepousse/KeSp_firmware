@@ -95,14 +95,12 @@ add_executable(test_runner
     ../main/display/oled/oled_nav.c
     test_niphar_left_pins.c
     test_niphar_right_pins.c
-    test_conchodytes_pins.c
     test_board_contract_kase_v1.c
     test_board_contract_kase_v2.c
     test_board_contract_kase_v2_debug.c
     test_board_contract_kase_dongle.c
     test_board_contract_niphar_left.c
     test_board_contract_niphar_right.c
-    test_board_contract_conchodytes.c
     test_mouse_input.c
     ../main/input/mouse_buttons.c
     ../main/input/mouse_wheel.c

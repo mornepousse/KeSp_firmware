@@ -139,7 +139,7 @@ A key keeps the layer it was pressed on until it is released.
 
 ## 8. Contributing a board or a fix
 
-- `./scripts/check.sh --fast` before every commit, `./scripts/check.sh` (7 boards)
+- `./scripts/check.sh --fast` before every commit, `./scripts/check.sh` (all in-tree boards)
   before a push — the pre-push hook does it (`./scripts/install-hooks.sh`).
 - Pure logic gets a host test first (`test/`), behaviour gets a line in
   `COMPORTEMENTS.md` (the contract `check.sh` verifies).

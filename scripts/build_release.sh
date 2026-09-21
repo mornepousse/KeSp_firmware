@@ -30,8 +30,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 RELEASE_DIR="$PROJECT_DIR/release"
 
-BOARDS=("kase_v1" "kase_v2" "kase_v2_debug" "kase_dongle" "niphar_left" "niphar_right" "conchodytes")
-HW_NAMES=("V1" "V2" "V2_Debug" "Dongle" "Niphargus_Left" "Niphargus_Right" "Conchodytes")
+BOARDS=("kase_v1" "kase_v2" "kase_v2_debug" "kase_dongle" "niphar_left" "niphar_right")
+HW_NAMES=("V1" "V2" "V2_Debug" "Dongle" "Niphargus_Left" "Niphargus_Right")
 # Nix devshell ships `esptool`, the classic install ships `esptool.py`.
 ESPTOOL="$(command -v esptool || command -v esptool.py)"
 export IDF_COMPONENT_CHECK_NEW_VERSION=0

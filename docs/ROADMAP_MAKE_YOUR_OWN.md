@@ -44,6 +44,10 @@ such a board.
 - **Done 2026-09-21: the forkable template repository**
   https://github.com/mornepousse/kesp-keyboard-template on the reusable
   `.github/workflows/build-board.yml` (this repository, `workflow_call`).
+  **First real out-of-tree board (2026-09-21): Conchodytes** —
+  `mornepousse/Conchodytes-firmware`, the PCB repository stays hardware-only
+  and links to it; the board, its pin test and the CI left this repository,
+  the `MOUSE` role code stays.
   Original note:
   — `kesp-keyboard-template`: one example board (the template filled in), this
   firmware as a submodule pinned on a release, a GitHub workflow calling a

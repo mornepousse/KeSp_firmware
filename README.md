@@ -14,11 +14,12 @@ distinction — KaSe was the first keyboard this firmware ran on — and are kep
 as-is for now; a rename to `KESP_*` is planned for a major version
 (`docs/ROADMAP_MAKE_YOUR_OWN.md`, item 4).
 
-**Seven board targets** share the codebase via `boards/<name>/` and per-board
+**Six board targets** share the codebase via `boards/<name>/` and per-board
 Kconfig gates: `kase_v1` (round display), `kase_v2` (OLED), `kase_v2_debug`
-(V2 + debug overrides), `kase_dongle` (USB receiver), `conchodytes` (a PMW3389
-mouse on the dongle's second radio slot), and `niphar_left` / `niphar_right`
-(the split keyboard — see below).
+(V2 + debug overrides), `kase_dongle` (USB receiver), and `niphar_left` / `niphar_right` (the split
+keyboard — see below). The **Conchodytes** mouse (PMW3389, the dongle's
+second radio slot) builds from [its own repository](https://github.com/mornepousse/Conchodytes-firmware)
+against this firmware as a submodule — the first out-of-tree board.
 
 ---
 
@@ -318,7 +319,7 @@ idf.py -B build_kase_v2_debug -DBOARD=kase_v2_debug \
 idf.py -B build_kase_dongle   -DBOARD=kase_dongle \
        -DSDKCONFIG=build_kase_dongle/sdkconfig   build
 
-# Build all 7 boards + run host tests (anti-regression gate)
+# Build all in-tree boards + run host tests (anti-regression gate)
 ./scripts/check.sh
 
 # App-only flash — preserves NVS (keymaps/macros/stats)
