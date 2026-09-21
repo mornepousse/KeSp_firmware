@@ -4,6 +4,14 @@ From a bare ESP32-S3 board to a typing keyboard, remappable over USB, with an
 optional wireless split and dongle. Nothing here needs Nix or the author's
 bench: plain ESP-IDF 5.5 and a USB cable.
 
+> **The short way:** use the template repository
+> **https://github.com/mornepousse/kesp-keyboard-template** — *Use this
+> template*, fill `boards/<name>/board.h`, push: GitHub builds your firmware
+> (this repository is a pinned submodule there, its reusable workflow
+> `build-board.yml` does the work), and a `v1.0.0` tag makes a release of
+> *your* repository. The rest of this document is what the template does and
+> why, and how to do it by hand.
+
 ## 1. Hardware you need
 
 | Part | Notes |

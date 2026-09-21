@@ -41,7 +41,10 @@ such a board.
 - `-DBOARD_DIR=/path/to/my_board`: the user keeps board + keymap in their
   own repository; this firmware is a dependency they pin (submodule or
   `idf_component.yml` git source).
-- **Next (decided 2026-09-21, not started): a forkable template repository**
+- **Done 2026-09-21: the forkable template repository**
+  https://github.com/mornepousse/kesp-keyboard-template on the reusable
+  `.github/workflows/build-board.yml` (this repository, `workflow_call`).
+  Original note:
   — `kesp-keyboard-template`: one example board (the template filled in), this
   firmware as a submodule pinned on a release, a GitHub workflow calling a
   reusable `workflow_call` workflow of this repository to build and publish

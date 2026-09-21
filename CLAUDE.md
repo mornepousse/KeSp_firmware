@@ -253,7 +253,9 @@ the netlist).
 
 **Standardisation roadmap (2026-09-20)**: `docs/ROADMAP_MAKE_YOUR_OWN.md` —
 board = one folder (**done 2026-09-20**, `boards/README.md`), out-of-tree
-boards (`-DBOARD_DIR`, **done 2026-09-20**), GitHub Actions CI + release on tag
+boards (`-DBOARD_DIR`, **done 2026-09-20**; forkable template repository
+`mornepousse/kesp-keyboard-template` on the reusable `build-board.yml`,
+**2026-09-21**), GitHub Actions CI + release on tag
 (**`.github/workflows/ci.yml`, 2026-09-20**), a "make your own"
 document (**`docs/MAKE_YOUR_OWN.md`, 2026-09-20**) and a single project name —
 decided: KeSp is the firmware, KaSe/Niphargus/Conchodytes are boards, the

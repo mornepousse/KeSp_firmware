@@ -74,6 +74,13 @@ half of a split that carries the engine), `KASE_DEVICE_ROLE_SPLIT_SCANNER`
 
 ## A board outside the repository
 
+The ready-made way is the template repository
+https://github.com/mornepousse/kesp-keyboard-template: your board in
+`boards/<name>/`, this firmware as a pinned submodule, a workflow calling
+`.github/workflows/build-board.yml` here (reusable, `workflow_call`) that
+builds with `-DBOARD_DIR`, uploads app + full image and publishes a release in
+your repository on a tag. By hand:
+
 Keep your board in your own repository and this firmware as a pinned
 dependency (submodule, or a checkout at a tag):
 
