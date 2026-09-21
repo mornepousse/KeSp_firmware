@@ -129,12 +129,16 @@ void veille_legere_entrer(void)
     esp_light_sleep_start();      /* blocks here until a key, or the timer */
 #if CONFIG_KASE_VEILLE_DIAG
     int64_t t_sorti = esp_timer_get_time();
-    /* BENCH 2026-09-16: VERY FIRST read after wake-up, before any
-     * logging — are the lines still high? And which pin
-     * triggered (mask remembered by the ESP)? A light tap on the left half did
-     * not wake it up; a held press did. If the pin is in the mask
-     * but already low here, the GPIO wake-up is SLOW; high here and invisible to
-     * the capture, it's the capture. */
+    /* BENCH 2026-09-16: first read after wake-up IN THIS TASK, before any
+     * logging — are the lines still high? And which pin triggered (mask
+     * remembered by the ESP)? ⚠ "First" for this task only: the esp_timer
+     * task (higher priority) runs before it as soon as the scheduler resumes,
+     * and replays every period a periodic timer missed during the sleep unless
+     * it was created with skip_unhandled_events (or stopped for the sleep).
+     * That replay is what made "lines at exit=0x0" after a long sleep and
+     * "0x4" after a short one, with the same 14 ms to the capture measured
+     * from here (bench 2026-09-21: battery timer, LVGL tick). If the pin is in
+     * the mask but already low here, look for what ran before this line. */
     uint8_t lignes_sortie = 0;
     for (int i = 0; i < MATRIX_ROWS; i++) if (gpio_get_level(s_rows[i])) lignes_sortie |= (uint8_t)(1u << i);
     /* No GPIO wake-up status API on the S3 (EXT1 only): we read the

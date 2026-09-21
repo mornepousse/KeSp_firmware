@@ -50,6 +50,21 @@ means a test, or a line.
   sleep, recreated everything on its next wake — the wake key fell into
   that gap (two `matrix_setup` calls 30 ms apart in the log, 2026-09-16).
   Console on wake: a single "matrix_setup".
+- [smoke:First key after sleep] No periodic esp_timer may replay its missed
+  periods at wake: the esp_timer task runs BEFORE the sleep task's first
+  instruction after `esp_light_sleep_start` returns, and a replay longer than
+  a tap (battery gauge: one 1.2 ms ADC burst per missed 10 s → 80 ms after
+  11 min; LVGL tick: one event per missed 50 ms) releases the key before the
+  wake capture reads the rows. The gauge timer is created with
+  `skip_unhandled_events`, the LVGL tick is stopped by the screen's sleep hook
+  and restarted at wake (`lvgl_port_stop/resume`); the relay timer was
+  already stopped by its hook. Bench 2026-09-21, left half, wake capture
+  instrumented (`KASE_VEILLE_DIAG`): 673 s asleep → `lines at exit=0x0`, 0
+  key captured, letter lost; with the fix 761 s → `lines at exit=0x4`, 1 key
+  captured, letter typed (dongle: 22 frames, 4 reports within 4 s). Both
+  halves showed the same signature; the "light first key lost on the left"
+  open since 2026-09-16 was this — the 13 ms then measured were counted after
+  the replay.
 - [smoke:First key after sleep] The bench instrumentation for wake
   (timings, GPIO lines and mask on exit, 150 ms re-read window, dump of
   both passes) is under `CONFIG_KASE_VEILLE_DIAG` (default n). Outside that

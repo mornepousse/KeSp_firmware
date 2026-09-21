@@ -242,11 +242,14 @@ Open items (2026-09-19):
   ~1-3 mA after DFS + tickless, asleep ~250 µA, while typing) — all the
   battery-life work from the 16th to the 19th is proven by the logs, not
   yet measured;
-- the **light first key lost on the left** after a long pause: GPIO
-  wake-up received, lines already low 13 ms later, key never seen within
-  156 ms, the next press on the same line is captured — contact < 13 ms,
-  switch lead (instrumentation of `veille.c`/`matrix_scan.c` under
-  `KASE_VEILLE_DIAG`, to be enabled in the bench build's sdkconfig).
+- ~~the light first key lost after a long pause~~ — **solved 2026-09-21**:
+  not the switch. After a light sleep the esp_timer task replays every
+  missed period of a periodic timer (battery gauge 10 s, LVGL tick 50 ms)
+  BEFORE the sleep task's first instruction — 80 ms+ after 11 minutes, the
+  tap is over when the rows are read. Rule: **a periodic esp_timer on the
+  halves is either created with `skip_unhandled_events` or stopped by a
+  sleep hook**. `KASE_VEILLE_DIAG` (`lines at exit=…`) is how it was seen:
+  0x0 after a long sleep, non-zero after a short one, same 14 ms to capture.
 Pinout: `docs/NIPHARGUS_V2_HARDWARE.md` (source of truth, checked against
 the netlist).
 

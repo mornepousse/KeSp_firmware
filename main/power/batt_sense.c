@@ -106,7 +106,12 @@ void batt_sense_init(void)
     }
 
     batt_sense_sample_now();
-    const esp_timer_create_args_t a = { .callback = timer_cb, .name = "batt" };
+    /* skip_unhandled_events: without it, after a light sleep the esp_timer task
+     * replays every missed 10 s period back to back (67 ADC samples × 1.2 ms
+     * after an 11-minute sleep) BEFORE the sleep task reads the rows — the
+     * key that woke the board is released by then ("lines at exit=0x0",
+     * bench 2026-09-21). One sample at wake is the "gauge" hook's job. */
+    const esp_timer_create_args_t a = { .callback = timer_cb, .name = "batt", .skip_unhandled_events = true };
     if (esp_timer_create(&a, &s_timer) == ESP_OK)
         esp_timer_start_periodic(s_timer, BATT_PERIOD_US);
     ESP_LOGI(TAG, "gauge: %u dV (state %u), ADC%d ch%d, measuring every 10 s",

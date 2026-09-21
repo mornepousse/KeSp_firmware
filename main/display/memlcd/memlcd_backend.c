@@ -318,9 +318,17 @@ static void memlcd_update(void)
     if ((uint32_t)(now_ms - s_vcom_ms) >= 1000u) { s_vcom_ms = now_ms; memlcd_panel_vcom_tick(); }
 }
 
-static void memlcd_sleep(void) { s_sleeping = true; }            /* frozen image, no more VCOM */
+/* The LVGL tick is a periodic esp_timer (50 ms) WITHOUT skip_unhandled_events:
+ * after a light sleep the esp_timer task (high priority) replays every missed
+ * period BEFORE the sleep task's first instruction after wake — 13 500 events
+ * after an 11-minute sleep, long enough for the key that woke the board to be
+ * released before the wake capture reads the rows ("lines at exit=0x0", bench
+ * 2026-09-21). Stopped for the sleep, restarted at wake: LVGL's own timers
+ * (refresh) do not replay. */
+static void memlcd_sleep(void) { s_sleeping = true; lvgl_port_stop(); }   /* frozen image, no more VCOM, no tick */
 static void memlcd_wake(void)
 {
+    lvgl_port_resume();
     s_sleeping = false;
     s_dirty = true;                                                /* the image comes back right away */
     if (s_disp && lvgl_port_lock(50)) { lv_obj_invalidate(lv_scr_act()); lvgl_port_unlock(); }
