@@ -22,7 +22,7 @@ if [ "$DB" -gt 0 ]; then
   [ $((NOW - LASTT)) -lt "$DB" ] && exit 0
   mkdir -p "$GITDIR/tripwire" 2>/dev/null; printf '%s' "$NOW" > "$GITDIR/tripwire/last-postedit" 2>/dev/null
 fi
-OUT="$("$REPO/scripts/check.sh" --fast --changed "$FP" 2>&1)"
+OUT="$("$REPO/scripts/check.sh" --fast 2>&1)"
 rc=$?
 if [ "$rc" -ne 0 ]; then
   # Avis, pas blocage. La norme TDD impose d'écrire l'assertion rouge AVANT
