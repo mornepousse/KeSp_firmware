@@ -39,14 +39,12 @@ its file, because `assert`/`__LINE__` bake line numbers into the image.
 Source of truth: git tag `vX.Y.Z`. Read by ESP-IDF via `git describe --tags`
 at build time. No VERSION file.
 
-To cut a release:
-1. `git commit` the changes
-2. `git tag vX.Y.Z`
-3. `git push && git push --tags`
-4. Build the 7 boards + merge full binaries
-5. `glab release create vX.Y.Z <files...>`
+To cut a release: see **Release workflow** at the end of this file
+(`/tripwire:release`; the CI builds and publishes on the tag, beta.N =
+pre-release, stable = Latest once the smoke test passed everywhere).
 
-Between two releases: `cheni vX.Y.Z-N-gHASH-dirty` via `git describe`.
+Between two releases: `vX.Y.Z-N-gHASH[-dirty]` via `git describe` — in the
+heartbeat and the CDC `VERSION` reply.
 
 ## Scope — old halves removed, Niphargus coming
 
@@ -645,7 +643,9 @@ in the CDC `VERSION` reply.
 4. The release is published on **GitHub** (the repo of record): the CI
    (`.github/workflows/ci.yml`) builds the 14 artefacts on the tag and creates
    the release — pre-release when the tag has a suffix — with generated notes;
-   then `gh release edit vX.Y.Z --notes-file <curated notes>`. Manual fallback:
+   then `gh release edit vX.Y.Z --notes-file <curated notes>` (first done for
+   v4.2.0-beta.2 on 2026-09-21; a transient artefact-upload 403 is fixed by
+   `gh run rerun <id> --failed`). Manual fallback:
    `gh release create vX.Y.Z release/KaSe_vX.Y.Z_*.bin --repo mornepousse/KeSp_firmware --notes-file …`.
    ⚠ Tags don't always ride the GitLab→GitHub mirror: `git push github vX.Y.Z`
    (a tag advances no branch, it cannot stall the mirror).

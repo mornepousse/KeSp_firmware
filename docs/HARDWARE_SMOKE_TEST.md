@@ -124,11 +124,14 @@ in the PR/release.
       updates the name in < 200 ms without losing a keypress; right served
       at 1 s: no zone greys out in 2 min (VCOM ~1 Hz), the image comes back
       to life within the second following the first key after a sleep
-- [ ] First key after sleep: let the half fall asleep (15 s untouched),
-      type ONE brief key → the character comes out (not swallowed) and
-      nothing stays stuck; console: "wake: 1 key(s) captured"
-      (wake: 1 key(s) captured). To be done on the left AND the right, over
-      wireless (fusion)
+- [ ] First key after sleep: let the half sleep — 15 s for the short case
+      AND at least 10 minutes for the long one (the failure of 2026-09-16..21
+      only showed after minutes: esp_timer replay of missed periods before
+      the capture) — then type ONE brief key → the character comes out (not
+      swallowed) and nothing stays stuck; console: "wake: 1 key(s) captured",
+      and with `KASE_VEILLE_DIAG` "lines at exit" non-zero. Left AND right,
+      over wireless (fusion). Done 2026-09-21 on the left (761 s) and both
+      halves typed
 - [ ] e-ink displays the 'PAIRED' splash at pairing
 - [ ] e-ink dashboard: L/R/USB + battery, without corruption
 - [ ] Trackpad (if present): cursor, L/R/M click, scroll

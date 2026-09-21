@@ -30,7 +30,7 @@ an Azoteq TPS43 trackpad on the left, a Sharp Memory LCD on **each** half.
 Configuration and updates go over USB; there is no WiFi and no BLE on either
 half — the power budget forbids it.
 
-**Hardware status — 2026-09-19.** The keyboard works in its nominal mode: both
+**Hardware status — 2026-09-21.** The keyboard works in its nominal mode: both
 halves on battery, no cable anywhere, typing together through the dongle. Pin
 tables were verified against the netlist on each half; symbol keys (`!@#$…`)
 are one press each (Modified Keys, 0x8000 range), and the physical layout the
@@ -158,17 +158,17 @@ frame parser, the gesture→HID mapping, the accel config — exists and is
 host-tested; what is missing is the I2C + RDY bring-up on the left half and
 wiring its output through the mouse-relay path.
 
-**Open: a lost first keystroke on the left.** After a pause of a couple of
-minutes, a light first press on the left half sometimes produces nothing —
-no wake, no capture, no driver event — while a firm press or the second press
-works; the right half behaves better. Light-sleep wake, sleep-path double
-entry (a real bug, removed), row voltage under press, NVS writes and dongle
-coalescing have all been instrumented and cleared; the dongle counts
-overwritten transitions and USB refusals (`KS_CMD_RF_STATUS[27..42]`) and
-they read zero in the failing trials. Latest clue (2026-09-19): a wake fired
-by row 2 with all rows already low 13 ms later, key never seen within 156 ms,
-then the next press on the same row captured normally — the first contact
-lasted under 13 ms. Points at the switch's first contact, not the firmware.
+**Solved (2026-09-21): the lost first keystroke after a pause.** Both halves,
+systematically after ~5 minutes: the GPIO wake fired but the rows read low at
+the sleep task's first instruction. It was never the switch. After a light
+sleep the esp_timer task replays every missed period of a periodic timer —
+the battery gauge (one ADC burst per missed 10 s: 80 ms after 11 minutes)
+and the LVGL tick (50 ms) — *before* the wake capture; a tap is over by then.
+Short sleeps replay a few milliseconds and were never affected, which is why
+the earlier investigation ("13 ms to capture", measured *after* the replay)
+blamed the switch. The gauge timer skips missed periods, the screen's sleep
+hook stops the LVGL tick; the rule — a periodic esp_timer on a half is
+either `skip_unhandled_events` or stopped by a sleep hook — is in `CLAUDE.md`.
 
 Removed along the way, and not coming back: the first-generation e-ink halves,
 their ESP-NOW side channel, and the "left is the only engine" doctrine that

@@ -57,8 +57,10 @@ exists). First green run on `b5ae1d1c` (host tests, 7 boards, out-of-tree
 board). What it took: no `path:` in `dependencies.lock` (local components are
 project components), `IDF_COMPONENT_CHECK_NEW_VERSION=0` inside the container
 command, the out-of-tree board inside the checkout (`.ci_boards/`) and a
-`FORCE` on the `BOARD_DIR` cache entry. Left: the first tag through the
-release job.
+`FORCE` on the `BOARD_DIR` cache entry. **First tag through the release job:
+`v4.2.0-beta.2` on 2026-09-21** — 14 artefacts, pre-release, embedded version
+checked. One transient 403 on an artefact upload (GitHub side): `gh run rerun
+--failed` re-ran the one build and the release job. Item done.
 
 - Build matrix of the 7 boards on every push and PR (ESP-IDF 5.5 docker
   image; ccache keyed on the lock file).
