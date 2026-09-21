@@ -631,6 +631,10 @@ promise of "no bugs" — maturity is said by the suffix:
   `beta.3`… may follow on the same X.Y.Z;
 - `vX.Y.Z` = stable, published as **Latest**, only when the smoke test has
   passed on every board the release concerns — no "build only" left.
+  **Scope of the 4.2 stables (decided 2026-09-21):** the keyboard boards —
+  Niphargus left/right, dongle, V2/V2D. **V1** (no hardware left) and
+  **Conchodytes** (the mouse, its own project) ship build-only and are out
+  of the stable's scope; the notes say so.
 `git describe` reads `v4.2.0-beta.1-12-gabcd` between two tags, in the HB and
 in the CDC `VERSION` reply.
 
