@@ -68,12 +68,17 @@ in the PR/release.
       `build_kase_dongle` — not a `_fusion` folder)
 - [ ] Fusion — Config divergence reported: dongle keymap ≠ left's → dongle
       console logs "config DIVERGENCE" and
-      KS_CMD_CONFIG_COHERENCE returns match=0; identical keymaps → match=1
+      KS_CMD_CONFIG_COHERENCE returns match=0; identical keymaps → match=1.
+      Bench recipe (no dongle console needed): `scripts/kesp_cdc.py
+      /dev/ttyACM0 setkey 1 0 0 0x0004` then `coherence` at 1 Hz. Done
+      2026-09-21: match=0 with own_fp≠left_fp, back to match=1 on the NEW
+      fingerprint once the left transmitted (twice: there and back)
 - [ ] Fusion — ACK payload return channel: the dongle loads a known
       payload into the ACK (EN_ACK_PAY); the left, over wireless, reads it
       after every transmission and logs it. Go/no-go for nRF24 clones: if
       RX_DR never rises on the left side, automatic sync via ACK is
-      impossible → fallback B
+      impossible → fallback B. Done 2026-09-21 by the keymap sync below:
+      the beacon and the 40 chunks only travel in ACK payloads
 - [ ] Radio — one owner: dongle UNPLUGGED, type on the right → right
       console "fallback: switch TX -> LEFT KaSe.03" (fallback: switch TX ->
       LEFT KaSe.03) (then GAUCHE/DONGLE oscillation if nobody's listening);
@@ -94,7 +99,11 @@ in the PR/release.
       then "40/40 recus … enregistree en NVS" (40/40 received … saved to
       NVS), and KS_CMD_CONFIG_COHERENCE (0x17) goes back to match=1 on the
       NEW fingerprint; afterwards no more ACK payload at rest (beacon cut
-      off)
+      off). Done 2026-09-21 (v4.2.0-beta.2): two rounds (key changed on the
+      dongle with `kesp_cdc.py setkey`, then restored), `coherence` back to
+      match=1 on the new fingerprint within one poll of the left's first
+      transmission — the left was asleep in between (radio off), which is
+      why `age_ms` climbed to ~60 s first; the sync needs an awake left
 
 ## Half (left / right)
 - [ ] Low battery: build a half with `BATT_FAIBLE_DV`/`BATT_CRITIQUE_DV`

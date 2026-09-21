@@ -6,6 +6,9 @@
     scripts/kesp_cdc.py PORT rfstat             dongle: link, counters, engine and USB diagnostics (RF_STATUS, 51 bytes)
     scripts/kesp_cdc.py PORT pair [reset]       dongle: open the 30 s pairing window (reset=1 forgets the pairs first)
     scripts/kesp_cdc.py PORT pairs              dongle: list the paired halves
+    scripts/kesp_cdc.py PORT coherence          dongle: keymap fingerprints left vs dongle (CONFIG_COHERENCE)
+    scripts/kesp_cdc.py PORT getkey L R C       read keycode of layer L, row R, col C (KEYMAP_GET)
+    scripts/kesp_cdc.py PORT setkey L R C KC    write keycode KC (hex ok) at layer L, row R, col C (SETKEY, saved)
 
 PORT is the board's CDC port (/dev/ttyACM* on Linux; on a Niphargus half the
 CDC is on its USB-C, the FTDI header is the console). Needs pyserial.
@@ -13,7 +16,8 @@ CDC is on its USB-C, the FTDI header is the console). Needs pyserial.
 import struct, sys, time
 import serial
 
-KS_CMD = {"version": 0x01, "dfu": 0x03, "pair": 0xB2, "rfstat": 0xB3, "pairs": 0xB4}
+KS_CMD = {"version": 0x01, "dfu": 0x03, "pair": 0xB2, "rfstat": 0xB3, "pairs": 0xB4,
+          "coherence": 0x17, "getkey": 0x13, "setkey": 0x11}
 
 
 def crc8(data: bytes) -> int:
@@ -78,6 +82,21 @@ def main() -> None:
     elif what == "pairs":
         p = request(port, KS_CMD[what])
         print(p.hex(" "))
+    elif what == "coherence":
+        p = request(port, KS_CMD[what])
+        own, left, age = struct.unpack("<3I", p[0:12])
+        print(f"own_fp=0x{own:08X} left_fp=0x{left:08X} age_ms={age} match={p[12]}")
+    elif what == "getkey":
+        layer, row, col = (int(x, 0) for x in sys.argv[3:6])
+        p = request(port, KS_CMD[what], bytes([layer]))
+        n = (len(p) - 1) // 2
+        cols = 14 if n % 14 == 0 else 13 if n % 13 == 0 else 7
+        kc = struct.unpack_from("<H", p, 1 + 2 * (row * cols + col))[0]
+        print(f"layer {layer} ({n} keys, {cols} cols) [{row},{col}] = 0x{kc:04X}")
+    elif what == "setkey":
+        layer, row, col, kc = (int(x, 0) for x in sys.argv[3:7])
+        request(port, KS_CMD[what], bytes([layer, row, col]) + struct.pack("<H", kc))
+        print(f"layer {layer} [{row},{col}] <- 0x{kc:04X} (saved)")
 
 
 if __name__ == "__main__":
