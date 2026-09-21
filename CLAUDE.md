@@ -260,6 +260,13 @@ boards (`-DBOARD_DIR`, **done 2026-09-20**; forkable template repository
 document (**`docs/MAKE_YOUR_OWN.md`, 2026-09-20**) and a single project name —
 decided: KeSp is the firmware, KaSe/Niphargus/Conchodytes are boards, the
 `KASE_*` prefix stays until a major-version rename (README says so).
+**The author's boards stay in the core** (decided 2026-09-21 after a dry run
+of `Niphargus-firmware`): the template repository is the path for *other
+people's* keyboards; the Niphargus halves, the dongle and V2/V2D are this
+firmware's reference boards — the dongle includes the left half's keymap by
+design and V2D inherits from V2, so they do not split cleanly, and a split
+would cost two checkouts and two commits per change for no newcomer benefit
+(details: `docs/ROADMAP_MAKE_YOUR_OWN.md`, item 2).
 
 ## Board variants
 

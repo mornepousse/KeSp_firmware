@@ -48,6 +48,20 @@ such a board.
   `mornepousse/Conchodytes-firmware`, the PCB repository stays hardware-only
   and links to it; the board, its pin test and the CI left this repository,
   the `MOUSE` role code stays.
+  **Tried and declined the same day: moving the author's keyboard boards out
+  too** (Niphargus → `Niphargus-firmware`, KaSe → `KaSe-firmware`, a
+  "downstreams" CI job). A dry run of `Niphargus-firmware` built both halves
+  byte-identical out of tree — the mechanism is fine — but the boards are not
+  separable the way the split assumed: `kase_dongle` includes the left half's
+  `board_keymap.c` and layout *by design* (one keymap source, never two that
+  could diverge), and `kase_v2_debug` inherits from `kase_v2`. Going through
+  meant a core with no real board, three satellite repositories, a bench
+  spanning two checkouts and two commits per core+board change — for one
+  person, and for no gain to a newcomer, who has the template. Decision
+  (2026-09-21): **the template is for other people's keyboards, the author's
+  boards stay in the core** as its reference boards; Conchodytes stays out
+  because it is another product. Not to be reopened without a second
+  maintainer.
   Original note:
   — `kesp-keyboard-template`: one example board (the template filled in), this
   firmware as a submodule pinned on a release, a GitHub workflow calling a
