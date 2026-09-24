@@ -99,6 +99,7 @@ static inline uint8_t memlcd_couper_nom(const char *nom,
  * but is not DATA that changes: it does not enter the diff. */
 typedef struct {
     uint8_t route_rf, dongle_vu;
+    uint8_t lien_5v;                   /* TRRS handshake UP: the 5 V is closed on our side */
     uint8_t batt_local_dv, batt_local_chg;
     uint8_t batt_niveau;               /* 0 normal, 1 low, 2 critical: thickened gauge border */
     uint8_t couche;
@@ -111,6 +112,7 @@ typedef struct {
 static inline bool memlcd_model_diff(const memlcd_model_t *a, const memlcd_model_t *b)
 {
     return a->route_rf != b->route_rf || a->dongle_vu != b->dongle_vu ||
+           a->lien_5v != b->lien_5v ||
            a->batt_local_dv != b->batt_local_dv || a->batt_local_chg != b->batt_local_chg ||
            a->batt_niveau != b->batt_niveau ||
            a->couche != b->couche || strcmp(a->nom, b->nom) != 0;

@@ -306,6 +306,26 @@ means a test, or a line.
   and restarts. Bench 2026-09-19: left USB + TRRS → `state=2 5V=1`, 490
   probes / 485 ACKs, sleep refusal `link=1`; unplugged → `state=0 5V=0` in
   < 1 s.
+- [smoke:5 V handshake on sleeping halves] A half ASLEEP hears the probe:
+  UART1 is armed as a light-sleep wake source (3 RX edges,
+  `uart_set_wakeup_threshold` + `esp_sleep_enable_uart_wakeup`, ESP32-S3
+  TRM v1.8 table 10.4-3 p. 580 — UART1 = 0x80, light sleep only). The frame
+  that wakes is lost by construction; the re-probe at 300 ms is the one that
+  gets decoded, and its ACK is the traffic that clears the wake indication.
+  Until 2026-09-23 the handshake only worked when both halves happened to be
+  awake — light sleep had no wake source but the matrix rows, so a half idle
+  for 15 s answered nothing and the 5 V never passed. ⚠ Still NOT covered,
+  and not coverable in software: plugging the cable into an already-sleeping
+  half. The USB is not a wake source on the S3 (same table); it takes the
+  GPIO33 VBUS bridge, unpopulated. On a sleeping half the cable is noticed
+  at the first keystroke.
+- [test:test_memlcd_model] The screens SAY whether the link is up: a bolt in
+  the banner while the 5 V is closed on our side (`link_uart_active()`),
+  displayed on both halves, part of the redraw diff. Without it the
+  handshake had no witness but the console — which you do not have while
+  typing on battery, and which is exactly what was missing to see this bug
+  (Mae, 2026-09-23: "I have no icon on the screen to see whether it's
+  active").
 - [test:test_veille_veto] Sleep veto registry (`power/veille_veto.h`,
   pure): one state per name (usb, lien, sync, test, pair), a posted veto
   blocks all sleep, lifting an absent veto has no effect, names bounded

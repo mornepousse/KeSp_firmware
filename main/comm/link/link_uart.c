@@ -35,6 +35,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_sleep.h"        /* esp_sleep_enable_uart_wakeup: the probe wakes a sleeping half */
 #include "tinyusb.h"
 #if CONFIG_KASE_VEILLE
 #include "veille_task.h"   /* LINK veto: a half charging the other does not sleep */
@@ -227,6 +228,37 @@ void link_uart_start(void)
      * spurious decoding. Also a lead against TRRS cable coupling into the
      * matrix lines, suspected in the phantom wakeups. */
     gpio_set_pull_mode(link_rx_pin, GPIO_PULLUP_ONLY);
+
+#if CONFIG_KASE_VEILLE
+    /* ── A sleeping half must HEAR the probe ─────────────────────────────
+     * Without this, the handshake only worked when both halves happened to
+     * be awake: light sleep has no wake source but EXT1 (the matrix rows)
+     * and the deep-sleep timer, so the probes of a half that has just been
+     * plugged in arrived on a clock-gated UART. You had to type on BOTH
+     * halves for the 5 V to pass — "it doesn't always work" (Mae, 2026-09-23).
+     *
+     * UART1 is a light-sleep wake source on the S3 (TRM v1.8, table 10.4-3
+     * p. 580, WAKEUP_ENA 0x80, note 5: the wake fires when the number of RX
+     * pulses exceeds the threshold register). Three edges is the documented
+     * minimum; the RX line rests high (pull-up above), so only a real frame
+     * produces them.
+     *
+     * The frame that wakes us is LOST — the chip only starts receiving after
+     * the wake (ESP-IDF, Sleep Modes, § UART Wakeup). That costs nothing
+     * here: whoever has current to give re-probes every
+     * LINK_HS_REPROBE_INTERVAL_MS (300 ms), so the NEXT probe is the one
+     * that gets decoded and answered, and that ACK is also the UART traffic
+     * the same doc asks for to clear the internal wake indication.
+     *
+     * ⚠ What this does NOT fix: plugging the USB cable into a half that is
+     * already asleep. The USB is not a wake source at all on the S3 (same
+     * table) — it would take the VBUS bridge on GPIO33, which is not
+     * populated. On a sleeping half, the cable is noticed at the first
+     * keystroke. */
+    ESP_ERROR_CHECK(uart_set_wakeup_threshold(BOARD_LINK_UART_NUM, 3));
+    ESP_ERROR_CHECK(esp_sleep_enable_uart_wakeup(BOARD_LINK_UART_NUM));
+    ESP_LOGI(TAG, "UART%d wakes the half from light sleep (3 RX edges)", BOARD_LINK_UART_NUM);
+#endif
 
     link_hs_init(&s_hs);
     memset(&s_usb_db, 0, sizeof(s_usb_db));

@@ -34,6 +34,13 @@ in the PR/release.
 - [ ] Pressing a BT key (switch/pair) while HOME is displayed → no crash, the screen rebuilds
 
 ## Dongle
+- [ ] **5 V handshake on sleeping halves**: leave BOTH halves untouched for
+      ≥ 30 s (no USB, nothing typed — they light-sleep), then plug the USB-C
+      into one half and press ONE key on that half only. Expected: the bolt
+      appears in the banner of BOTH screens within a second (the probe wakes
+      the sleeping peer over UART1). Before the 2026-09-23 fix you had to
+      type on both halves. ⚠ Pressing a key on the plugged half is required:
+      the cable alone does not wake it (no USB wake source on the S3).
 - [ ] RF link establishes with a half (pairing < 120s)
 - [ ] NRF doesn't wedge after 5 min (watchdog OK)
 - [ ] Idle wake (DFS): console at boot "DFS actif : 160 MHz en travail,

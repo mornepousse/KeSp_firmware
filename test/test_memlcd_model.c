@@ -52,6 +52,10 @@ static void test_model_diff(void)
     b = a; strcpy(b.nom, "NAV"); TEST_ASSERT(memlcd_model_diff(&a, &b), "name changes → redraw");
     b = a; b.dongle_vu = 0; TEST_ASSERT(memlcd_model_diff(&a, &b), "dongle lost → redraw");
     b = a; b.is_left = 0;  TEST_ASSERT(!memlcd_model_diff(&a, &b), "is_left is not a displayed field that moves");
+    /* TRRS link: the 5 V closing is displayed (bolt in the banner), so it
+     * redraws. Without this, the handshake was invisible — the only witness
+     * was the console, which you don't have while typing on battery. */
+    b = a; b.lien_5v = 1;  TEST_ASSERT(memlcd_model_diff(&a, &b), "TRRS 5 V closes → redraw");
 }
 
 /* The panel is PHYSICALLY 68 lines of 160 pixels (Sharp catalog, doc

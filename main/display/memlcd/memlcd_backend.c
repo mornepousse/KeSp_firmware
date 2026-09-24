@@ -40,6 +40,11 @@
 #endif
 #if CONFIG_KASE_KBD_WIRELESS
 #include "usb_presence.h"      /* kbd_active_route */
+#endif
+#if CONFIG_KASE_LINK_WIRE
+#include "link_uart.h"         /* link_uart_active: TRRS 5 V closed */
+#endif
+#if CONFIG_KASE_KBD_WIRELESS
 #include "kbd_relay_tx.h"      /* kbd_relay_dongle_vu */
 #endif
 #if CONFIG_KASE_HALF_LINK_TX
@@ -71,7 +76,7 @@ static lv_disp_t *s_disp;
 static memlcd_model_t s_shown;          /* last drawn model */
 
 /* ── LVGL objects ─────────────────────────────────────────────────── */
-static lv_obj_t *s_l_route, *s_bar, *s_l_volt, *s_l_nom[MEMLCD_NOM_LIGNES], *s_l_couche;
+static lv_obj_t *s_l_route, *s_bar, *s_l_volt, *s_l_lien, *s_l_nom[MEMLCD_NOM_LIGNES], *s_l_couche;
 
 #define Y_BANDEAU_FIN 31
 #define Y_CENTRE      (Y_BANDEAU_FIN + 1)
@@ -109,6 +114,11 @@ static void construire(void)
      * voltage below in UNSCII 8. */
     s_l_route = texte(scr, &lv_font_montserrat_14, 3, 2);
     s_l_volt  = texte(scr, &lv_font_unscii_8, 3, 20);
+    /* TRRS link, second row, between the voltage (ends at ~39 px with its
+     * charge marker) and the gauge (x = 54): a bolt while the 5 V is closed.
+     * It is the ONLY witness of the handshake away from the console — and the
+     * handshake is exactly what fails silently when a half is asleep. */
+    s_l_lien  = texte(scr, &lv_font_montserrat_14, 41, 16);
     s_bar = lv_bar_create(scr);
     lv_obj_remove_style_all(s_bar);
     lv_obj_set_size(s_bar, 10, 24); lv_obj_set_pos(s_bar, MEMLCD_W - 14, 3);
@@ -150,6 +160,9 @@ static void lire_modele(memlcd_model_t *m)
 {
     memset(m, 0, sizeof *m);
     m->batt_local_dv = 0xFF;
+#if CONFIG_KASE_LINK_WIRE
+    m->lien_5v = link_uart_active() ? 1 : 0;
+#endif
 #if CONFIG_KASE_BATT_SENSE
     { uint8_t dv = batt_sense_dv(); m->batt_local_dv = dv ? dv : 0xFF; m->batt_local_chg = batt_sense_charging(); m->batt_niveau = batt_sense_niveau(); }
     /* Low / critical: the voltage stays displayed as-is (no
@@ -185,6 +198,7 @@ static void dessiner(const memlcd_model_t *m)
     lv_label_set_text_fmt(s_l_route, "%s%s", m->route_rf ? "RF" : "USB", m->dongle_vu ? " " LV_SYMBOL_UP : "");
     tension(buf, sizeof buf, m->batt_local_dv, m->batt_local_chg);
     lv_label_set_text(s_l_volt, buf);
+    lv_label_set_text(s_l_lien, m->lien_5v ? LV_SYMBOL_CHARGE : "");
     uint8_t pct = 0;
 #if CONFIG_KASE_BATT_SENSE
     pct = (m->batt_local_dv == 0xFF) ? 0 : batt_soc_pct(m->batt_local_dv);
