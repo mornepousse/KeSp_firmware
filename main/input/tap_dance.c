@@ -119,6 +119,8 @@ void tap_dance_on_release(uint8_t row, uint8_t col)
     /* Don't resolve yet — wait for timeout to see if another tap comes */
 }
 
+bool tap_dance_pending(void) { return active.state == TD_COUNTING; }
+
 void tap_dance_tick(void)
 {
     /* Do NOT clear resolved_flag here: a resolution set by on_press (4th

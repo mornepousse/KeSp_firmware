@@ -35,6 +35,10 @@ void tap_dance_on_release(uint8_t row, uint8_t col);
 /* Called every ~10ms. Resolves dances that timed out. */
 void tap_dance_tick(void);
 
+/* A dance is counting taps: its timeout needs the keyboard task's 10 ms
+ * tick (keyboard_cadence.h). */
+bool tap_dance_pending(void);
+
 /* Get the resolved keycode (0 if nothing resolved yet) */
 uint8_t tap_dance_consume(void);
 

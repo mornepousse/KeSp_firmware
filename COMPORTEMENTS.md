@@ -176,13 +176,17 @@ means a test, or a line.
   100 Hz, the automatic light sleep threshold) — a shorter periodic wait
   doesn't compile (verified: 10 ms → "static assertion failed"). ACTIVE
   cadences stay ≤ 20 ms.
-- [test:test_keyboard_cadence] The keyboard task runs at 10 ms as long as a
-  timer can still fire — less than 1.5 s since the last keypress (covers
-  tap-hold and tap-dance 200 ms, leader 1000 ms), a USB host present,
-  matrix test mode — and at 100 ms at rest; a matrix change notifies it,
-  the first key never waits. At 100 Hz its 10 ms loop was leaving ONE tick
-  free when automatic light sleep requires three: SLEEP mode 92 % of idle
-  time and light_sleep_counts = 0 (bench 2026-09-16).
+- [test:test_keyboard_cadence] The keyboard task runs at 10 ms only while a
+  timer IS waiting on the clock — a tap-hold undecided (`tap_hold_pending`,
+  tested), a tap-dance counting (`tap_dance_pending`, tested), a leader
+  sequence, a macro queued — or a USB host is present, or matrix test mode;
+  100 ms otherwise. A matrix change notifies it, the first key never waits.
+  Until 2026-09-25 ANY keypress armed 1.5 s at 10 ms "in case": typing every
+  ~200 ms, the window never closed and the half never slept while typing
+  (~20 mA over a working day, measured). At 100 Hz a 10 ms loop leaves ONE
+  tick free when automatic light sleep requires three (bench 2026-09-16:
+  SLEEP mode 92 %, light_sleep_counts = 0). A new timed feature must join
+  the list in keyboard_task.c, or it runs with a 100 ms resolution.
 - [smoke:Idle wake] The halves SLEEP BETWEEN KEYSTROKES: tickless idle
   (CONFIG_FREERTOS_USE_TICKLESS_IDLE) + esp_pm's automatic light sleep as
   soon as both cores are idle for more than 30 ms — at rest ~9 sleeps/s

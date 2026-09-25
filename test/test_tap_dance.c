@@ -13,6 +13,21 @@ static void configure_slot0(void) {
     tap_dance_set(0, actions);
 }
 
+/* tap_dance_pending(): the keyboard task keeps its 10 ms tick only while a
+ * dance is counting (keyboard_cadence.h, 2026-09-25). */
+static void test_td_pending_pendant_le_comptage(void) {
+    td_reset(); configure_slot0();
+    TEST_ASSERT(!tap_dance_pending(), "idle: nothing pending");
+    tap_dance_on_press(0, 0, 0);
+    TEST_ASSERT(tap_dance_pending(), "pressed: counting, pending");
+    tap_dance_on_release(0, 0);
+    TEST_ASSERT(tap_dance_pending(), "released, waiting for another tap: still pending");
+    host_clock_advance_ms(200);
+    tap_dance_tick();
+    TEST_ASSERT(!tap_dance_pending(), "resolved at the timeout: no longer pending");
+    tap_dance_consume();
+}
+
 /* 1 tap, released, timeout -> action[0] = A. */
 static void test_td_single_tap(void) {
     td_reset(); configure_slot0();
@@ -132,6 +147,7 @@ static void test_td_interrupt_resolves_current(void) {
 
 void test_tap_dance(void) {
     TEST_SUITE("Tap Dance — real module");
+    TEST_RUN(test_td_pending_pendant_le_comptage);
     TEST_RUN(test_td_single_tap);
     TEST_RUN(test_td_interrupt_resolves_current);
     TEST_RUN(test_td_max_taps_survives_tick);

@@ -187,6 +187,13 @@ void tap_hold_tick(void)
     }
 }
 
+bool tap_hold_pending(void)
+{
+    for (int i = 0; i < TAP_HOLD_MAX_PENDING; i++)
+        if (pending[i].state == TH_PENDING) return true;
+    return false;
+}
+
 bool tap_hold_hold_just_activated(void)
 {
     return hold_activated_flag;

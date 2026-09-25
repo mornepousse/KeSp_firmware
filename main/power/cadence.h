@@ -29,7 +29,6 @@
  * remote fusion over USB. Notified by the scan on change. */
 #define KBD_CADENCE_ACTIF_MS     10u
 #define KBD_CADENCE_REPOS_MS     100u
-#define KBD_CADENCE_FENETRE_MS   1500u   /* > LEADER_TIMEOUT_MS (1000) */
 CADENCE_REPOS_OK(KBD_CADENCE_REPOS_MS);
 
 /* Left radio relay (esp_timer timer): bounded repair, holds,

@@ -19,6 +19,31 @@ extern uint8_t last_layer;
 
 static void th_reset(void) { tap_hold_init(); host_clock_reset(); }
 
+/* tap_hold_pending(): the keyboard task keeps its 10 ms tick ONLY while this
+ * is true (keyboard_cadence.h, 2026-09-25) — undecided = the clock decides. */
+static void test_th_pending_tant_que_non_tranche(void) {
+    th_reset();
+    TEST_ASSERT(!tap_hold_pending(), "nothing pressed: nothing pending");
+    uint16_t mt = K_MT(MOD_LSFT, 0x04);
+    tap_hold_on_press(mt, 0, 0);
+    TEST_ASSERT(tap_hold_pending(), "pressed, undecided: pending");
+    advance_ms(200);
+    tap_hold_tick();
+    TEST_ASSERT(!tap_hold_pending(), "hold decided at the timeout: no longer pending");
+    tap_hold_on_release(0, 0);
+    TEST_ASSERT(!tap_hold_pending(), "released: nothing pending");
+}
+
+static void test_th_pending_tap_rapide(void) {
+    th_reset();
+    uint16_t mt = K_MT(MOD_LSFT, 0x04);
+    tap_hold_on_press(mt, 0, 0);
+    advance_ms(50);
+    tap_hold_on_release(0, 0);
+    TEST_ASSERT(!tap_hold_pending(), "quick tap resolved on release: not pending");
+    tap_hold_consume_tap();
+}
+
 /* 1. MT released before the timeout → TAP: consume_tap returns the tap key. */
 static void test_th_mt_tap(void) {
     th_reset();
@@ -206,6 +231,8 @@ static void test_th_two_lt_concurrent(void) {
 
 void test_tap_hold(void) {
     TEST_SUITE("Tap/Hold State Machine — real module");
+    TEST_RUN(test_th_pending_tant_que_non_tranche);
+    TEST_RUN(test_th_pending_tap_rapide);
     TEST_RUN(test_th_mt_tap);
     TEST_RUN(test_th_mt_hold_timeout);
     TEST_RUN(test_th_timeout_boundary);

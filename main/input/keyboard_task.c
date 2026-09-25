@@ -58,15 +58,16 @@ void vTaskKeyboard(void *pvParameters)
         if (keyboard_task_handle == NULL)
             keyboard_task_handle = xTaskGetCurrentTaskHandle();
 
-        /* 10 ms as long as a timer might be running (tap-hold, tap-dance, leader,
-         * test mode, USB), 100 ms at rest: see keyboard_cadence.h. A
+        /* 10 ms only while a timer IS running (tap-hold, tap-dance, leader,
+         * macro, test mode, USB), 100 ms otherwise: see keyboard_cadence.h. A
          * matrix change notifies the task, the first keystroke doesn't
          * wait. */
         {
             extern volatile bool matrix_test_mode;
-            uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-            uint32_t attente = kbd_cadence_attente_ms(now, get_last_activity_time_ms(),
-                                                      usb_presence_cable(), matrix_test_mode);   /* same rule as routing, link, sleep */
+            bool minuteur = tap_hold_pending() || tap_dance_pending() || leader_is_active()
+                         || key_processor_has_pending_macro();   /* the tick's four consumers */
+            uint32_t attente = kbd_cadence_attente_ms(usb_presence_cable(), matrix_test_mode,   /* same USB rule as routing, link, sleep */
+                                                      minuteur);
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(attente));
         }
 

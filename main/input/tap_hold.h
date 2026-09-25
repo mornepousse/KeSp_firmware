@@ -41,6 +41,10 @@ bool tap_hold_on_release(uint8_t row, uint8_t col);
 /* Called every scan cycle to check timeouts. May resolve pending keys to HOLD. */
 void tap_hold_tick(void);
 
+/* A key pressed and not yet decided tap/hold: only the clock can decide it,
+ * so the keyboard task keeps its 10 ms tick (keyboard_cadence.h). */
+bool tap_hold_pending(void);
+
 /* Called when a non-tap-hold key is pressed (interrupts pending tap/holds → HOLD). */
 void tap_hold_interrupt(void);
 

@@ -15,15 +15,20 @@
  * idle time and light_sleep_counts = 0.
  *
  * A matrix change notifies the task (xTaskNotifyGive): the long wait
- * costs nothing for the first keystroke, it only delays the
- * timers — hence the activity window, wider than the longest
- * of them. */
-
-
-static inline uint32_t kbd_cadence_attente_ms(uint32_t now_ms, uint32_t derniere_activite_ms,
-                                              bool usb_present, bool test_matrice)
+ * costs nothing for the first keystroke, it only delays the timers.
+ *
+ * So the 10 ms is kept only while a timer is ACTUALLY waiting on the clock
+ * (2026-09-25). It used to be a 1.5 s window after ANY activity, "in case":
+ * typing every ~200 ms, the window never closed and the half never slept
+ * while typing — ~20 mA across a working day, measured. The four consumers
+ * of the tick, inventoried in keyboard_task.c's loop: tap-hold undecided
+ * (tap_hold_pending), tap-dance counting (tap_dance_pending), leader
+ * sequence (leader_is_active), macro queued (played on the next turn).
+ * Combos do not need it (evaluated on matrix changes only), nor do one-shot
+ * or caps word (no timeout). A new timed feature MUST join that list. */
+static inline uint32_t kbd_cadence_attente_ms(bool usb_present, bool test_matrice,
+                                              bool minuteur_en_cours)
 {
-    if (usb_present || test_matrice) return KBD_CADENCE_ACTIF_MS;
-    if ((uint32_t)(now_ms - derniere_activite_ms) < KBD_CADENCE_FENETRE_MS) return KBD_CADENCE_ACTIF_MS;
+    if (usb_present || test_matrice || minuteur_en_cours) return KBD_CADENCE_ACTIF_MS;
     return KBD_CADENCE_REPOS_MS;
 }
