@@ -76,6 +76,11 @@ static lv_disp_t *s_disp;
 static memlcd_model_t s_shown;          /* last drawn model */
 
 /* ── LVGL objects ─────────────────────────────────────────────────── */
+/* The status task and LVGL run at 1 s on this panel (cadence.h). A
+ * cadence.h read without sdkconfig.h would silently fall back to 100 ms. */
+_Static_assert(STATUS_DISP_PERIODE_MS == 1000u, "memory-LCD halves: status display at 1 s");
+_Static_assert(LVGL_REFR_MS == 1000u, "memory-LCD halves: LVGL refresh at 1 s");
+
 static lv_obj_t *s_l_route, *s_bar, *s_l_volt, *s_img_lien, *s_l_nom[MEMLCD_NOM_LIGNES], *s_l_couche;
 
 /* TRRS link pictogram, 8x8, one arrow each way: the cable carries the 5 V from
@@ -271,10 +276,9 @@ static bool lvgl_pret(void)
     if (s_disp) return true;
     if (!s_fb_mux) s_fb_mux = xSemaphoreCreateMutex();
     if (!lv_is_initialized()) {
-        /* LVGL tick at 50 ms, task asleep for up to 500 ms: nothing is
-         * animated on this panel, and every task wake at rest costs a
-         * frequency ramp-up (DFS). A model change is pushed on the next
-         * tick of update() (100 ms), unchanged. */
+        /* LVGL tick and task sleep at 1 s (cadence.h): nothing is animated
+         * on this status panel, and every wake at rest shortens the calm
+         * automatic light sleep needs. A model change shows within ~1-2 s. */
         const lvgl_port_cfg_t cfg = { .task_priority = 2, .task_stack = 6144, .task_affinity = 0,
                                       .task_max_sleep_ms = LVGL_TASK_MAX_SLEEP_MS, .timer_period_ms = LVGL_TICK_MS };
         if (lvgl_port_init(&cfg) != ESP_OK) { ESP_LOGE(TAG, "lvgl_port_init KO"); return false; }
@@ -287,8 +291,7 @@ static bool lvgl_pret(void)
     s_disp = lv_disp_drv_register(&s_drv);
     /* The LVGL refresh timer runs at 30 ms by default, even when
      * nothing changes: 33 wakes per second that would forbid automatic
-     * light sleep. 200 ms is enough for a status screen (update() invalidates
-     * at most every 100 ms). */
+     * light sleep. LVGL_REFR_MS (1 s) is enough for a status screen. */
     if (s_disp) { lv_timer_t *t = _lv_disp_get_refr_timer(s_disp); if (t) lv_timer_set_period(t, LVGL_REFR_MS); }
     lvgl_port_unlock();
     return s_disp != NULL;

@@ -197,10 +197,12 @@ static void kbd_tx_locked(const uint8_t *buf, uint8_t len) { (void)kbd_tx_emettr
  * even when idle. Only transmits over RF when RF is the active path — when USB is
  * plugged we must NOT relay (the dongle would type a duplicate on its own host). */
 /* Refresh timer period: 10 ms as long as there is something to repeat (held
- * key, bounded repair, sync pull), 100 ms at rest. At a permanent 10 ms, the
+ * key, bounded repair, sync pull) or to drain (USB route), KBD_RELAY_REPOS_MS
+ * (500 ms since 2026-09-25) at rest. At a permanent 10 ms, the
  * processor left idle 100 times per second for a memcmp and a route poll —
- * and each time the DFS raised the PLL back up. The route (50 ms debounce)
- * and the USB announcement (200 ms) hold fine at 100 ms. */
+ * and each time the DFS raised the PLL back up. The route (50 ms debounce,
+ * a plug seen within ~1 s) and the 1 s STATUS (dongle patience 2.5 s) hold at
+ * 500 ms; the USB announcement (200 ms) runs on the USB route, at 10 ms. */
 static uint32_t s_periode_ms;
 static void kbd_relay_timer_set(uint32_t ms)
 {

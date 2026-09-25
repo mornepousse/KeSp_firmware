@@ -1,4 +1,7 @@
 #pragma once
+#if __has_include("sdkconfig.h")
+#include "sdkconfig.h"   /* CONFIG_KASE_DISPLAY_MEMLCD below: a missing include would read 0, silently */
+#endif
 /* Cadences of the Niphargus halves — ONE place, one rule, one guard.
  *
  * The rule: at rest, no periodic wait below CADENCE_REPOS_MIN_MS.
@@ -28,13 +31,15 @@
 /* Keyboard task (left): tap-hold/tap-dance/leader timers, test mode,
  * remote fusion over USB. Notified by the scan on change. */
 #define KBD_CADENCE_ACTIF_MS     10u
-#define KBD_CADENCE_REPOS_MS     100u
+#define KBD_CADENCE_REPOS_MS     1000u   /* 2026-09-25, was 100: nothing to do at rest since timers are tracked (keyboard_cadence.h) */
 CADENCE_REPOS_OK(KBD_CADENCE_REPOS_MS);
 
 /* Left radio relay (esp_timer timer): bounded repair, holds,
  * ACK sync, and over USB the draining of the right half's frame FIFO. */
 #define KBD_RELAY_REFRESH_MS     10u
-#define KBD_RELAY_REPOS_MS       100u
+#define KBD_RELAY_REPOS_MS       500u    /* 2026-09-25, was 100: at rest on battery the tick drains nothing (PTX);
+                                          * STATUS still leaves every 1-1.5 s < RF_LINK_LOST_MS 2.5 s;
+                                          * USB route = RADIO_PRX = 10 ms, unchanged */
 CADENCE_REPOS_OK(KBD_RELAY_REPOS_MS);
 
 /* Right half refresh: reaffirmation of holds, repair. */
@@ -53,10 +58,33 @@ CADENCE_REPOS_OK(LINK_REPOS_MS);
 #define MEMLCD_DROITE_PERIODE_MS 1000u  /* model: 30 s gauge, dongle seen; VCOM timestamped in update() */
 CADENCE_REPOS_OK(MEMLCD_DROITE_PERIODE_MS);
 
-/* LVGL (esp_lvgl_port): tick, refresh, max task sleep. */
-#define LVGL_TICK_MS             50u
-#define LVGL_REFR_MS             200u
-#define LVGL_TASK_MAX_SLEEP_MS   500u
+/* CDC command task: woken by the USB reception itself; this is only the
+ * safety net if a notification were ever missed (2026-09-25, was a 50 ms poll). */
+#define CDC_ATTENTE_MAX_MS       1000u
+CADENCE_REPOS_OK(CDC_ATTENTE_MAX_MS);
+
+/* Status display task (main.c): 1 s on the memory-LCD halves, whose screen
+ * only shows status and need not follow the typing (Mae, 2026-09-25 — one of
+ * the six interleaved pollers); 100 ms elsewhere, where the OLED runs the
+ * tamagotchi and navigation screens. */
+#if CONFIG_KASE_DISPLAY_MEMLCD
+#define STATUS_DISP_PERIODE_MS   1000u
+#else
+#define STATUS_DISP_PERIODE_MS   100u
+#endif
+CADENCE_REPOS_OK(STATUS_DISP_PERIODE_MS);
+
+/* LVGL (esp_lvgl_port, memory-LCD halves only): tick, refresh, max task sleep.
+ * All at 1 s since 2026-09-25 (were 50 / 200 / 500 ms): the halves' screens
+ * show STATUS — route, dongle seen, gauge, layer — nothing animates and
+ * nothing has to follow the typing (Mae). The 50 ms tick and the 200 ms
+ * refresh were two of the six interleaved pollers that kept automatic light
+ * sleep out (24 mA between keystrokes, 6-10 mA with them stretched). The
+ * port's tick timer adds LVGL_TICK_MS to lv_tick at each period: LVGL's time
+ * advances in 1 s steps, which only its refresh timer uses here. */
+#define LVGL_TICK_MS             1000u
+#define LVGL_REFR_MS             1000u
+#define LVGL_TASK_MAX_SLEEP_MS   1000u
 CADENCE_REPOS_OK(LVGL_TICK_MS);
 CADENCE_REPOS_OK(LVGL_REFR_MS);
 

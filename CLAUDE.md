@@ -257,7 +257,13 @@ Open items (2026-09-19):
   safe by `VEILLE_VETO_TOUCHE` (no sleep while a key is held);
   **0.67 mA** now, against a 0.2 mA deep-sleep floor; the gauge ADC, the
   console and pin isolation were ruled out. A working day at ~20 mA is the 0.2 V/day the gauge shows: the
-  day is the awake window (1 kHz scan, no tickless), the night was the leaks;
+  day is the awake window, the night was the leaks. **Awake between
+  keystrokes: 24 → 6-12 mA** (same day): the CPU was >99 % idle but six
+  interleaved rest pollers woke core 0 ~140×/s (CDC 50 ms, LVGL 50/200 ms,
+  status display 100 ms, keyboard and relay 100 ms), never leaving the 30 ms
+  automatic light sleep needs — found with PM profiling + per-task CPU stats
+  (`sys/cpu_time.c`), fixed poller by poller (cadence.h). Frequency is NOT
+  the lever: capped at 80 MHz, nothing moved (40 MHz WAITI is 13-19 mA);
 - ~~the light first key lost after a long pause~~ — **solved 2026-09-21**:
   not the switch. After a light sleep the esp_timer task replays every
   missed period of a periodic timer (battery gauge 10 s, LVGL tick 50 ms)

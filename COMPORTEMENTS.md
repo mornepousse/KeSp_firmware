@@ -176,6 +176,20 @@ means a test, or a line.
   100 Hz, the automatic light sleep threshold) — a shorter periodic wait
   doesn't compile (verified: 10 ms → "static assertion failed"). ACTIVE
   cadences stay ≤ 20 ms.
+- [test:test_cadence] At rest the halves have no poller shorter than ~0.5 s,
+  so automatic light sleep gets its 30 ms of calm between keystrokes. Six
+  interleaved pollers used to wake core 0 ~140 times a second while the CPU
+  sat >99 % idle (PM profiling + per-task CPU stats, 2026-09-25): CDC command
+  task 50 ms even with no USB (now woken by `receive_data()`, 1 s safety
+  net), LVGL tick 50 ms and refresh 200 ms and status display 100 ms (now 1 s
+  on the memory-LCD halves — status only, Mae; `_Static_assert` in
+  memlcd_backend.c), keyboard task 100 ms (1 s, its timers being tracked),
+  relay 100 ms (500 ms; `KBD_RELAY_REPOS_MS + RF_STATUS_PERIOD_MS <
+  RF_LINK_LOST_MS` tested, proven biting). Diagnostic build with all of them
+  at ~1 s: 24 → 6-10 mA between keystrokes on the left; the real change
+  measured 6-12 mA (Mae's ammeter). Side effect: the CDC answers in 2.2 ms
+  median instead of ~30 ms (10 requests, left vs dongle still polling). A new periodic task
+  on the halves is a new interleaved wake-up: justify it in cadence.h.
 - [test:test_keyboard_cadence] The keyboard task runs at 10 ms only while a
   timer IS waiting on the clock — a tap-hold undecided (`tap_hold_pending`,
   tested), a tap-dance counting (`tap_dance_pending`, tested), a leader

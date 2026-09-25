@@ -164,7 +164,10 @@ static void status_display_task(void *arg) {
       display_sleep = 1;
     }
 
-    if (display_sleep && last != 0 && (now - last) <= 500) {
+    /* The window must outlast one period of this task, or a keypress seen
+     * late would never wake the screen (STATUS_DISP_PERIODE_MS is 1 s on the
+     * memory-LCD halves since 2026-09-25). */
+    if (display_sleep && last != 0 && (now - last) <= STATUS_DISP_PERIODE_MS + 500u) {
       status_display_wake();
       display_sleep = 0;
     }
@@ -189,8 +192,7 @@ static void status_display_task(void *arg) {
     }
 
 
-    vTaskDelay(pdMS_TO_TICKS(
-        100)); // 100ms polling — fast enough for UI, no keyboard lag
+    vTaskDelay(pdMS_TO_TICKS(STATUS_DISP_PERIODE_MS));   /* power/cadence.h */
   }
 }
 #endif /* CONFIG_KASE_DEVICE_ROLE_KEYBOARD */
