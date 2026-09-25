@@ -176,6 +176,12 @@ means a test, or a line.
   100 Hz, the automatic light sleep threshold) — a shorter periodic wait
   doesn't compile (verified: 10 ms → "static assertion failed"). ACTIVE
   cadences stay ≤ 20 ms.
+- [smoke:Sleep current] The matrix scan timer (keyboard_button's gptimer,
+  running only while a key is held) is clocked from the XTAL, not the default
+  APB: the IDF gptimer driver takes an `ESP_PM_APB_FREQ_MAX` lock for an APB
+  source and only `ESP_PM_NO_LIGHT_SLEEP` otherwise, so the chip no longer
+  waits between two 1 ms scans at 80 MHz. Key held on the left: 36 → 27-33
+  mA (2026-09-25).
 - [test:test_cadence] At rest the halves have no poller shorter than ~0.5 s,
   so automatic light sleep gets its 30 ms of calm between keystrokes. Six
   interleaved pollers used to wake core 0 ~140 times a second while the CPU

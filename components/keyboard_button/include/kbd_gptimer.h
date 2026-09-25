@@ -13,9 +13,18 @@ extern "C" {
 #include "driver/gptimer.h"
 
 // 1MHz, 1 tick = 1us
+/* KaSe: clocked from the XTAL, not the default APB (2026-09-25). The IDF
+ * gptimer driver takes an ESP_PM_APB_FREQ_MAX lock for an APB source (APB
+ * moves under DFS) and only ESP_PM_NO_LIGHT_SLEEP for any other. The scan
+ * timer runs while a key is held: with APB, the chip waited between two 1 ms
+ * scans at 80 MHz — 36 mA measured on the Niphargus left, the ESP32-S3
+ * datasheet v2.2 table 5-9 gives 22.0-36.1 mA for 80 MHz WAITI; with the XTAL
+ * DFS can drop to 40 MHz (13.2-18.8 mA). Light sleep is impossible at a 1 ms
+ * scan anyway, so the NO_LIGHT_SLEEP lock costs nothing. Boards without
+ * CONFIG_PM_ENABLE take no lock at all. */
 #define GPTIMER_CONFIG_DEFAULT()        \
 {                                       \
-    .clk_src = GPTIMER_CLK_SRC_DEFAULT, \
+    .clk_src = GPTIMER_CLK_SRC_XTAL,    \
     .direction = GPTIMER_COUNT_UP,      \
     .resolution_hz = 1 * 1000 * 1000,   \
 }
