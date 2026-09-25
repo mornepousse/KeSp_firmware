@@ -309,8 +309,13 @@ means a test, or a line.
 - [test:test_lost_probe_eventually_reprobes] After a lost probe, the 5 V
   handshake probes again. It doesn't stay stuck on a failure.
 - [test:test_kbd_route] ONE rule for USB cable presence
-  (`usb_presence_brut`) drives USB/RF routing, the 5 V TRRS source and the
-  sleep veto: with the VBUS bridge soldered (`KASE_VBUS_SENSE`) the GPIO
+  (`usb_presence_brut`) drives USB/RF routing, the 5 V TRRS source, the
+  sleep veto — and, since 2026-09-25, the DFS APB lock (`pm_dfs.c`), which
+  was driven by TinyUSB's attach/detach events alone: the S3 does not always
+  signal the unplug, the lock stayed held and automatic light sleep never
+  came back (32-33 mA between keystrokes instead of 6-12, on the RF route,
+  sleeping normally — the ammeter was the only witness). The sleep task
+  re-applies it every second on both halves: with the VBUS bridge soldered (`KASE_VBUS_SENSE`) the GPIO
   level is authoritative — a wall charger doesn't enumerate and still
   makes this half the source; without the bridge, `tud_ready()`; the bench
   override (`KASE_LINK_FORCE_SOURCE`) wins over everything. Until

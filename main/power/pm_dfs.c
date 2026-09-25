@@ -57,6 +57,17 @@ void pm_dfs_usb_event(bool monte)
 #endif
 }
 
+/* The unmount is NOT always signaled on the S3 (see below): after a hot unplug
+ * the lock stayed held, automatic light sleep never came back and the left
+ * drew 32-33 mA between keystrokes instead of 6-12 — on the RF route, sleeping
+ * normally (the explicit B7 sleep ignores PM locks), so nothing looked wrong
+ * but the ammeter (Mae, 2026-09-25, right after a USB session). The veto had a
+ * 1 s catch-up; the lock had none. Same rule now: usb_presence_cable(). */
+void pm_dfs_usb_rattrapage(bool present)
+{
+    usb_hote(present);
+}
+
 void pm_dfs_init(void)
 {
     esp_pm_config_t cfg = {

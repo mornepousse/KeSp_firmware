@@ -17,8 +17,9 @@
 #if CONFIG_PM_PROFILING
 #include "esp_pm.h"
 #endif
-#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-#include "usb_presence.h"   /* USB veto catch-up: usb_presence_cable() */
+#include "usb_presence.h"   /* both halves: USB veto (left) and DFS lock catch-up */
+#if CONFIG_PM_ENABLE
+#include "pm_dfs.h"         /* pm_dfs_usb_rattrapage */
 #endif
 #if CONFIG_KASE_BATT_SENSE
 #include "batt_sense.h"     /* critical battery: sleep sooner */
@@ -90,6 +91,11 @@ static void veille_task(void *arg)
          * Accepted trade-off: a host that goes to sleep with the cable plugged in
          * also lets the keyboard sleep; it re-enumerates on wake. */
         veille_veto(VEILLE_VETO_USB, usb_presence_cable());   /* VBUS bridge if soldered, else tud_ready */
+#endif
+#if CONFIG_PM_ENABLE
+        /* Both halves: the DFS APB lock follows the same rule, or a missed
+         * unmount keeps automatic light sleep out for good (pm_dfs.c). */
+        pm_dfs_usb_rattrapage(usb_presence_cable());
 #endif
 #if CONFIG_KASE_BATT_SENSE
         /* CRITICAL battery (< 3.3 V): the light stage at 5 s instead of 15 —
