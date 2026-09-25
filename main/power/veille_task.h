@@ -23,7 +23,7 @@ typedef struct {
     void (*dormir)(void);         /* called BEFORE sleep, in registration order */
     void (*reveiller)(void);      /* called AFTER wake, in REVERSE order */
 } veille_hook_t;
-#define VEILLE_HOOKS_MAX 4
+#define VEILLE_HOOKS_MAX 6   /* left: radio, relay, gauge, screen, link (2026-09-25) + 1 spare */
 
 void veille_hook_enregistrer(const veille_hook_t *h);   /* before veille_task_start */
 void veille_veto(veille_veto_t quoi, bool on);           /* from any task */

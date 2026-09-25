@@ -66,7 +66,7 @@ static veille_vetos_t vetos_lire(void)
  * lost is indistinguishable from a night at 244 µA without this figure. */
 static void hb(uint32_t inactif_ms, const veille_vetos_t *v)
 {
-    uint32_t dodo_n = 0, dodo_ms = 0; char vb[24];
+    uint32_t dodo_n = 0, dodo_ms = 0; char vb[VEILLE_VETOS_STR_MAX];
     veille_bilan(&dodo_n, &dodo_ms);
 #if CONFIG_PM_PROFILING
     esp_pm_dump_locks(stdout);   /* bench: light_sleep_counts, time per mode, locks */
@@ -103,7 +103,7 @@ static void veille_task(void *arg)
         if ((uint32_t)(now - dernier_hb) >= HB_PERIODE_MS) { dernier_hb = now; hb(inactif, &v); }
         if (veille_bloquee(&v) && inactif >= veille_seuil_legere_ms()
             && (uint32_t)(now - dernier_refus) >= 30000u) {
-            char vb[24]; dernier_refus = now;
+            char vb[VEILLE_VETOS_STR_MAX]; dernier_refus = now;
             ESP_LOGW(TAG, "sleep REFUSED for %lu s: vetos=%s",
                      (unsigned long)(inactif / 1000), veille_vetos_str(&v, vb, sizeof vb));
         }

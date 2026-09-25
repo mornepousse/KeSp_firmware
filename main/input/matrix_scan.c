@@ -314,6 +314,15 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
     memcpy(prev_matrix_state, new_state, sizeof(prev_matrix_state));
     matrix_flag_signal(&stat_matrix_changed);
     last_activity_time_ms = esp_timer_get_time() / 1000;
+#if CONFIG_KASE_VEILLE
+    /* A held key is a reason to stay awake: the driver reports changes only,
+     * so without this the half slept key down once the light threshold went
+     * by, woke at once on the high row and looped (VEILLE_VETO_TOUCHE). This
+     * callback runs on every change, the release included — the veto is
+     * posted and lifted here, nowhere else. */
+    veille_veto(VEILLE_VETO_TOUCHE,
+                veille_touche_tenue(&new_state[0][0], sizeof(new_state)));
+#endif
 
     if (keyboard_task_handle != NULL)
         xTaskNotifyGive(keyboard_task_handle);

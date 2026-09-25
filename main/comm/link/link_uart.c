@@ -35,7 +35,6 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "esp_sleep.h"        /* esp_sleep_enable_uart_wakeup: the probe wakes a sleeping half */
 #include "tinyusb.h"
 #if CONFIG_KASE_VEILLE
 #include "veille_task.h"   /* LINK veto: a half charging the other does not sleep */
@@ -43,6 +42,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include <string.h>
 
 static const char *TAG = "link";
@@ -58,6 +58,31 @@ static uint8_t          s_rx[LINK_RX_BUF];
 static uint16_t         s_rx_len;
 static volatile bool    s_active;
 static QueueHandle_t    s_uart_q;      /* UART driver events: wake on reception */
+
+/* ── The UART gives the crystal back while the half sleeps ────────────────
+ * UART1 runs on UART_SCLK_XTAL (the only clock that keeps its baud under
+ * DFS) and, installed, it keeps the 40 MHz crystal alive through light sleep:
+ * 3.4 mA measured on 2026-09-25 (ammeter on the left's battery, 5.0 -> 1.6 mA
+ * with the link compiled out) — as much as everything else asleep together.
+ * An ESTABLISHED link vetoes sleep (VEILLE_VETO_LIEN), so whenever the half
+ * sleeps the link is down and the UART serves nothing: the sleep hook asks
+ * this task to delete the driver, the wake hook to reinstall it.
+ *
+ * The task owns the driver, never the hook: the task blocks on the driver's
+ * event queue, deleting it under it would be a use-after-free. So the hook
+ * posts LINK_EV_PARK into that queue to wake the task, which deletes the
+ * driver itself, says so, and waits for the wake. s_park_req + s_parked under
+ * s_park_mux close the race of a sentinel read after the wake already ran.
+ *
+ * Consequence, accepted (Mae, 2026-09-25): a sleeping half hears no probe —
+ * the UART wake source of 0cd026ed needed this clock and is gone. For the 5 V
+ * to pass, BOTH halves must be awake: a key on each. */
+#define LINK_EV_PARK ((uart_event_type_t)UART_EVENT_MAX)
+static TaskHandle_t      s_task;
+static SemaphoreHandle_t s_parked_sem;
+static portMUX_TYPE      s_park_mux = portMUX_INITIALIZER_UNLOCKED;
+static bool              s_park_req, s_parked;
+static int               s_rx_pin;     /* the real RX pin, swap included */
 
 /* Bench counters: we can't see the wire, we have to count it. */
 static uint32_t s_probes_tx, s_acks_tx, s_probes_rx, s_acks_rx, s_skips;
@@ -119,6 +144,8 @@ static void drain_uart(uint32_t now)
     if (s_rx_len == LINK_RX_BUF) s_rx_len = 0;   /* buffer full without a frame: noise, start over */
 }
 
+static void uart_up(void);
+
 static void link_task(void *arg)
 {
     (void)arg;
@@ -168,6 +195,21 @@ static void link_task(void *arg)
         bool repos = (s_hs.state == LINK_HS_IDLE) && !usb;
         uart_event_t ev;
         if (s_uart_q && xQueueReceive(s_uart_q, &ev, pdMS_TO_TICKS(repos ? LINK_REPOS_MS : LINK_TICK_MS)) == pdTRUE) {
+            if (ev.type == LINK_EV_PARK) {
+                bool park;
+                taskENTER_CRITICAL(&s_park_mux);
+                park = s_park_req;           /* false: the wake already ran, a late sentinel */
+                if (park) s_parked = true;
+                taskEXIT_CRITICAL(&s_park_mux);
+                if (!park) continue;
+                uart_driver_delete(BOARD_LINK_UART_NUM);   /* the crystal is free */
+                s_uart_q = NULL;
+                xSemaphoreGive(s_parked_sem);
+                ulTaskNotifyTake(pdTRUE, portMAX_DELAY);   /* until link_wake() */
+                uart_up();
+                s_parked = false;
+                continue;
+            }
             /* Overflow (floating TX of a sleeping peer = flood of fake bytes):
              * start clean rather than decode noise for seconds. */
             if (ev.type == UART_FIFO_OVF || ev.type == UART_BUFFER_FULL) {
@@ -183,6 +225,67 @@ static void link_task(void *arg)
 
 bool link_uart_active(void) { return s_active; }
 
+/* Install and configure UART1 — at boot, and again on every wake. */
+static void uart_up(void)
+{
+    uart_config_t uc = {
+        .baud_rate = LINK_BAUD,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        /* XTAL, not APB: with DFS (CONFIG_PM_ENABLE) the APB drops to 40 MHz at
+         * rest and a UART clocked off it loses its baud between two locks.
+         * The XTAL never moves — and costs 3.4 mA asleep: see s_park_req. */
+        .source_clk = UART_SCLK_XTAL,
+    };
+    ESP_ERROR_CHECK(uart_driver_install(BOARD_LINK_UART_NUM, 256, 0, 8, &s_uart_q, 0));
+    ESP_ERROR_CHECK(uart_param_config(BOARD_LINK_UART_NUM, &uc));
+#if BOARD_LINK_SWAP_TX_RX
+    s_rx_pin = BOARD_LINK_TX;   /* swap: the real RX is on TX */
+    ESP_ERROR_CHECK(uart_set_pin(BOARD_LINK_UART_NUM, BOARD_LINK_RX, BOARD_LINK_TX,
+                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+#else
+    s_rx_pin = BOARD_LINK_RX;
+    ESP_ERROR_CHECK(uart_set_pin(BOARD_LINK_UART_NUM, BOARD_LINK_TX, BOARD_LINK_RX,
+                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+#endif
+    /* Pull-up on RX. When the other half sleeps, its TX floats: at rest a
+     * UART is in the HIGH state, a floating line drifts low and gets read as
+     * a flood of fake bytes (91,682 "noise" counted on a capture from
+     * 2026-09-12). The internal pull-up holds it high — line at rest, no
+     * spurious decoding. Also a lead against TRRS cable coupling into the
+     * matrix lines, suspected in the phantom wakeups. */
+    gpio_set_pull_mode(s_rx_pin, GPIO_PULLUP_ONLY);
+    s_rx_len = 0;
+}
+
+#if CONFIG_KASE_VEILLE
+static void link_sleep(void)
+{
+    if (s_active || !s_uart_q || !s_task) return;   /* an up link vetoes sleep: not expected */
+    xSemaphoreTake(s_parked_sem, 0);                 /* drop a stale "parked" from an old round */
+    taskENTER_CRITICAL(&s_park_mux);
+    s_park_req = true;
+    taskEXIT_CRITICAL(&s_park_mux);
+    uart_event_t ev = { .type = LINK_EV_PARK };
+    if (xQueueSendToFront(s_uart_q, &ev, 0) != pdTRUE) return;   /* full: sleep with it, no harm */
+    if (xSemaphoreTake(s_parked_sem, pdMS_TO_TICKS(100)) != pdTRUE)
+        ESP_LOGW(TAG, "UART%d not released in time: this sleep keeps the crystal on",
+                 BOARD_LINK_UART_NUM);
+}
+
+static void link_wake(void)
+{
+    bool parked;
+    taskENTER_CRITICAL(&s_park_mux);
+    s_park_req = false;
+    parked = s_parked;
+    taskEXIT_CRITICAL(&s_park_mux);
+    if (parked && s_task) xTaskNotifyGive(s_task);   /* latched: fine even before it waits */
+}
+#endif
+
 void link_uart_start(void)
 {
     /* 1. The switch, LOW, before anything else: it's the only pin that can
@@ -195,74 +298,22 @@ void link_uart_start(void)
     gpio_set_level(BOARD_LINK_5V_EN, 0);
 
     /* 2. The UART, with the swap on the half that declares it. */
-    uart_config_t uc = {
-        .baud_rate = LINK_BAUD,
-        .data_bits = UART_DATA_8_BITS,
-        .parity    = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        /* XTAL, not APB: with DFS (CONFIG_PM_ENABLE) the APB drops to 40 MHz at
-         * rest and a UART clocked off it loses its baud between two locks.
-         * The XTAL never moves. */
-        .source_clk = UART_SCLK_XTAL,
-    };
-    ESP_ERROR_CHECK(uart_driver_install(BOARD_LINK_UART_NUM, 256, 0, 8, &s_uart_q, 0));
-    ESP_ERROR_CHECK(uart_param_config(BOARD_LINK_UART_NUM, &uc));
+    uart_up();
 #if BOARD_LINK_SWAP_TX_RX
-    const int link_rx_pin = BOARD_LINK_TX;   /* swap: the real RX is on TX */
-    ESP_ERROR_CHECK(uart_set_pin(BOARD_LINK_UART_NUM, BOARD_LINK_RX, BOARD_LINK_TX,
-                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_LOGI(TAG, "UART%d TX=GPIO%d RX=GPIO%d (SWAP, straight cable)",
              BOARD_LINK_UART_NUM, BOARD_LINK_RX, BOARD_LINK_TX);
 #else
-    const int link_rx_pin = BOARD_LINK_RX;
-    ESP_ERROR_CHECK(uart_set_pin(BOARD_LINK_UART_NUM, BOARD_LINK_TX, BOARD_LINK_RX,
-                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_LOGI(TAG, "UART%d TX=GPIO%d RX=GPIO%d", BOARD_LINK_UART_NUM, BOARD_LINK_TX, BOARD_LINK_RX);
-#endif
-
-    /* Pull-up on RX. When the other half sleeps, its TX floats: at rest a
-     * UART is in the HIGH state, a floating line drifts low and gets read as
-     * a flood of fake bytes (91,682 "noise" counted on a capture from
-     * 2026-09-12). The internal pull-up holds it high — line at rest, no
-     * spurious decoding. Also a lead against TRRS cable coupling into the
-     * matrix lines, suspected in the phantom wakeups. */
-    gpio_set_pull_mode(link_rx_pin, GPIO_PULLUP_ONLY);
-
-#if CONFIG_KASE_VEILLE
-    /* ── A sleeping half must HEAR the probe ─────────────────────────────
-     * Without this, the handshake only worked when both halves happened to
-     * be awake: light sleep has no wake source but EXT1 (the matrix rows)
-     * and the deep-sleep timer, so the probes of a half that has just been
-     * plugged in arrived on a clock-gated UART. You had to type on BOTH
-     * halves for the 5 V to pass — "it doesn't always work" (Mae, 2026-09-23).
-     *
-     * UART1 is a light-sleep wake source on the S3 (TRM v1.8, table 10.4-3
-     * p. 580, WAKEUP_ENA 0x80, note 5: the wake fires when the number of RX
-     * pulses exceeds the threshold register). Three edges is the documented
-     * minimum; the RX line rests high (pull-up above), so only a real frame
-     * produces them.
-     *
-     * The frame that wakes us is LOST — the chip only starts receiving after
-     * the wake (ESP-IDF, Sleep Modes, § UART Wakeup). That costs nothing
-     * here: whoever has current to give re-probes every
-     * LINK_HS_REPROBE_INTERVAL_MS (300 ms), so the NEXT probe is the one
-     * that gets decoded and answered, and that ACK is also the UART traffic
-     * the same doc asks for to clear the internal wake indication.
-     *
-     * ⚠ What this does NOT fix: plugging the USB cable into a half that is
-     * already asleep. The USB is not a wake source at all on the S3 (same
-     * table) — it would take the VBUS bridge on GPIO33, which is not
-     * populated. On a sleeping half, the cable is noticed at the first
-     * keystroke. */
-    ESP_ERROR_CHECK(uart_set_wakeup_threshold(BOARD_LINK_UART_NUM, 3));
-    ESP_ERROR_CHECK(esp_sleep_enable_uart_wakeup(BOARD_LINK_UART_NUM));
-    ESP_LOGI(TAG, "UART%d wakes the half from light sleep (3 RX edges)", BOARD_LINK_UART_NUM);
 #endif
 
     link_hs_init(&s_hs);
     memset(&s_usb_db, 0, sizeof(s_usb_db));
     s_usb_prev = false;
-    xTaskCreate(link_task, "link", 3072, NULL, 4, NULL);
+    s_parked_sem = xSemaphoreCreateBinary();
+    xTaskCreate(link_task, "link", 3072, NULL, 4, &s_task);
+#if CONFIG_KASE_VEILLE
+    static const veille_hook_t hook = { "link", link_sleep, link_wake };
+    veille_hook_enregistrer(&hook);
+#endif
     ESP_LOGI(TAG, "wired link ready, 5 V open");
 }

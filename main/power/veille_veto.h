@@ -24,7 +24,15 @@ typedef enum {
     VEILLE_VETO_PAIR = 1u << 4,   /* pairing active: radio_pair_round holds the chip ~150 ms per round,
                                    * 30-40 s without anyone typing — asleep, radio_sleep was cutting
                                    * the chip out from under the pairing task (review 2026-09-20) */
+    VEILLE_VETO_TOUCHE = 1u << 5, /* a key of THIS half is held: no matrix change, so inactivity grew
+                                   * and the half slept key down, woke on its high row, slept again
+                                   * (2026-09-25, needed once the threshold went from 15 s to 5 s) */
 } veille_veto_t;
+
+/* Room for every veto name joined by '+' in the heartbeat, NUL included:
+ * "usb+link+sync+test+pair+key" = 27 characters. Sized once, here — the HB
+ * and its "sleep REFUSED" line use it, the test checks all six fit. */
+#define VEILLE_VETOS_STR_MAX 32
 
 typedef struct { uint32_t actifs; } veille_vetos_t;
 
@@ -36,15 +44,24 @@ static inline void veille_veto_poser(veille_vetos_t *v, veille_veto_t quoi, bool
 
 static inline bool veille_bloquee(const veille_vetos_t *v) { return v->actifs != 0; }
 
+/* Is any key of this half's matrix held? `etat` is the scanned matrix, one
+ * byte per key, non-zero = pressed (MATRIX_STATE). Feeds VEILLE_VETO_TOUCHE. */
+static inline bool veille_touche_tenue(const uint8_t *etat, size_t n)
+{
+    if (etat == NULL) return false;
+    for (size_t i = 0; i < n; i++) if (etat[i]) return true;
+    return false;
+}
+
 /* Names of active vetoes for the heartbeat: "usb+link", "-" if
- * none. Bounded to n bytes (n >= 2), cleanly truncated beyond that — the five
- * fit within the HB's 24 bytes ("usb+link+sync+test+pair" = 23). */
+ * none. Bounded to n bytes (n >= 2), cleanly truncated beyond that — the six
+ * fit within VEILLE_VETOS_STR_MAX. */
 static inline const char *veille_vetos_str(const veille_vetos_t *v, char *out, size_t n)
 {
     static const struct { veille_veto_t q; const char *nom; } noms[] = {
         { VEILLE_VETO_USB, "usb" }, { VEILLE_VETO_LIEN, "link" },
         { VEILLE_VETO_SYNC, "sync" }, { VEILLE_VETO_TEST, "test" },
-        { VEILLE_VETO_PAIR, "pair" },
+        { VEILLE_VETO_PAIR, "pair" }, { VEILLE_VETO_TOUCHE, "key" },
     };
     if (n == 0) return "";
     out[0] = '\0';

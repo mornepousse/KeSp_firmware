@@ -36,18 +36,20 @@ in the PR/release.
 ## Dongle
 - [ ] **Sleep current**: ammeter in series with the battery, no USB, no TRRS,
       keyboard untouched ≥ 20 s (console: one `light sleep` line, then
-      silence). Reference 2026-09-25, left half: 5.0 mA with the VDD_SPI
-      power-down (7.5 mA without — the in-package PSRAM leak is back if this
-      number returns), 1.6 mA with the TRRS link compiled out, 0.2 mA in deep
-      sleep. After flashing, also type one key after a 20 s pause: the flash
+      silence). Reference 2026-09-25, left half: 7.5 mA before any fix, 5.0
+      mA with the VDD_SPI power-down (the in-package PSRAM leak), target ~1.6
+      mA with the link's UART released during sleep, 0.2 mA in deep sleep. If
+      ~5 mA comes back, the UART is not being released (look for "not
+      released in time" in the console). After flashing, also type one key after a 20 s pause: the flash
       power-down lengthens the wake (the first-key-lost path).
-- [ ] **5 V handshake on sleeping halves**: leave BOTH halves untouched for
-      ≥ 30 s (no USB, nothing typed — they light-sleep), then plug the USB-C
-      into one half and press ONE key on that half only. Expected: the bolt
-      appears in the banner of BOTH screens within a second (the probe wakes
-      the sleeping peer over UART1). Before the 2026-09-23 fix you had to
-      type on both halves. ⚠ Pressing a key on the plugged half is required:
-      the cable alone does not wake it (no USB wake source on the S3).
+- [ ] **5 V handshake on sleeping halves**: leave BOTH halves untouched ≥ 10 s
+      (they light-sleep at 5 s), plug the TRRS cable and the USB-C into one
+      half, press ONE key on EACH half. Expected: the bolt on BOTH screens
+      within a second. A key on one half only is not enough, by design (the
+      link's UART is released during sleep to save 3.4 mA).
+- [ ] **Held key**: hold Backspace ≥ 10 s with nothing else — the host keeps
+      auto-repeating without a stutter, the heartbeat shows `vetos=key`, no
+      `light sleep` line until release.
 - [ ] RF link establishes with a half (pairing < 120s)
 - [ ] NRF doesn't wedge after 5 min (watchdog OK)
 - [ ] Idle wake (DFS): console at boot "DFS actif : 160 MHz en travail,

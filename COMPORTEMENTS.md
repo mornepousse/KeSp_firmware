@@ -311,21 +311,19 @@ means a test, or a line.
   initialised, its CS floats while the IOs are isolated, and it leaked 2.5 mA
   all night (7.5 → 5.0 mA, ammeter, 2026-09-25). The IDF's own guard
   (`ESP_SLEEP_PSRAM_LEAKAGE_WORKAROUND`) depends on SPIRAM and cannot be
-  selected here. ⚠ The TRRS UART1 on the main crystal still costs 3.4 mA
-  asleep (measured by compiling the link out) — known, not fixed.
-- [smoke:5 V handshake on sleeping halves] A half ASLEEP hears the probe:
-  UART1 is armed as a light-sleep wake source (3 RX edges,
-  `uart_set_wakeup_threshold` + `esp_sleep_enable_uart_wakeup`, ESP32-S3
-  TRM v1.8 table 10.4-3 p. 580 — UART1 = 0x80, light sleep only). The frame
-  that wakes is lost by construction; the re-probe at 300 ms is the one that
-  gets decoded, and its ACK is the traffic that clears the wake indication.
-  Until 2026-09-23 the handshake only worked when both halves happened to be
-  awake — light sleep had no wake source but the matrix rows, so a half idle
-  for 15 s answered nothing and the 5 V never passed. ⚠ Still NOT covered,
-  and not coverable in software: plugging the cable into an already-sleeping
-  half. The USB is not a wake source on the S3 (same table); it takes the
-  GPIO33 VBUS bridge, unpopulated. On a sleeping half the cable is noticed
-  at the first keystroke.
+  selected here. The TRRS UART1 on the main crystal cost another 3.4 mA
+  asleep; it is released during sleep since 2026-09-25 (target ~1.6 mA).
+- [smoke:5 V handshake on sleeping halves] The 5 V needs BOTH halves awake:
+  a sleeping half does not hear the probe, by design since 2026-09-25. The
+  link's UART1 runs on the main crystal (the only clock that keeps its baud
+  under DFS) and, installed, kept that crystal alive through light sleep —
+  3.4 mA asleep, measured. So the sleep hook has the link task delete the
+  driver and the wake hook reinstall it; an established link vetoes sleep
+  anyway (`VEILLE_VETO_LIEN`), so the UART is only released when it serves
+  nothing. The UART wake source of 0cd026ed (a probe waking a sleeping half)
+  needed that clock and was removed — Mae chose the 3.4 mA over it. USB is
+  not a wake source either (TRM table 10.4-3): plug the cable, press a key on
+  each half, the bolt appears on both screens.
 - [test:test_memlcd_model] The screens SAY whether the link is up: a bolt in
   the banner while the 5 V is closed on our side (`link_uart_active()`),
   displayed on both halves, part of the redraw diff. Without it the
@@ -333,6 +331,13 @@ means a test, or a line.
   typing on battery, and which is exactly what was missing to see this bug
   (Mae, 2026-09-23: "I have no icon on the screen to see whether it's
   active").
+- [test:test_veille_veto] A held key keeps its half awake
+  (`VEILLE_VETO_TOUCHE`, posted and lifted by the matrix change callback,
+  which also fires on the release). The driver reports changes only: without
+  the veto, a key held with nothing else happening let inactivity grow, the
+  half slept key down, woke at once on the high row, and looped. Required by
+  the 5 s light-sleep threshold of 2026-09-25 (Backspace held while the host
+  auto-repeats, a layer key held while reading).
 - [test:test_veille_veto] Sleep veto registry (`power/veille_veto.h`,
   pure): one state per name (usb, lien, sync, test, pair), a posted veto
   blocks all sleep, lifting an absent veto has no effect, names bounded
