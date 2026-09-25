@@ -118,10 +118,20 @@
  * contributing to missed keystrokes (docs/DONGLE_ARCHI_ET_HALF_TYPING_2026-07-13.md,
  * bug #2) — to be measured on the bench, do not tune blindly. */
 #define BOARD_MATRIX_COL2ROW
-#define BOARD_MATRIX_SCAN_INTERVAL_US  1000
+/* Scan every 5 ms while a key is held (2026-09-25, was 1 ms). The driver
+ * only scans with a key down — idle is interrupt-driven — and at 1 kHz its
+ * task woke the chip a thousand times a second, each wake ramping DFS back up:
+ * 27-33 mA with a key held even with the gptimer on the XTAL. A press is
+ * reported ~5-10 ms after it lands, invisible behind the radio and the USB
+ * poll. wake_grace_ms(2, 5000) = 30 ms, under its 50 ms ceiling. */
+#define BOARD_MATRIX_SCAN_INTERVAL_US  5000
 #define BOARD_MATRIX_SETTLING_US       0
 #define BOARD_MATRIX_RECOVERY_US       0
-#define BOARD_DEBOUNCE_TICKS           5   /* 5 ms: the dongle replays every transition, it no longer masks a 3-5 ms bounce (2026-09-20) */
+#define BOARD_DEBOUNCE_TICKS           2   /* 2 scans x 5 ms = 10 ms of stability (was 5 x 1 ms, 2026-09-25) */
+/* The 5 ms floor decided 2026-09-20: the dongle replays every transition,
+ * nothing masks a short bounce any more. */
+_Static_assert(BOARD_DEBOUNCE_TICKS * BOARD_MATRIX_SCAN_INTERVAL_US >= 5000,
+               "debounce window below 5 ms");
 
 /* ── USB ──
  * No useful USB HID in production on the right half (it has neither a keymap

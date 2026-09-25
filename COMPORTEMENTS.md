@@ -182,6 +182,11 @@ means a test, or a line.
   source and only `ESP_PM_NO_LIGHT_SLEEP` otherwise, so the chip no longer
   waits between two 1 ms scans at 80 MHz. Key held on the left: 36 → 27-33
   mA (2026-09-25).
+- [smoke:Sleep current] The halves scan every 5 ms while a key is held, with
+  a 2-scan debounce (10 ms of stability, a `_Static_assert` keeps it ≥ 5 ms):
+  at 1 ms the scan task alone kept DFS up. Key held: 27-33 → 24 mA, several
+  keys 28 mA; fast typing, first key after sleep and a held Backspace checked
+  on the bench (2026-09-25).
 - [test:test_cadence] At rest the halves have no poller shorter than ~0.5 s,
   so automatic light sleep gets its 30 ms of calm between keystrokes. Six
   interleaved pollers used to wake core 0 ~140 times a second while the CPU
