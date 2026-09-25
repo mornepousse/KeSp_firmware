@@ -76,7 +76,30 @@ static lv_disp_t *s_disp;
 static memlcd_model_t s_shown;          /* last drawn model */
 
 /* ── LVGL objects ─────────────────────────────────────────────────── */
-static lv_obj_t *s_l_route, *s_bar, *s_l_volt, *s_l_lien, *s_l_nom[MEMLCD_NOM_LIGNES], *s_l_couche;
+static lv_obj_t *s_l_route, *s_bar, *s_l_volt, *s_img_lien, *s_l_nom[MEMLCD_NOM_LIGNES], *s_l_couche;
+
+/* TRRS link pictogram, 8x8, one arrow each way: the cable carries the 5 V from
+ * one half to the other. LV_IMG_CF_ALPHA_1BIT has NO palette and a stride of
+ * ceil(w/8) = 1 byte per row (lv_img_decoder_built_in_line_alpha), bit 7 is
+ * the leftmost pixel; the ink colour comes from img_recolor. Replaced the
+ * LV_SYMBOL_CHARGE bolt of 2026-09-23, which sat on top of the " +" charge
+ * marker — shown precisely while the link charges the half (Mae: "not a good
+ * logo"). */
+static const uint8_t s_lien_map[8] = {
+    0x04,   /* .....#..   tip of the upper arrow  */
+    0xFE,   /* #######.   upper arrow, pointing right */
+    0x04,   /* .....#.. */
+    0x00,
+    0x20,   /* ..#.....   tip of the lower arrow  */
+    0x7F,   /* .#######   lower arrow, pointing left */
+    0x20,   /* ..#..... */
+    0x00,
+};
+static const lv_img_dsc_t s_lien_img = {
+    .header.cf = LV_IMG_CF_ALPHA_1BIT, .header.always_zero = 0,
+    .header.w = 8, .header.h = 8,
+    .data_size = sizeof s_lien_map, .data = s_lien_map,
+};
 
 #define Y_BANDEAU_FIN 31
 #define Y_CENTRE      (Y_BANDEAU_FIN + 1)
@@ -114,11 +137,16 @@ static void construire(void)
      * voltage below in UNSCII 8. */
     s_l_route = texte(scr, &lv_font_montserrat_14, 3, 2);
     s_l_volt  = texte(scr, &lv_font_unscii_8, 3, 20);
-    /* TRRS link, second row, between the voltage (ends at ~39 px with its
-     * charge marker) and the gauge (x = 54): a bolt while the 5 V is closed.
-     * It is the ONLY witness of the handshake away from the console — and the
-     * handshake is exactly what fails silently when a half is asleep. */
-    s_l_lien  = texte(scr, &lv_font_montserrat_14, 41, 16);
+    /* TRRS link, second row, in place of the charge marker: "4.1V " is five
+     * UNSCII 8 characters (8 px each) from x = 3, so the pictogram starts at
+     * 43 and ends at 50, clear of the gauge (x = 54). It is the ONLY witness
+     * of the handshake away from the console. Hidden unless the 5 V is closed. */
+    s_img_lien = lv_img_create(scr);
+    lv_img_set_src(s_img_lien, &s_lien_img);
+    lv_obj_set_style_img_recolor(s_img_lien, lv_color_black(), 0);
+    lv_obj_set_style_img_recolor_opa(s_img_lien, LV_OPA_COVER, 0);
+    lv_obj_set_pos(s_img_lien, 3 + 5 * 8, 20);
+    lv_obj_add_flag(s_img_lien, LV_OBJ_FLAG_HIDDEN);
     s_bar = lv_bar_create(scr);
     lv_obj_remove_style_all(s_bar);
     lv_obj_set_size(s_bar, 10, 24); lv_obj_set_pos(s_bar, MEMLCD_W - 14, 3);
@@ -196,9 +224,12 @@ static void dessiner(const memlcd_model_t *m)
 {
     char buf[24];
     lv_label_set_text_fmt(s_l_route, "%s%s", m->route_rf ? "RF" : "USB", m->dongle_vu ? " " LV_SYMBOL_UP : "");
-    tension(buf, sizeof buf, m->batt_local_dv, m->batt_local_chg);
+    /* Link up: the pictogram takes the charge marker's place — the cable
+     * already says the half is being fed. */
+    tension(buf, sizeof buf, m->batt_local_dv, m->lien_5v ? 0 : m->batt_local_chg);
     lv_label_set_text(s_l_volt, buf);
-    lv_label_set_text(s_l_lien, m->lien_5v ? LV_SYMBOL_CHARGE : "");
+    if (m->lien_5v) lv_obj_clear_flag(s_img_lien, LV_OBJ_FLAG_HIDDEN);
+    else            lv_obj_add_flag(s_img_lien, LV_OBJ_FLAG_HIDDEN);
     uint8_t pct = 0;
 #if CONFIG_KASE_BATT_SENSE
     pct = (m->batt_local_dv == 0xFF) ? 0 : batt_soc_pct(m->batt_local_dv);

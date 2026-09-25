@@ -324,9 +324,11 @@ means a test, or a line.
   needed that clock and was removed — Mae chose the 3.4 mA over it. USB is
   not a wake source either (TRM table 10.4-3): plug the cable, press a key on
   each half, the bolt appears on both screens.
-- [test:test_memlcd_model] The screens SAY whether the link is up: a bolt in
-  the banner while the 5 V is closed on our side (`link_uart_active()`),
-  displayed on both halves, part of the redraw diff. Without it the
+- [test:test_memlcd_model] The screens SAY whether the link is up: an 8x8
+  two-arrow pictogram (⇆) in place of the charge marker while the 5 V is
+  closed on our side (`link_uart_active()`), displayed on both halves, part of
+  the redraw diff. It replaced a bolt (2026-09-25) that overlapped the " +"
+  marker exactly while the link was charging the half. Without it the
   handshake had no witness but the console — which you do not have while
   typing on battery, and which is exactly what was missing to see this bug
   (Mae, 2026-09-23: "I have no icon on the screen to see whether it's
