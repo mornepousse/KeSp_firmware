@@ -41,6 +41,14 @@ CADENCE_REPOS_OK(KBD_CADENCE_REPOS_MS);
                                           * STATUS still leaves every 1-1.5 s < RF_LINK_LOST_MS 2.5 s;
                                           * USB route = RADIO_PRX = 10 ms, unchanged */
 CADENCE_REPOS_OK(KBD_RELAY_REPOS_MS);
+/* A key simply held (no repair, no sync, no USB listening): the tick only has
+ * to reaffirm it every KBD_RELAY_REAFFIRM_MS (2026-09-25, was the 10 ms tick:
+ * 100 wakes a second to find nothing due). Worst gap between two
+ * reaffirmations = REAFFIRM + TENU = 150 ms, one losable under the dongle's
+ * HALF_LINK_TIMEOUT_MS 400 ms (test_cadence). */
+#define KBD_RELAY_TENU_MS        50u
+#define KBD_RELAY_REAFFIRM_MS    100u
+CADENCE_REPOS_OK(KBD_RELAY_TENU_MS);
 
 /* Right half refresh: reaffirmation of holds, repair. */
 #define HALF_TX_TENU_MS          20u

@@ -48,15 +48,17 @@ static inline bool kbd_refresh_step(kbd_refresh_t *r)
 }
 
 /* Refresh timer cadence (pure, test/test_kbd_refresh.c).
- * 10 ms as long as there is something to repeat, a key held, a sync in
+ * 10 ms as long as there is something to repeat, a sync in
  * progress — or the left LISTENS to the right re-sent by the dongle (USB
  * route): it's this tick that drains the receive FIFO (3 frames); at 100 ms
  * the press and release of a right-half key fell in the same round and only
- * the release survived (bench 2026-09-16). 100 ms otherwise (idle, DFS). */
+ * the release survived (bench 2026-09-16). A key simply held: 50 ms, enough
+ * for its 100 ms reaffirmation (2026-09-25). KBD_RELAY_REPOS_MS otherwise. */
 #include "cadence.h"   /* KBD_RELAY_REFRESH_MS / KBD_RELAY_REPOS_MS */
 static inline uint32_t kbd_relay_cadence_ms(bool reparation, bool tenu, bool sync, bool ecoute_usb)
 {
-    return (reparation || tenu || sync || ecoute_usb) ? KBD_RELAY_REFRESH_MS : KBD_RELAY_REPOS_MS;
+    if (reparation || sync || ecoute_usb) return KBD_RELAY_REFRESH_MS;
+    return tenu ? KBD_RELAY_TENU_MS : KBD_RELAY_REPOS_MS;
 }
 
 /* Init NRF radio in PTX mode and restore (or discover) the dongle pairing from

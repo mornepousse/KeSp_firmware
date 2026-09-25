@@ -62,7 +62,14 @@ static void test_cadence_du_relais(void)
      * "I'm losing a bunch of right-side keys" in USB). */
     TEST_ASSERT_EQ(kbd_relay_cadence_ms(false, false, false, false), KBD_RELAY_REPOS_MS, "at rest");
     TEST_ASSERT_EQ(kbd_relay_cadence_ms(true,  false, false, false), KBD_RELAY_REFRESH_MS, "repair in progress");
-    TEST_ASSERT_EQ(kbd_relay_cadence_ms(false, true,  false, false), KBD_RELAY_REFRESH_MS, "key held");
+    /* A key simply held only needs its reaffirmation (every
+     * KBD_RELAY_REAFFIRM_MS): at 10 ms the tick woke the chip 100 times a
+     * second to find nothing due (2026-09-25). Repair, sync and USB listening
+     * keep the fast tick even with a key held. */
+    TEST_ASSERT_EQ(kbd_relay_cadence_ms(false, true,  false, false), KBD_RELAY_TENU_MS, "key held");
+    TEST_ASSERT_EQ(kbd_relay_cadence_ms(true,  true,  false, false), KBD_RELAY_REFRESH_MS, "repair beats held");
+    TEST_ASSERT_EQ(kbd_relay_cadence_ms(false, true,  true,  false), KBD_RELAY_REFRESH_MS, "sync beats held");
+    TEST_ASSERT_EQ(kbd_relay_cadence_ms(false, true,  false, true),  KBD_RELAY_REFRESH_MS, "USB listening beats held");
     TEST_ASSERT_EQ(kbd_relay_cadence_ms(false, false, true,  false), KBD_RELAY_REFRESH_MS, "sync");
     TEST_ASSERT_EQ(kbd_relay_cadence_ms(false, false, false, true),  KBD_RELAY_REFRESH_MS, "listening to the right's USB");
 }

@@ -345,7 +345,7 @@ static void kbd_relay_refresh_body(void)
         taskEXIT_CRITICAL(&s_left_mux);
         bool tenu = (bm[0] | bm[1] | bm[2] | bm[3]) != 0;
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-        if (tenu && (uint32_t)(now - dernier) >= 100u) {
+        if (tenu && (uint32_t)(now - dernier) >= KBD_RELAY_REAFFIRM_MS) {
             /* Reaffirmation: a REPEAT — stale if the state changed between
              * this snapshot and the lock (the change already went out). */
             if (send_matrix_frame(RF_HALF_LEFT, bm, gen_valide, &gen)) {

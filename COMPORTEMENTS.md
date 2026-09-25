@@ -187,6 +187,12 @@ means a test, or a line.
   at 1 ms the scan task alone kept DFS up. Key held: 27-33 → 24 mA, several
   keys 28 mA; fast typing, first key after sleep and a held Backspace checked
   on the bench (2026-09-25).
+- [test:test_kbd_refresh] [test:test_cadence] A key simply held on the left
+  runs the relay tick at 50 ms, not 10: it only has to reaffirm the hold every
+  100 ms. Repair, keymap sync and USB listening keep the 10 ms tick. Worst gap
+  between two reaffirmations (150 ms) leaves one losable under the dongle's
+  400 ms release. Bench on the left: key held 24 → 23 mA, a held Backspace
+  and a held MO unaffected (2026-09-25).
 - [test:test_cadence] At rest the halves have no poller shorter than ~0.5 s,
   so automatic light sleep gets its 30 ms of calm between keystrokes. Six
   interleaved pollers used to wake core 0 ~140 times a second while the CPU

@@ -5,6 +5,7 @@
 #include "test_framework.h"
 #include "../main/power/cadence.h"
 #include "../main/comm/rf/rf_slot.h"   /* RF_STATUS_PERIOD_MS, RF_LINK_LOST_MS */
+#include "../main/comm/rf/half_link.h" /* HALF_LINK_TIMEOUT_MS */
 
 static void test_le_repos_laisse_trois_ticks(void)
 {
@@ -40,10 +41,22 @@ static void test_le_repos_du_relais_tient_la_patience_du_dongle(void)
                 "relay rest + STATUS period < dongle link-lost timeout");
 }
 
+/* A held left key is reaffirmed at the first held tick after
+ * KBD_RELAY_REAFFIRM_MS, i.e. up to one held tick late. The dongle releases a
+ * mute half after HALF_LINK_TIMEOUT_MS: one reaffirmation must be losable
+ * (15 ESB retries exhausted) without the key being released. */
+static void test_le_maintien_du_relais_tient_la_patience_du_dongle(void)
+{
+    TEST_ASSERT(KBD_RELAY_TENU_MS >= CADENCE_REPOS_MIN_MS, "held tick leaves the chip 3 ticks");
+    TEST_ASSERT(2u * (KBD_RELAY_REAFFIRM_MS + KBD_RELAY_TENU_MS) <= HALF_LINK_TIMEOUT_MS,
+                "one reaffirmation losable before the dongle releases the half");
+}
+
 void test_cadence(void)
 {
     TEST_SUITE("half cadences (tickless)");
     TEST_RUN(test_le_repos_laisse_trois_ticks);
     TEST_RUN(test_l_actif_reste_reactif);
     TEST_RUN(test_le_repos_du_relais_tient_la_patience_du_dongle);
+    TEST_RUN(test_le_maintien_du_relais_tient_la_patience_du_dongle);
 }
