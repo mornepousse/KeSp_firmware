@@ -306,6 +306,13 @@ means a test, or a line.
   and restarts. Bench 2026-09-19: left USB + TRRS → `state=2 5V=1`, 490
   probes / 485 ACKs, sleep refusal `link=1`; unplugged → `state=0 5V=0` in
   < 1 s.
+- [smoke:Sleep current] VDD_SPI is powered down in light sleep on both halves
+  (`CONFIG_ESP_SLEEP_POWER_DOWN_FLASH`): the N16R8's in-package PSRAM is never
+  initialised, its CS floats while the IOs are isolated, and it leaked 2.5 mA
+  all night (7.5 → 5.0 mA, ammeter, 2026-09-25). The IDF's own guard
+  (`ESP_SLEEP_PSRAM_LEAKAGE_WORKAROUND`) depends on SPIRAM and cannot be
+  selected here. ⚠ The TRRS UART1 on the main crystal still costs 3.4 mA
+  asleep (measured by compiling the link out) — known, not fixed.
 - [smoke:5 V handshake on sleeping halves] A half ASLEEP hears the probe:
   UART1 is armed as a light-sleep wake source (3 RX edges,
   `uart_set_wakeup_threshold` + `esp_sleep_enable_uart_wakeup`, ESP32-S3

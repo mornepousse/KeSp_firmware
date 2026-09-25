@@ -236,10 +236,21 @@ Open items (2026-09-19):
   gesture→HID mapping, accel config — exists and is tested
   (`periph/trackpad/`); missing: the I2C+RDY bring-up on the LEFT side and
   the hookup to the mouse relay;
-- the **multimeter measurement** of each half (awake-idle expected
-  ~1-3 mA after DFS + tickless, asleep ~250 µA, while typing) — all the
-  battery-life work from the 16th to the 19th is proven by the logs, not
-  yet measured;
+- ~~the multimeter measurement~~ — **done on the left half, 2026-09-25**
+  (ammeter in series with the battery), and it overturned the numbers this
+  file quoted: the "~244 µA asleep" was the DATASHEET line (table 5-10: VDD_SPI
+  powered down, all GPIOs high-impedance), never ours. Measured: awake idle
+  **16-24 mA**, key held **35.9 mA**, light sleep **7.5 mA** (v4.2.0-beta.2),
+  deep sleep **0.2 mA** (the board's floor). Found by bisection: **2.5 mA** =
+  the N16R8's in-package PSRAM, unused but powered, CS floating in sleep
+  ("large current leakage", IDF Kconfig) → fixed by
+  `CONFIG_ESP_SLEEP_POWER_DOWN_FLASH=y` (both halves' defaults, 7.5 → 5.0 mA);
+  **3.4 mA** = the TRRS link's UART1 on `UART_SCLK_XTAL` keeping the main
+  crystal alive (5.0 → 1.6 mA with the link compiled out) — NOT fixed, it is a
+  design decision (the UART wake source of 0cd026ed needs that clock);
+  **1.6 mA** left, not USB, not the gauge ADC, not the console, not pin
+  isolation. A working day at ~20 mA is the 0.2 V/day the gauge shows: the
+  day is the awake window (1 kHz scan, no tickless), the night was the leaks;
 - ~~the light first key lost after a long pause~~ — **solved 2026-09-21**:
   not the switch. After a light sleep the esp_timer task replays every
   missed period of a periodic timer (battery gauge 10 s, LVGL tick 50 ms)

@@ -88,3 +88,14 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 # il reste de la place pour dormir entre deux frappes. Broches radio et ecran
 # ont leur configuration de sommeil (CE bas, CSN haut, CS/SCK/MOSI bas).
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+
+# Power down VDD_SPI during light sleep (measured 2026-09-25, ammeter on the
+# battery). The N16R8 carries 8 MB of octal PSRAM in the package that this
+# firmware never uses (CONFIG_SPIRAM off) — but VDD_SPI stays powered in light
+# sleep, all IOs are isolated, the PSRAM CS floats low and the chip believes it
+# is selected: "a large current leakage" (IDF Kconfig help of
+# ESP_SLEEP_PSRAM_LEAKAGE_WORKAROUND, which `depends on SPIRAM` and so cannot
+# be selected here). Cutting VDD_SPI is the documented way out when !SPIRAM.
+# Left half: 7.5 mA -> 5.0 mA in light sleep (0.2 mA in deep sleep, the board's
+# floor). Cost: flash re-powered on every wake, ~1-3 ms more before the capture.
+CONFIG_ESP_SLEEP_POWER_DOWN_FLASH=y

@@ -34,6 +34,13 @@ in the PR/release.
 - [ ] Pressing a BT key (switch/pair) while HOME is displayed → no crash, the screen rebuilds
 
 ## Dongle
+- [ ] **Sleep current**: ammeter in series with the battery, no USB, no TRRS,
+      keyboard untouched ≥ 20 s (console: one `light sleep` line, then
+      silence). Reference 2026-09-25, left half: 5.0 mA with the VDD_SPI
+      power-down (7.5 mA without — the in-package PSRAM leak is back if this
+      number returns), 1.6 mA with the TRRS link compiled out, 0.2 mA in deep
+      sleep. After flashing, also type one key after a 20 s pause: the flash
+      power-down lengthens the wake (the first-key-lost path).
 - [ ] **5 V handshake on sleeping halves**: leave BOTH halves untouched for
       ≥ 30 s (no USB, nothing typed — they light-sleep), then plug the USB-C
       into one half and press ONE key on that half only. Expected: the bolt
