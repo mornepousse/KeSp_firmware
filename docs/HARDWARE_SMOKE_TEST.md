@@ -38,7 +38,11 @@ in the PR/release.
       keyboard untouched ≥ 20 s (console: one `light sleep` line, then
       silence). Reference 2026-09-25, left half: 7.5 mA before any fix, 5.0
       mA with the VDD_SPI power-down (the in-package PSRAM leak), 1.75 mA with
-      the link's UART released during sleep (aa5a8170), 0.2 mA in deep sleep. If
+      the link's UART released during sleep (aa5a8170), **0.67 mA** with the
+      unconditional USB withdrawal, 0.2 mA in deep sleep. Measure RIGHT AFTER
+      A RESET (no USB since boot): that is the case the USB fix is about —
+      after a USB session the old firmware also read 0.67 mA, by accident.
+      Then plug the USB-C: it must enumerate and type. If
       ~5 mA comes back, the UART is not being released (look for "not
       released in time" in the console). After flashing, also type one key after a 20 s pause: the flash
       power-down lengthens the wake (the first-key-lost path).

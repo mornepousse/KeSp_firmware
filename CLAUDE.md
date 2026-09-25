@@ -249,10 +249,14 @@ Open items (2026-09-19):
   crystal alive (5.0 → 1.6 mA with the link compiled out) → the link task now
   deletes the driver while the half sleeps and reinstalls it on wake; the
   UART wake source of 0cd026ed is gone with it (the 5 V needs a key on BOTH
-  halves — Mae's call): **1.75 mA** asleep measured. Light sleep moved **15 s → 5 s** the same day, made
+  halves — Mae's call): **1.75 mA** asleep measured; then **0.67 mA** once
+  `tud_disconnect()` runs before EVERY light sleep — it was gated by
+  `tud_mounted()`, false after a reset (the controller stayed attached: +1.1
+  mA) and stale-true after a hot unplug (hence 0.67 mA only after a USB
+  session: reproduced 3×, the reset bringing 1.76 back). Light sleep moved **15 s → 5 s** the same day, made
   safe by `VEILLE_VETO_TOUCHE` (no sleep while a key is held);
-  **1.6 mA** left, not USB, not the gauge ADC, not the console, not pin
-  isolation. A working day at ~20 mA is the 0.2 V/day the gauge shows: the
+  **0.67 mA** now, against a 0.2 mA deep-sleep floor; the gauge ADC, the
+  console and pin isolation were ruled out. A working day at ~20 mA is the 0.2 V/day the gauge shows: the
   day is the awake window (1 kHz scan, no tickless), the night was the leaks;
 - ~~the light first key lost after a long pause~~ — **solved 2026-09-21**:
   not the switch. After a light sleep the esp_timer task replays every

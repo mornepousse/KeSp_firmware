@@ -106,8 +106,16 @@ void veille_legere_entrer(void)
      * tud_disconnect() releases the D+ pull-up cleanly: the host sees a
      * device withdrawing, not one disappearing. tud_connect() on wake-up
      * re-enumerates in ~1 s. A sleeping device has no business on the bus. */
-    bool etait_connecte = tud_mounted();
-    if (etait_connecte) tud_disconnect();
+    /* ALWAYS, not only if tud_mounted() (2026-09-25). The condition made the
+     * sleep current depend on history: after a reset with no host ever,
+     * tud_mounted() is false, the controller stayed attached through the whole
+     * sleep — 1.76 mA on the left; after a USB session then a hot unplug,
+     * tud_mounted() stays stuck true on the S3 (see the routing notes), the
+     * disconnect ran — 0.67 mA. Reproduced three times by Mae (ammeter on the
+     * battery), the reset bringing 1.76 back each time. With a host really
+     * present the half does not sleep (VEILLE_VETO_USB), so an unconditional
+     * disconnect/connect costs nothing. */
+    tud_disconnect();
 
     /* DEEP sleep used to be unreachable: inactivity is only evaluated
      * while awake, and the board stays stuck here until a key — which resets
@@ -168,7 +176,7 @@ void veille_legere_entrer(void)
              (unsigned long)s_sommeils, (unsigned long)(s_dormi_ms / 1000),
              (unsigned long)(esp_timer_get_time() / 1000000));
 
-    if (etait_connecte) tud_connect();
+    tud_connect();                /* back on the bus: a cable plugged later enumerates */
 
     /* The order is the heart of the fix, each step has its reason:
      *

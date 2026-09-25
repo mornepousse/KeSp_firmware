@@ -313,6 +313,14 @@ means a test, or a line.
   (`ESP_SLEEP_PSRAM_LEAKAGE_WORKAROUND`) depends on SPIRAM and cannot be
   selected here. The TRRS UART1 on the main crystal cost another 3.4 mA
   asleep; it is released during sleep since 2026-09-25: 1.75 mA measured.
+- [smoke:Sleep current] The half withdraws from the USB bus before EVERY
+  light sleep (`tud_disconnect()`, `tud_connect()` on wake), whatever
+  `tud_mounted()` says. Gated on it, the sleep current depended on history:
+  1.76 mA after a reset with no host ever seen (controller left attached),
+  0.67 mA after a USB session and a hot unplug (`tud_mounted()` stays stuck
+  true on the S3, so the disconnect happened to run) — found and reproduced
+  3× by Mae with an ammeter on 2026-09-25. With a host present the half does
+  not sleep (`VEILLE_VETO_USB`), so the unconditional pair costs nothing.
 - [smoke:5 V handshake on sleeping halves] The 5 V needs BOTH halves awake:
   a sleeping half does not hear the probe, by design since 2026-09-25. The
   link's UART1 runs on the main crystal (the only clock that keeps its baud
