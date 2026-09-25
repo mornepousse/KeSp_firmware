@@ -312,7 +312,7 @@ means a test, or a line.
   all night (7.5 → 5.0 mA, ammeter, 2026-09-25). The IDF's own guard
   (`ESP_SLEEP_PSRAM_LEAKAGE_WORKAROUND`) depends on SPIRAM and cannot be
   selected here. The TRRS UART1 on the main crystal cost another 3.4 mA
-  asleep; it is released during sleep since 2026-09-25 (target ~1.6 mA).
+  asleep; it is released during sleep since 2026-09-25: 1.75 mA measured.
 - [smoke:5 V handshake on sleeping halves] The 5 V needs BOTH halves awake:
   a sleeping half does not hear the probe, by design since 2026-09-25. The
   link's UART1 runs on the main crystal (the only clock that keeps its baud

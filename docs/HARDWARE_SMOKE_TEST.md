@@ -37,8 +37,8 @@ in the PR/release.
 - [ ] **Sleep current**: ammeter in series with the battery, no USB, no TRRS,
       keyboard untouched ≥ 20 s (console: one `light sleep` line, then
       silence). Reference 2026-09-25, left half: 7.5 mA before any fix, 5.0
-      mA with the VDD_SPI power-down (the in-package PSRAM leak), target ~1.6
-      mA with the link's UART released during sleep, 0.2 mA in deep sleep. If
+      mA with the VDD_SPI power-down (the in-package PSRAM leak), 1.75 mA with
+      the link's UART released during sleep (aa5a8170), 0.2 mA in deep sleep. If
       ~5 mA comes back, the UART is not being released (look for "not
       released in time" in the console). After flashing, also type one key after a 20 s pause: the flash
       power-down lengthens the wake (the first-key-lost path).

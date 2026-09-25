@@ -249,7 +249,7 @@ Open items (2026-09-19):
   crystal alive (5.0 → 1.6 mA with the link compiled out) → the link task now
   deletes the driver while the half sleeps and reinstalls it on wake; the
   UART wake source of 0cd026ed is gone with it (the 5 V needs a key on BOTH
-  halves — Mae's call). Light sleep moved **15 s → 5 s** the same day, made
+  halves — Mae's call): **1.75 mA** asleep measured. Light sleep moved **15 s → 5 s** the same day, made
   safe by `VEILLE_VETO_TOUCHE` (no sleep while a key is held);
   **1.6 mA** left, not USB, not the gauge ADC, not the console, not pin
   isolation. A working day at ~20 mA is the 0.2 V/day the gauge shows: the
