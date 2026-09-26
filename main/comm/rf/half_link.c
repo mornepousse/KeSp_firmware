@@ -185,7 +185,7 @@ bool half_link_tx_init(void)
     ESP_LOGI(TAG, "TX ready: ch=0x%02X addr=KaSe.%02X", cfg.channel, cfg.addr_suffix);
 #if CONFIG_KASE_VEILLE && CONFIG_KASE_BATT_SENSE
     /* On wake: a STATUS right away, the voltage may have moved. */
-    static const veille_hook_t hook_status = { "status", NULL, half_link_apres_reveil };
+    static const veille_hook_t hook_status = { "status", NULL, half_link_apres_reveil, NULL };
     veille_hook_enregistrer(&hook_status);
 #endif
 

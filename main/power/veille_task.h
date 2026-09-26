@@ -22,6 +22,10 @@ typedef struct {
     const char *nom;              /* "radio", "ecran", "jauge" — for the log */
     void (*dormir)(void);         /* called BEFORE sleep, in registration order */
     void (*reveiller)(void);      /* called AFTER wake, in REVERSE order */
+    /* Optional, called before ANY dormir, while every module is still awake:
+     * the radio's dormir takes the SPI bus lock and keeps it through the
+     * sleep, so the screen draws its last image (zZ) here (2026-09-25). */
+    void (*avant)(void);
 } veille_hook_t;
 #define VEILLE_HOOKS_MAX 6   /* left: radio, relay, gauge, screen, link (2026-09-25) + 1 spare */
 

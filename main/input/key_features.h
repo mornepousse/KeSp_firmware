@@ -16,6 +16,9 @@ uint8_t osm_consume(void);
 /* Check if any OSM is armed */
 bool osm_is_active(void);
 
+/* Armed mods, NOT consumed (status screen) */
+uint8_t osm_peek(void);
+
 /* ── One-Shot Layer ──────────────────────────────────────────────── */
 
 /* Arm a one-shot layer (next keypress uses this layer, then returns) */

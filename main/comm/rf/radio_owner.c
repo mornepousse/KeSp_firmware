@@ -60,7 +60,7 @@ bool radio_owner_init(const rf_radio_cfg_t *cible, const radio_hw_t *hw)
     if (s_hw.init_tx(&s_radio, cible) != ESP_OK || !s_radio.present) return false;
     s_cible = *cible; s_mode = RADIO_PTX;
 #if !defined(TEST_HOST) && CONFIG_KASE_VEILLE
-    static const veille_hook_t hook = { "radio", radio_sleep, radio_wake };
+    static const veille_hook_t hook = { "radio", radio_sleep, radio_wake, NULL };
     veille_hook_enregistrer(&hook);
 #endif
     return true;

@@ -80,7 +80,7 @@ void batt_sense_init(void)
 {
 #if CONFIG_KASE_VEILLE
     /* One measurement on wake: the timer was frozen during sleep. */
-    static const veille_hook_t hook = { "gauge", NULL, batt_sense_sample_now };
+    static const veille_hook_t hook = { "gauge", NULL, batt_sense_sample_now, NULL };
     veille_hook_enregistrer(&hook);
 #endif
     if (adc_oneshot_io_to_channel(BOARD_VBAT_SENSE_GPIO, &s_unit_id, &s_chan) != ESP_OK) {

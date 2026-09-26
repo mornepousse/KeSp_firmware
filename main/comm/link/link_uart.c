@@ -312,7 +312,7 @@ void link_uart_start(void)
     s_parked_sem = xSemaphoreCreateBinary();
     xTaskCreate(link_task, "link", 3072, NULL, 4, &s_task);
 #if CONFIG_KASE_VEILLE
-    static const veille_hook_t hook = { "link", link_sleep, link_wake };
+    static const veille_hook_t hook = { "link", link_sleep, link_wake, NULL };
     veille_hook_enregistrer(&hook);
 #endif
     ESP_LOGI(TAG, "wired link ready, 5 V open");

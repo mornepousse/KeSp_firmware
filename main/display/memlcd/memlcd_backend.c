@@ -1,7 +1,10 @@
 /* display_backend_t backend of the Sharp memory-LCD — LVGL UI in 68x160 portrait:
- *   banner : route (RF/USB) + ▲ if the dongle ACKs, gauge + local voltage
- *   center : LEFT  = layer name in 4 lines (memlcd_couper_nom) + "Ln"
+ *   banner : route (USB / radio symbol) + ▲ if the dongle ACKs, gauge + local voltage
+ *   center : LEFT  = layer number in Montserrat 48, underlined when locked,
+ *                    name on 2 lines (memlcd_couper_nom), 2 status lines
+ *                    (memlcd_ligne_etat: Caps Lock/Word, armed one-shots)
  *            RIGHT = 60 px centered Niphargus logo
+ *   zZ     : top right of the center, on the last image before sleep only
  * (No "other half's battery": the user does not want it, and the
  * ACK channel that would have carried it was removed along with it — 2026-09-14.)
  * LVGL renders in 16 bits into a full-screen buffer (full_refresh); the flush
@@ -37,6 +40,9 @@
 #endif
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 #include "keyboard_config.h"   /* current_layout, default_layout_names */
+#include "matrix_scan.h"       /* last_layer */
+#include "key_features.h"      /* caps_word_is_active, osm_peek, osl_get_layer */
+#include "usb_hid.h"           /* hid_led_state */
 #endif
 #if CONFIG_KASE_KBD_WIRELESS
 #include "usb_presence.h"      /* kbd_active_route */
@@ -53,8 +59,13 @@
 
 static const char *TAG = "memlcd_be";
 LV_FONT_DECLARE(lv_font_montserrat_14);
+LV_FONT_DECLARE(lv_font_montserrat_24);
 LV_FONT_DECLARE(lv_font_unscii_8);
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
+extern const lv_img_dsc_t img_niphargus_34;
+#else
 extern const lv_img_dsc_t img_niphargus_60;
+#endif
 
 /* ── State ────────────────────────────────────────────────────────── */
 static bool s_attached;                 /* panel on the bus */
@@ -81,42 +92,56 @@ static memlcd_model_t s_shown;          /* last drawn model */
 _Static_assert(STATUS_DISP_PERIODE_MS == 1000u, "memory-LCD halves: status display at 1 s");
 _Static_assert(LVGL_REFR_MS == 1000u, "memory-LCD halves: LVGL refresh at 1 s");
 
-static lv_obj_t *s_l_route, *s_bar, *s_l_volt, *s_img_lien, *s_l_nom[MEMLCD_NOM_LIGNES], *s_l_couche;
+static lv_obj_t *s_l_route, *s_l_dongle, *s_bar, *s_l_volt, *s_img_lien, *s_l_zz;
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
+static lv_obj_t *s_l_nom[MEMLCD_NOM_LIGNES], *s_l_etat[2];
+#endif
 
-/* TRRS link pictogram, 8x8, one arrow each way: the cable carries the 5 V from
- * one half to the other. LV_IMG_CF_ALPHA_1BIT has NO palette and a stride of
- * ceil(w/8) = 1 byte per row (lv_img_decoder_built_in_line_alpha), bit 7 is
- * the leftmost pixel; the ink colour comes from img_recolor. Replaced the
- * LV_SYMBOL_CHARGE bolt of 2026-09-23, which sat on top of the " +" charge
- * marker — shown precisely while the link charges the half (Mae: "not a good
- * logo"). */
-static const uint8_t s_lien_map[8] = {
-    0x04,   /* .....#..   tip of the upper arrow  */
-    0xFE,   /* #######.   upper arrow, pointing right */
-    0x04,   /* .....#.. */
-    0x00,
-    0x20,   /* ..#.....   tip of the lower arrow  */
-    0x7F,   /* .#######   lower arrow, pointing left */
-    0x20,   /* ..#..... */
-    0x00,
+/* TRRS link pictogram, 16x12, one arrow each way: the cable carries the 5 V
+ * from one half to the other. LV_IMG_CF_ALPHA_1BIT has NO palette and a
+ * stride of ceil(w/8) = 2 bytes per row (lv_img_decoder_built_in_line_alpha),
+ * bit 7 of the first byte is the leftmost pixel; the ink colour comes from
+ * img_recolor. 8x8 until 2026-09-26 (Mae: icons too small). */
+static const uint8_t s_lien_map[24] = {
+    0x00, 0x10,   /* ...........#....   upper arrow, pointing right */
+    0x00, 0x18,   /* ...........##... */
+    0xFF, 0xFC,   /* ##############.. */
+    0xFF, 0xFC,   /* ##############.. */
+    0x00, 0x18,   /* ...........##... */
+    0x00, 0x10,   /* ...........#.... */
+    0x08, 0x00,   /* ....#...........   lower arrow, pointing left */
+    0x18, 0x00,   /* ...##........... */
+    0x3F, 0xFF,   /* ..############## */
+    0x3F, 0xFF,   /* ..############## */
+    0x18, 0x00,   /* ...##........... */
+    0x08, 0x00,   /* ....#........... */
 };
 static const lv_img_dsc_t s_lien_img = {
     .header.cf = LV_IMG_CF_ALPHA_1BIT, .header.always_zero = 0,
-    .header.w = 8, .header.h = 8,
+    .header.w = 16, .header.h = 12,
     .data_size = sizeof s_lien_map, .data = s_lien_map,
 };
 
-#define Y_BANDEAU_FIN 31
-#define Y_CENTRE      (Y_BANDEAU_FIN + 1)
-#define H_CENTRE      (MEMLCD_H - Y_CENTRE)
+/* Layout (2026-09-26, Mae's pick "icons in a column on the right"):
+ *   x 0..34  : top-left zone — logo 34 px (left), zZ under it
+ *   x 35     : separator
+ *   x 36..67 : icon column, 32 px — route (Montserrat 24 symbol), ▲ dongle
+ *              seen, horizontal battery, voltage, ⇆ link
+ *   y > Y_SEP: full width — layer name (2 lines of 6), lock underline, the
+ *              two status lines (left); the 60 px logo (right)
+ * The layer name does not fit the 35 px zone: "MAIN" is 39 px in Montserrat 14. */
+#define COL_X   36
+#define COL_W   (MEMLCD_W - COL_X)
+#define Y_SEP   92
 
-static void trait(lv_obj_t *parent, lv_coord_t y)
+static lv_obj_t *rect(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_coord_t w, lv_coord_t h)
 {
     lv_obj_t *o = lv_obj_create(parent);
     lv_obj_remove_style_all(o);
-    lv_obj_set_pos(o, 0, y); lv_obj_set_size(o, MEMLCD_W, 1);
+    lv_obj_set_pos(o, x, y); lv_obj_set_size(o, w, h);
     lv_obj_set_style_bg_color(o, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    return o;
 }
 
 static lv_obj_t *texte(lv_obj_t *parent, const lv_font_t *f, lv_coord_t x, lv_coord_t y)
@@ -128,6 +153,24 @@ static lv_obj_t *texte(lv_obj_t *parent, const lv_font_t *f, lv_coord_t x, lv_co
     lv_label_set_text(l, "");
     return l;
 }
+/* A label centred in a box of width w starting at x, clipped rather than wrapped. */
+static lv_obj_t *texte_centre(lv_obj_t *parent, const lv_font_t *f, lv_coord_t x, lv_coord_t y, lv_coord_t w)
+{
+    lv_obj_t *l = texte(parent, f, x, y);
+    lv_obj_set_width(l, w);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    return l;
+}
+static lv_obj_t *image(lv_obj_t *parent, const lv_img_dsc_t *src, lv_coord_t x, lv_coord_t y)
+{
+    lv_obj_t *img = lv_img_create(parent);
+    lv_img_set_src(img, src);
+    lv_obj_set_style_img_recolor(img, lv_color_black(), 0);
+    lv_obj_set_style_img_recolor_opa(img, LV_OPA_COVER, 0);
+    lv_obj_set_pos(img, x, y);
+    return img;
+}
 
 static void construire(void)
 {
@@ -138,53 +181,50 @@ static void construire(void)
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Banner: route + ▲ (Montserrat 14 carries the symbols), gauge on the right,
-     * voltage below in UNSCII 8. */
-    s_l_route = texte(scr, &lv_font_montserrat_14, 3, 2);
-    s_l_volt  = texte(scr, &lv_font_unscii_8, 3, 20);
-    /* TRRS link, second row, in place of the charge marker: "4.1V " is five
-     * UNSCII 8 characters (8 px each) from x = 3, so the pictogram starts at
-     * 43 and ends at 50, clear of the gauge (x = 54). It is the ONLY witness
-     * of the handshake away from the console. Hidden unless the 5 V is closed. */
-    s_img_lien = lv_img_create(scr);
-    lv_img_set_src(s_img_lien, &s_lien_img);
-    lv_obj_set_style_img_recolor(s_img_lien, lv_color_black(), 0);
-    lv_obj_set_style_img_recolor_opa(s_img_lien, LV_OPA_COVER, 0);
-    lv_obj_set_pos(s_img_lien, 3 + 5 * 8, 20);
-    lv_obj_add_flag(s_img_lien, LV_OBJ_FLAG_HIDDEN);
+    /* Icon column */
+    s_l_route  = texte_centre(scr, &lv_font_montserrat_24, COL_X, 2, COL_W);
+    s_l_dongle = texte_centre(scr, &lv_font_montserrat_14, COL_X, 28, COL_W);
+    /* Horizontal battery: 24x12 body + 3x6 nub, filled from the left. */
     s_bar = lv_bar_create(scr);
     lv_obj_remove_style_all(s_bar);
-    lv_obj_set_size(s_bar, 10, 24); lv_obj_set_pos(s_bar, MEMLCD_W - 14, 3);
+    lv_obj_set_size(s_bar, 24, 12); lv_obj_set_pos(s_bar, COL_X + 2, 46);
     lv_bar_set_range(s_bar, 0, 100);
     lv_obj_set_style_border_color(s_bar, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_border_width(s_bar, 1, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_bar, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(s_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_bar, 2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_bar, lv_color_black(), LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(s_bar, LV_OPA_COVER, LV_PART_INDICATOR);
-    trait(scr, Y_BANDEAU_FIN);
+    (void)rect(scr, COL_X + 26, 49, 3, 6);
+    s_l_volt   = texte_centre(scr, &lv_font_unscii_8, COL_X, 62, COL_W);
+    /* TRRS link: the ONLY witness of the handshake away from the console.
+     * Hidden unless the 5 V is closed. */
+    s_img_lien = image(scr, &s_lien_img, COL_X + (COL_W - 16) / 2, 75);
+    lv_obj_add_flag(s_img_lien, LV_OBJ_FLAG_HIDDEN);
+    (void)rect(scr, COL_X - 1, 0, 1, Y_SEP);                 /* column separator */
+    (void)rect(scr, 0, Y_SEP, MEMLCD_W, 1);                  /* section separator */
 
-    /* Center: the full height below the banner */
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-    /* 3 lines of 18 px + "Ln" 14 px below, the block centered vertically */
-    const lv_coord_t bloc = MEMLCD_NOM_LIGNES * 18 + 14 + 8;
-    const lv_coord_t y0 = Y_CENTRE + (H_CENTRE - bloc) / 2;
-    for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) {
-        s_l_nom[i] = texte(scr, &lv_font_montserrat_14, 0, y0 + i * 18);
-        lv_obj_set_width(s_l_nom[i], MEMLCD_W);
-        lv_obj_set_style_text_align(s_l_nom[i], LV_TEXT_ALIGN_CENTER, 0);
+    (void)image(scr, &img_niphargus_34, 0, 4);
+    /* Layer name (the stable layer, memlcd_couche_affichee), 2 lines of 18 px */
+    for (int i = 0; i < MEMLCD_NOM_LIGNES; i++)
+        s_l_nom[i] = texte_centre(scr, &lv_font_montserrat_14, 0, Y_SEP + 4 + i * 18, MEMLCD_W);
+    /* Status lines (memlcd_ligne_etat): "CAPS CW" is 69 px in Montserrat 14,
+     * one letter space less brings it inside the 68. */
+    for (int i = 0; i < 2; i++) {
+        s_l_etat[i] = texte_centre(scr, &lv_font_montserrat_14, 0, Y_SEP + 44 + i * 16, MEMLCD_W);
+        lv_obj_set_style_text_letter_space(s_l_etat[i], -1, 0);
     }
-    s_l_couche = texte(scr, &lv_font_unscii_8, 0, y0 + MEMLCD_NOM_LIGNES * 18 + 8);
-    lv_obj_set_width(s_l_couche, MEMLCD_W);
-    lv_obj_set_style_text_align(s_l_couche, LV_TEXT_ALIGN_CENTER, 0);
 #else
-    lv_obj_t *img = lv_img_create(scr);
-    lv_img_set_src(img, &img_niphargus_60);
-    lv_obj_set_style_img_recolor(img, lv_color_black(), 0);
-    lv_obj_set_style_img_recolor_opa(img, LV_OPA_COVER, 0);
-    lv_obj_set_pos(img, (MEMLCD_W - 60) / 2, Y_CENTRE + (H_CENTRE - 60) / 2);   /* centered */
+    (void)image(scr, &img_niphargus_60, (MEMLCD_W - 60) / 2, Y_SEP + 1 + (MEMLCD_H - Y_SEP - 1 - 60) / 2);
 #endif
+    /* zZ: the image a sleeping half leaves behind is frozen (no flush, no
+     * VCOM); this says so, rather than a stale ⇆ or route pretending to be
+     * live (2026-09-25). Top-left zone, under the logo's place. */
+    s_l_zz = texte_centre(scr, &lv_font_montserrat_24, 0, 50, COL_X - 1);
+    lv_label_set_text(s_l_zz, "zZ");
+    lv_obj_add_flag(s_l_zz, LV_OBJ_FLAG_HIDDEN);
     s_built = true;
 }
 
@@ -208,27 +248,41 @@ static void lire_modele(memlcd_model_t *m)
     m->route_rf  = (kbd_active_route() == KBD_OUT_RF);
     m->dongle_vu = kbd_relay_dongle_vu();
 #endif
-    m->couche    = current_layout;
-    strncpy(m->nom, default_layout_names[current_layout], sizeof m->nom - 1);
+    m->couche    = memlcd_couche_affichee(current_layout, last_layer);
+    if (m->couche >= LAYERS) m->couche = 0;
+    strncpy(m->nom, default_layout_names[m->couche], sizeof m->nom - 1);
+    m->caps_word   = caps_word_is_active();
+    m->osm         = osm_peek();
+    { int8_t osl = osl_get_layer(); m->osl = osl < 0 ? MEMLCD_OSL_AUCUNE : (uint8_t)osl; }
+    /* Caps Lock is the HOST's LED: known over USB only. In RF the dongle gets
+     * the LED report and nothing brings it back, and the last USB value would
+     * be stale — shown on the USB route only. */
+    m->caps_lock   = !m->route_rf && (hid_led_state & HID_LED_CAPS_LOCK);
 #else
     m->is_left   = 0;
     m->route_rf  = 1;
+    m->osl       = MEMLCD_OSL_AUCUNE;
 #if CONFIG_KASE_HALF_LINK_TX
     m->dongle_vu = half_link_tx_dongle_vu();
 #endif
 #endif
 }
 
+/* Four UNSCII 8 characters = the 32 px column: "4.1V", or the charge marker
+ * in place of the V — "4.1+" charging, "4.1#" charged. */
 static void tension(char *out, size_t n, uint8_t dv, uint8_t chg)
 {
     if (dv == 0xFF) snprintf(out, n, "?");
-    else snprintf(out, n, "%u.%uV%s", dv / 10, dv % 10, chg == 2 ? " #" : (chg == 1 ? " +" : ""));
+    else snprintf(out, n, "%u.%u%s", dv / 10, dv % 10, chg == 2 ? "#" : (chg == 1 ? "+" : "V"));
 }
 
 static void dessiner(const memlcd_model_t *m)
 {
     char buf[24];
-    lv_label_set_text_fmt(s_l_route, "%s%s", m->route_rf ? "RF" : "USB", m->dongle_vu ? " " LV_SYMBOL_UP : "");
+    lv_label_set_text(s_l_route, m->route_rf ? LV_SYMBOL_WIFI : LV_SYMBOL_USB);
+    lv_label_set_text(s_l_dongle, m->dongle_vu ? LV_SYMBOL_UP : "");
+    if (m->veille) lv_obj_clear_flag(s_l_zz, LV_OBJ_FLAG_HIDDEN);
+    else           lv_obj_add_flag(s_l_zz, LV_OBJ_FLAG_HIDDEN);
     /* Link up: the pictogram takes the charge marker's place — the cable
      * already says the half is being fed. */
     tension(buf, sizeof buf, m->batt_local_dv, m->lien_5v ? 0 : m->batt_local_chg);
@@ -247,7 +301,10 @@ static void dessiner(const memlcd_model_t *m)
     char lignes[MEMLCD_NOM_LIGNES][MEMLCD_NOM_BUF];
     memlcd_couper_nom(m->nom, lignes);
     for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) lv_label_set_text(s_l_nom[i], lignes[i]);
-    lv_label_set_text_fmt(s_l_couche, "L%u", (unsigned)m->couche);
+    char e1[MEMLCD_ETAT_BUF], e2[MEMLCD_ETAT_BUF];
+    memlcd_ligne_etat(m, e1, e2);
+    lv_label_set_text(s_l_etat[0], e1);
+    lv_label_set_text(s_l_etat[1], e2);
 #endif
 }
 
@@ -311,6 +368,7 @@ static bool try_attach(void)
 /* ── Vtable ───────────────────────────────────────────────────────── */
 static void memlcd_sleep(void);
 static void memlcd_wake(void);
+static void memlcd_before_sleep(void);
 static bool memlcd_init(void)
 {
     if (!lvgl_pret()) return false;
@@ -318,7 +376,7 @@ static bool memlcd_init(void)
 #if CONFIG_KASE_VEILLE
     /* Sleep (B7): frozen image and VCOM suspended while asleep; on wake,
      * flags only — the screen task pushes the image again on its tick. */
-    static const veille_hook_t hook = { "screen", memlcd_sleep, memlcd_wake };
+    static const veille_hook_t hook = { "screen", memlcd_sleep, memlcd_wake, memlcd_before_sleep };
     veille_hook_enregistrer(&hook);
 #endif
     return true;               /* never "KO": the attachment happens on the first update() */
@@ -346,8 +404,13 @@ static void memlcd_update(void)
     if (!s_baff_init) { memlcd_batt_aff_init(&s_baff); s_baff_init = true; }
     m.batt_local_dv = memlcd_batt_aff_step(&s_baff, m.batt_local_dv,
                                            (uint32_t)(esp_timer_get_time() / 1000), 30000);
+    /* Rendered NOW (lv_refr_now → flush → panel), on this task: LVGL's own
+     * refresh timer runs at 1 s with a 1 s tick (cadence.h) and could show a
+     * change up to 2 s late — a layer tapped and released looked stuck
+     * (Mae, 2026-09-26). The reactivity is now the caller's cadence: 100 ms
+     * on USB, 1 s on battery (status_disp_periode_ms). */
     if (memlcd_model_diff(&s_shown, &m)) {
-        if (lvgl_port_lock(50)) { s_shown = m; dessiner(&m); lvgl_port_unlock(); }
+        if (lvgl_port_lock(50)) { s_shown = m; dessiner(&m); lv_refr_now(s_disp); lvgl_port_unlock(); }
     }
     if (s_dirty && s_attached) {
         static uint16_t s_refus;
@@ -374,6 +437,24 @@ static void memlcd_update(void)
  * 2026-09-21). Stopped for the sleep, restarted at wake: LVGL's own timers
  * (refresh) do not replay. */
 static void memlcd_sleep(void) { s_sleeping = true; lvgl_port_stop(); }   /* frozen image, no more VCOM, no tick */
+/* Last image before sleep, drawn NOW (lv_refr_now → flush → panel) while the
+ * SPI bus is still free: the radio's dormir takes the bus lock for the whole
+ * sleep. The model is re-read, so a ⇆ or route that changed since the last
+ * 1 s tick is up to date, and zZ says the image is frozen. On wake the
+ * model re-read has veille = 0: the diff redraws without zZ. Coming from
+ * light sleep into deep sleep the screen is already asleep: nothing to do. */
+static void memlcd_before_sleep(void)
+{
+    if (!s_disp || s_sleeping || !s_built || !s_attached) return;
+    if (!lvgl_port_lock(100)) return;
+    memlcd_model_t m; lire_modele(&m);
+    m.batt_local_dv = s_shown.batt_local_dv;   /* keep the stabilized voltage */
+    m.veille = 1;
+    s_shown = m;
+    dessiner(&m);
+    lv_refr_now(s_disp);
+    lvgl_port_unlock();
+}
 static void memlcd_wake(void)
 {
     lvgl_port_resume();

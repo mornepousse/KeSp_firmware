@@ -27,7 +27,11 @@ static void test_osm_multi_mod(void) {
     reset_osm();
     osm_arm(MOD_LCTL);
     osm_arm(MOD_LSFT);
+    /* The screen reads the armed mods without consuming them. */
+    TEST_ASSERT_EQ(osm_peek(), (uint8_t)(MOD_LCTL | MOD_LSFT), "peek sees both mods");
+    TEST_ASSERT_EQ(osm_peek(), (uint8_t)(MOD_LCTL | MOD_LSFT), "peek does not consume");
     TEST_ASSERT_EQ(osm_consume(), (uint8_t)(MOD_LCTL | MOD_LSFT), "OSM multi-mod");
+    TEST_ASSERT_EQ(osm_peek(), 0, "nothing left after consume");
 }
 
 /* ── OSL ─────────────────────────────────────────────────────────── */

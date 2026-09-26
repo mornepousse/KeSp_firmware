@@ -68,13 +68,15 @@ static inline uint8_t memlcd_batt_aff_step(memlcd_batt_aff_t *b, uint8_t dv, uin
     return b->aff;
 }
 
-/* Layer name on 68 px in Montserrat 14: 4 characters per line, 3 lines
- * at most, and "…" on the last one if the name exceeds 12 characters.
- * The user preferred readable lines over text rotated 90°.
- * MEMLCD_NOM_BUF holds 4 characters + the UTF-8 ellipsis (3 bytes) + NUL. */
-#define MEMLCD_NOM_COLS   4
-#define MEMLCD_NOM_LIGNES 3
-#define MEMLCD_NOM_BUF    (MEMLCD_NOM_COLS + 4)
+/* Layer name, full width under the icon column (2026-09-26): Montserrat 14
+ * on 68 px = 6 characters per line, 2 lines. A line is cut at the last space
+ * that fits (skipped), else hard at 6; the last line ends in "…" when the
+ * name does not fit, never after a space. (4 x 3 until 2026-09-25, 4 x 2 for
+ * one day under the big layer number.) MEMLCD_NOM_BUF holds 6 characters +
+ * NUL, or 5 + the UTF-8 ellipsis (3 bytes) + NUL. */
+#define MEMLCD_NOM_COLS   6
+#define MEMLCD_NOM_LIGNES 2
+#define MEMLCD_NOM_BUF    (MEMLCD_NOM_COLS + 3)
 
 static inline uint8_t memlcd_couper_nom(const char *nom,
                                         char lignes[MEMLCD_NOM_LIGNES][MEMLCD_NOM_BUF])
@@ -82,18 +84,45 @@ static inline uint8_t memlcd_couper_nom(const char *nom,
     for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) lignes[i][0] = '\0';
     size_t n = nom ? strlen(nom) : 0;
     if (n == 0) return 1;                       /* one empty line, never zero lines */
-    const size_t max = (size_t)MEMLCD_NOM_COLS * MEMLCD_NOM_LIGNES;
+    const char *p = nom;
     uint8_t nl = 0;
-    for (size_t off = 0; off < n && nl < MEMLCD_NOM_LIGNES; off += MEMLCD_NOM_COLS, nl++) {
-        size_t len = n - off;
-        if (len > MEMLCD_NOM_COLS) len = MEMLCD_NOM_COLS;
-        memcpy(lignes[nl], nom + off, len);
-        lignes[nl][len] = '\0';
+    while (*p && nl < MEMLCD_NOM_LIGNES) {
+        while (*p == ' ') p++;                  /* a line never starts with a space */
+        size_t reste = strlen(p);
+        if (reste == 0) break;
+        bool derniere = (nl == MEMLCD_NOM_LIGNES - 1);
+        if (reste <= MEMLCD_NOM_COLS) {         /* fits: take it all */
+            memcpy(lignes[nl], p, reste); lignes[nl][reste] = '\0';
+            nl++; break;
+        }
+        if (derniere) {                         /* overflow: 5 characters + … */
+            size_t len = MEMLCD_NOM_COLS - 1;
+            while (len > 0 && p[len - 1] == ' ') len--;
+            memcpy(lignes[nl], p, len);
+            memcpy(lignes[nl] + len, "\xE2\x80\xA6", 4);
+            nl++; break;
+        }
+        size_t len = MEMLCD_NOM_COLS;           /* cut at the last space that fits */
+        for (size_t i = MEMLCD_NOM_COLS; i > 0; i--) if (p[i] == ' ') { len = i; break; }
+        memcpy(lignes[nl], p, len); lignes[nl][len] = '\0';
+        p += len; nl++;
     }
-    if (n > max)                                /* truncated: 3 letters + … */
-        memcpy(lignes[MEMLCD_NOM_LIGNES - 1] + 3, "\xE2\x80\xA6", 4);
-    return nl;
+    return nl ? nl : 1;
 }
+
+/* The layer the screen shows: the STABLE one — base, TO or Layer Lock — which
+ * is the engine's last_layer; a held MO/LT/LM (current_layout differing) is
+ * not shown. In RF the left does not hear the right, so it cannot know a MO
+ * held on the right, and a 1 s status screen cannot follow a momentary layer
+ * anyway (Mae, 2026-09-26). */
+static inline uint8_t memlcd_couche_affichee(uint8_t courante, uint8_t derniere)
+{
+    (void)courante;
+    return derniere;
+}
+
+#define MEMLCD_OSL_AUCUNE 0xFF   /* no one-shot layer armed */
+#define MEMLCD_ETAT_BUF   9      /* 8 UNSCII 8 columns on 68 px + NUL */
 
 /* Everything the screen shows. is_left picks the central zone (layer or logo)
  * but is not DATA that changes: it does not enter the diff. */
@@ -104,8 +133,31 @@ typedef struct {
     uint8_t batt_niveau;               /* 0 normal, 1 low, 2 critical: thickened gauge border */
     uint8_t couche;
     char    nom[16];
+    uint8_t caps_lock;                 /* host LED — known over USB only */
+    uint8_t caps_word;
+    uint8_t osm;                       /* armed one-shot modifiers, HID mask */
+    uint8_t osl;                       /* armed one-shot layer, MEMLCD_OSL_AUCUNE if none */
+    uint8_t veille;                    /* last image before sleep: zZ */
     uint8_t is_left;
 } memlcd_model_t;
+
+/* The two status lines under the layer name (see test_ligne_etat). */
+static inline void memlcd_ligne_etat(const memlcd_model_t *m,
+                                     char l1[MEMLCD_ETAT_BUF], char l2[MEMLCD_ETAT_BUF])
+{
+    l1[0] = '\0';
+    if (m->caps_lock) strcat(l1, "CAPS");
+    if (m->caps_word) strcat(l1, l1[0] ? " CW" : "CW");
+    size_t n = 0;
+    uint8_t mods = (uint8_t)(m->osm | (m->osm >> 4));   /* right mods onto the left bits */
+    static const char lettres[4] = { 'C', 'S', 'A', 'G' };
+    for (int i = 0; i < 4; i++) if (mods & (1u << i)) l2[n++] = lettres[i];
+    l2[n] = '\0';
+    if (m->osl != MEMLCD_OSL_AUCUNE && m->osl < 10) {
+        if (n) l2[n++] = ' ';
+        l2[n++] = 'L'; l2[n++] = (char)('0' + m->osl); l2[n] = '\0';
+    }
+}
 
 /* Should it redraw? Each redraw is a transaction on the SPI bus that
  * the screen SHARES with the radio: it only happens if a displayed field changed. */
@@ -115,5 +167,8 @@ static inline bool memlcd_model_diff(const memlcd_model_t *a, const memlcd_model
            a->lien_5v != b->lien_5v ||
            a->batt_local_dv != b->batt_local_dv || a->batt_local_chg != b->batt_local_chg ||
            a->batt_niveau != b->batt_niveau ||
-           a->couche != b->couche || strcmp(a->nom, b->nom) != 0;
+           a->couche != b->couche || strcmp(a->nom, b->nom) != 0 ||
+           a->caps_lock != b->caps_lock ||
+           a->caps_word != b->caps_word || a->osm != b->osm || a->osl != b->osl ||
+           a->veille != b->veille;
 }

@@ -23,6 +23,7 @@
  *
  * Tested on host: test/test_cadence.c. */
 #include <stdint.h>
+#include <stdbool.h>
 
 #define CADENCE_TICK_MS          10u   /* CONFIG_FREERTOS_HZ = 100 */
 #define CADENCE_REPOS_MIN_MS     30u   /* 3 ticks: CONFIG_FREERTOS_IDLE_TIME_BEFORE_SLEEP */
@@ -81,6 +82,13 @@ CADENCE_REPOS_OK(CDC_ATTENTE_MAX_MS);
 #define STATUS_DISP_PERIODE_MS   100u
 #endif
 CADENCE_REPOS_OK(STATUS_DISP_PERIODE_MS);
+/* On USB the half is powered by the host: no rest cadence to protect, the
+ * screen follows the typing (Mae, 2026-09-26). */
+#define STATUS_DISP_USB_MS       100u
+static inline uint32_t status_disp_periode_ms(bool usb)
+{
+    return (usb && STATUS_DISP_USB_MS < STATUS_DISP_PERIODE_MS) ? STATUS_DISP_USB_MS : STATUS_DISP_PERIODE_MS;
+}
 
 /* LVGL (esp_lvgl_port, memory-LCD halves only): tick, refresh, max task sleep.
  * All at 1 s since 2026-09-25 (were 50 / 200 / 500 ms): the halves' screens

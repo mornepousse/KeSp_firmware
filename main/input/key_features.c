@@ -14,6 +14,7 @@ static uint8_t osm_pending_mods = 0;
 
 void osm_arm(uint8_t mod_mask)   { osm_pending_mods |= mod_mask; }
 bool osm_is_active(void)         { return osm_pending_mods != 0; }
+uint8_t osm_peek(void)           { return osm_pending_mods; }
 
 uint8_t osm_consume(void)
 {

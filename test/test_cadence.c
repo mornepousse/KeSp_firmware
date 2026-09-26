@@ -52,6 +52,16 @@ static void test_le_maintien_du_relais_tient_la_patience_du_dongle(void)
                 "one reaffirmation losable before the dongle releases the half");
 }
 
+/* On USB the halves draw no battery current (Mae, 2026-09-26: "no more
+ * consumption limit"): the status screen follows the typing at 100 ms. On
+ * battery it keeps its 1 s rest cadence. */
+static void test_ecran_rapide_en_usb(void)
+{
+    TEST_ASSERT_EQ(status_disp_periode_ms(true), STATUS_DISP_USB_MS, "USB: fast screen");
+    TEST_ASSERT(STATUS_DISP_USB_MS <= 100u, "USB: at most 100 ms");
+    TEST_ASSERT_EQ(status_disp_periode_ms(false), STATUS_DISP_PERIODE_MS, "battery: rest cadence");
+}
+
 void test_cadence(void)
 {
     TEST_SUITE("half cadences (tickless)");
@@ -59,4 +69,5 @@ void test_cadence(void)
     TEST_RUN(test_l_actif_reste_reactif);
     TEST_RUN(test_le_repos_du_relais_tient_la_patience_du_dongle);
     TEST_RUN(test_le_maintien_du_relais_tient_la_patience_du_dongle);
+    TEST_RUN(test_ecran_rapide_en_usb);
 }

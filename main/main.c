@@ -192,7 +192,12 @@ static void status_display_task(void *arg) {
     }
 
 
+#if CONFIG_KASE_DISPLAY_MEMLCD && CONFIG_KASE_KBD_WIRELESS
+    /* On USB the screen follows the typing (100 ms), on battery 1 s. */
+    vTaskDelay(pdMS_TO_TICKS(status_disp_periode_ms(usb_presence_cable())));   /* power/cadence.h */
+#else
     vTaskDelay(pdMS_TO_TICKS(STATUS_DISP_PERIODE_MS));   /* power/cadence.h */
+#endif
   }
 }
 #endif /* CONFIG_KASE_DEVICE_ROLE_KEYBOARD */

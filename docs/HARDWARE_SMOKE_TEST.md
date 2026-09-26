@@ -150,10 +150,15 @@ in the PR/release.
       pixel; typing during a refresh loses no keypress; in light sleep the
       image stays frozen and readable, the board still sleeps at 15 s; on
       wake the screen comes back to life
-- [ ] Memory-LCD screens UI: left → banner "RF ▲" (or "USB") + gauge +
-      voltage, layer name in lines of 4 (e.g. "DVO / RAK"), "L0"; right →
-      same banner, crisp centred Niphargus logo; changing layer (MO held)
-      updates the name in < 200 ms without losing a keypress; right served
+- [ ] Memory-LCD screens UI: icon column on the right (route symbol, ▲,
+      horizontal gauge, voltage, ⇆), logo top-left on the left half and at
+      the bottom on the right; the layer NAME full width (e.g. "LAYER / 2"),
+      the base or locked layer only — holding a MO does NOT change it; TO /
+      Layer Lock does; on USB a change shows within ~0.1 s, on battery
+      within ~1 s; Caps Word shows "CW", a one-shot Shift armed and left
+      alone shows "S", a one-shot layer "L3"; Caps Lock shows "CAPS" over
+      USB only; when a half goes to sleep its last image carries "zZ" and an
+      up-to-date ⇆ / route, and "zZ" goes away at the first key; right served
       at 1 s: no zone greys out in 2 min (VCOM ~1 Hz), the image comes back
       to life within the second following the first key after a sleep
 - [ ] First key after sleep: let the half sleep — 15 s for the short case

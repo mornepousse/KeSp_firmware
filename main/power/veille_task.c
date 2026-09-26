@@ -41,6 +41,7 @@ void veille_hook_enregistrer(const veille_hook_t *h)
 }
 void veille_hooks_dormir(void)
 {
+    for (int i = 0; i < s_n_hooks; i++) if (s_hooks[i].avant) s_hooks[i].avant();
     for (int i = 0; i < s_n_hooks; i++) if (s_hooks[i].dormir) s_hooks[i].dormir();
 }
 void veille_hooks_reveiller(void)
@@ -120,6 +121,8 @@ static void veille_task(void *arg)
 
 void veille_task_start(void)
 {
-    xTaskCreatePinnedToCore(veille_task, "sleep", 4096, NULL, 3, NULL, 0);
+    /* 6144, not 4096: the screen's `avant` hook renders its last LVGL frame
+     * (lv_refr_now) on THIS stack — the LVGL task itself runs on 6144. */
+    xTaskCreatePinnedToCore(veille_task, "sleep", 6144, NULL, 3, NULL, 0);
     ESP_LOGI(TAG, "sleep task: tick %u ms, %d hook(s)", (unsigned)VEILLE_TICK_MS, s_n_hooks);
 }

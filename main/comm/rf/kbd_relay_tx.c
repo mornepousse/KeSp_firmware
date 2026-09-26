@@ -528,7 +528,7 @@ void kbd_relay_init(void)
      * wake up in reverse order, so the radio is up before the timer starts
      * again (otherwise its first tick could land on a still-sleeping chip:
      * "radio unavailable" for nothing). */
-    static const veille_hook_t hook = { "relay", kbd_relay_sleep_prepare, kbd_relay_wake_restore };
+    static const veille_hook_t hook = { "relay", kbd_relay_sleep_prepare, kbd_relay_wake_restore, NULL };
     veille_hook_enregistrer(&hook);
 #endif
     /* The owner initializes the chip in PTX towards the dongle and registers

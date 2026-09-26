@@ -25,19 +25,87 @@ static void test_rev8(void)
 
 static void test_couper_nom(void)
 {
+    /* Full width under the icon column since 2026-09-26: 6 characters per
+     * line (Montserrat 14 on 68 px — "LAYER 2" is ~56 px), 2 lines, cut at
+     * the last space that fits so a word is not split when it can be avoided. */
     char l[MEMLCD_NOM_LIGNES][MEMLCD_NOM_BUF];
-    TEST_ASSERT_EQ(memlcd_couper_nom("DVORAK", l), 2, "6 letters → 2 lines");
-    TEST_ASSERT(strcmp(l[0], "DVOR") == 0 && strcmp(l[1], "AK") == 0, "DVOR / AK");
-    TEST_ASSERT(l[2][0] == '\0', "3rd line empty");
+    TEST_ASSERT_EQ(MEMLCD_NOM_LIGNES, 2, "two name lines");
+    TEST_ASSERT_EQ(MEMLCD_NOM_COLS, 6, "six characters per line");
+    TEST_ASSERT_EQ(memlcd_couper_nom("DVORAK", l), 1, "6 letters → 1 line");
+    TEST_ASSERT(strcmp(l[0], "DVORAK") == 0 && l[1][0] == '\0', "DVORAK, 2nd line empty");
     TEST_ASSERT_EQ(memlcd_couper_nom("NAV", l), 1, "3 letters → 1 line");
     TEST_ASSERT(strcmp(l[0], "NAV") == 0, "NAV");
     TEST_ASSERT_EQ(memlcd_couper_nom("", l), 1, "empty → 1 empty line (never 0)");
     TEST_ASSERT(l[0][0] == '\0', "empty line");
     TEST_ASSERT_EQ(memlcd_couper_nom(NULL, l), 1, "NULL → like empty, no crash");
-    TEST_ASSERT_EQ(memlcd_couper_nom("ABCDEFGHIJKL", l), 3, "12 letters → 3 full lines");
-    TEST_ASSERT(strcmp(l[2], "IJKL") == 0, "3rd line full, no …");
-    TEST_ASSERT_EQ(memlcd_couper_nom("ABCDEFGHIJKLMNOP", l), 3, "16 letters → 3 lines, truncated");
-    TEST_ASSERT(strcmp(l[2], "IJK\xE2\x80\xA6") == 0, "3rd line = 3 letters + … (UTF-8)");
+    TEST_ASSERT_EQ(memlcd_couper_nom("LAYER 2", l), 2, "7 characters → 2 lines");
+    TEST_ASSERT(strcmp(l[0], "LAYER") == 0 && strcmp(l[1], "2") == 0, "cut at the space: LAYER / 2");
+    TEST_ASSERT_EQ(memlcd_couper_nom("GAMING", l), 1, "exactly 6 → 1 line");
+    TEST_ASSERT_EQ(memlcd_couper_nom("SYMBOLS", l), 2, "7 letters, no space → hard cut");
+    TEST_ASSERT(strcmp(l[0], "SYMBOL") == 0 && strcmp(l[1], "S") == 0, "SYMBOL / S");
+    TEST_ASSERT_EQ(memlcd_couper_nom("NUM PAD", l), 2, "space at 3");
+    TEST_ASSERT(strcmp(l[0], "NUM") == 0 && strcmp(l[1], "PAD") == 0, "NUM / PAD");
+    TEST_ASSERT_EQ(memlcd_couper_nom("ABCDEFGHIJKL", l), 2, "12 letters → 2 full lines");
+    TEST_ASSERT(strcmp(l[1], "GHIJKL") == 0, "2nd line full, no …");
+    TEST_ASSERT_EQ(memlcd_couper_nom("ABCDEFGHIJKLMN", l), 2, "14 letters → truncated");
+    TEST_ASSERT(strcmp(l[1], "GHIJK\xE2\x80\xA6") == 0, "2nd line = 5 letters + … (UTF-8)");
+    TEST_ASSERT_EQ(memlcd_couper_nom("MEDIA KEYS 2", l), 2, "space cut, the rest fits exactly");
+    TEST_ASSERT(strcmp(l[0], "MEDIA") == 0 && strcmp(l[1], "KEYS 2") == 0, "MEDIA / KEYS 2");
+    TEST_ASSERT_EQ(memlcd_couper_nom("MEDIA KEYS ABC", l), 2, "space cut, then overflow");
+    TEST_ASSERT(strcmp(l[1], "KEYS\xE2\x80\xA6") == 0, "the ellipsis never follows a space: KEYS…");
+}
+
+/* Displayed layer: the STABLE one (base, TO, Layer Lock) = the engine's
+ * last_layer, never a held MO/LT/LM. In RF the left does not hear the right
+ * (the dongle runs the engine), so a MO on the right was invisible and a mix
+ * of thumbs left the screen on the wrong layer; a status screen at 1 s cannot
+ * follow a momentary layer anyway. Mae, 2026-09-26: "if we can't be reactive,
+ * we don't handle MOs". */
+static void test_couche_affichee(void)
+{
+    TEST_ASSERT_EQ(memlcd_couche_affichee(0, 0), 0, "base layer");
+    TEST_ASSERT_EQ(memlcd_couche_affichee(1, 0), 0, "MO(1) held from base → still base");
+    TEST_ASSERT_EQ(memlcd_couche_affichee(3, 3), 3, "TO(3) / layer lock → 3");
+    TEST_ASSERT_EQ(memlcd_couche_affichee(1, 3), 3, "MO(1) held over a locked 3 → 3");
+}
+
+/* Status lines, UNSCII 8 = 8 characters on 68 px. Line 1: what capitalises
+ * (host Caps Lock, Caps Word). Line 2: armed one-shots — modifiers as letters
+ * C S A G (left and right merged), then the one-shot layer. Empty when
+ * nothing is armed: the screen says nothing when there is nothing to say. */
+static void test_ligne_etat(void)
+{
+    char l1[MEMLCD_ETAT_BUF], l2[MEMLCD_ETAT_BUF];
+    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE };
+    memlcd_ligne_etat(&m, l1, l2);
+    TEST_ASSERT(l1[0] == '\0' && l2[0] == '\0', "nothing armed → both lines empty");
+
+    m.caps_lock = 1;
+    memlcd_ligne_etat(&m, l1, l2);
+    TEST_ASSERT(strcmp(l1, "CAPS") == 0, "Caps Lock");
+    m.caps_word = 1;
+    memlcd_ligne_etat(&m, l1, l2);
+    TEST_ASSERT(strcmp(l1, "CAPS CW") == 0, "Caps Lock + Caps Word");
+    m.caps_lock = 0;
+    memlcd_ligne_etat(&m, l1, l2);
+    TEST_ASSERT(strcmp(l1, "CW") == 0, "Caps Word alone");
+
+    memlcd_model_t o = { .osl = MEMLCD_OSL_AUCUNE, .osm = 0x02 };   /* LShift */
+    memlcd_ligne_etat(&o, l1, l2);
+    TEST_ASSERT(strcmp(l2, "S") == 0, "one-shot Shift");
+    o.osm = 0x20 | 0x01;                                             /* RShift + LCtrl */
+    memlcd_ligne_etat(&o, l1, l2);
+    TEST_ASSERT(strcmp(l2, "CS") == 0, "right Shift merged, fixed order C S A G");
+    o.osm = 0xFF;
+    memlcd_ligne_etat(&o, l1, l2);
+    TEST_ASSERT(strcmp(l2, "CSAG") == 0, "all four");
+    o.osl = 3;
+    memlcd_ligne_etat(&o, l1, l2);
+    TEST_ASSERT(strcmp(l2, "CSAG L3") == 0, "mods + one-shot layer, 7 characters");
+    TEST_ASSERT(strlen(l2) <= 8, "fits the 8 UNSCII columns");
+    o.osm = 0;
+    memlcd_ligne_etat(&o, l1, l2);
+    TEST_ASSERT(strcmp(l2, "L3") == 0, "one-shot layer alone, no leading space");
 }
 
 static void test_model_diff(void)
@@ -56,6 +124,11 @@ static void test_model_diff(void)
      * redraws. Without this, the handshake was invisible — the only witness
      * was the console, which you don't have while typing on battery. */
     b = a; b.lien_5v = 1;  TEST_ASSERT(memlcd_model_diff(&a, &b), "TRRS 5 V closes → redraw");
+    b = a; b.caps_lock = 1; TEST_ASSERT(memlcd_model_diff(&a, &b), "Caps Lock → redraw");
+    b = a; b.caps_word = 1; TEST_ASSERT(memlcd_model_diff(&a, &b), "Caps Word → redraw");
+    b = a; b.osm = 0x02;   TEST_ASSERT(memlcd_model_diff(&a, &b), "one-shot mod armed → redraw");
+    b = a; b.osl = 2;      TEST_ASSERT(memlcd_model_diff(&a, &b), "one-shot layer armed → redraw");
+    b = a; b.veille = 1;   TEST_ASSERT(memlcd_model_diff(&a, &b), "going to sleep → redraw (zZ)");
 }
 
 /* The panel is PHYSICALLY 68 lines of 160 pixels (Sharp catalog, doc
@@ -120,6 +193,8 @@ void test_memlcd_model(void)
     TEST_SUITE("Memory-LCD screen: pure logic");
     test_rev8();
     test_couper_nom();
+    test_couche_affichee();
+    test_ligne_etat();
     test_model_diff();
     test_fb_to_panel();
     test_batt_affichee();

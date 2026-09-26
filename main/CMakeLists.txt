@@ -80,6 +80,7 @@ if(CONFIG_KASE_HAS_DISPLAY)
             "display/memlcd/memlcd_panel.c"
             "display/memlcd/memlcd_backend.c"
             "display/assets/img_niphargus_60.c"
+            "display/assets/img_niphargus_34.c"
         )
     elseif(DISPLAY_BACKEND STREQUAL "round")
         list(APPEND srcs
