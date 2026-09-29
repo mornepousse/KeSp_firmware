@@ -603,6 +603,85 @@ static void test_kp_lt_resolves_sec_confirm_from_right_confirms_nothing(void)
     chest_gate_publish(0, 0);
 }
 
+/* B4 (review round 2, 2026-09-29): the re-latch K_IS_SEC branch must
+ * ABSORB the security keycode, not fold its low byte into keycodes[] like a
+ * plain HID code. Mutant: `keycodes[i] = (uint8_t)kc2;` instead of `= 0`.
+ * For K_OATH_CODE (0x3E04), (uint8_t)0x3E04 == 0x04 == HID 'a': the mutant
+ * would type 'a' on the very cycle the LT resolves. */
+static void test_kp_lt_relatch_absorbs_oath_code_never_types_its_low_byte(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = 0x4000u | (1u << 8) | 0x2Cu;   /* K_LT(1, Space) */
+    keymaps[0][0][1] = 0x06u;          /* base: C */
+    keymaps[1][0][1] = T_K_OATH_CODE;  /* layer 1: OATH Code (0x3E04) */
+    press_key(0, 0, 0);
+    build_keycode_report();
+    press_key(1, 0, 1);
+    build_keycode_report();            /* THIS cycle resolves the LT as a hold */
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "the second key resolves the LT as a hold");
+    TEST_ASSERT(chest_gate_take_oath_code(), "K_OATH_CODE still fires on the resolving cycle");
+    TEST_ASSERT(!keycode_in_report(0x04),
+                "never typed as 'a' — 0x3E04's low byte is not a keycode");
+    TEST_ASSERT(!keycode_in_report(0x06), "never a C either");
+}
+
+/* B9 (review round 2, 2026-09-29): one physical press fires at most ONE
+ * action, even when its base-layer value and its LT-target-layer value are
+ * BOTH security actions. P's own press already fires its base-layer
+ * K_OATH_NEXT in the FIRST pass (active_layer starts at base, before the LT
+ * resolves) — the re-latch loop must not fire it a second time against the
+ * LT-target-layer's K_SEC_CONFIRM just because a neighbour key (Q) supplied
+ * the plain HID keycode that resolves the LT this same cycle. Mutant: drop
+ * the `keycodes[i] == 0` filter in the re-latch (B9) — P's already-absorbed
+ * slot (keycodes[i]==0 from the first pass) would then be reprocessed
+ * against layer 1 and confirm the chest a second time from one press. */
+static void test_kp_lt_relatch_does_not_double_fire_an_already_absorbed_key(void)
+{
+    reset_kp_state();
+    chest_gate_publish(1, 0);                          /* chest: op 1 pending */
+    keymaps[0][0][0] = 0x4000u | (1u << 8) | 0x2Cu;    /* K_LT(1, Space) */
+    keymaps[0][0][1] = T_K_OATH_NEXT;                   /* P, base layer */
+    keymaps[1][0][1] = T_K_SEC_CONFIRM;                 /* P, LT-target layer, LOCAL column */
+    keymaps[0][0][2] = 0x06u;                           /* Q, plain 'C': resolves the LT */
+    press_key(0, 0, 0);
+    build_keycode_report();
+    press_key(1, 0, 1);       /* P: new press */
+    press_key(2, 0, 2);       /* Q: new press, same cycle, resolves the LT */
+    build_keycode_report();
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "Q's plain press resolves the LT as a hold");
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 1,
+                   "P's own base-layer K_OATH_NEXT fires once, in the first pass");
+    TEST_ASSERT_EQ(chest_gate_take_press(), 0,
+                   "P's LT-target-layer K_SEC_CONFIRM must NOT also fire: one press, one action");
+    chest_gate_publish(0, 0);
+}
+
+/* B2 (review round 2, 2026-09-29): the re-latch's K_IS_SEC scope is
+ * deliberate, not merely convenient — LT/MT/OSM would re-enter
+ * tap_hold_on_press() on the very cycle their OWN resolution is still being
+ * computed. OSL has no such re-entrancy risk but still illustrates the
+ * general rule the K_IS_SEC branch is carved OUT of ("resolves fully next
+ * cycle from the latched layer"): on the LT's own resolving cycle, an OSL
+ * held only on the target layer must NOT arm — osl_arm() is unconditional
+ * (no is_new_press gate, see process_advanced_key), so a widened scope (any
+ * is_advanced_keycode, not just K_IS_SEC) WOULD arm it there and then. This
+ * is a real, deterministic, observable difference — not a hypothetical one. */
+static void test_kp_lt_relatch_osl_on_target_layer_does_not_arm_this_cycle(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = 0x4000u | (1u << 8) | 0x2Cu;   /* K_LT(1, Space) */
+    keymaps[0][0][1] = 0x06u;                          /* base: C, resolves the LT */
+    keymaps[1][0][1] = T_OSL_1;                        /* layer 1: OSL(1), never on base */
+    press_key(0, 0, 0);
+    build_keycode_report();
+    press_key(1, 0, 1);
+    build_keycode_report();
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "the second key resolves the LT as a hold");
+    TEST_ASSERT_EQ(osl_get_layer(), -1,
+                   "OSL on the LT-target layer does not arm on the resolving cycle "
+                   "(re-latch scope is K_IS_SEC only, by design)");
+}
+
 static void test_kp_sec_confirm_authorizes(void)
 {
     reset_kp_state();
@@ -1145,6 +1224,9 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_lt_resolves_oath_next_on_its_press_cycle);
     TEST_RUN(test_kp_lt_resolves_sec_confirm_from_left_confirms_once);
     TEST_RUN(test_kp_lt_resolves_sec_confirm_from_right_confirms_nothing);
+    TEST_RUN(test_kp_lt_relatch_absorbs_oath_code_never_types_its_low_byte);
+    TEST_RUN(test_kp_lt_relatch_does_not_double_fire_an_already_absorbed_key);
+    TEST_RUN(test_kp_lt_relatch_osl_on_target_layer_does_not_arm_this_cycle);
     TEST_RUN(test_kp_sec_confirm_authorizes);
     TEST_RUN(test_kp_sec_confirm_routes_to_chest);
     TEST_RUN(test_kp_sec_confirm_held_confirms_chest_once);
