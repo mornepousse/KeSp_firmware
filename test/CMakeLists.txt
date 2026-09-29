@@ -57,6 +57,8 @@ add_executable(test_runner
     ../main/comm/chest/chest_proto.c
     test_chest_dma.c
     ../main/comm/chest/chest_dma.c
+    test_chest_oath.c
+    ../main/comm/chest/chest_oath.c
     test_cr_crc16.c
     ../main/security/cr_crc16.c
     test_otp_proto.c
@@ -166,6 +168,8 @@ add_executable(test_chest_sanitized
     ../main/comm/chest/chest_proto.c
     test_chest_dma.c
     ../main/comm/chest/chest_dma.c
+    test_chest_oath.c
+    ../main/comm/chest/chest_oath.c
     ../main/security/cr_crc16.c
     test_main_chest_sanitized.c
 )

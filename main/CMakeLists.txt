@@ -27,6 +27,7 @@ set(srcs
     "comm/chest/chest_gate.c"
     "comm/chest/chest_proto.c"
     "comm/chest/chest_dma.c"
+    "comm/chest/chest_oath.c"
     "security/cr_crc16.c"
 
 )

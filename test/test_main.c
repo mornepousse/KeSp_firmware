@@ -39,6 +39,7 @@ extern void test_sec_store(void);
 extern void test_cdc_sec(void);
 extern void test_chest_proto(void);
 extern void test_chest_dma(void);
+extern void test_chest_oath(void);
 extern void test_cr_crc16(void);
 extern void test_otp_proto(void);
 extern void test_apdu(void);
@@ -123,6 +124,7 @@ int main(void) {
     test_cdc_sec();
     test_chest_proto();
     test_chest_dma();
+    test_chest_oath();
     test_cr_crc16();
     test_otp_proto();
     test_apdu();
