@@ -35,8 +35,8 @@ typedef enum {
 bool          chest_proto_is_absent(const uint8_t *regs, size_t len);
 /* Contract §4 order: short, absent, magic, version, CRC. `out` written only on OK. */
 chest_block_t chest_proto_parse(const uint8_t *regs, size_t len, chest_status_t *out);
-/* Label of a chest sec_op_t code, 6 characters max (spec §6). The enum is the
- * chest's and not frozen (contract §1): an unknown code still prompts. */
+/* Label of a chest sec_op_t code. Known codes 1-10: lookup table; 11-99: "OP nn" format;
+ * >= 100: "OP ?" (controller-mandated limit). Always <= 6 characters. */
 void          chest_op_label(uint16_t op, char out[CHEST_LABEL_BUF]);
 
 /* Confirm delivery: one write, one retry after CHEST_CONFIRM_RETRY_MS if the

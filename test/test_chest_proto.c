@@ -3,6 +3,7 @@
  * test/test_link_proto.c too: a change on either side that the other did not
  * follow breaks a fast check, not the bench. Copied verbatim, never edited. */
 #include "test_framework.h"
+#include <string.h>
 #include "../main/comm/chest/chest_proto.h"
 #include "../main/security/cr_crc16.h"
 
@@ -44,6 +45,12 @@ static void test_chest_contract_vectors(void)
     TEST_ASSERT_EQ(s.pending_op, 1, "V8 decodes like V1");
     TEST_ASSERT_EQ(chest_proto_parse(V9, 20, &s), CHEST_BLOCK_OK, "V9 present, booting");
     TEST_ASSERT_EQ(s.state, 0x00, "V9 not READY");
+
+    /* Gap 1: CRC high byte must be validated. */
+    uint8_t V1_crc_high_bad[20];
+    memcpy(V1_crc_high_bad, V1, 20);
+    V1_crc_high_bad[0x0D] = 0xEB;  /* Flip high CRC byte from 0xEA to 0xEB */
+    TEST_ASSERT_EQ(chest_proto_parse(V1_crc_high_bad, 20, &s), CHEST_BLOCK_CORRUPT, "CRC high byte corruption detected");
 }
 
 static void test_chest_noise_is_not_a_chest(void)
@@ -56,18 +63,56 @@ static void test_chest_noise_is_not_a_chest(void)
     TEST_ASSERT_EQ(s.pending_op, 0xBEEF, "out untouched on any failure");
 }
 
+static void test_chest_absence_full_scan(void)
+{
+    /* Gap 2: chest_proto_is_absent must scan all bytes, not just a prefix. */
+    uint8_t b[20];
+    chest_status_t s;
+
+    /* 0x00 with last byte 0x01 is NOT absent. */
+    memset(b, 0x00, 20);
+    b[19] = 0x01;
+    TEST_ASSERT(!chest_proto_is_absent(b, 20), "0x00 block with last byte 0x01 is not absent");
+    TEST_ASSERT_EQ(chest_proto_parse(b, 20, &s), CHEST_BLOCK_CORRUPT, "and parse rejects it");
+
+    /* 0xFF with last byte 0xFE is NOT absent. */
+    memset(b, 0xFF, 20);
+    b[19] = 0xFE;
+    TEST_ASSERT(!chest_proto_is_absent(b, 20), "0xFF block with last byte 0xFE is not absent");
+    TEST_ASSERT_EQ(chest_proto_parse(b, 20, &s), CHEST_BLOCK_CORRUPT, "and parse rejects it");
+}
+
 static void test_chest_op_labels(void)
 {
     char l[CHEST_LABEL_BUF];
     static const char *exp[] = { "", "SIGN", "DECRYP", "AUTH", "OTP", "FIDO +", "FIDO",
                                  "TOTP", "DELETE", "REPLAC", "RESET!" };
+
+    /* Known ops 1-10: use lookup table. */
     for (uint16_t op = 1; op <= 10; op++) {
         chest_op_label(op, l);
         TEST_ASSERT(strcmp(l, exp[op]) == 0, "label of each chest sec_op_t code");
         TEST_ASSERT(strlen(l) <= 6, "6 characters max");
     }
+
+    /* Gap 3: Unknown ops formatting: 11-99 → "OP nn", >= 100 → "OP ?". */
+    chest_op_label(11, l);
+    TEST_ASSERT(strcmp(l, "OP 11") == 0, "op 11 format");
+    TEST_ASSERT(strlen(l) <= 6, "op 11 length <= 6");
+
     chest_op_label(42, l);
-    TEST_ASSERT(strcmp(l, "OP 42") == 0, "an unknown op still prompts, with its code");
+    TEST_ASSERT(strcmp(l, "OP 42") == 0, "op 42 format");
+
+    chest_op_label(99, l);
+    TEST_ASSERT(strcmp(l, "OP 99") == 0, "op 99 format");
+    TEST_ASSERT(strlen(l) <= 6, "op 99 length <= 6");
+
+    chest_op_label(100, l);
+    TEST_ASSERT(strcmp(l, "OP ?") == 0, "op 100 format: OP ?");
+    TEST_ASSERT(strlen(l) <= 6, "op 100 length <= 6");
+
+    chest_op_label(1042, l);
+    TEST_ASSERT(strcmp(l, "OP ?") == 0, "op 1042 format: OP ?");
 }
 
 static void test_chest_confirm_rule(void)
@@ -101,6 +146,7 @@ void test_chest_proto(void)
     TEST_RUN(test_chest_crc_check_value);
     TEST_RUN(test_chest_contract_vectors);
     TEST_RUN(test_chest_noise_is_not_a_chest);
+    TEST_RUN(test_chest_absence_full_scan);
     TEST_RUN(test_chest_op_labels);
     TEST_RUN(test_chest_confirm_rule);
 }

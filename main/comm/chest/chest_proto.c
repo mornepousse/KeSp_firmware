@@ -39,11 +39,13 @@ chest_block_t chest_proto_parse(const uint8_t *regs, size_t len, chest_status_t 
 void chest_op_label(uint16_t op, char out[CHEST_LABEL_BUF])
 {
     /* The chest's sec_op_t codes (contract §1), pinned by value: the enum lives
-     * in the other repository and new codes get appended. */
+     * in the other repository and new codes get appended. Codes 1-10: known labels;
+     * 11-99: "OP nn"; >= 100: "OP ?" (6-char limit). */
     static const char *const k[] = { "", "SIGN", "DECRYP", "AUTH", "OTP", "FIDO +", "FIDO",
                                      "TOTP", "DELETE", "REPLAC", "RESET!" };
     if (op < sizeof k / sizeof k[0]) snprintf(out, CHEST_LABEL_BUF, "%s", k[op]);
-    else snprintf(out, CHEST_LABEL_BUF, "OP %u", (unsigned)(op % 1000u));
+    else if (op < 100) snprintf(out, CHEST_LABEL_BUF, "OP %u", (unsigned)op);
+    else snprintf(out, CHEST_LABEL_BUF, "OP ?");
 }
 
 bool chest_confirm_request(chest_confirm_t *c, uint16_t pending_op, uint32_t count, uint32_t now_ms)
