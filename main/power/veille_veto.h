@@ -27,12 +27,16 @@ typedef enum {
     VEILLE_VETO_TOUCHE = 1u << 5, /* a key of THIS half is held: no matrix change, so inactivity grew
                                    * and the half slept key down, woke on its high row, slept again
                                    * (2026-09-25, needed once the threshold went from 15 s to 5 s) */
+    VEILLE_VETO_CODE = 1u << 6,   /* a chest TOTP code is on the screen (chest_link.c): light sleep
+                                   * after 5 s < a 30 s window, and the memory LCD keeps its image
+                                   * asleep — the code would outlive its window on the panel. Bounded
+                                   * by the code's deadline, <= 30 s (Mae, 2026-09-29) */
 } veille_veto_t;
 
 /* Room for every veto name joined by '+' in the heartbeat, NUL included:
- * "usb+link+sync+test+pair+key" = 27 characters. Sized once, here — the HB
- * and its "sleep REFUSED" line use it, the test checks all six fit. */
-#define VEILLE_VETOS_STR_MAX 32
+ * "usb+link+sync+test+pair+key+code" = 32 characters. Sized once, here — the
+ * HB and its "sleep REFUSED" line use it, the test checks all seven fit. */
+#define VEILLE_VETOS_STR_MAX 40
 
 typedef struct { uint32_t actifs; } veille_vetos_t;
 
@@ -54,7 +58,7 @@ static inline bool veille_touche_tenue(const uint8_t *etat, size_t n)
 }
 
 /* Names of active vetoes for the heartbeat: "usb+link", "-" if
- * none. Bounded to n bytes (n >= 2), cleanly truncated beyond that — the six
+ * none. Bounded to n bytes (n >= 2), cleanly truncated beyond that — the seven
  * fit within VEILLE_VETOS_STR_MAX. */
 static inline const char *veille_vetos_str(const veille_vetos_t *v, char *out, size_t n)
 {
@@ -62,6 +66,7 @@ static inline const char *veille_vetos_str(const veille_vetos_t *v, char *out, s
         { VEILLE_VETO_USB, "usb" }, { VEILLE_VETO_LIEN, "link" },
         { VEILLE_VETO_SYNC, "sync" }, { VEILLE_VETO_TEST, "test" },
         { VEILLE_VETO_PAIR, "pair" }, { VEILLE_VETO_TOUCHE, "key" },
+        { VEILLE_VETO_CODE, "code" },
     };
     if (n == 0) return "";
     out[0] = '\0';

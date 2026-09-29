@@ -49,6 +49,14 @@ int8_t   chest_gate_take_oath_nav(void);
 void     chest_gate_oath_code(void);
 /* link task: consume the request (false = none pending). */
 bool     chest_gate_take_oath_code(void);
+/* Wake-up hook: chest_link.c registers a function that wakes its task
+ * (xTaskNotifyGive) so a K_OATH_* / K_CHEST_NEXT press, or a K_SEC_CONFIRM
+ * press that the chest takes, is served at once instead of at the next
+ * 250 ms poll. Called from the keyboard task after the request is stored.
+ * NULL (the default, and always on host builds and on boards without the
+ * chest link): nothing is called — the gate stays free of FreeRTOS. */
+typedef void (*chest_gate_notify_fn)(void);
+void     chest_gate_set_notify(chest_gate_notify_fn fn);
 /* Pure: is this keymap column one of the board's LOCAL (left) columns?
  * On a split master (keymap_cols > local_cols) the columns >= local_cols come
  * over the inter-half radio, which is unauthenticated: K_SEC_CONFIRM there is

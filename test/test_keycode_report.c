@@ -1196,6 +1196,47 @@ static void test_kp_slot_recycle_ne_gele_pas_le_keycode(void)
                 "cycle 2: A must NO LONGER be in the report (slot recycle)");
 }
 
+/* Task 6 (2026-09-29): a chest key wakes the link task at once instead of
+ * waiting up to its 250 ms poll. The gate stays FreeRTOS-free: chest_link.c
+ * registers a function pointer at init; NULL (host, boards without the
+ * chest) calls nothing. A K_SEC_CONFIRM press wakes it only when the chest
+ * takes it (an op pending) — a local confirm has nothing to tell the link. */
+static int s_gate_notify_count;
+static void gate_notify_counter(void) { s_gate_notify_count++; }
+
+static void test_chest_gate_notify_wakes_the_link_task(void)
+{
+    reset_kp_state();
+    s_gate_notify_count = 0;
+    chest_gate_set_notify(gate_notify_counter);
+    chest_gate_mode_next();
+    TEST_ASSERT_EQ(s_gate_notify_count, 1, "K_CHEST_NEXT wakes the link task");
+    chest_gate_oath_nav(1);
+    chest_gate_oath_nav(-1);
+    TEST_ASSERT_EQ(s_gate_notify_count, 3, "each K_OATH_PREV/NEXT wakes it");
+    chest_gate_oath_code();
+    TEST_ASSERT_EQ(s_gate_notify_count, 4, "K_OATH_CODE wakes it");
+    chest_gate_publish(0, 0);
+    (void)chest_gate_press();
+    TEST_ASSERT_EQ(s_gate_notify_count, 4, "a confirm with nothing pending at the chest does not");
+    chest_gate_publish(7, 3);
+    TEST_ASSERT(chest_gate_press(), "the chest takes the press");
+    TEST_ASSERT_EQ(s_gate_notify_count, 5, "a confirm the chest takes wakes it");
+
+    /* the whole key path, not just the gate API */
+    keymaps[0][0][0] = T_K_OATH_CODE;
+    press_key(1, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT_EQ(s_gate_notify_count, 6, "a K_OATH_CODE key press wakes it once");
+    build_keycode_report();
+    TEST_ASSERT_EQ(s_gate_notify_count, 6, "held: no second wake-up");
+
+    chest_gate_set_notify(NULL);
+    chest_gate_mode_next();
+    TEST_ASSERT_EQ(s_gate_notify_count, 6, "NULL: nothing called, nothing crashes");
+    reset_kp_state();
+}
+
 void test_keycode_report(void)
 {
     test_kp_slot_recycle_ne_gele_pas_le_keycode();
@@ -1244,6 +1285,7 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_oath_nav_saturates_negative);
     TEST_RUN(test_kp_oath_code_twice_before_take_yields_one);
     TEST_RUN(test_chest_gate_oath_nav_cas_survives_a_concurrent_take);
+    TEST_RUN(test_chest_gate_notify_wakes_the_link_task);
     TEST_RUN(test_sec_confirm_from_local);
     TEST_RUN(test_kp_macro_inline_injects_steps);
     TEST_RUN(test_kp_macro_empty_name_noop);

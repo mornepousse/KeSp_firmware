@@ -41,6 +41,7 @@ extern void test_chest_proto(void);
 extern void test_chest_dma(void);
 extern void test_chest_oath(void);
 extern void test_chest_view(void);
+extern void test_chest_round(void);
 extern void test_cr_crc16(void);
 extern void test_otp_proto(void);
 extern void test_apdu(void);
@@ -127,6 +128,7 @@ int main(void) {
     test_chest_dma();
     test_chest_oath();
     test_chest_view();
+    test_chest_round();
     test_cr_crc16();
     test_otp_proto();
     test_apdu();

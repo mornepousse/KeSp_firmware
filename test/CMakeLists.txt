@@ -61,6 +61,8 @@ add_executable(test_runner
     ../main/comm/chest/chest_oath.c
     test_chest_view.c
     ../main/comm/chest/chest_view.c
+    test_chest_round.c
+    ../main/comm/chest/chest_round.c
     test_cr_crc16.c
     ../main/security/cr_crc16.c
     test_otp_proto.c
@@ -180,6 +182,8 @@ add_executable(test_chest_sanitized
     ../main/comm/chest/chest_oath.c
     test_chest_view.c
     ../main/comm/chest/chest_view.c
+    test_chest_round.c
+    ../main/comm/chest/chest_round.c
     ../main/security/cr_crc16.c
     # test_memlcd_model.c (review M-f, 2026-09-29): pure header-only logic
     # (memlcd_model.h — memlcd_couper_8/memlcd_bas_coffre index caller-sized

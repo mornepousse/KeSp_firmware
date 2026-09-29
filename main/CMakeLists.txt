@@ -272,7 +272,7 @@ endif()
 
 # Chest link (Niphar_chest ESP32-P4): SPI master, left half only.
 if(CONFIG_KASE_CHEST_LINK)
-    list(APPEND srcs "comm/chest/chest_link.c" "comm/chest/chest_view.c")   # chest_proto.c/chest_gate.c/chest_dma.c/chest_oath.c are in the base list (Task 3)
+    list(APPEND srcs "comm/chest/chest_link.c" "comm/chest/chest_view.c" "comm/chest/chest_round.c")   # chest_proto.c/chest_gate.c/chest_dma.c/chest_oath.c are in the base list (Task 3)
 endif()
 
 # Veille hybride (B7) — light sleep puis deep sleep.
