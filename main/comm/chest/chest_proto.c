@@ -1,6 +1,7 @@
-/* Niphar_chest link, S3 side — pure logic, protocol version 2. Contract:
- * Niphar_chest LINK_CONTRACT.md at 14f9352, vectors V1-V14; spec:
- * docs/superpowers/specs/2026-09-29-chest-link-v2-design.md. */
+/* Niphar_chest link, S3 side — pure logic, protocol version 3. Contract:
+ * Niphar_chest main/link/link_proto.{h,c} and test/test_link_proto.c at
+ * cfd7b35, vectors V1-V16, R1-R3, L1, C1; spec:
+ * docs/superpowers/specs/2026-09-29-chest-link-v3-design.md. */
 #include "chest_proto.h"
 #include <stdio.h>
 #include <string.h>
@@ -28,9 +29,13 @@ chest_block_t chest_proto_parse(const uint8_t *regs, size_t len, chest_status_t 
     if (memcmp(regs, k_magic, 4) != 0) return CHEST_BLOCK_CORRUPT;
     if (regs[0x04] != CHEST_PROTO_VERSION) return CHEST_BLOCK_BAD_VERSION;
     if (get_u16(&regs[CHEST_REG_CRC]) != cr_crc16(regs, CHEST_REG_CRC_SPAN)) return CHEST_BLOCK_CORRUPT;
+    /* A length that overruns the field is a CORRUPT block, not one to
+     * truncate: a master that truncated would read bytes that are not the
+     * label and show a name the chest never composed (Review Focus, V6g). */
+    if (regs[CHEST_REG_LABEL_LEN] > CHEST_LABEL_MAX) return CHEST_BLOCK_CORRUPT;
     uint8_t active = regs[CHEST_REG_MODE_ACTIVE];
     if ((regs[0x05] & CHEST_STATE_USB) && !(active >= CHEST_MODE_STORAGE && active <= CHEST_MODE_OATH))
-        return CHEST_BLOCK_CORRUPT;                    /* mounted without a mode: contract §1 */
+        return CHEST_BLOCK_CORRUPT;                    /* mounted without a mode: KeSp's own invariant */
     if (out) {
         out->version = regs[0x04];
         out->state = regs[0x05];
@@ -38,8 +43,25 @@ chest_block_t chest_proto_parse(const uint8_t *regs, size_t len, chest_status_t 
         out->confirm_count = get_u32(&regs[0x08]);
         out->instance = regs[CHEST_REG_INSTANCE];
         out->active_mode = active;
+        out->op_count = regs[CHEST_REG_OP_COUNT];
+        out->dma_kind = regs[CHEST_REG_DMA_KIND];
+        out->dma_seq = regs[CHEST_REG_DMA_SEQ];
+        out->dma_len = get_u16(&regs[CHEST_REG_DMA_LEN]);
+        out->label_len = regs[CHEST_REG_LABEL_LEN];
+        for (uint8_t i = 0; i < out->label_len; i++) {
+            uint8_t c = regs[CHEST_REG_LABEL + i];
+            out->label[i] = (c >= 0x20 && c <= 0x7E) ? (char)c : '?';
+        }
+        out->label[out->label_len] = '\0';
     }
     return CHEST_BLOCK_OK;
+}
+
+bool chest_dma_segment_ok(const chest_status_t *st)
+{
+    if (!st) return false;
+    if (st->dma_kind != CHEST_DMA_LIST && st->dma_kind != CHEST_DMA_CODE) return false;
+    return st->dma_len >= 1 && st->dma_len <= CHEST_DMA_MAX;
 }
 
 void chest_op_label(uint16_t op, char out[CHEST_LABEL_BUF])

@@ -1,31 +1,224 @@
-/* The chest link, byte for byte — Niphar_chest LINK_CONTRACT.md §11, protocol
- * version 2. Vectors V1-V14 were produced by the chest's own link_proto.c and
- * are pinned in its test/test_link_proto.c too: a change on either side that
- * the other did not follow breaks a fast check, not the bench. Copied
- * verbatim, never edited. */
+/* The chest link, byte for byte — Niphar_chest main/link/link_proto.h and
+ * test/test_link_proto.c at commit cfd7b35, protocol version 3 (64-byte
+ * register block: account label, DMA channel signalling, TIME_VALID). The
+ * register vectors below (V1, V4, V5, V6, V6b-g, V8-V16) are copied VERBATIM
+ * from k_vec_v1..k_vec_v16 in that file (lines ~360-566), never edited: a
+ * change on either side that the other did not follow breaks a fast check,
+ * not the bench. Spec: docs/superpowers/specs/2026-09-29-chest-link-v3-design.md. */
 #include "test_framework.h"
 #include <string.h>
 #include "../main/comm/chest/chest_proto.h"
 #include "../main/security/cr_crc16.h"
 
-/* Niphar_chest docs/LINK_CONTRACT.md §11, v2, commit 14f9352 — copied verbatim, never edited. */
-static const uint8_t V1[20]  = { 0x4E,0x49,0x50,0x48,0x02,0x07,0x01,0x00,0x2A,0x00,0x00,0x00,0x03,0x01,0xEB,0x2B,0x00,0x00,0x00,0x00 };
-static const uint8_t V2[20]  = { 0 };
-static const uint8_t V3[20]  = { 0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF };
-static const uint8_t V4[20]  = { 0x4E,0x49,0x50,0x58,0x02,0x07,0x01,0x00,0x2A,0x00,0x00,0x00,0x03,0x01,0xEB,0x2B,0x00,0x00,0x00,0x00 };
-static const uint8_t V5[20]  = { 0x4E,0x49,0x50,0x48,0x03,0x07,0x01,0x00,0x2A,0x00,0x00,0x00,0x03,0x01,0xCC,0x07,0x00,0x00,0x00,0x00 };
-static const uint8_t V6[20]  = { 0x4E,0x49,0x50,0x48,0x02,0x07,0x01,0x00,0x2B,0x00,0x00,0x00,0x03,0x01,0xEB,0x2B,0x00,0x00,0x00,0x00 };
-static const uint8_t V6b[20] = { 0x4E,0x49,0x50,0x48,0x02,0x07,0x01,0x00,0x2A,0x00,0x00,0x00,0x03,0x01,0xEA,0x2B,0x00,0x00,0x00,0x00 };
-static const uint8_t V6c[20] = { 0x4E,0x49,0x50,0x48,0x02,0x07,0x01,0x00,0x2A,0x00,0x00,0x00,0x03,0x01,0xEB,0x2A,0x00,0x00,0x00,0x00 };
-static const uint8_t V6d[20] = { 0x4E,0x49,0x50,0x48,0x02,0x07,0x01,0x00,0x2A,0x00,0x00,0x00,0x02,0x01,0xEB,0x2B,0x00,0x00,0x00,0x00 };
-static const uint8_t V6e[20] = { 0x4E,0x49,0x50,0x48,0x02,0x07,0x01,0x00,0x2A,0x00,0x00,0x00,0x03,0x05,0xEB,0x2B,0x00,0x00,0x00,0x00 };
-static const uint8_t V8[20]  = { 0x4E,0x49,0x50,0x48,0x02,0x07,0x01,0x00,0x2A,0x00,0x00,0x00,0x03,0x01,0xEB,0x2B,0x5A,0x03,0x00,0x00 };
-static const uint8_t V9[20]  = { 0x4E,0x49,0x50,0x48,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x39,0xD4,0x00,0x00,0x00,0x00 };
-static const uint8_t V10[20] = { 0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x00 };
-static const uint8_t V11[20] = { 0x4E,0x49,0x50,0x48,0x02,0x07,0x01,0x00,0x2A,0x00,0x00,0x00,0x03,0x01,0xEB,0x2B,0x5A,0x02,0x00,0x00 };
-static const uint8_t V12[20] = { 0x4E,0x49,0x50,0x48,0x02,0x07,0x01,0x00,0x2A,0x00,0x00,0x00,0x03,0x01,0xEB,0x2B,0x00,0x00,0x09,0x00 };
-static const uint8_t V13[20] = { 0x4E,0x49,0x50,0x48,0x02,0x07,0x01,0x00,0x2A,0x00,0x00,0x00,0x03,0x01,0xEB,0x2B,0x00,0x00,0x02,0x00 };
-static const uint8_t V14[20] = { 0x4E,0x49,0x50,0x48,0x02,0x05,0x00,0x00,0x2A,0x00,0x00,0x00,0x03,0xFF,0x5F,0x2F,0x00,0x00,0x00,0x00 };
+/* Niphar_chest test/test_link_proto.c, commit cfd7b35 — copied verbatim, never edited. */
+
+/* V1 — nominal v3: a pending OATH code for GITHUB. SD + USB mounted + ready +
+ * time valid, 42 confirmations, instance 3, active mode oath. The label at
+ * 0x14 is what makes it v3. */
+static const uint8_t V1[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0C, 0xFD, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V4 — magic word wrong by one byte, everything else identical to V1. */
+static const uint8_t V4[64] = {
+    0x4E, 0x49, 0x50, 0x58, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0C, 0xFD, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V5 — version 4 announced, CRC RECOMPUTED and correct: refused on version
+ * alone, not on a corruption. */
+static const uint8_t V5[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x04, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x94, 0x08, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V6 — one payload bit flipped (42 -> 43), CRC left untouched. */
+static const uint8_t V6[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2B, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0C, 0xFD, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V6b — payload intact, one bit flipped in the LOW byte of the CRC. */
+static const uint8_t V6b[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0D, 0xFD, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V6c — the same bit flipped in the HIGH byte of the CRC. An implementation
+ * that only compares the low byte would pass V6b and fail here. */
+static const uint8_t V6c[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0C, 0xFC, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V6d — instance changed (3 -> 2) with no recalculation: proof, in bytes,
+ * that the instance is inside the CRC's coverage. */
+static const uint8_t V6d[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x02, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0C, 0xFD, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V6e — active mode changed (oath -> storage) with no recalculation. */
+static const uint8_t V6e[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x01, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0C, 0xFD, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V6f — one byte of the LABEL changed ("G" -> "g") with no CRC
+ * recalculation: proof that the label is covered too. */
+static const uint8_t V6f[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x67, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0C, 0xFD, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V6g — impossible label length (35 for a 34-byte field), CRC RECOMPUTED and
+ * correct. The refusal is about the block's COHERENCE, not its
+ * transmission: a master that truncated instead of refusing would read
+ * bytes that are not the label — Review Focus. */
+static const uint8_t V6g[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x23, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x8F, 0x04, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V8 — V1 plus a confirmation posed, echo on the ARMED instance (3). Same
+ * CRC as V1: that is the whole argument about the CRC's span. */
+static const uint8_t V8[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0C, 0xFD, 0x5A, 0x03, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V9 — chest present and NOT ready: no state bit, nothing pending, no
+ * label, no time. Its non-zero CRC distinguishes it from an absent block. */
+static const uint8_t V9[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x95, 0x15, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V10 — uniform block EXCEPT the last byte: present, not absent. */
+static const uint8_t V10[64] = {
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0x00,
+};
+/* V11 — the v1 defect, in bytes: well-formed confirmation, echo on the
+ * PREVIOUS instance (2 for an armed instance of 3). */
+static const uint8_t V11[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0C, 0xFD, 0x5A, 0x02, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V12 — an unknown requested mode (0x09): the block stays valid, it is the
+ * REQUEST that is refused. */
+static const uint8_t V12[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0C, 0xFD, 0x00, 0x00, 0x09, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V13 — the same with an assigned value (0x02, pgp): applied. */
+static const uint8_t V13[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0C, 0xFD, 0x00, 0x00, 0x02, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V14 — a switch IN PROGRESS: active mode indeterminate (0xFF), USB_MOUNTED
+ * dropped. The only state where requested and active legitimately differ. */
+static const uint8_t V14[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0D, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0xFF, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xCF, 0xC9, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V15 — ready and mounted, but NO time posed (bit 3 clear). The keyboard
+ * must show "NO TIME" and never request a code. */
+static const uint8_t V15[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x07, 0x09, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xEA, 0x29, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V16 — a RESET pending: TWELVE accounts leave on one press. The label says
+ * so in words and 0x0F says so in one byte, so the keyboard can show
+ * "12 CPT" without parsing text. */
+static const uint8_t V16[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x0C, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x0A, 0x0C, 0x00, 0x00, 0x00, 0x00,
+    0x31, 0x32, 0x20, 0x43, 0x4F, 0x4D, 0x50, 0x54, 0x45, 0x53,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x77, 0x08, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
 
 /* Contract §1: compare check values, not names (the chest's header calls it X-25; it is MCRF4XX). */
 static void test_chest_crc_check_value(void)
@@ -33,95 +226,202 @@ static void test_chest_crc_check_value(void)
     TEST_ASSERT_EQ(cr_crc16((const uint8_t *)"123456789", 9), 0x6F91, "CRC-16/MCRF4XX check value (X-25 would be 0x906E)");
 }
 
-static void test_chest_v2_vectors(void)
+static void test_chest_v3_vectors_accepted(void)
 {
     chest_status_t s;
-    TEST_ASSERT_EQ(chest_proto_parse(V1, 20, &s), CHEST_BLOCK_OK, "V1 nominal");
-    TEST_ASSERT_EQ(s.version, 2, "V1 version 2");
-    TEST_ASSERT_EQ(s.state, 0x07, "V1 state");
-    TEST_ASSERT_EQ(s.pending_op, 1, "V1 PSO:CDS");
+
+    memset(&s, 0, sizeof s);
+    TEST_ASSERT_EQ(chest_proto_parse(V1, 64, &s), CHEST_BLOCK_OK, "V1 nominal");
+    TEST_ASSERT_EQ(s.version, 3, "V1 version 3");
+    TEST_ASSERT_EQ(s.state, 0x0F, "V1 state: SD + mounted + ready + time valid");
+    TEST_ASSERT_EQ(s.pending_op, 9, "V1 pending op");
     TEST_ASSERT_EQ(s.confirm_count, 42, "V1 count 42");
     TEST_ASSERT_EQ(s.instance, 3, "V1 instance 3");
-    TEST_ASSERT_EQ(s.active_mode, CHEST_MODE_STORAGE, "V1 active storage");
-    TEST_ASSERT_EQ(chest_proto_parse(V2, 20, &s), CHEST_BLOCK_ABSENT, "V2 absent 0x00");
-    TEST_ASSERT_EQ(chest_proto_parse(V3, 20, &s), CHEST_BLOCK_ABSENT, "V3 absent 0xFF");
-    TEST_ASSERT_EQ(chest_proto_parse(V4, 20, &s), CHEST_BLOCK_CORRUPT, "V4 bad magic");
-    TEST_ASSERT_EQ(chest_proto_parse(V5, 20, &s), CHEST_BLOCK_BAD_VERSION, "V5 version 3 refused");
-    TEST_ASSERT_EQ(chest_proto_parse(V6, 20, &s), CHEST_BLOCK_CORRUPT, "V6 payload bit");
-    TEST_ASSERT_EQ(chest_proto_parse(V6b, 20, &s), CHEST_BLOCK_CORRUPT, "V6b CRC low byte");
-    TEST_ASSERT_EQ(chest_proto_parse(V6c, 20, &s), CHEST_BLOCK_CORRUPT, "V6c CRC high byte");
-    TEST_ASSERT_EQ(chest_proto_parse(V6d, 20, &s), CHEST_BLOCK_CORRUPT, "V6d instance covered by the CRC");
-    TEST_ASSERT_EQ(chest_proto_parse(V6e, 20, &s), CHEST_BLOCK_CORRUPT, "V6e active mode covered by the CRC");
-    TEST_ASSERT_EQ(chest_proto_parse(V1, 19, &s), CHEST_BLOCK_CORRUPT, "V7 truncated");
-    TEST_ASSERT_EQ(chest_proto_parse(V8, 20, &s), CHEST_BLOCK_OK, "V8 master word outside the CRC");
-    TEST_ASSERT_EQ(chest_proto_parse(V9, 20, &s), CHEST_BLOCK_OK, "V9 present, booting");
+    TEST_ASSERT_EQ(s.active_mode, CHEST_MODE_OATH, "V1 active oath");
+    TEST_ASSERT_EQ(s.op_count, 1, "V1 one account targeted");
+    TEST_ASSERT_EQ(s.label_len, 6, "V1 label length");
+    TEST_ASSERT_EQ(memcmp(s.label, "GITHUB", 6), 0, "V1 the account is NAMED");
+    TEST_ASSERT_EQ(s.label[6], '\0', "V1 label NUL-terminated at label_len");
+    TEST_ASSERT(s.state & CHEST_STATE_TIME, "V1 time posed");
+    TEST_ASSERT_EQ(s.dma_kind, CHEST_DMA_NONE, "V1 no DMA segment queued");
+    TEST_ASSERT_EQ(s.dma_seq, 0, "V1 dma_seq 0");
+    TEST_ASSERT_EQ(s.dma_len, 0, "V1 dma_len 0");
+    TEST_ASSERT(!chest_proto_is_absent(V1, 64), "V1 not absent");
+
+    /* V8 differs from V1 only in the master's range — same verdict and
+     * fields. That is the CRC span made visible. */
+    memset(&s, 0, sizeof s);
+    TEST_ASSERT_EQ(chest_proto_parse(V8, 64, &s), CHEST_BLOCK_OK, "V8 master word outside the CRC");
+    TEST_ASSERT_EQ(s.state, 0x0F, "V8 state identical to V1");
+    TEST_ASSERT_EQ(s.pending_op, 9, "V8 op identical to V1");
+    TEST_ASSERT_EQ(memcmp(s.label, "GITHUB", 6), 0, "V8 same label as V1");
+    TEST_ASSERT_EQ(s.confirm_count, 42, "V8 count identical to V1");
+    TEST_ASSERT_EQ(s.instance, 3, "V8 instance identical to V1");
+
+    memset(&s, 0, sizeof s);
+    TEST_ASSERT_EQ(chest_proto_parse(V9, 64, &s), CHEST_BLOCK_OK, "V9 present, booting");
     TEST_ASSERT_EQ(s.state, 0, "V9 not ready");
+    TEST_ASSERT_EQ(s.pending_op, 0, "V9 nothing pending");
+    TEST_ASSERT_EQ(s.confirm_count, 0, "V9 count 0");
     TEST_ASSERT_EQ(s.instance, 0, "V9 nothing ever armed");
     TEST_ASSERT_EQ(s.active_mode, CHEST_MODE_NONE, "V9 no active mode");
-    TEST_ASSERT(!chest_proto_is_absent(V10, 20), "V10 uniform but the last byte: present");
-    TEST_ASSERT_EQ(chest_proto_parse(V10, 20, &s), CHEST_BLOCK_CORRUPT, "V10 not a chest");
-    TEST_ASSERT_EQ(chest_proto_parse(V11, 20, &s), CHEST_BLOCK_OK, "V11 block valid");
-    TEST_ASSERT_EQ(chest_proto_parse(V12, 20, &s), CHEST_BLOCK_OK, "V12 block valid");
-    TEST_ASSERT_EQ(chest_proto_parse(V13, 20, &s), CHEST_BLOCK_OK, "V13 block valid");
-    TEST_ASSERT_EQ(chest_proto_parse(V14, 20, &s), CHEST_BLOCK_OK, "V14 switch in flight is valid");
+    TEST_ASSERT_EQ(s.label_len, 0, "V9 no label");
+    TEST_ASSERT_EQ(s.op_count, 0, "V9 no account targeted");
+    TEST_ASSERT_EQ(s.state & CHEST_STATE_TIME, 0, "V9 no time posed");
+    TEST_ASSERT(!chest_proto_is_absent(V9, 64), "V9 present and not ready, not absent");
+
+    TEST_ASSERT(!chest_proto_is_absent(V10, 64), "V10 one different byte is enough: present");
+    TEST_ASSERT_EQ(chest_proto_parse(V10, 64, &s), CHEST_BLOCK_CORRUPT, "V10 not a chest");
+
+    /* V11, V12, V13 carry a chest block identical to V1: it is the MASTER's
+     * range that differs, and it is outside the CRC. */
+    memset(&s, 0, sizeof s);
+    TEST_ASSERT_EQ(chest_proto_parse(V11, 64, &s), CHEST_BLOCK_OK, "V11 block valid");
+    TEST_ASSERT_EQ(s.instance, 3, "V11 armed instance");
+    TEST_ASSERT_EQ(chest_proto_parse(V12, 64, &s), CHEST_BLOCK_OK, "V12 block valid");
+    TEST_ASSERT_EQ(chest_proto_parse(V13, 64, &s), CHEST_BLOCK_OK, "V13 block valid");
+
+    TEST_ASSERT_EQ(chest_proto_parse(V14, 64, &s), CHEST_BLOCK_OK, "V14 switch in flight is valid");
     TEST_ASSERT_EQ(s.active_mode, CHEST_MODE_IN_FLIGHT, "V14 active indeterminate");
     TEST_ASSERT_EQ(s.state & CHEST_STATE_USB, 0, "V14 USB_MOUNTED cleared");
 }
 
-/* A v1 chest (the 20-byte v1 map, version 1) is refused, not half-parsed. */
-static void test_chest_v1_chest_refused(void)
+static void test_chest_v3_vectors_rejected(void)
 {
-    static const uint8_t v1_nominal[20] = { 0x4E,0x49,0x50,0x48,0x01,0x07,0x01,0x00,0x2A,0x00,0x00,0x00,0xAF,0xEA,0x00,0x00,0x00,0x00,0x00,0x00 };
     chest_status_t s;
-    TEST_ASSERT_EQ(chest_proto_parse(v1_nominal, 20, &s), CHEST_BLOCK_BAD_VERSION, "a v1 chest is BAD_VERSION");
+
+    TEST_ASSERT_EQ(chest_proto_parse(V4, 64, &s), CHEST_BLOCK_CORRUPT, "V4 bad magic");
+    TEST_ASSERT_EQ(chest_proto_parse(V5, 64, &s), CHEST_BLOCK_BAD_VERSION, "V5 version 4 refused");
+    TEST_ASSERT_EQ(chest_proto_parse(V6, 64, &s), CHEST_BLOCK_CORRUPT, "V6 payload bit");
+    TEST_ASSERT_EQ(chest_proto_parse(V6b, 64, &s), CHEST_BLOCK_CORRUPT, "V6b CRC low byte");
+    TEST_ASSERT_EQ(chest_proto_parse(V6c, 64, &s), CHEST_BLOCK_CORRUPT, "V6c CRC high byte");
+    TEST_ASSERT_EQ(chest_proto_parse(V6d, 64, &s), CHEST_BLOCK_CORRUPT, "V6d instance covered by the CRC");
+    TEST_ASSERT_EQ(chest_proto_parse(V6e, 64, &s), CHEST_BLOCK_CORRUPT, "V6e active mode covered by the CRC");
+    TEST_ASSERT_EQ(chest_proto_parse(V6f, 64, &s), CHEST_BLOCK_CORRUPT, "V6f one byte of the LABEL covered by the CRC");
+    /* Review Focus: V6g must be CORRUPT even with a valid CRC — a truncating
+     * parser would show a name the chest never composed. */
+    TEST_ASSERT_EQ(chest_proto_parse(V6g, 64, &s), CHEST_BLOCK_CORRUPT, "V6g impossible label length refused despite a correct CRC");
+    TEST_ASSERT_EQ(chest_proto_parse(V1, 63, &s), CHEST_BLOCK_CORRUPT, "V7 truncated");
+
+    TEST_ASSERT(!chest_proto_is_absent(V10, 64), "V10 a single different byte rules out absence");
+    TEST_ASSERT_EQ(chest_proto_parse(V10, 64, &s), CHEST_BLOCK_CORRUPT, "V10 not interpreted");
+
+    TEST_ASSERT(!chest_proto_is_absent(V4, 64), "V4 not an absent block");
+    TEST_ASSERT(!chest_proto_is_absent(V5, 64), "V5 not an absent block");
+    TEST_ASSERT(!chest_proto_is_absent(V6, 64), "V6 not an absent block");
+    TEST_ASSERT(!chest_proto_is_absent(V6b, 64), "V6b not an absent block");
+    TEST_ASSERT(!chest_proto_is_absent(V6c, 64), "V6c not an absent block");
+    TEST_ASSERT(!chest_proto_is_absent(V6d, 64), "V6d not an absent block");
 }
 
-/* USB_MOUNTED set with no known mode is self-contradictory: corrupt (contract §1). */
+/* V15 and V16 — the two states the v3 layout makes visible. */
+static void test_chest_v3_states(void)
+{
+    chest_status_t s;
+
+    memset(&s, 0, sizeof s);
+    TEST_ASSERT_EQ(chest_proto_parse(V15, 64, &s), CHEST_BLOCK_OK, "V15 accepted");
+    TEST_ASSERT_EQ(s.state & CHEST_STATE_TIME, 0, "V15 no time posed");
+    TEST_ASSERT(s.state & CHEST_STATE_USB, "V15 mounted anyway");
+    TEST_ASSERT(s.state & CHEST_STATE_READY, "V15 ready anyway");
+
+    memset(&s, 0, sizeof s);
+    TEST_ASSERT_EQ(chest_proto_parse(V16, 64, &s), CHEST_BLOCK_OK, "V16 accepted");
+    TEST_ASSERT_EQ(s.pending_op, 12, "V16 pending op");
+    TEST_ASSERT_EQ(s.op_count, 12, "V16 twelve accounts leave on ONE press");
+    TEST_ASSERT_EQ(s.label_len, 10, "V16 label length");
+    TEST_ASSERT_EQ(memcmp(s.label, "12 COMPTES", 10), 0, "V16 the label states the count in words");
+    TEST_ASSERT(s.op_count > 1, "V16 the keyboard shows N CPT");
+}
+
+/* Non-printable bytes in the label are shown as '?' — never interpreted —
+ * and the sanitized label stays NUL-terminated at label_len. Not one of the
+ * chest's pinned vectors: built here from V1 with a byte inside "GITHUB"
+ * replaced and the CRC recomputed. */
+static void test_chest_label_sanitized_and_terminated(void)
+{
+    uint8_t b[64];
+    chest_status_t s;
+    memcpy(b, V1, 64);
+    b[CHEST_REG_LABEL + 1] = 0x01;   /* the 'I' of GITHUB becomes a control byte */
+    uint16_t crc = cr_crc16(b, CHEST_REG_CRC_SPAN);
+    b[CHEST_REG_CRC] = (uint8_t)(crc & 0xFF);
+    b[CHEST_REG_CRC + 1] = (uint8_t)(crc >> 8);
+
+    memset(&s, 0, sizeof s);
+    TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_OK, "a non-printable label byte does not corrupt the block");
+    TEST_ASSERT_EQ(s.label[0], 'G', "byte before is untouched");
+    TEST_ASSERT_EQ(s.label[1], '?', "the non-printable byte is shown as '?'");
+    TEST_ASSERT_EQ(memcmp(&s.label[2], "THUB", 4), 0, "the rest is untouched");
+    TEST_ASSERT_EQ(s.label[6], '\0', "still NUL-terminated at label_len");
+}
+
+static void test_chest_dma_segment_ok(void)
+{
+    chest_status_t s = {0};
+
+    s.dma_kind = CHEST_DMA_LIST; s.dma_len = 1;
+    TEST_ASSERT(chest_dma_segment_ok(&s), "LIST, length 1: ok");
+    s.dma_len = CHEST_DMA_MAX;
+    TEST_ASSERT(chest_dma_segment_ok(&s), "LIST, length at the max: ok");
+    s.dma_len = CHEST_DMA_MAX + 1;
+    TEST_ASSERT(!chest_dma_segment_ok(&s), "length over the max: refused");
+    s.dma_kind = CHEST_DMA_CODE; s.dma_len = 14;
+    TEST_ASSERT(chest_dma_segment_ok(&s), "CODE, length 14: ok");
+    s.dma_kind = CHEST_DMA_NONE; s.dma_len = 1;
+    TEST_ASSERT(!chest_dma_segment_ok(&s), "kind none refused even with a plausible length");
+    s.dma_kind = CHEST_DMA_LIST; s.dma_len = 0;
+    TEST_ASSERT(!chest_dma_segment_ok(&s), "length 0 refused");
+    s.dma_kind = 3; s.dma_len = 10;
+    TEST_ASSERT(!chest_dma_segment_ok(&s), "unknown kind refused");
+    TEST_ASSERT(!chest_dma_segment_ok(NULL), "NULL refused");
+}
+
+/* USB_MOUNTED set with no known mode is self-contradictory: corrupt — KeSp's
+ * own invariant, not part of the chest's own parse_status. */
 static void test_chest_mounted_without_mode_is_corrupt(void)
 {
-    uint8_t b[20]; chest_status_t s;
-    memcpy(b, V1, 20);
+    uint8_t b[64]; chest_status_t s;
+    memcpy(b, V1, 64);
     b[CHEST_REG_MODE_ACTIVE] = CHEST_MODE_NONE;
     uint16_t crc = cr_crc16(b, CHEST_REG_CRC_SPAN);
     b[CHEST_REG_CRC] = (uint8_t)(crc & 0xFF); b[CHEST_REG_CRC + 1] = (uint8_t)(crc >> 8);
-    TEST_ASSERT_EQ(chest_proto_parse(b, 20, &s), CHEST_BLOCK_CORRUPT, "mounted + active none");
+    TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_CORRUPT, "mounted + active none");
     b[CHEST_REG_MODE_ACTIVE] = CHEST_MODE_IN_FLIGHT;
     crc = cr_crc16(b, CHEST_REG_CRC_SPAN);
     b[CHEST_REG_CRC] = (uint8_t)(crc & 0xFF); b[CHEST_REG_CRC + 1] = (uint8_t)(crc >> 8);
-    TEST_ASSERT_EQ(chest_proto_parse(b, 20, &s), CHEST_BLOCK_CORRUPT, "mounted + active in flight");
+    TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_CORRUPT, "mounted + active in flight");
     b[CHEST_REG_MODE_ACTIVE] = CHEST_MODE_OATH;
     crc = cr_crc16(b, CHEST_REG_CRC_SPAN);
     b[CHEST_REG_CRC] = (uint8_t)(crc & 0xFF); b[CHEST_REG_CRC + 1] = (uint8_t)(crc >> 8);
-    TEST_ASSERT_EQ(chest_proto_parse(b, 20, &s), CHEST_BLOCK_OK, "mounted + a known mode");
+    TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_OK, "mounted + a known mode");
 }
 
 static void test_chest_noise_is_not_a_chest(void)
 {
     /* Review focus: a booting/hung chest or a degrading bus returns noise. */
-    uint8_t b[20]; chest_status_t s = { .pending_op = 0xBEEF };
-    for (int i = 0; i < 20; i++) b[i] = (uint8_t)(0x31 * i + 7);
-    TEST_ASSERT_EQ(chest_proto_parse(b, 20, &s), CHEST_BLOCK_CORRUPT, "noise is not a chest");
-    TEST_ASSERT_EQ(chest_proto_parse(V5, 20, &s), CHEST_BLOCK_BAD_VERSION, "and V5 neither (a version-3 block)");
+    uint8_t b[64]; chest_status_t s = { .pending_op = 0xBEEF };
+    for (int i = 0; i < 64; i++) b[i] = (uint8_t)(0x31 * i + 7);
+    TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_CORRUPT, "noise is not a chest");
+    TEST_ASSERT_EQ(chest_proto_parse(V5, 64, &s), CHEST_BLOCK_BAD_VERSION, "and V5 neither (a version-4 block)");
     TEST_ASSERT_EQ(s.pending_op, 0xBEEF, "out untouched on any failure");
 }
 
 static void test_chest_absence_full_scan(void)
 {
-    /* Gap 2: chest_proto_is_absent must scan all bytes, not just a prefix. */
-    uint8_t b[20];
+    /* chest_proto_is_absent must scan all bytes, not just a prefix. */
+    uint8_t b[64];
     chest_status_t s;
 
-    /* 0x00 with last byte 0x01 is NOT absent. */
-    memset(b, 0x00, 20);
-    b[19] = 0x01;
-    TEST_ASSERT(!chest_proto_is_absent(b, 20), "0x00 block with last byte 0x01 is not absent");
-    TEST_ASSERT_EQ(chest_proto_parse(b, 20, &s), CHEST_BLOCK_CORRUPT, "and parse rejects it");
+    memset(b, 0x00, 64);
+    b[63] = 0x01;
+    TEST_ASSERT(!chest_proto_is_absent(b, 64), "0x00 block with last byte 0x01 is not absent");
+    TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_CORRUPT, "and parse rejects it");
 
-    /* 0xFF with last byte 0xFE is NOT absent. */
-    memset(b, 0xFF, 20);
-    b[19] = 0xFE;
-    TEST_ASSERT(!chest_proto_is_absent(b, 20), "0xFF block with last byte 0xFE is not absent");
-    TEST_ASSERT_EQ(chest_proto_parse(b, 20, &s), CHEST_BLOCK_CORRUPT, "and parse rejects it");
+    memset(b, 0xFF, 64);
+    b[63] = 0xFE;
+    TEST_ASSERT(!chest_proto_is_absent(b, 64), "0xFF block with last byte 0xFE is not absent");
+    TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_CORRUPT, "and parse rejects it");
 }
 
 static void test_chest_op_labels(void)
@@ -130,14 +430,12 @@ static void test_chest_op_labels(void)
     static const char *exp[] = { "", "SIGN", "DECRYP", "AUTH", "OTP", "FIDO +", "FIDO",
                                  "TOTP", "DELETE", "REPLAC", "RESET!" };
 
-    /* Known ops 1-10: use lookup table. */
     for (uint16_t op = 1; op <= 10; op++) {
         chest_op_label(op, l);
         TEST_ASSERT(strcmp(l, exp[op]) == 0, "label of each chest sec_op_t code");
         TEST_ASSERT(strlen(l) <= 6, "6 characters max");
     }
 
-    /* Gap 3: Unknown ops formatting: 11-99 → "OP nn", >= 100 → "OP ?". */
     chest_op_label(11, l);
     TEST_ASSERT(strcmp(l, "OP 11") == 0, "op 11 format");
     TEST_ASSERT(strlen(l) <= 6, "op 11 length <= 6");
@@ -160,20 +458,20 @@ static void test_chest_op_labels(void)
 static void test_chest_press_matches_tag(void)
 {
     chest_status_t s;
-    chest_proto_parse(V1, 20, &s);                                   /* op 1, instance 3, READY */
-    TEST_ASSERT(chest_press_matches(CHEST_TAG(1, 3), CHEST_BLOCK_OK, &s), "same op, same instance");
-    TEST_ASSERT(!chest_press_matches(CHEST_TAG(1, 2), CHEST_BLOCK_OK, &s), "same op, older instance");
+    chest_proto_parse(V1, 64, &s);                                   /* op 9, instance 3, READY */
+    TEST_ASSERT(chest_press_matches(CHEST_TAG(9, 3), CHEST_BLOCK_OK, &s), "same op, same instance");
+    TEST_ASSERT(!chest_press_matches(CHEST_TAG(9, 2), CHEST_BLOCK_OK, &s), "same op, older instance");
     TEST_ASSERT(!chest_press_matches(CHEST_TAG(2, 3), CHEST_BLOCK_OK, &s), "other op");
     TEST_ASSERT(!chest_press_matches(0, CHEST_BLOCK_OK, &s), "no press");
-    TEST_ASSERT(!chest_press_matches(CHEST_TAG(1, 3), CHEST_BLOCK_CORRUPT, &s), "non-OK block");
-    chest_proto_parse(V9, 20, &s);
+    TEST_ASSERT(!chest_press_matches(CHEST_TAG(9, 3), CHEST_BLOCK_CORRUPT, &s), "non-OK block");
+    chest_proto_parse(V9, 64, &s);
     TEST_ASSERT(!chest_press_matches(CHEST_TAG(0, 0), CHEST_BLOCK_OK, &s), "not READY, nothing pending");
 }
 
 static void test_chest_confirm_rule_v2(void)
 {
     chest_status_t a, b;
-    chest_proto_parse(V1, 20, &a);                                   /* op 1, inst 3, count 42 */
+    chest_proto_parse(V1, 64, &a);                                   /* op 9, inst 3, count 42 */
     chest_confirm_t c = {0};
     TEST_ASSERT(chest_confirm_request(&c, &a, 1000), "pending: accepted");
     TEST_ASSERT_EQ(c.instance, 3, "instance recorded");
@@ -264,10 +562,13 @@ static void test_chest_mode_label(void)
 
 void test_chest_proto(void)
 {
-    TEST_SUITE("chest link protocol (S3 master)");
+    TEST_SUITE("chest link protocol (S3 master, v3)");
     TEST_RUN(test_chest_crc_check_value);
-    TEST_RUN(test_chest_v2_vectors);
-    TEST_RUN(test_chest_v1_chest_refused);
+    TEST_RUN(test_chest_v3_vectors_accepted);
+    TEST_RUN(test_chest_v3_vectors_rejected);
+    TEST_RUN(test_chest_v3_states);
+    TEST_RUN(test_chest_label_sanitized_and_terminated);
+    TEST_RUN(test_chest_dma_segment_ok);
     TEST_RUN(test_chest_mounted_without_mode_is_corrupt);
     TEST_RUN(test_chest_noise_is_not_a_chest);
     TEST_RUN(test_chest_absence_full_scan);
