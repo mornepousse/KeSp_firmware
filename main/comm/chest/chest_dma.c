@@ -44,6 +44,13 @@ bool chest_list_decode(const uint8_t *buf, uint16_t len, chest_list_t *out)
     uint16_t o = CHEST_LIST_HDR_SIZE;
     const uint16_t end = (uint16_t)(len - 2u);
     for (uint8_t i = 0; i < count; i++) {
+        /* Redundant with the "name runs past the CRC" check just below: once
+         * name_off (== o + 2) itself exceeds `end`, name_off + namelen > end
+         * too for any namelen >= 0, so that check alone already refuses this
+         * case. Kept anyway as a local, self-contained proof at the point
+         * where o is used as an offset — an equivalent mutant, not a gap: a
+         * mutation campaign that flags its removal as "surviving" should read
+         * this comment before spending a test vector on it. */
         if ((uint16_t)(o + 2u) > end) return false;   /* index + length bytes run past the CRC */
         uint8_t idx = buf[o];
         uint8_t namelen = buf[o + 1];
@@ -76,8 +83,22 @@ bool chest_code_decode(const uint8_t *buf, uint16_t len, chest_code_t *out)
     for (uint8_t i = 0; i < 8; i++)
         if (buf[2 + i] < '0' || buf[2 + i] > '9') return false;
 
+    /* link_proto_pack_code (Niphar_chest main/link/link_proto.c at 440d79d)
+     * memsets the whole 8-byte field to '0' BEFORE writing the code
+     * right-justified: for digits == 6, the two leftmost bytes are the
+     * padding the packer itself always produces, never the code. A 6-digit
+     * answer whose padding is not exactly "00" is not a code the chest ever
+     * packed — desync or corruption, not a real code. Only checked for
+     * digits == 6: an 8-digit code fills the whole field, no padding byte
+     * to check. */
+    if (digits == 6 && (buf[2] != '0' || buf[3] != '0')) return false;
+
+    /* The chest's own sec_time_window_remaining() (main/security/sec_time.c
+     * at 440d79d, SEC_TIME_TOTP_STEP == 30) returns 1..30: 0 is impossible
+     * for a real code (it would mean an already-expired window) and > 30 is
+     * impossible for the same step. */
     uint8_t seconds = buf[10];
-    if (seconds > 30) return false;
+    if (seconds == 0 || seconds > 30) return false;
 
     chest_code_t tmp;
     tmp.index = buf[0];

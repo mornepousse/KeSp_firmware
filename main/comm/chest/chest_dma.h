@@ -54,8 +54,12 @@ typedef struct {
 
 /* Decodes a CODE answer (RDDMA response, always CHEST_CODE_SIZE bytes). False
  * — `out` left untouched — on: len != CHEST_CODE_SIZE, a bad CRC, digits not
- * 6 or 8, a non-digit byte in the 8 code bytes, or seconds > 30 (the chest's
- * own sec_time_window_remaining() returns 1..SEC_TIME_TOTP_STEP == 1..30:
- * anything above is impossible for a real chest, verified against
+ * 6 or 8, a non-digit byte in the 8 code bytes, digits == 6 with a padding
+ * byte (buf[2] or buf[3]) other than '0' (link_proto_pack_code always
+ * memsets the field to '0' before writing the code right-justified: for a
+ * 6-digit code the two leftmost bytes are ALWAYS that padding), or seconds
+ * == 0 or > 30 (the chest's own sec_time_window_remaining() returns
+ * 1..SEC_TIME_TOTP_STEP == 1..30: 0 would be an already-expired window and
+ * anything above 30 is impossible for a real chest, both verified against
  * Niphar_chest main/security/sec_time.c at 440d79d). */
 bool chest_code_decode(const uint8_t *buf, uint16_t len, chest_code_t *out);

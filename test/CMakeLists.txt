@@ -135,3 +135,53 @@ target_include_directories(test_runner PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/cdc
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/display/oled
 )
+
+# ---------------------------------------------------------------------------
+# Sanitized chest test binary (review fix round 1, 2026-09-29).
+#
+# Some of chest_dma.c's bounds (main/comm/chest/chest_dma.c) guard a REAL
+# out-of-bounds stack write (e.g. `count > CHEST_LIST_MAX_ENTRIES`, which
+# stops the LIST decoder writing past chest_list_t.e[31]). At -O0, an
+# ordinary build can survive that write "by accident": the overflow clobbers
+# unrelated stack locals and the function can still happen to return the
+# expected value, so a mutation that removes the guard does not reliably
+# turn the ordinary test_runner red. Only a sanitizer pins it.
+#
+# test_chest_sanitized carries ONLY the chest suites (test_chest_proto.c,
+# test_chest_dma.c and the sources they need) — deliberately NOT the full
+# suite: openpgp has two pre-existing ASan findings, out of scope here, and
+# would make this target red for a reason that has nothing to do with the
+# chest link.
+#
+# It is part of the DEFAULT build target (no EXCLUDE_FROM_ALL), and the
+# add_custom_command below runs it as a POST_BUILD step on its own target —
+# so `cmake --build test/build` itself fails on a red run. scripts/check.sh's
+# fast phase is exactly `cmake -S test -B test/build && cmake --build
+# test/build && ./test/build/test_runner`: this makes the sanitized binary
+# part of that build step WITHOUT any change to check.sh — the build fails,
+# and the `&&` chain never reaches test_runner, before scripts/check.sh ever
+# has to know this binary exists.
+add_executable(test_chest_sanitized
+    test_chest_proto.c
+    ../main/comm/chest/chest_proto.c
+    test_chest_dma.c
+    ../main/comm/chest/chest_dma.c
+    ../main/security/cr_crc16.c
+    test_main_chest_sanitized.c
+)
+
+target_include_directories(test_chest_sanitized PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/chest
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/security
+)
+
+target_compile_options(test_chest_sanitized PRIVATE -fsanitize=address,undefined -fno-sanitize-recover=all)
+target_link_options(test_chest_sanitized PRIVATE -fsanitize=address,undefined -fno-sanitize-recover=all)
+
+add_custom_command(TARGET test_chest_sanitized POST_BUILD
+    COMMAND $<TARGET_FILE:test_chest_sanitized>
+    WORKING_DIRECTORY $<TARGET_FILE_DIR:test_chest_sanitized>
+    COMMENT "Running test_chest_sanitized (ASan+UBSan) — a red run fails this build step"
+    VERBATIM
+)
