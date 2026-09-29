@@ -653,9 +653,9 @@ static void test_kp_chest_next_requests_a_mode_change_once(void)
     keymaps[0][0][0] = T_K_CHEST_NEXT;
     press_key(0, 0, 0);
     build_keycode_report();
-    build_keycode_report();
     TEST_ASSERT(chest_gate_take_mode_next(), "a new press requests the next mode");
-    TEST_ASSERT(!chest_gate_take_mode_next(), "a held key requests it once");
+    build_keycode_report();                /* still held, no release */
+    TEST_ASSERT(!chest_gate_take_mode_next(), "a held key does not request again");
     TEST_ASSERT_EQ(keycodes[0], 0, "absorbed, not typed");
 }
 
@@ -666,6 +666,7 @@ static void test_sec_confirm_from_local(void)
     TEST_ASSERT(!sec_confirm_from_local(7, 7, 14), "right col 7");
     TEST_ASSERT(!sec_confirm_from_local(13, 7, 14), "right col 13");
     TEST_ASSERT(sec_confirm_from_local(12, 13, 13), "non-split board: every column");
+    TEST_ASSERT(sec_confirm_from_local(13, 13, 13), "non-split: a column at/after local_cols is still local");
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
