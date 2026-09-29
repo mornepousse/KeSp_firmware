@@ -32,6 +32,32 @@ void chest_oath_on_list(chest_oath_t *o, const chest_list_t *l)
         if (!chest_oath_cursor_entry(o, &e) || e->index != o->code.index)
             o->code_shown = false;
     }
+
+    /* Review round 2, item 1: same treatment for a PENDING (not yet
+     * answered) request — retract it if the cursor's entry, after this
+     * refresh, no longer matches requested_index.
+     *
+     * Bite-proof note (round 2): under the CURRENT call surface this block
+     * is behaviorally redundant with chest_oath_on_code's own cursor-entry
+     * check (below) — on_code always re-validates the cursor at answer
+     * time regardless of what happened here, so no test in this suite can
+     * tell this block's presence from its absence (confirmed: removing it
+     * did not turn anything red). Kept anyway, per the reported fix, as an
+     * early/proactive retraction: a caller that inspects code_requested
+     * directly between an on_list and the eventual on_code (Task 6's
+     * transport — e.g. to stop showing "waiting for confirmation", or to
+     * avoid re-sending a request that can no longer be answered
+     * meaningfully) sees it cleared right away rather than only once a
+     * (possibly late, possibly never-arriving) answer shows up. Same shape
+     * as chest_dma.c's documented "equivalent mutant" guard: a real,
+     * deliberate piece of behavior that this pure model's own tests cannot
+     * distinguish from a no-op, because the two checks it duplicates
+     * happen to always compose correctly here. */
+    if (o->code_requested) {
+        const chest_list_entry_t *e;
+        if (!chest_oath_cursor_entry(o, &e) || e->index != o->requested_index)
+            o->code_requested = false;
+    }
 }
 
 void chest_oath_nav(chest_oath_t *o, int8_t delta)
@@ -105,9 +131,27 @@ void chest_oath_on_code(chest_oath_t *o, const chest_code_t *c, uint32_t now_ms)
      * late one after nav retracted the request, is ignored. */
     if (!o->code_requested || o->requested_index != c->index) return;
 
+    /* Review round 2, item 1: ALSO require the account currently under the
+     * cursor to be that same index — a request alone is not enough. This
+     * IS the actual enforcement (confirmed by bite proof: removing this
+     * check alone turns test_chest_oath_code_requested_index_not_under_
+     * cursor_never_visible red); chest_oath_on_list's own request-
+     * retraction is a proactive, but behaviorally redundant, early exit
+     * (see its comment there). A refusal here does NOT touch
+     * code_requested — the request stays armed for whatever answer comes
+     * next (item 3). */
+    const chest_list_entry_t *e;
+    if (!chest_oath_cursor_entry(o, &e) || e->index != c->index) return;
+
     o->code = *c;
     o->code_shown = true;
     o->code_deadline_ms = now_ms + (uint32_t)c->seconds * 1000u;
+    o->code_requested = false;
+}
+
+void chest_oath_code_cancel(chest_oath_t *o)
+{
+    if (!o) return;
     o->code_requested = false;
 }
 

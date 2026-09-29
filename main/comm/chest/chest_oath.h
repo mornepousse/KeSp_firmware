@@ -37,12 +37,23 @@ void chest_oath_reset(chest_oath_t *o);
  *
  * Does NOT hide a code just because a LIST arrived — a refresh is not a
  * navigation key. But a LIST can silently move accounts around (added or
- * removed between two pages): if a code is currently shown, it is kept
- * ONLY when the cursor, after this refresh, still lands on the SAME chest
- * account (same entry.index) the code was issued for; if that account is
- * no longer under the cursor at all (gone, or some other account slid
- * there), the code is hidden — a code must never be shown next to an
- * account it was not issued for. */
+ * removed between two pages), and this matters for TWO independent pieces
+ * of state, checked separately:
+ *   - a code CURRENTLY SHOWN is kept only when the cursor, after this
+ *     refresh, still lands on the SAME chest account (same entry.index)
+ *     the code was issued for; otherwise it is hidden — a code must never
+ *     be shown next to an account it was not issued for;
+ *   - a PENDING request (chest_oath_code_requested, not yet answered) is
+ *     retracted the same way: if the cursor's entry, after this refresh,
+ *     is missing or its index no longer equals requested_index, the
+ *     request is cancelled. Review round 2, item 1: without this, a race
+ *     between a page refresh and an in-flight CODE answer could show a
+ *     code next to the account that happens to occupy the cursor's
+ *     position NOW, even though the request and the answer both named the
+ *     account that used to be there — chest_oath_on_code's own cursor
+ *     check (below) already refuses that specific case, but retracting
+ *     the request here means the owner also stops waiting for an answer
+ *     that can no longer be shown anyway. */
 void chest_oath_on_list(chest_oath_t *o, const chest_list_t *l);
 
 /* A navigation key: move the cursor by delta, wrapping over the cached
@@ -88,17 +99,52 @@ bool chest_oath_cursor_entry(const chest_oath_t *o, const chest_list_entry_t **e
 void chest_oath_code_requested(chest_oath_t *o, uint8_t chest_index);
 
 /* A decoded CODE arrives: shown until now_ms + seconds*1000, but ONLY when
- * a request is currently pending (chest_oath_code_requested) for EXACTLY
- * c->index. Consumed on acceptance — code_requested clears — so a second
- * answer for the same index (a duplicate packet, or the chest re-sending)
- * is ignored: one code per request, never refreshed. This is also what
- * makes navigating away and back a real block, not just a cursor check:
- * chest_oath_nav retracts the request on EVERY call, so returning to the
- * same account does not restore eligibility for an answer that was
- * in flight before the navigation. A no-op (no state change) in every
- * other case: no request pending, or the answer's index does not match
- * the one requested. */
+ * BOTH gates agree — review round 2, item 1 (a request alone is not
+ * enough: a code answering an OLD request must not surface just because
+ * some OTHER account has since slid under the cursor):
+ *   - a request is currently pending (chest_oath_code_requested) for
+ *     EXACTLY c->index;
+ *   - the account CURRENTLY under the cursor (chest_oath_cursor_entry) is
+ *     that SAME index too.
+ * Consumed on acceptance — code_requested clears — so a second answer for
+ * the same index (a duplicate packet, or the chest re-sending) is
+ * ignored: one code per request, never refreshed. A refused answer (wrong
+ * index, no request, or the cursor moved on) does NOT touch the pending
+ * request: it stays armed for a later, correct answer (review round 2,
+ * item 3 — pinned by test_chest_oath_on_code_ignored_wrong_requested_index).
+ * This is also what makes navigating away and back a real block, not just
+ * a cursor check: chest_oath_nav retracts the request on EVERY call
+ * (including delta == 0), so returning to the same account does not
+ * restore eligibility for an answer that was in flight before the
+ * navigation — and chest_oath_on_list retracts it too when a refresh
+ * moves a different account under the cursor. A no-op (no state change)
+ * in every other case. */
 void chest_oath_on_code(chest_oath_t *o, const chest_code_t *c, uint32_t now_ms);
+
+/* Cancels a pending code request without touching anything else — in
+ * particular, NEVER hides or otherwise changes an already-shown code
+ * (chest_oath_code_shown/code_deadline_ms are left alone; only
+ * code_requested is cleared). A no-op when nothing is pending.
+ *
+ * The Task 6 transport calls this when a request will never be answered
+ * and should stop being waited on:
+ *   - the pending op (register 0x06-0x07) returns to 0 without a new DMA
+ *     segment ever having been queued for it;
+ *   - the chest did not arm the CODE operation at all after the request
+ *     (no SEC_OP_OATH_CODE observed);
+ *   - the owner leaves OATH mode;
+ *   - the chest's instance (register 0x0C) changes — a different session,
+ *     any in-flight request belongs to the old one.
+ *
+ * It must NEVER be called on the DMA request's own ~2 s retry/give-up
+ * timeout (chest_dma.c / chest_link.c transport level): that timeout
+ * covers the WIRE request only (WRDMA/WR_END + the doorbell reaching the
+ * chest), not the human confirmation the chest then waits for
+ * (K_SEC_CONFIRM, seconds away, not milliseconds) before it ever arms the
+ * CODE operation and starts producing the DMA answer — cancelling on that
+ * short timeout would retract a request that is still legitimately
+ * waiting on the user's own confirmation press. */
+void chest_oath_code_cancel(chest_oath_t *o);
 
 /* Visible? Hides it FOR GOOD once `now_ms` reaches or passes the deadline —
  * a later call, even with an EARLIER now_ms, never resurrects it: once

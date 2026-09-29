@@ -393,6 +393,29 @@ static void test_chest_oath_nav_zero_hides_code(void)
     TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs), "nav(0) still hides the code: the key itself is the trigger");
 }
 
+/* Review round 2, item 2 (L2): nav(0) must retract a PENDING request too,
+ * not only hide an already-shown code — this exercises the case where NO
+ * code has been shown yet (unlike test_chest_oath_nav_zero_hides_code,
+ * which starts from a shown code). Mutant to kill: gating the
+ * code_requested clear behind `if (delta)` in chest_oath_nav. */
+static void test_chest_oath_nav_zero_retracts_pending_request(void)
+{
+    chest_oath_t o;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
+    chest_code_t c = decode_c1();   /* index 5 */
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 5);
+
+    chest_oath_nav(&o, 0);
+
+    chest_oath_on_code(&o, &c, 1000);
+    TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs),
+                "nav(0) retracted the pending request: the later answer is ignored");
+}
+
 /* Review round 1, item 3: a LIST refresh that moves a DIFFERENT account
  * under the cursor must hide a code already shown for the account that
  * used to be there. Positive control alongside: a refresh that leaves the
@@ -462,20 +485,94 @@ static void test_chest_oath_on_code_ignored_without_request(void)
 }
 
 /* A request pending for a DIFFERENT index than the answer's must also be
- * ignored — the lock is exact, not "any request will do". */
+ * ignored — the lock is exact, not "any request will do". Review round 2,
+ * item 3 (L6): a refused answer must leave the pending request INTACT —
+ * pinned here by following the decoy refusal with the real answer for the
+ * account that was actually requested (and is still under the cursor, to
+ * satisfy chest_oath_on_code's cursor gate from item 1), which must still
+ * be accepted. */
 static void test_chest_oath_on_code_ignored_wrong_requested_index(void)
 {
     chest_oath_t o;
-    chest_list_t l5 = one_entry_page(5, "SOMEACC");
-    chest_code_t c = decode_c1();   /* index 5 */
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");   /* cursor -> index 5 */
+    chest_code_t right = decode_c1();                 /* index 5: matches both the request and the cursor */
+    chest_code_t wrong = right;
+    wrong.index = 9;                                  /* a decoy answer for an index never requested */
     uint8_t secs;
 
     chest_oath_reset(&o);
     chest_oath_on_list(&o, &l5);
-    chest_oath_code_requested(&o, 9);   /* requested a DIFFERENT index */
+    chest_oath_code_requested(&o, 5);
+
+    chest_oath_on_code(&o, &wrong, 1000);
+    TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs), "an answer for an index other than the one requested is ignored");
+
+    chest_oath_on_code(&o, &right, 1000);
+    TEST_ASSERT(chest_oath_code_visible(&o, 1000, &secs),
+                "the refused decoy did NOT clear the pending request: the right answer is still accepted afterwards");
+}
+
+/* Review round 2, item 1 (Important) — the exact reproduction reported: a
+ * code answering an OLD request must not surface once the chest's LIST has
+ * moved a DIFFERENT account under the cursor in between. Both gates in
+ * chest_oath_on_code (the request lock AND the cursor-entry check) close
+ * this; chest_oath_on_list's own request-retraction (see its header) means
+ * code_requested is already false by the time on_code is even called, but
+ * the cursor gate is what actually enforces it — this test does not rely
+ * on which one fires. */
+static void test_chest_oath_on_code_after_list_changes_account_under_cursor(void)
+{
+    chest_oath_t o;
+    chest_list_t page2 = one_entry_page(2, "ACC2");
+    chest_list_t page7 = one_entry_page(7, "ACC7");
+    chest_code_t c = decode_c1();
+    c.index = 2;   /* an answer for the account that WAS under the cursor at request time */
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &page2);      /* cursor -> index 2 */
+    chest_oath_code_requested(&o, 2);    /* request lock armed for 2 */
+
+    chest_oath_on_list(&o, &page7);      /* the chest now serves index 7 at the SAME cursor position */
+
+    chest_oath_on_code(&o, &c, 1000);    /* the (late/racing) answer for index 2 */
+    TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs),
+                "a code for the account that WAS under the cursor, after a different one slid there, must not show");
+}
+
+/* Review round 2, item 1: a request for an index that was never under the
+ * cursor in the first place (a caller bug, or a race the owner did not
+ * guard against) must never lead to a visible code, even though the
+ * request lock alone would have matched. Also pins item 3 (L6) for THIS
+ * refusal path specifically (not just the request-mismatch path
+ * test_chest_oath_on_code_ignored_wrong_requested_index covers): the
+ * cursor-gate refusal must not clear the pending request either — once
+ * the cursor legitimately catches up to the requested account, the SAME
+ * answer, replayed, is accepted. */
+static void test_chest_oath_code_requested_index_not_under_cursor_never_visible(void)
+{
+    chest_oath_t o;
+    chest_list_t page2 = one_entry_page(2, "ACC2");   /* cursor is on index 2 */
+    chest_list_t page5 = one_entry_page(5, "ACC5");   /* a later refresh puts index 5 at the cursor */
+    chest_code_t c = decode_c1();
+    c.index = 5;   /* a code for an index that was never under the cursor, at first */
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &page2);
+    chest_oath_code_requested(&o, 5);   /* lock armed for 5, but the cursor's real entry is 2 */
     chest_oath_on_code(&o, &c, 1000);
 
-    TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs), "an answer for an index other than the one requested is ignored");
+    TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs),
+                "a request for an index not under the cursor never leads to a visible code");
+
+    /* The refusal above must not have cleared the pending request: once a
+     * LIST refresh legitimately brings the requested account under the
+     * cursor, the SAME (replayed) answer is now accepted. */
+    chest_oath_on_list(&o, &page5);
+    chest_oath_on_code(&o, &c, 1000);
+    TEST_ASSERT(chest_oath_code_visible(&o, 1000, &secs),
+                "the cursor-gate refusal did not clear the request: it is accepted once the cursor catches up");
 }
 
 /* Review round 1, item 4: CODE requested, nav away, nav back to the SAME
@@ -539,6 +636,57 @@ static void test_chest_oath_on_code_duplicate_after_success_ignored(void)
 
     TEST_ASSERT(!chest_oath_code_visible(&o, 13000, &secs),
                 "hidden at the ORIGINAL deadline (13000), proving the duplicate never re-armed a fresh 30 s window");
+}
+
+/* Review round 2, item 4: chest_oath_code_cancel retracts a pending
+ * request — an answer arriving afterwards is ignored, same as any other
+ * retraction path (nav, on_list, consumption). */
+static void test_chest_oath_code_cancel(void)
+{
+    chest_oath_t o;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
+    chest_code_t c = decode_c1();   /* index 5 */
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 5);
+    TEST_ASSERT(o.code_requested, "request armed before cancel");
+
+    chest_oath_code_cancel(&o);
+    TEST_ASSERT(!o.code_requested, "cancel clears the pending request");
+
+    chest_oath_on_code(&o, &c, 1000);
+    TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs), "an answer after cancel is ignored");
+}
+
+/* Review round 2, item 4: cancel must NEVER touch an already-shown code —
+ * only the pending-request lock. */
+static void test_chest_oath_code_cancel_does_not_touch_shown_code(void)
+{
+    chest_oath_t o;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
+    chest_code_t c = decode_c1();   /* index 5, seconds 12 */
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 5);
+    chest_oath_on_code(&o, &c, 1000);   /* accepted: code_shown true, request already consumed */
+    TEST_ASSERT(chest_oath_code_visible(&o, 1000, &secs), "code visible before cancel");
+
+    chest_oath_code_cancel(&o);
+    TEST_ASSERT(chest_oath_code_visible(&o, 1000, &secs), "cancel does not hide an already-shown code");
+    TEST_ASSERT_EQ(secs, 12, "cancel does not touch the code's countdown either");
+}
+
+/* chest_oath_code_cancel on nothing pending: a harmless no-op. */
+static void test_chest_oath_code_cancel_nothing_pending(void)
+{
+    chest_oath_t o;
+    chest_oath_reset(&o);
+    chest_oath_code_cancel(&o);
+    TEST_ASSERT(!o.code_requested, "cancel with nothing pending: still false, no crash");
 }
 
 /* Review round 1, item 5: a malformed-but-CRC-valid LIST page — total 0
@@ -659,12 +807,18 @@ void test_chest_oath(void)
     TEST_RUN(test_chest_oath_code_visible_wraps_uint32_from_the_other_side);
     TEST_RUN(test_chest_oath_nav_hides_code);
     TEST_RUN(test_chest_oath_nav_zero_hides_code);
+    TEST_RUN(test_chest_oath_nav_zero_retracts_pending_request);
     TEST_RUN(test_chest_oath_on_list_moves_cursor_hides_code);
     TEST_RUN(test_chest_oath_on_list_entry_gone_hides_code);
     TEST_RUN(test_chest_oath_on_code_ignored_without_request);
     TEST_RUN(test_chest_oath_on_code_ignored_wrong_requested_index);
+    TEST_RUN(test_chest_oath_on_code_after_list_changes_account_under_cursor);
+    TEST_RUN(test_chest_oath_code_requested_index_not_under_cursor_never_visible);
     TEST_RUN(test_chest_oath_on_code_nav_away_and_back_ignores_late_answer);
     TEST_RUN(test_chest_oath_on_code_duplicate_after_success_ignored);
+    TEST_RUN(test_chest_oath_code_cancel);
+    TEST_RUN(test_chest_oath_code_cancel_does_not_touch_shown_code);
+    TEST_RUN(test_chest_oath_code_cancel_nothing_pending);
     TEST_RUN(test_chest_oath_cursor_entry_malformed_total_zero);
     TEST_RUN(test_chest_oath_may_request_code);
     TEST_RUN(test_chest_oath_may_request_code_index_not_cursor_position);
