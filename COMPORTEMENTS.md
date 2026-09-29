@@ -296,6 +296,12 @@ means a test, or a line.
   board declares them, pin tables consistent with MATRIX_ROWS/COLS and
   KEYMAP_COLS. Proven biting: a duplicated column on the V2 turns V2 and V2D
   red. The Niphargus pin tests keep their hardware-specific facts.
+- [test:test_left_chest_link_pins] The chest link uses GPIO3 (CS_P4, R48 to
+  the chest's rail) and GPIO46 (IRQ_P4, R49 pull-down) on the left — from
+  the netlist, 2026-09-29; the matrix never lands on them, and the generic
+  board contract exempts exactly these two strapping pins
+  (BOARD_PINS_STRAPPING_WIRED). The chest's own HARDWARE.md said IO7/IO11:
+  those are the P4-side numbers.
 - [smoke:New board from the template] A board is one folder:
   `scripts/new-board.sh <name>` copies `boards/_template/` (board.h with the
   pin tables and `BOARD_PINS(X)`, keymap, layout, sdkconfig.defaults, README)

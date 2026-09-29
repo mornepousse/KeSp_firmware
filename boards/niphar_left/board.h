@@ -141,6 +141,18 @@
 #define BOARD_DISPLAY_SLEEP_MS    60000
 #define BOARD_HAS_LED_STRIP  0
 
+/* ── Chest link (Niphar_chest, ESP32-P4 as spi_slave_hd) ──
+ * From the netlist (kicad-cli export of niphar.kicad_sch, 2026-09-29):
+ * CS_P4 = U6 pin 15 = GPIO3, R48 10k pull-up to the CHEST's P4_3V3 rail —
+ * so the S3 drives it only while the chest is powered (USB); IRQ_P4 = U6
+ * pin 16 = GPIO46, R49 10k pull-down, active high, input-only pin.
+ * Both are strapping pins wired on purpose: GPIO3 (JTAG source, ignored
+ * without EFUSE_STRAP_JTAG_SEL) and GPIO46 (ROM print, "Ignored" with the
+ * default eFuse, TRM v1.8 table 8.3-1 p. 536). */
+#define BOARD_CHEST_CS   GPIO_NUM_3
+#define BOARD_CHEST_IRQ  GPIO_NUM_46
+#define BOARD_PINS_STRAPPING_WIRED(g) ((g) == 3 || (g) == 46)
+
 /* ── Matrix scan ───────────────────────────────────────────────
  * SETTLING/RECOVERY at 0 reuses the KaSe boards' setting. Suspected of
  * contributing to missed keystrokes (docs/DONGLE_ARCHI_ET_HALF_TYPING_2026-07-13.md,
@@ -176,4 +188,5 @@ _Static_assert(BOARD_DEBOUNCE_TICKS * BOARD_MATRIX_SCAN_INTERVAL_US >= 5000,
     X(COLS0) X(COLS1) X(COLS2) X(COLS3) X(COLS4) X(COLS5) X(COLS6) \
     X(BOARD_NRF_SCK) X(BOARD_NRF_MISO) X(BOARD_NRF_MOSI) X(BOARD_NRF_CE) X(BOARD_NRF_CSN) X(BOARD_NRF_IRQ) \
     X(BOARD_LINK_TX) X(BOARD_LINK_RX) X(BOARD_LINK_5V_EN) X(BOARD_VBAT_SENSE_GPIO) \
-    X(BOARD_TRACK_SDA_GPIO) X(BOARD_TRACK_SCL_GPIO) X(BOARD_TRACK_RDY_GPIO) X(BOARD_LCD_CS_GPIO)
+    X(BOARD_TRACK_SDA_GPIO) X(BOARD_TRACK_SCL_GPIO) X(BOARD_TRACK_RDY_GPIO) X(BOARD_LCD_CS_GPIO) \
+    X(BOARD_CHEST_CS) X(BOARD_CHEST_IRQ)

@@ -69,7 +69,8 @@ it does not match.
 | TP_RDY | 42 | trackpad, left only (labels pending on the right) |
 | I2C trackpad SDA / SCL | 47 / 48 | 4.7k pull-ups; left only. Trackpad NRST = hardware RC, no GPIO |
 | Prog | 0, 43 (TX0), 44 (RX0) | 6-pin ESP-Prog-style connector per half (EN/3V3/TX/GND/RX/IO0) |
-| Forbidden | 3, 45, 46, 35-37 | strapping / octal PSRAM — not wired |
+| Forbidden | 45, 35-37 | strapping / octal PSRAM — not wired |
+| Chest link CS_P4 / IRQ_P4 (left) | 3 / 46 | CS: R48 10k pull-up to the CHEST's rail — drive only while the chest is powered; IRQ: R49 10k pull-down, active high. Strapping pins wired on purpose (netlist 2026-09-29) |
 
 ## ⚠ The SPI bus carries a third participant: the ESP32-P4
 
@@ -90,9 +91,11 @@ component at the other end.
 
 Design consequences, not addressed as of today:
 
-- **Three slaves on one bus, each with its own CS.** The P4 absolutely must
-  release MISO outside of selection. A slave that keeps MISO driven as an
-  output holds the bus even while working perfectly.
+- **Three slaves on one bus, each with its own CS.** The P4's CS is GPIO3
+  (`BOARD_CHEST_CS`, R48 10k pull-up to the chest's own rail — netlist
+  2026-09-29). The P4 absolutely must release MISO outside of selection. A
+  slave that keeps MISO driven as an output holds the bus even while
+  working perfectly.
 - **Arbitration.** Nothing currently orders access between the nRF24, the
   display and the P4.
 - The P4 must be flashed **before** any radio test on the left half.

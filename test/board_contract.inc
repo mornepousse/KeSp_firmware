@@ -32,8 +32,12 @@ static void bc_no_strapping(void)
 #ifdef BOARD_PINS_WAIVE_STRAPPING
     TEST_ASSERT(1, BOARD_CONTRACT_NAME ": strapping rule waived by the board (legacy pinout)");
 #else
-    for (unsigned i = 0; i < BC_N; i++)
+    for (unsigned i = 0; i < BC_N; i++) {
+#ifdef BOARD_PINS_STRAPPING_WIRED
+        if (BOARD_PINS_STRAPPING_WIRED(bc_pins[i])) continue;   /* wired by the PCB, justified in board.h */
+#endif
         TEST_ASSERT(!bc_strapping(bc_pins[i]), BOARD_CONTRACT_NAME ": strapping GPIO (0/3/45/46) in use");
+    }
 #endif
 }
 static void bc_no_reserved(void)

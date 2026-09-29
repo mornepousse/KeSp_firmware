@@ -14,6 +14,7 @@
 #define GPIO_NUM_0  0
 #define GPIO_NUM_1  1
 #define GPIO_NUM_2  2
+#define GPIO_NUM_3  3
 #define GPIO_NUM_4  4
 #define GPIO_NUM_5  5
 #define GPIO_NUM_6  6
@@ -35,6 +36,7 @@
 #define GPIO_NUM_40 40
 #define GPIO_NUM_41 41
 #define GPIO_NUM_42 42
+#define GPIO_NUM_46 46
 #define GPIO_NUM_47 47
 #define GPIO_NUM_48 48
 #define GPIO_NUM_NC (-1)
@@ -61,8 +63,9 @@
 #error "the left has no OLED: BOARD_DISPLAY_BACKEND_OLED would change the backend chosen by CMakeLists.txt"
 #endif
 
-/* Unwired GPIOs: strapping and octal PSRAM. No board pin must
- * fall on these. */
+/* Unwired GPIOs: strapping and octal PSRAM. GPIO3 and GPIO46 are strapping
+ * pins too but WIRED to the chest (CS_P4, IRQ_P4 — test_left_chest_link_pins),
+ * so they stay out of the matrix all the same. */
 static int is_forbidden(int gpio)
 {
     return gpio == 3 || gpio == 45 || gpio == 46 ||
@@ -241,6 +244,22 @@ static void test_ecran_memlcd_gauche(void)
                 "the screen CS is neither the radio's CSN nor its CE (shared bus)");
 }
 
+/* The chest link, from the netlist (kicad-cli export, 2026-09-29):
+ * CS_P4 = U6 pin 15 = GPIO3 (R48 10k to the chest's P4_3V3 rail),
+ * IRQ_P4 = U6 pin 16 = GPIO46 (R49 10k to GND). Both are S3 strapping pins,
+ * wired on purpose by the PCB: the matrix must never land on them. */
+static void test_left_chest_link_pins(void)
+{
+    TEST_ASSERT_EQ(BOARD_CHEST_CS, 3, "CS_P4 = GPIO3");
+    TEST_ASSERT_EQ(BOARD_CHEST_IRQ, 46, "IRQ_P4 = GPIO46");
+    const int matrix[] = { ROWS0, ROWS1, ROWS2, ROWS3,
+                           COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6 };
+    for (unsigned i = 0; i < sizeof matrix / sizeof matrix[0]; i++) {
+        TEST_ASSERT(matrix[i] != BOARD_CHEST_CS, "no matrix line on the chest CS");
+        TEST_ASSERT(matrix[i] != BOARD_CHEST_IRQ, "no matrix line on the chest IRQ");
+    }
+}
+
 void test_niphar_left_pins(void)
 {
     printf("\n-- Niphargus LEFT pinout (netlist contract 2026-08-06) --\n");
@@ -253,4 +272,5 @@ void test_niphar_left_pins(void)
     test_left_swaps_the_link_uart();
     test_left_radio_pin_aliases();
     test_ecran_memlcd_gauche();
+    test_left_chest_link_pins();
 }
