@@ -24,7 +24,8 @@ typedef struct {
     bool         code_requested;    /* a CODE request is outstanding for requested_index */
     uint8_t      requested_index;   /* the CHEST index chest_oath_code_requested was called with */
     bool         code_shown;
-    chest_code_t code;
+    chest_code_t code;              /* zeroed whenever the code is hidden (nav, expiry, LIST moving
+                                     * the cursor): the digits never outlive their display */
     uint32_t     code_deadline_ms;
 } chest_oath_t;
 

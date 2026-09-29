@@ -13,6 +13,15 @@ void chest_oath_reset(chest_oath_t *o)
     memset(o, 0, sizeof *o);
 }
 
+/* Hides the code AND wipes its digits (Task 6 review m3): a code that is no
+ * longer on the screen has no reason to stay in RAM until the next one
+ * overwrites it. The only place code_shown goes false. */
+static void hide_code(chest_oath_t *o)
+{
+    o->code_shown = false;
+    memset(&o->code, 0, sizeof o->code);
+}
+
 void chest_oath_on_list(chest_oath_t *o, const chest_list_t *l)
 {
     if (!o || !l) return;
@@ -30,7 +39,7 @@ void chest_oath_on_list(chest_oath_t *o, const chest_list_t *l)
     if (o->code_shown) {
         const chest_list_entry_t *e;
         if (!chest_oath_cursor_entry(o, &e) || e->index != o->code.index)
-            o->code_shown = false;
+            hide_code(o);
     }
 
     /* Review round 2, item 1: same treatment for a PENDING (not yet
@@ -63,7 +72,7 @@ void chest_oath_on_list(chest_oath_t *o, const chest_list_t *l)
 void chest_oath_nav(chest_oath_t *o, int8_t delta)
 {
     if (!o) return;
-    o->code_shown = false;      /* IHM engagement: every navigation key hides the code, unconditionally */
+    hide_code(o);               /* IHM engagement: every navigation key hides the code, unconditionally */
     o->code_requested = false;  /* review round 1, item 4: a nav key also retracts any pending request */
 
     uint8_t total = o->have_page ? o->page.total : 0;
@@ -162,7 +171,7 @@ bool chest_oath_code_visible(chest_oath_t *o, uint32_t now_ms, uint8_t *secs_lef
 
     int32_t remaining_ms = (int32_t)(o->code_deadline_ms - now_ms);
     if (remaining_ms <= 0) {
-        o->code_shown = false;   /* hidden for good: no later call resurrects it */
+        hide_code(o);            /* hidden for good: no later call resurrects it */
         return false;
     }
 

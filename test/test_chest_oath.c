@@ -789,6 +789,47 @@ static void test_chest_oath_may_request_code_no_cached_entry(void)
                 "READY and TIME_VALID set but nothing cached under the cursor: refused");
 }
 
+/* Task 6 review m3 (2026-09-29): a hidden code does not linger in RAM.
+ * The digits are zeroed the moment the code stops being visible — on a
+ * navigation key, on its deadline, on a LIST that moves another account
+ * under the cursor — not left in chest_oath_t until the next code
+ * overwrites them. */
+static bool code_bytes_zero(const chest_oath_t *o)
+{
+    const uint8_t *b = (const uint8_t *)&o->code;
+    for (size_t i = 0; i < sizeof o->code; i++) if (b[i]) return false;
+    return true;
+}
+
+static void test_chest_oath_hidden_code_is_wiped(void)
+{
+    chest_oath_t o;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
+    chest_code_t c = decode_c1();   /* index 5, "418902", 12 s */
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 5);
+    chest_oath_on_code(&o, &c, 1000);
+    TEST_ASSERT(!code_bytes_zero(&o), "shown: the code is held");
+    chest_oath_nav(&o, 0);
+    TEST_ASSERT(code_bytes_zero(&o), "hidden by a navigation key: digits wiped");
+
+    chest_oath_code_requested(&o, 5);
+    chest_oath_on_code(&o, &c, 2000);
+    TEST_ASSERT(chest_oath_code_visible(&o, 13999, &secs), "visible until its deadline");
+    TEST_ASSERT(!code_bytes_zero(&o), "still held while visible");
+    TEST_ASSERT(!chest_oath_code_visible(&o, 14000, &secs), "deadline reached");
+    TEST_ASSERT(code_bytes_zero(&o), "expired: digits wiped");
+
+    chest_list_t other = one_entry_page(6, "OTHERACC");
+    chest_oath_code_requested(&o, 5);
+    chest_oath_on_code(&o, &c, 20000);
+    chest_oath_on_list(&o, &other);
+    TEST_ASSERT(code_bytes_zero(&o), "hidden by a LIST moving another account under the cursor: wiped");
+}
+
 void test_chest_oath(void)
 {
     TEST_SUITE("chest_oath");
@@ -806,6 +847,7 @@ void test_chest_oath(void)
     TEST_RUN(test_chest_oath_code_visible_wraps_uint32);
     TEST_RUN(test_chest_oath_code_visible_wraps_uint32_from_the_other_side);
     TEST_RUN(test_chest_oath_nav_hides_code);
+    TEST_RUN(test_chest_oath_hidden_code_is_wiped);
     TEST_RUN(test_chest_oath_nav_zero_hides_code);
     TEST_RUN(test_chest_oath_nav_zero_retracts_pending_request);
     TEST_RUN(test_chest_oath_on_list_moves_cursor_hides_code);

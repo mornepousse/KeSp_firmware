@@ -380,6 +380,144 @@ static void test_doorbell_wraps_and_reset_forgets_the_chest(void)
     TEST_ASSERT_EQ(chest_round_next_doorbell(&r), 0x11, "and its doorbell is seeded again");
 }
 
+/* Review round 1, I1: once a code has been served, the transport must go
+ * back to accepting K_OATH_CODE — the prompt is over whichever way the op
+ * cleared. Two shapes of the real chest (contract §13 at 6219516: 0x11
+ * moves BEFORE the op clears, the op clears one chest tick later): our
+ * 250 ms read sees both changes in ONE block, or sees them in two. */
+static void test_a_second_code_after_a_served_code(void)
+{
+    chest_round_t r; chest_round_plan_t p; chest_oath_t o;
+    for (int shape = 0; shape < 2; shape++) {
+        round_in_oath_with_page(&r, &o, 0);
+        chest_status_t st = oath_status(1);
+        chest_round_plan(&r, &st, 0, &o, false, true, 1000, &p);
+        TEST_ASSERT(p.send && p.cmd == CHEST_REQ_CODE, "first CODE");
+        chest_round_sent(&r, true, p.cmd, p.arg, st.instance, 1000);
+        st.pending_op = 7; st.instance = 4;                       /* armed */
+        chest_round_plan(&r, &st, 0, &o, false, false, 1250, &p);
+        st.dma_seq = 2; st.dma_kind = CHEST_DMA_CODE; st.dma_len = CHEST_CODE_SIZE;
+        if (shape == 1) {                                         /* 0x11 first, op still set */
+            chest_round_plan(&r, &st, 0, &o, false, false, 1500, &p);
+            TEST_ASSERT(p.read_segment, "the CODE segment is read");
+            chest_round_segment_read(&r, true, 2);
+        }
+        st.pending_op = 0;                                        /* the op clears */
+        chest_round_plan(&r, &st, 0, &o, false, false, 1750, &p);
+        if (p.read_segment) chest_round_segment_read(&r, true, 2);
+        chest_round_plan(&r, &st, 0, &o, false, true, 2000, &p);
+        TEST_ASSERT(p.send && p.cmd == CHEST_REQ_CODE,
+                    shape ? "a second K_OATH_CODE is served (op cleared a round after 0x11)"
+                          : "a second K_OATH_CODE is served (0x11 and op seen in one block)");
+    }
+}
+
+/* Review round 1, I2 + M15: leaving OATH resets the browser (the transport
+ * calls chest_oath_reset), so re-entering must ask LIST(0) again at once —
+ * even though LIST(0) was the last LIST sent, and even if a LIST was still
+ * in flight when OATH was left. */
+static void test_reentering_oath_lists_again(void)
+{
+    chest_round_t r; chest_round_plan_t p; chest_oath_t o;
+    round_in_oath_with_page(&r, &o, 0);                          /* LIST(0) was sent and answered */
+    chest_status_t st = oath_status(1);
+    st.active_mode = CHEST_MODE_PGP;
+    chest_round_plan(&r, &st, 0, &o, false, false, 500, &p);
+    TEST_ASSERT(p.leave_oath, "left");
+    chest_oath_reset(&o);
+    st.active_mode = CHEST_MODE_OATH;
+    chest_round_plan(&r, &st, 0, &o, false, false, 750, &p);
+    TEST_ASSERT(p.send && p.cmd == CHEST_REQ_LIST && p.arg == 0, "re-entering OATH: LIST(0) again");
+
+    round_in_oath_with_page(&r, &o, 0);
+    chest_oath_nav(&o, 5);
+    st = oath_status(1);
+    chest_round_plan(&r, &st, 0, &o, true, false, 500, &p);
+    TEST_ASSERT(p.send && p.arg == 5, "LIST(5) in flight");
+    chest_round_sent(&r, true, p.cmd, p.arg, st.instance, 500);
+    st.active_mode = CHEST_MODE_PGP;
+    chest_round_plan(&r, &st, 0, &o, false, false, 750, &p);
+    chest_oath_reset(&o);
+    st.active_mode = CHEST_MODE_OATH;
+    chest_round_plan(&r, &st, 0, &o, false, false, 1000, &p);
+    TEST_ASSERT(p.send && p.cmd == CHEST_REQ_LIST && p.arg == 0,
+                "the LIST left in flight does not hold the re-entry LIST for 2 s");
+}
+
+/* Review round 1, I3: one request in flight — a navigation key while a
+ * LIST is outstanding does not send a second LIST; the new page is asked
+ * when the answer arrives or the request times out. */
+static void test_nav_during_a_list_in_flight_waits(void)
+{
+    chest_round_t r; chest_round_plan_t p; chest_oath_t o;
+    round_in_oath_with_page(&r, &o, 0);
+    chest_oath_nav(&o, 5);
+    chest_status_t st = oath_status(1);
+    chest_round_plan(&r, &st, 0, &o, true, false, 500, &p);
+    chest_round_sent(&r, true, p.cmd, p.arg, st.instance, 500);
+    chest_oath_nav(&o, 3);                                        /* cursor 8: another page */
+    chest_round_plan(&r, &st, 0, &o, true, false, 750, &p);
+    TEST_ASSERT(!p.send, "LIST(5) still in flight: no LIST(8) yet");
+    for (uint32_t t = 1000; t < 2500; t += 250) {
+        chest_round_plan(&r, &st, 0, &o, false, false, t, &p);
+        TEST_ASSERT(!p.send, "nor on any round before the answer or the timeout");
+    }
+    chest_round_plan(&r, &st, 0, &o, false, false, 2500, &p);
+    TEST_ASSERT(p.send && p.cmd == CHEST_REQ_LIST && p.arg == 8, "timeout: now LIST(8)");
+
+    round_in_oath_with_page(&r, &o, 0);
+    chest_oath_nav(&o, 5);
+    st = oath_status(1);
+    chest_round_plan(&r, &st, 0, &o, true, false, 500, &p);
+    chest_round_sent(&r, true, p.cmd, p.arg, st.instance, 500);
+    chest_oath_nav(&o, 3);
+    chest_round_plan(&r, &st, 0, &o, true, false, 750, &p);
+    TEST_ASSERT(!p.send, "in flight");
+    st.dma_seq = 2; st.dma_kind = CHEST_DMA_LIST; st.dma_len = 34;
+    chest_round_plan(&r, &st, 0, &o, false, false, 1000, &p);
+    TEST_ASSERT(p.send && p.cmd == CHEST_REQ_LIST && p.arg == 8, "answer in: now LIST(8)");
+}
+
+/* Review round 1, M25 + M26: the same-first block is about the SAME first
+ * only, and the retry budget is per segment. The one way the wanted first
+ * changes without a key is chest_oath_on_list's clamp when the chest's
+ * total shrinks: that LIST must go out even though retries were spent and
+ * a LIST (for another first) is still remembered, and it gets its own
+ * retries. */
+static void test_a_shrinking_chest_is_followed_with_fresh_retries(void)
+{
+    chest_round_t r; chest_round_plan_t p; chest_oath_t o;
+    round_in_oath_with_page(&r, &o, 0);
+    chest_oath_nav(&o, 11);                                       /* cursor 11 of 12 */
+    chest_status_t st = oath_status(1);
+    uint32_t t = 500;
+    int lists = 0;
+    chest_round_plan(&r, &st, 0, &o, true, false, t, &p);
+    for (; t < 9000; t += 250) {
+        if (t > 500) chest_round_plan(&r, &st, 0, &o, false, false, t, &p);
+        if (p.send) { lists++; chest_round_sent(&r, true, p.cmd, p.arg, st.instance, t); }
+    }
+    TEST_ASSERT_EQ(lists, 1 + CHEST_LIST_RETRIES, "LIST(11) and its retries, spent");
+
+    chest_list_t shrunk; memset(&shrunk, 0, sizeof shrunk);      /* the chest now holds 5 */
+    shrunk.total = 5; shrunk.count = 3; shrunk.first = 0;
+    for (uint8_t i = 0; i < 3; i++) shrunk.e[i].index = i;
+    st.dma_seq = 2; st.dma_kind = CHEST_DMA_LIST; st.dma_len = 34;
+    chest_round_plan(&r, &st, 0, &o, false, false, t, &p);
+    TEST_ASSERT(p.read_segment, "a late page arrives");
+    chest_round_segment_read(&r, true, 2);
+    chest_oath_on_list(&o, &shrunk);                             /* cursor clamps to 4 */
+    lists = 0;
+    for (t += 250; t < 20000; t += 250) {
+        chest_round_plan(&r, &st, 0, &o, false, false, t, &p);
+        if (p.send) {
+            TEST_ASSERT(p.cmd == CHEST_REQ_LIST && p.arg == 4, "the clamped cursor's page: LIST(4)");
+            lists++; chest_round_sent(&r, true, p.cmd, p.arg, st.instance, t);
+        }
+    }
+    TEST_ASSERT_EQ(lists, 1 + CHEST_LIST_RETRIES, "LIST(4) goes out, with retries of its own");
+}
+
 void test_chest_round(void)
 {
     TEST_SUITE("chest link: DMA round plan");
@@ -401,4 +539,8 @@ void test_chest_round(void)
     TEST_RUN(test_code_press_while_prompt_pending_or_busy_is_dropped);
     TEST_RUN(test_code_send_failure_gets_one_retry);
     TEST_RUN(test_doorbell_wraps_and_reset_forgets_the_chest);
+    TEST_RUN(test_a_second_code_after_a_served_code);
+    TEST_RUN(test_reentering_oath_lists_again);
+    TEST_RUN(test_nav_during_a_list_in_flight_waits);
+    TEST_RUN(test_a_shrinking_chest_is_followed_with_fresh_retries);
 }

@@ -51,6 +51,9 @@ void chest_round_plan(chest_round_t *r, const chest_status_t *st, uint8_t doorbe
         r->last_seq = st->dma_seq;
     } else if (st->dma_seq != r->last_seq) {
         seq_changed = true;
+        /* The real chest never announces an unreadable segment (kind 1/2,
+         * length 1..512 by construction): this guard is defence against a
+         * corrupt-but-CRC-valid block, not a path the bench can reach. */
         if (chest_dma_segment_ok(st)) p->read_segment = true;
         else r->last_seq = st->dma_seq;          /* unreadable: consumed, never retried */
         if (r->req_busy && r->req_cmd == CHEST_REQ_LIST) r->req_busy = false;   /* answered */
@@ -61,6 +64,14 @@ void chest_round_plan(chest_round_t *r, const chest_status_t *st, uint8_t doorbe
      * boundary round counts. */
     if (r->code_wait) {
         if (!r->code_armed) {
+            /* "A new arming" = op pending AND instance moved. Each half is
+             * redundant with the REAL chest (review round 1: equivalent
+             * mutants) — its instance only moves on an arming, and we never
+             * send CODE while an op is pending — so the pair is kept as the
+             * literal statement, not for a case a test can build. (A CCID
+             * arming between our send and the chest's service satisfies
+             * both; the chest then refuses ours, and the prompt shown is
+             * the CCID one, whose label says so.) */
             if (st->pending_op != 0 && st->instance != r->code_inst0) {
                 r->code_armed = true;
                 r->code_inst = st->instance;

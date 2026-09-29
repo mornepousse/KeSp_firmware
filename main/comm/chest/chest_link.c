@@ -183,6 +183,17 @@ static bool send_request(uint8_t cmd, uint8_t arg, uint8_t bell)
         { .cmd = CHEST_CMD_WR_END },
         { .cmd = CHEST_CMD_WRBUF, .addr = CHEST_REG_REQ_SEQ, .length = 8, .tx_buffer = s_tx },
     };
+    /* Partial failure (review m4): if WRDMA and WR_END went out but the
+     * doorbell did not, the chest holds a completed, unannounced receive.
+     * We report !ok, so the doorbell does not advance (chest_round_sent)
+     * and the next attempt re-sends WRDMA + WR_END + the SAME doorbell
+     * value. That second WRDMA finds no receive armed on the chest (its one
+     * receive is the completed one) and is lost; the doorbell then makes the
+     * chest serve the FIRST segment — the same request if it is a retry,
+     * the old one otherwise (a CODE re-planned for another account after a
+     * navigation, for instance). Harmless either way: a wrong LIST is just a
+     * page, and a wrong CODE arms a prompt that names the account the chest
+     * really targeted, which the owner does not confirm. */
     bool ok = xfer_seq(t, 3);
     DIAG("DMA WRDMA %s arg=%u bell=%u: %02X %02X %02X %02X %02X %02X %02X %02X -> %s",
          cmd == CHEST_REQ_LIST ? "LIST" : "CODE", arg, bell, s_req[0], s_req[1], s_req[2],
@@ -285,7 +296,12 @@ static void round_ok(const chest_status_t *st, uint32_t pressed, bool mode_next,
         bool ok = read_segment(st->dma_len);
         chest_round_segment_read(&s_round, ok, st->dma_seq);
         if (ok) consume_segment(st, now);
-        else DIAG("DMA RDDMA seq=%u len=%u: bus busy, next round", st->dma_seq, st->dma_len);
+        else {
+            /* RDDMA may have landed before INT0 failed: whatever reached
+             * s_dma (a code, possibly) is wiped now, not at the retry. */
+            memset(s_dma, 0, st->dma_len);
+            DIAG("DMA RDDMA seq=%u len=%u: bus busy, next round", st->dma_seq, st->dma_len);
+        }
     }
 }
 

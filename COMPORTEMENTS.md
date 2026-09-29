@@ -905,7 +905,21 @@ means a test, or a line.
   also resets the browser) — never on the wire timeout of a request that
   was armed; the doorbell is seeded from its read-back at first contact
   (a keyboard reboot under a powered chest never re-sends the value the
-  chest already served) and advances only on a send that went out.
+  chest already served) and advances only on a send that went out. Review
+  round 1: a second K_OATH_CODE is served after a served code, whether the
+  read sees 0x11 and the op clearing in one block or in two
+  [test:test_a_second_code_after_a_served_code]; re-entering OATH asks
+  LIST(0) at once, even with a LIST left in flight on leaving
+  [test:test_reentering_oath_lists_again]; a navigation key during a LIST
+  in flight waits for its answer or its timeout
+  [test:test_nav_during_a_list_in_flight_waits]; a chest whose account
+  count shrinks is followed to the clamped cursor's page, with retries of
+  its own [test:test_a_shrinking_chest_is_followed_with_fresh_retries].
+- [test:test_chest_oath_hidden_code_is_wiped] A TOTP code's digits are
+  zeroed in the OATH model the moment it stops being shown — navigation,
+  deadline, a LIST moving another account under the cursor — and the link's
+  DMA buffer is wiped after every decode and after an RDDMA whose INT0
+  failed.
 - [test:test_chest_gate_notify_wakes_the_link_task] The chest gate calls a
   registered wake-up hook (chest_link.c's task notify) on K_CHEST_NEXT,
   K_OATH_PREV/NEXT/CODE, and on a K_SEC_CONFIRM the chest takes — not on

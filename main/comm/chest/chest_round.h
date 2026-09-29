@@ -10,7 +10,8 @@
  * when to read a segment, when a code request is abandoned
  * (chest_oath_code_cancel), when the OATH browser is dropped. chest_link.c
  * only executes the plan on the wire. Contract: Niphar_chest
- * docs/LINK_CONTRACT.md §13 (46499d6); spec
+ * docs/LINK_CONTRACT.md §13 (46499d6; the 0x11-before-op guarantee below at
+ * c9ee3ad/6219516); spec
  * docs/superpowers/specs/2026-09-29-chest-link-v3-design.md §3-4.
  *
  * The rules, each one pinned by a test:
@@ -40,11 +41,19 @@
  *  - CANCEL (chest_oath_code_cancel): no arming within CHEST_REQ_TIMEOUT_MS
  *    (the chest refused: a CCID confirmation in flight, a slot that is not
  *    OATH); armed, then the instance changes (another arming replaced ours);
- *    armed, then the pending op returns to 0 without a CODE segment in the
- *    same block (refused or expired prompt — the chest bumps 0x11 no later
- *    than it clears the op, link_spi.c link_task: service_pending_code runs
- *    before pack_current in the authorising tick); leaving OATH. NEVER on
- *    the wire timeout of a request that WAS armed: the answer then waits
+ *    armed, then the pending op returns to 0 while 0x11 has not moved
+ *    since the last segment consumed — contract §13 ("The segment number
+ *    moves before the pending operation clears", c9ee3ad/6219516): the
+ *    chest bumps 0x11 in the tick that authorises and serves, and clears
+ *    the op one tick LATER, also when it fails to serve, so op 0 with no
+ *    new 0x11 means refused, expired or failed; leaving OATH. The
+ *    exemption (op 0 but a CODE segment announced and not yet consumed)
+ *    covers the rounds where the segment is still unread when the op is
+ *    already 0: our 250 ms read seeing both changes in one block (the
+ *    chest ticks every 20 ms — cancelling there would retract the request
+ *    before the same round's read, and the code would be refused), and a
+ *    round after an RDDMA the busy bus refused (0x11 not consumed). NEVER
+ *    on the wire timeout of a request that WAS armed: the answer then waits
  *    for a human press, seconds away (chest_oath.h). */
 
 #define CHEST_REQ_TIMEOUT_MS  2000u  /* a request unanswered (LIST) or unarmed (CODE) is dropped */
