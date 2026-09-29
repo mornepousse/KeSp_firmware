@@ -172,7 +172,7 @@ The contract confirms this spec's choices: CS active LOW (the driver's
 command/address/dummy with the dummy phase on writes too, IRQ with a polling
 floor, `0x5A`. It is wrong on one point: its §2 gives IO7/IO11 on the S3 side;
 the netlist (§2 above) gives GPIO3/GPIO46 — IO7/IO11 are the P4-side numbers.
-Reported to the chest session on 2026-09-29.
+Reported to the chest session on 2026-09-29, which reproduced the netlist export and corrected its contract and HARDWARE.md the same day (Niphar_chest `4ce641a`).
 
 ## 8. Modules
 
