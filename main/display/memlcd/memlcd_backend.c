@@ -56,6 +56,9 @@
 #if CONFIG_KASE_HALF_LINK_TX
 #include "half_link.h"         /* half_link_tx_dongle_vu */
 #endif
+#if CONFIG_KASE_CHEST_LINK
+#include "chest_link.h"        /* chest_link_view */
+#endif
 
 static const char *TAG = "memlcd_be";
 LV_FONT_DECLARE(lv_font_montserrat_14);
@@ -95,6 +98,7 @@ _Static_assert(LVGL_REFR_MS == 1000u, "memory-LCD halves: LVGL refresh at 1 s");
 static lv_obj_t *s_l_route, *s_l_dongle, *s_bar, *s_l_volt, *s_img_lien, *s_l_zz;
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 static lv_obj_t *s_l_nom[MEMLCD_NOM_LIGNES], *s_l_etat[2];
+static lv_obj_t *s_l_coffre[3];
 #endif
 
 /* TRRS link pictogram, 16x12, one arrow each way: the cable carries the 5 V
@@ -216,6 +220,10 @@ static void construire(void)
         s_l_etat[i] = texte_centre(scr, &lv_font_montserrat_14, 0, Y_SEP + 44 + i * 16, MEMLCD_W);
         lv_obj_set_style_text_letter_space(s_l_etat[i], -1, 0);
     }
+    /* Chest status (memlcd_lignes_coffre) under the logo — the zZ slot: the
+     * left never sleeps while the chest exists (USB veto). */
+    for (int i = 0; i < 3; i++)
+        s_l_coffre[i] = texte_centre(scr, &lv_font_unscii_8, 0, 44 + i * 12, COL_X - 1);
 #else
     (void)image(scr, &img_niphargus_60, (MEMLCD_W - 60) / 2, Y_SEP + 1 + (MEMLCD_H - Y_SEP - 1 - 60) / 2);
 #endif
@@ -258,6 +266,9 @@ static void lire_modele(memlcd_model_t *m)
      * the LED report and nothing brings it back, and the last USB value would
      * be stale — shown on the USB route only. */
     m->caps_lock   = !m->route_rf && (hid_led_state & HID_LED_CAPS_LOCK);
+#if CONFIG_KASE_CHEST_LINK
+    m->coffre = chest_link_view(&m->coffre_op);
+#endif
 #else
     m->is_left   = 0;
     m->route_rf  = 1;
@@ -298,13 +309,26 @@ static void dessiner(const memlcd_model_t *m)
      * made a full bar unreadable — bench 2026-09-19). */
     lv_obj_set_style_border_width(s_bar, m->batt_niveau ? 2 : 1, LV_PART_MAIN);
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-    char lignes[MEMLCD_NOM_LIGNES][MEMLCD_NOM_BUF];
-    memlcd_couper_nom(m->nom, lignes);
-    for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) lv_label_set_text(s_l_nom[i], lignes[i]);
-    char e1[MEMLCD_ETAT_BUF], e2[MEMLCD_ETAT_BUF];
-    memlcd_ligne_etat(m, e1, e2);
-    lv_label_set_text(s_l_etat[0], e1);
-    lv_label_set_text(s_l_etat[1], e2);
+    char lc[3][MEMLCD_COFFRE_BUF];
+    memlcd_lignes_coffre(m, lc);
+    for (int i = 0; i < 3; i++) lv_label_set_text(s_l_coffre[i], m->veille ? "" : lc[i]);
+    if (m->coffre_op) {
+        /* The prompt names WHAT is authorized (spec §6): the operation, then OK ?. */
+        char op[CHEST_LABEL_BUF];
+        chest_op_label(m->coffre_op, op);
+        lv_label_set_text(s_l_nom[0], op);
+        lv_label_set_text(s_l_nom[1], "OK ?");
+        lv_label_set_text(s_l_etat[0], "");
+        lv_label_set_text(s_l_etat[1], "");
+    } else {
+        char lignes[MEMLCD_NOM_LIGNES][MEMLCD_NOM_BUF];
+        memlcd_couper_nom(m->nom, lignes);
+        for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) lv_label_set_text(s_l_nom[i], lignes[i]);
+        char e1[MEMLCD_ETAT_BUF], e2[MEMLCD_ETAT_BUF];
+        memlcd_ligne_etat(m, e1, e2);
+        lv_label_set_text(s_l_etat[0], e1);
+        lv_label_set_text(s_l_etat[1], e2);
+    }
 #endif
 }
 

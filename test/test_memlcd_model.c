@@ -108,6 +108,27 @@ static void test_ligne_etat(void)
     TEST_ASSERT(strcmp(l2, "L3") == 0, "one-shot layer alone, no leading space");
 }
 
+/* Chest status, 3 lines of 4 UNSCII characters under the logo (spec §6). */
+static void test_lignes_coffre(void)
+{
+    char l[3][MEMLCD_COFFRE_BUF];
+    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE };
+    memlcd_lignes_coffre(&m, l);
+    TEST_ASSERT(!l[0][0] && !l[1][0] && !l[2][0], "absent: nothing");
+    m.coffre = MEMLCD_COFFRE_PRESENT;
+    memlcd_lignes_coffre(&m, l);
+    TEST_ASSERT(strcmp(l[0], "P4..") == 0 && !l[1][0], "present, booting");
+    m.coffre = MEMLCD_COFFRE_PRESENT | CHEST_STATE_READY | CHEST_STATE_SD | CHEST_STATE_USB;
+    memlcd_lignes_coffre(&m, l);
+    TEST_ASSERT(strcmp(l[0], "P4") == 0 && strcmp(l[1], "SD") == 0 && strcmp(l[2], "USB") == 0, "P4 / SD / USB");
+    m.coffre = MEMLCD_COFFRE_PRESENT | CHEST_STATE_READY | CHEST_STATE_USB;
+    memlcd_lignes_coffre(&m, l);
+    TEST_ASSERT(strcmp(l[1], "USB") == 0 && !l[2][0], "no SD: USB moves up");
+    m.coffre = MEMLCD_COFFRE_PRESENT | MEMLCD_COFFRE_BADVER;
+    memlcd_lignes_coffre(&m, l);
+    TEST_ASSERT(strcmp(l[0], "P4?") == 0 && !l[1][0], "unknown protocol version");
+}
+
 static void test_model_diff(void)
 {
     memlcd_model_t a = { .route_rf = 1, .dongle_vu = 1, .batt_local_dv = 40,
@@ -129,6 +150,8 @@ static void test_model_diff(void)
     b = a; b.osm = 0x02;   TEST_ASSERT(memlcd_model_diff(&a, &b), "one-shot mod armed → redraw");
     b = a; b.osl = 2;      TEST_ASSERT(memlcd_model_diff(&a, &b), "one-shot layer armed → redraw");
     b = a; b.veille = 1;   TEST_ASSERT(memlcd_model_diff(&a, &b), "going to sleep → redraw (zZ)");
+    b = a; b.coffre = MEMLCD_COFFRE_PRESENT; TEST_ASSERT(memlcd_model_diff(&a, &b), "chest appears → redraw");
+    b = a; b.coffre_op = 1; TEST_ASSERT(memlcd_model_diff(&a, &b), "chest prompt → redraw");
 }
 
 /* The panel is PHYSICALLY 68 lines of 160 pixels (Sharp catalog, doc
@@ -195,6 +218,7 @@ void test_memlcd_model(void)
     test_couper_nom();
     test_couche_affichee();
     test_ligne_etat();
+    test_lignes_coffre();
     test_model_diff();
     test_fb_to_panel();
     test_batt_affichee();

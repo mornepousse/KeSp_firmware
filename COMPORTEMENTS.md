@@ -695,3 +695,8 @@ means a test, or a line.
   flush and re-drive never transpose the same buffer at the same time —
   otherwise lines come out blank: "une partie de l'écran s'efface" (part
   of the screen goes blank), right, 2026-09-14).
+- [test:test_memlcd_model] The left shows the chest's status under the logo
+  ("P4" ready, "P4.." booting, "P4?" unknown protocol version, then "SD",
+  "USB"), nothing without a chest; while the chest has an operation pending
+  the bottom area names it (SIGN, DECRYP, FIDO +, DELETE, RESET!…) over
+  "OK ?" instead of the layer — the owner sees what she authorizes.

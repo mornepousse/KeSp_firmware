@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include "../../comm/chest/chest_proto.h"
 
 /* Halves' Sharp memory-LCD screen — pure logic, tested on host
  * (test/test_memlcd_model.c). LS011B7DH03 panel (nice!view module) mounted in
@@ -138,8 +139,28 @@ typedef struct {
     uint8_t osm;                       /* armed one-shot modifiers, HID mask */
     uint8_t osl;                       /* armed one-shot layer, MEMLCD_OSL_AUCUNE if none */
     uint8_t veille;                    /* last image before sleep: zZ */
+    uint8_t  coffre;                   /* MEMLCD_COFFRE_* | CHEST_STATE_*; 0 = no chest */
+    uint16_t coffre_op;                /* chest op awaiting confirmation, 0 = none */
     uint8_t is_left;
 } memlcd_model_t;
+
+#define MEMLCD_COFFRE_PRESENT 0x80
+#define MEMLCD_COFFRE_BADVER  0x40
+#define MEMLCD_COFFRE_BUF     5        /* 4 UNSCII 8 characters in the 35 px zone + NUL */
+
+/* Chest status under the logo: "P4" ready ("P4.." booting, "P4?" unknown
+ * protocol version), then "SD", then "USB", lines packed upwards. */
+static inline void memlcd_lignes_coffre(const memlcd_model_t *m, char l[3][MEMLCD_COFFRE_BUF])
+{
+    for (int i = 0; i < 3; i++) l[i][0] = '\0';
+    if (!(m->coffre & MEMLCD_COFFRE_PRESENT)) return;
+    if (m->coffre & MEMLCD_COFFRE_BADVER) { strcpy(l[0], "P4?"); return; }
+    if (!(m->coffre & CHEST_STATE_READY)) { strcpy(l[0], "P4.."); return; }
+    int n = 0;
+    strcpy(l[n++], "P4");
+    if (m->coffre & CHEST_STATE_SD)  strcpy(l[n++], "SD");
+    if (m->coffre & CHEST_STATE_USB) strcpy(l[n++], "USB");
+}
 
 /* The two status lines under the layer name (see test_ligne_etat). */
 static inline void memlcd_ligne_etat(const memlcd_model_t *m,
@@ -170,5 +191,6 @@ static inline bool memlcd_model_diff(const memlcd_model_t *a, const memlcd_model
            a->couche != b->couche || strcmp(a->nom, b->nom) != 0 ||
            a->caps_lock != b->caps_lock ||
            a->caps_word != b->caps_word || a->osm != b->osm || a->osl != b->osl ||
-           a->veille != b->veille;
+           a->veille != b->veille ||
+           a->coffre != b->coffre || a->coffre_op != b->coffre_op;
 }
