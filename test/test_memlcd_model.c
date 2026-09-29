@@ -287,6 +287,11 @@ static void test_bas_coffre(void)
     memlcd_bas_coffre(&m, b);
     for (int i = 1; i < MEMLCD_BAS_LIGNES; i++) TEST_ASSERT(strstr(b[i], "CPT") == NULL, "op_count 1: N CPT never shown (only N > 1)");
 
+    /* The boundary: two accounts is already "more than one" (op_count > 1). */
+    m.coffre_op_count = 2;
+    memlcd_bas_coffre(&m, b);
+    TEST_ASSERT(strcmp(b[2], "2 CPT") == 0, "op_count 2: N CPT shown from two accounts on");
+
     /* N CPT appended after a short label that leaves room. */
     m.coffre_op_count = 12;
     memlcd_bas_coffre(&m, b);

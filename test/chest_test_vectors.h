@@ -13,7 +13,7 @@
  * header gets its own copy, no ODR issue, same as any other header-defined
  * static const table. */
 
-/* V1 — nominal v3: a pending op (9, "DELETE") naming GITHUB. SD+USB mounted,
+/* V1 — nominal v3: a pending op (9 = OATH_REPLACE, "REPLAC") naming GITHUB. SD+USB mounted,
  * ready, time valid, instance 3, active mode oath. */
 static const uint8_t CHEST_TV_V1[64] = {
     0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x09, 0x00, 0x2A, 0x00,
