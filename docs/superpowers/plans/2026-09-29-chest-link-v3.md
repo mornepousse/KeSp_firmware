@@ -232,6 +232,16 @@ Pure rendering helper in `memlcd_model.h` (tested): `void memlcd_bas_coffre(cons
 4. otherwise: empty (the existing layer/status rendering applies).
 The model gains the view fields; they enter the diff. The backend renders the six lines in UNSCII over the bottom area when case 1-3 applies (the code lines may use Montserrat 24 for 6 digits — optional, keep UNSCII if simpler), else the current layer/status widgets.
 
+**Bytes → pixels, pinned end to end (added 2026-09-29 after the chest found its RESET path publishing op_count 1 while the contract and V16 said 12 — vectors prove the packer and parser, not that the screen shows what the block says):** `chest_view_t` and a PURE builder live in `main/comm/chest/chest_view.{h,c}` (no ESP-IDF), `chest_link.h` re-exports it:
+
+```c
+void chest_view_build(chest_view_t *v, chest_block_t blk, const chest_status_t *st,
+                      uint8_t mode_wanted, uint8_t mode_state,
+                      chest_oath_t *o, uint32_t now_ms);
+```
+
+Test chain, one test per case, starting from the chest's RAW vector bytes: `chest_proto_parse(k_vec_v16)` → `chest_view_build` → the memlcd model → `memlcd_bas_coffre` → assert the rendered lines contain `12 CPT` and the V16 label; V15 → `NO TIME` in browsing; V9 (a pending op with a label) → the prompt shows THAT label even when the OATH cursor names another account; a code visible only after `chest_oath_on_code` and gone after its deadline. The transport (Task 6) calls only `chest_view_build`.
+
 - [ ] Tests first (every case above; the prompt uses the chest label even when the browser name differs; `12 CPT` with V16's values; a 34-char label cut into 5 lines with `~`; NO TIME with V15's state) → RED → implement → GREEN; both halves build. Commit `feat(memlcd): the chest's prompt names the account, the TOTP browser and the code with its countdown`.
 
 ---
@@ -247,7 +257,7 @@ The model gains the view fields; they enter the diff. The backend renders the si
   - response: when `st.dma_seq != s_last_seq && st.dma_kind != 0`: RDDMA `.rxlength = st.dma_len * 8` into `s_dma`, then `INT0` alone; `s_last_seq = st.dma_seq`; decode with `chest_list_decode` / `chest_code_decode` per kind; feed `chest_oath_on_list` / `chest_oath_on_code`.
   - per OK round, in order: publish gate `(op, instance)`; mode next / self-heal (v2); nav delta → `chest_oath_nav`; if active mode is OATH and READY: `chest_oath_page_needed` → LIST request; `chest_gate_take_oath_code()` && `chest_oath_may_request_code` → CODE request (else, with TIME clear, nothing — the screen shows NO TIME); confirm rule (v2); segment read if announced.
   - leaving OATH mode or presence lost: `chest_oath_reset`.
-  - view: fill `chest_view_t` (label from the status, browser from the model, code via `chest_oath_code_visible(now)`).
+  - view: `chest_view_build()` (Task 5, pure) — the transport only passes it the status, the block result, the mode track and the OATH model; it does NOT fill fields itself.
 - [ ] fast GREEN; full six-board check GREEN; COMPORTEMENTS `[smoke:Chest link]` v3 bullet; smoke item: browse, K_OATH_CODE → prompt names the account → K_SEC_CONFIRM → code + countdown; no press → no code; NO TIME before `niphar-oath set-time`.
 - [ ] Commit `feat(chest): protocol v3 on the wire — the DMA channel, the browser and the TOTP code on the keyboard`.
 
