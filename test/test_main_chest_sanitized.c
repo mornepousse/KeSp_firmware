@@ -7,8 +7,8 @@
  * function can still return the expected value) — only a sanitizer reliably
  * turns the write itself red. This binary runs the chest test suites
  * (test_chest_proto.c, test_chest_dma.c, test_chest_oath.c, test_chest_view.c)
- * plus test_memlcd_model.c (review M-f, 2026-09-29: memlcd_couper_8/
- * memlcd_bas_coffre index caller-sized stack arrays the same way the DMA
+ *  plus test_memlcd_model.c (review M-f, 2026-09-29: memlcd_couper_px/
+ * memlcd_vue_coffre index caller-sized arrays the same way the DMA
  * decoder does, and every dependency it needs was already a source of this
  * binary) — never openpgp, which has two pre-existing ASan findings out of
  * scope for the chest link work — and is wired into test/CMakeLists.txt as

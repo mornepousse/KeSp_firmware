@@ -5,6 +5,10 @@
  *                    (memlcd_ligne_etat: Caps Lock/Word, armed one-shots)
  *            RIGHT = 60 px centered Niphargus logo
  *   zZ     : top right of the center, on the last image before sleep only
+ *   chest  : LEFT only — a padlock + mode word under the logo; the chest's
+ *            prompt and TOTP code take the WHOLE screen (every widget above
+ *            hidden in one place, s_normal), its account browser takes the
+ *            bottom zone only (memlcd_vue_coffre, plan chest-link-v3 Task 8)
  * (No "other half's battery": the user does not want it, and the
  * ACK channel that would have carried it was removed along with it — 2026-09-14.)
  * LVGL renders in 16 bits into a full-screen buffer (full_refresh); the flush
@@ -68,6 +72,7 @@ _Static_assert(CHEST_VIEW_BADVER == MEMLCD_COFFRE_BADVER, "chest_link.h CHEST_VI
 static const char *TAG = "memlcd_be";
 LV_FONT_DECLARE(lv_font_montserrat_14);
 LV_FONT_DECLARE(lv_font_montserrat_24);
+LV_FONT_DECLARE(lv_font_montserrat_28);
 LV_FONT_DECLARE(lv_font_unscii_8);
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 extern const lv_img_dsc_t img_niphargus_34;
@@ -101,14 +106,20 @@ _Static_assert(STATUS_DISP_PERIODE_MS == 1000u, "memory-LCD halves: status displ
 _Static_assert(LVGL_REFR_MS == 1000u, "memory-LCD halves: LVGL refresh at 1 s");
 
 static lv_obj_t *s_l_route, *s_l_dongle, *s_bar, *s_l_volt, *s_img_lien, *s_l_zz;
+/* Every widget of the normal screen is a child of s_normal: a full-screen
+ * chest view (prompt, code) hides them all in ONE place. */
+static lv_obj_t *s_normal;
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
+/* The layer name and status lines, grouped: the chest browser takes their
+ * zone, shown instead of them, never alongside. */
+static lv_obj_t *s_couche;
 static lv_obj_t *s_l_nom[MEMLCD_NOM_LIGNES], *s_l_etat[2];
-static lv_obj_t *s_l_coffre[3];
-/* The chest's bottom area (memlcd_bas_coffre): prompt / code / browser, six
- * UNSCII 8 lines over the same full-width zone the layer name and status
- * lines occupy — shown instead of them, never alongside (dessiner() hides
- * whichever set does not apply). */
-static lv_obj_t *s_l_bas[MEMLCD_BAS_LIGNES];
+static lv_obj_t *s_img_cadenas, *s_l_coffre[3];
+/* The chest view (memlcd_vue_coffre): one container placed per frame over
+ * the whole screen (prompt, code) or the bottom zone (browser); its labels
+ * get their font, position and text from the pure view each frame. */
+static lv_obj_t *s_vue, *s_vue_regle, *s_vue_barre;
+static lv_obj_t *s_l_vue[MEMLCD_VC_LIGNES];
 #endif
 
 /* TRRS link pictogram, 16x12, one arrow each way: the cable carries the 5 V
@@ -136,6 +147,48 @@ static const lv_img_dsc_t s_lien_img = {
     .data_size = sizeof s_lien_map, .data = s_lien_map,
 };
 
+#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
+/* Chest padlock, 24 x 28 (MEMLCD_CADENAS_W x _H), same technique as the
+ * link pictogram: ALPHA_1BIT, stride ceil(24/8) = 3 bytes, recoloured black.
+ * Big on purpose (Mae, 2026-09-29): it replaces the "P4" text. */
+static const uint8_t s_cadenas_map[84] = {
+    0x00, 0xFF, 0x00,   /* ........########........ */
+    0x03, 0xFF, 0xC0,   /* ......############...... */
+    0x07, 0xC3, 0xE0,   /* .....#####....#####..... */
+    0x0F, 0x00, 0xF0,   /* ....####........####.... */
+    0x0E, 0x00, 0x70,   /* ....###..........###.... */
+    0x0E, 0x00, 0x70,   /* ....###..........###.... */
+    0x0E, 0x00, 0x70,   /* ....###..........###.... */
+    0x0E, 0x00, 0x70,   /* ....###..........###.... */
+    0x0E, 0x00, 0x70,   /* ....###..........###.... */
+    0x0E, 0x00, 0x70,   /* ....###..........###.... */
+    0x0E, 0x00, 0x70,   /* ....###..........###.... */
+    0x0E, 0x00, 0x70,   /* ....###..........###.... */
+    0x7F, 0xFF, 0xFE,   /* .######################. */
+    0xFF, 0xFF, 0xFF,   /* ######################## */
+    0xFF, 0xFF, 0xFF,   /* ######################## */
+    0xFF, 0xFF, 0xFF,   /* ######################## */
+    0xFF, 0xC3, 0xFF,   /* ##########....########## */
+    0xFF, 0x81, 0xFF,   /* #########......######### */
+    0xFF, 0x81, 0xFF,   /* #########......######### */
+    0xFF, 0xC3, 0xFF,   /* ##########....########## */
+    0xFF, 0xE7, 0xFF,   /* ###########..########### */
+    0xFF, 0xE7, 0xFF,   /* ###########..########### */
+    0xFF, 0xE7, 0xFF,   /* ###########..########### */
+    0xFF, 0xE7, 0xFF,   /* ###########..########### */
+    0xFF, 0xFF, 0xFF,   /* ######################## */
+    0xFF, 0xFF, 0xFF,   /* ######################## */
+    0xFF, 0xFF, 0xFF,   /* ######################## */
+    0x7F, 0xFF, 0xFE,   /* .######################. */
+};
+_Static_assert(sizeof s_cadenas_map == ((MEMLCD_CADENAS_W + 7) / 8) * MEMLCD_CADENAS_H, "padlock bitmap vs its declared size");
+static const lv_img_dsc_t s_cadenas_img = {
+    .header.cf = LV_IMG_CF_ALPHA_1BIT, .header.always_zero = 0,
+    .header.w = MEMLCD_CADENAS_W, .header.h = MEMLCD_CADENAS_H,
+    .data_size = sizeof s_cadenas_map, .data = s_cadenas_map,
+};
+#endif
+
 /* Layout (2026-09-26, Mae's pick "icons in a column on the right"):
  *   x 0..34  : top-left zone — logo 34 px (left), zZ under it
  *   x 35     : separator
@@ -146,7 +199,8 @@ static const lv_img_dsc_t s_lien_img = {
  * The layer name does not fit the 35 px zone: "MAIN" is 39 px in Montserrat 14. */
 #define COL_X   36
 #define COL_W   (MEMLCD_W - COL_X)
-#define Y_SEP   92
+#define Y_SEP   MEMLCD_Y_SEP
+_Static_assert(COL_X - 1 == MEMLCD_ETAT_COFFRE_W, "the chest status zone is the 35 px left of the column separator");
 
 static lv_obj_t *rect(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_coord_t w, lv_coord_t h)
 {
@@ -176,6 +230,15 @@ static lv_obj_t *texte_centre(lv_obj_t *parent, const lv_font_t *f, lv_coord_t x
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     return l;
 }
+/* A transparent full-screen group: hiding it hides all its children. */
+static lv_obj_t *groupe(lv_obj_t *parent)
+{
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_pos(o, 0, 0); lv_obj_set_size(o, MEMLCD_W, MEMLCD_H);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    return o;
+}
 static lv_obj_t *image(lv_obj_t *parent, const lv_img_dsc_t *src, lv_coord_t x, lv_coord_t y)
 {
     lv_obj_t *img = lv_img_create(parent);
@@ -194,12 +257,14 @@ static void construire(void)
     lv_obj_set_style_bg_color(scr, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    s_normal = groupe(scr);
+    lv_obj_t *nrm = s_normal;
 
     /* Icon column */
-    s_l_route  = texte_centre(scr, &lv_font_montserrat_24, COL_X, 2, COL_W);
-    s_l_dongle = texte_centre(scr, &lv_font_montserrat_14, COL_X, 28, COL_W);
+    s_l_route  = texte_centre(nrm, &lv_font_montserrat_24, COL_X, 2, COL_W);
+    s_l_dongle = texte_centre(nrm, &lv_font_montserrat_14, COL_X, 28, COL_W);
     /* Horizontal battery: 24x12 body + 3x6 nub, filled from the left. */
-    s_bar = lv_bar_create(scr);
+    s_bar = lv_bar_create(nrm);
     lv_obj_remove_style_all(s_bar);
     lv_obj_set_size(s_bar, 24, 12); lv_obj_set_pos(s_bar, COL_X + 2, 46);
     lv_bar_set_range(s_bar, 0, 100);
@@ -210,44 +275,65 @@ static void construire(void)
     lv_obj_set_style_pad_all(s_bar, 2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_bar, lv_color_black(), LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(s_bar, LV_OPA_COVER, LV_PART_INDICATOR);
-    (void)rect(scr, COL_X + 26, 49, 3, 6);
-    s_l_volt   = texte_centre(scr, &lv_font_unscii_8, COL_X, 62, COL_W);
+    (void)rect(nrm, COL_X + 26, 49, 3, 6);
+    s_l_volt   = texte_centre(nrm, &lv_font_unscii_8, COL_X, 62, COL_W);
     /* TRRS link: the ONLY witness of the handshake away from the console.
      * Hidden unless the 5 V is closed. */
-    s_img_lien = image(scr, &s_lien_img, COL_X + (COL_W - 16) / 2, 75);
+    s_img_lien = image(nrm, &s_lien_img, COL_X + (COL_W - 16) / 2, 75);
     lv_obj_add_flag(s_img_lien, LV_OBJ_FLAG_HIDDEN);
-    (void)rect(scr, COL_X - 1, 0, 1, Y_SEP);                 /* column separator */
-    (void)rect(scr, 0, Y_SEP, MEMLCD_W, 1);                  /* section separator */
+    (void)rect(nrm, COL_X - 1, 0, 1, Y_SEP);                 /* column separator */
+    (void)rect(nrm, 0, Y_SEP, MEMLCD_W, 1);                  /* section separator */
 
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-    (void)image(scr, &img_niphargus_34, 0, 4);
-    /* Layer name (the stable layer, memlcd_couche_affichee), 2 lines of 18 px */
+    (void)image(nrm, &img_niphargus_34, 0, 4);
+    /* Layer name (the stable layer, memlcd_couche_affichee), 2 lines of 18 px,
+     * and the status lines: grouped in s_couche, which the chest browser
+     * replaces. */
+    s_couche = groupe(nrm);
     for (int i = 0; i < MEMLCD_NOM_LIGNES; i++)
-        s_l_nom[i] = texte_centre(scr, &lv_font_montserrat_14, 0, Y_SEP + 4 + i * 18, MEMLCD_W);
+        s_l_nom[i] = texte_centre(s_couche, &lv_font_montserrat_14, 0, Y_SEP + 4 + i * 18, MEMLCD_W);
     /* Status lines (memlcd_ligne_etat): "CAPS CW" is 69 px in Montserrat 14,
      * one letter space less brings it inside the 68. */
     for (int i = 0; i < 2; i++) {
-        s_l_etat[i] = texte_centre(scr, &lv_font_montserrat_14, 0, Y_SEP + 44 + i * 16, MEMLCD_W);
+        s_l_etat[i] = texte_centre(s_couche, &lv_font_montserrat_14, 0, Y_SEP + 44 + i * 16, MEMLCD_W);
         lv_obj_set_style_text_letter_space(s_l_etat[i], -1, 0);
     }
-    /* Chest status (memlcd_lignes_coffre) under the logo — the zZ slot: the
-     * left never sleeps while the chest exists (USB veto). */
+    /* Chest status (memlcd_etat_coffre) under the logo — the zZ slot: the
+     * left never sleeps while the chest exists (USB veto). A 24 x 28 padlock,
+     * then three UNSCII 8 lines (mode word, NO / CARD). */
+    s_img_cadenas = image(nrm, &s_cadenas_img, MEMLCD_CADENAS_X, MEMLCD_CADENAS_Y);
+    lv_obj_add_flag(s_img_cadenas, LV_OBJ_FLAG_HIDDEN);
     for (int i = 0; i < 3; i++)
-        s_l_coffre[i] = texte_centre(scr, &lv_font_unscii_8, 0, 44 + i * 12, COL_X - 1);
-    /* Chest bottom area (memlcd_bas_coffre): 6 UNSCII 8 lines over the same
-     * 68 px the layer name + status lines occupy (Y_SEP..MEMLCD_H, 68 px —
-     * 6 lines at an 11 px pitch fit with 2 px to spare). Built even without
-     * CONFIG_KASE_CHEST_LINK: harmless (memlcd_bas_coffre always returns
-     * false without a chest, dessiner() then hides this set). */
-    for (int i = 0; i < MEMLCD_BAS_LIGNES; i++)
-        s_l_bas[i] = texte_centre(scr, &lv_font_unscii_8, 0, Y_SEP + 2 + i * 11, MEMLCD_W);
+        s_l_coffre[i] = texte_centre(nrm, &lv_font_unscii_8, 0, MEMLCD_ETAT_COFFRE_Y0 + i * MEMLCD_ETAT_COFFRE_PAS,
+                                     MEMLCD_ETAT_COFFRE_W);
+    /* Chest view (memlcd_vue_coffre): a group OUTSIDE s_normal — a full-screen
+     * view hides s_normal and keeps this; the browser keeps both and hides
+     * s_couche. Labels, rule and countdown bar are placed per frame. Built
+     * even without CONFIG_KASE_CHEST_LINK: harmless (the view is always NONE
+     * without a chest, dessiner() then hides the group). */
+    s_vue = groupe(scr);
+    for (int i = 0; i < MEMLCD_VC_LIGNES; i++)
+        s_l_vue[i] = texte_centre(s_vue, &lv_font_montserrat_14, 0, 0, MEMLCD_W);
+    s_vue_regle = rect(s_vue, 4, 0, MEMLCD_W - 8, 1);
+    s_vue_barre = lv_bar_create(s_vue);
+    lv_obj_remove_style_all(s_vue_barre);
+    lv_obj_set_size(s_vue_barre, MEMLCD_W - 8, MEMLCD_BAR_H); lv_obj_set_pos(s_vue_barre, 4, 0);
+    lv_bar_set_range(s_vue_barre, 0, 100);
+    lv_obj_set_style_border_color(s_vue_barre, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_vue_barre, 1, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_vue_barre, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_vue_barre, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_vue_barre, 2, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_vue_barre, lv_color_black(), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(s_vue_barre, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_add_flag(s_vue, LV_OBJ_FLAG_HIDDEN);
 #else
-    (void)image(scr, &img_niphargus_60, (MEMLCD_W - 60) / 2, Y_SEP + 1 + (MEMLCD_H - Y_SEP - 1 - 60) / 2);
+    (void)image(nrm, &img_niphargus_60, (MEMLCD_W - 60) / 2, Y_SEP + 1 + (MEMLCD_H - Y_SEP - 1 - 60) / 2);
 #endif
     /* zZ: the image a sleeping half leaves behind is frozen (no flush, no
      * VCOM); this says so, rather than a stale ⇆ or route pretending to be
      * live (2026-09-25). Top-left zone, under the logo's place. */
-    s_l_zz = texte_centre(scr, &lv_font_montserrat_24, 0, 50, COL_X - 1);
+    s_l_zz = texte_centre(nrm, &lv_font_montserrat_24, 0, 50, COL_X - 1);
     lv_label_set_text(s_l_zz, "zZ");
     lv_obj_add_flag(s_l_zz, LV_OBJ_FLAG_HIDDEN);
     s_built = true;
@@ -338,35 +424,60 @@ static void dessiner(const memlcd_model_t *m)
      * made a full bar unreadable — bench 2026-09-19). */
     lv_obj_set_style_border_width(s_bar, m->batt_niveau ? 2 : 1, LV_PART_MAIN);
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-    char lc[3][MEMLCD_COFFRE_BUF];
-    memlcd_lignes_coffre(m, lc);
-    for (int i = 0; i < 3; i++) lv_label_set_text(s_l_coffre[i], m->veille ? "" : lc[i]);
-    /* Bottom area: the chest's prompt / code / browser (memlcd_bas_coffre)
-     * takes over the same zone the layer name and status lines occupy —
-     * one set shown, the other hidden, never both (spec §5 / plan Task 5). */
-    char bas[MEMLCD_BAS_LIGNES][MEMLCD_ETAT_BUF];
-    bool chest_prend_la_zone = !m->veille && memlcd_bas_coffre(m, bas);
-    if (chest_prend_la_zone) {
-        for (int i = 0; i < MEMLCD_BAS_LIGNES; i++) {
-            lv_label_set_text(s_l_bas[i], bas[i]);
-            lv_obj_clear_flag(s_l_bas[i], LV_OBJ_FLAG_HIDDEN);
-        }
-        for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) lv_obj_add_flag(s_l_nom[i], LV_OBJ_FLAG_HIDDEN);
-        for (int i = 0; i < 2; i++) lv_obj_add_flag(s_l_etat[i], LV_OBJ_FLAG_HIDDEN);
+    memlcd_etat_coffre_t ec;
+    memlcd_etat_coffre(m, &ec);
+    if (ec.cadenas && !m->veille) lv_obj_clear_flag(s_img_cadenas, LV_OBJ_FLAG_HIDDEN);
+    else                          lv_obj_add_flag(s_img_cadenas, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < 3; i++) lv_label_set_text(s_l_coffre[i], m->veille ? "" : ec.ligne[i]);
+
+    /* The chest view (memlcd_vue_coffre, pure): prompt and code over the
+     * whole screen (s_normal hidden), the browser over the bottom zone
+     * (s_couche hidden), otherwise the normal screen. Static: ~400 bytes,
+     * and dessiner() only ever runs under the LVGL lock. */
+    static memlcd_vue_coffre_t v;
+    if (m->veille) memset(&v, 0, sizeof v);   /* the sleep image never carries a chest view */
+    else           memlcd_vue_coffre(m, &v);
+    if (v.kind == MEMLCD_VC_NONE) {
+        lv_obj_add_flag(s_vue, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_normal, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_couche, LV_OBJ_FLAG_HIDDEN);
     } else {
-        for (int i = 0; i < MEMLCD_BAS_LIGNES; i++) lv_obj_add_flag(s_l_bas[i], LV_OBJ_FLAG_HIDDEN);
-        char lignes[MEMLCD_NOM_LIGNES][MEMLCD_NOM_BUF];
-        memlcd_couper_nom(m->nom, lignes);
-        for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) {
-            lv_label_set_text(s_l_nom[i], lignes[i]);
-            lv_obj_clear_flag(s_l_nom[i], LV_OBJ_FLAG_HIDDEN);
+        bool plein = (v.kind != MEMLCD_VC_BROWSE);
+        if (plein) lv_obj_add_flag(s_normal, LV_OBJ_FLAG_HIDDEN);
+        else       lv_obj_clear_flag(s_normal, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_couche, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(s_vue, 0, plein ? 0 : MEMLCD_ZONE_BAS_Y);
+        lv_obj_set_size(s_vue, MEMLCD_W, plein ? MEMLCD_H : MEMLCD_ZONE_BAS_H);
+        static const lv_font_t *const polices[] = {
+            [MEMLCD_F_U8] = &lv_font_unscii_8, [MEMLCD_F_M14] = &lv_font_montserrat_14,
+            [MEMLCD_F_M24] = &lv_font_montserrat_24, [MEMLCD_F_M28] = &lv_font_montserrat_28,
+        };
+        for (int i = 0; i < MEMLCD_VC_LIGNES; i++) {
+            if (i >= v.n) { lv_obj_add_flag(s_l_vue[i], LV_OBJ_FLAG_HIDDEN); continue; }
+            uint8_t f = v.l[i].font <= MEMLCD_F_M28 ? v.l[i].font : MEMLCD_F_U8;
+            lv_obj_set_style_text_font(s_l_vue[i], polices[f], 0);
+            lv_obj_set_pos(s_l_vue[i], 0, v.l[i].y);
+            lv_label_set_text(s_l_vue[i], v.l[i].text);
+            lv_obj_clear_flag(s_l_vue[i], LV_OBJ_FLAG_HIDDEN);
         }
-        char e1[MEMLCD_ETAT_BUF], e2[MEMLCD_ETAT_BUF];
-        memlcd_ligne_etat(m, e1, e2);
-        lv_label_set_text(s_l_etat[0], e1);
-        lv_label_set_text(s_l_etat[1], e2);
-        for (int i = 0; i < 2; i++) lv_obj_clear_flag(s_l_etat[i], LV_OBJ_FLAG_HIDDEN);
+        if (v.rule_y) { lv_obj_set_pos(s_vue_regle, 4, v.rule_y); lv_obj_clear_flag(s_vue_regle, LV_OBJ_FLAG_HIDDEN); }
+        else          lv_obj_add_flag(s_vue_regle, LV_OBJ_FLAG_HIDDEN);
+        if (v.kind == MEMLCD_VC_CODE) {
+            lv_obj_set_pos(s_vue_barre, 4, v.bar_y);
+            lv_bar_set_value(s_vue_barre, v.bar_pct, LV_ANIM_OFF);
+            lv_obj_clear_flag(s_vue_barre, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_vue_barre, LV_OBJ_FLAG_HIDDEN);
+        }
+        lv_obj_clear_flag(s_vue, LV_OBJ_FLAG_HIDDEN);
     }
+    char lignes[MEMLCD_NOM_LIGNES][MEMLCD_NOM_BUF];
+    memlcd_couper_nom(m->nom, lignes);
+    for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) lv_label_set_text(s_l_nom[i], lignes[i]);
+    char e1[MEMLCD_ETAT_BUF], e2[MEMLCD_ETAT_BUF];
+    memlcd_ligne_etat(m, e1, e2);
+    lv_label_set_text(s_l_etat[0], e1);
+    lv_label_set_text(s_l_etat[1], e2);
 #endif
 }
 

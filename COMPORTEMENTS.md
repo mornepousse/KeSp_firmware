@@ -748,64 +748,72 @@ means a test, or a line.
   otherwise lines come out blank: "une partie de l'écran s'efface" (part
   of the screen goes blank), right, 2026-09-14).
 - [test:test_memlcd_model] The left shows the chest's status under the logo
-  ("P4" ready, "P4.." booting, "P4?" unknown protocol version, then "SD",
-  then the USB mode: the ACTIVE mode upper case once ARRIVED, the WANTED one
-  lower case while a switch is PENDING (0xFF or not yet taken), "ERR" once
-  active and wanted have disagreed for 8 reads straight — nothing without a
-  chest [test:test_chest_mode_track].
-- [test:test_memlcd_model][test:test_chest_view] The bottom area — prompt,
-  code, browser, in that priority, otherwise the layer/status widgets stay —
-  is built end to end from the chest's own raw register/DMA bytes through
+  (`memlcd_etat_coffre`, plan chest-link-v3 Task 8 — "SD c'est confusant",
+  Mae 2026-09-29): a 24 x 28 PADLOCK pictogram = chest present (at x 5,
+  y 37..64, under the 34 px logo's ink which ends at y 35), then up to three
+  UNSCII 8 lines at y 65/74/83 in the 35 px zone: `..` while the chest is
+  not READY, `?` on a protocol version mismatch; once READY the USB mode in
+  plain words (`chest_mode_label`: DISK, PGP, OTP, FIDO, TOTP — MSC/OATH
+  until then — the ACTIVE mode upper case once ARRIVED, the WANTED one lower
+  case while a switch is PENDING (0xFF or not yet taken), `ERR` once active
+  and wanted have disagreed for 8 reads straight), and the SD card ONLY
+  when it is missing: `NO` / `CARD` (no more `SD` line when it is there);
+  lines packed upwards; nothing without a chest
+  [test:test_chest_mode_track][test:test_chest_mode_label].
+- [test:test_memlcd_model][test:test_chest_view] The chest views — prompt,
+  code, browser, in that priority, otherwise the normal screen — are built
+  end to end from the chest's own raw register/DMA bytes through
   `chest_proto_parse` -> `chest_view_build` (pure, `main/comm/chest/
-  chest_view.c`) -> the memlcd model -> `memlcd_bas_coffre` (pure,
+  chest_view.c`) -> the memlcd model -> `memlcd_vue_coffre` (pure,
   `memlcd_model.h`), pinned on the chest's V1/V9/V15/V16/L1/C1 vectors so a
   regression anywhere in the chain shows up as a wrong string, not just a
   wrong struct field (added after the chest found a RESET path publishing
   op_count 1 to the wire while the contract and V16 said 12 — the vectors
-  alone proved the parser, never that the screen showed it):
+  alone proved the parser, never that the screen showed it). Readable type
+  since plan Task 8 ("c'est tout petit", bench 2026-09-29): the PROMPT and
+  the CODE take the WHOLE screen (every normal widget — icon column, logo,
+  separators, padlock, layer name and status lines — hidden in one place),
+  the BROWSER keeps the bottom zone (y 93..159) so the layer stays visible.
+  Every line is measured with a width oracle generated from the LVGL font
+  files (`memlcd_font_widths.h`, `scripts/gen_memlcd_font_widths.py`,
+  guarded by the `font-widths` tripwire brick): at most 66 px of the 68
+  (2 px for kerning, which the table ignores), and every line inside its
+  zone:
   - prompt (an operation is pending, beats a simultaneously-visible code —
-    review I3): line 0 folds the op label AND the confirmation question
-    into one line, `"<chest_op_label> ?"` ("TOTP ?", "RESET! ?", "OP 42 ?"
-    — every op label is <= 6 characters, `+2` for `" ?"` always fits the 8
-    UNSCII columns, walked by `test_prompt_op_fits_with_the_question_mark`
-    over the whole op range); lines 1-5 the CHEST's OWN label (register
-    0x14) cut into up to 5 UNSCII lines of 8 characters (`5 * 8 = 40 >=
-    CHEST_LABEL_MAX (34)`: a label at the chest's own maximum length is
-    NEVER cut in the common case — review C1, fixing a bug where two
-    labels differing only past character 32 rendered identically, since
-    the old layout spent a whole dedicated line on a bare "OK ?" and
-    therefore capped the label at 4 lines) — NEVER the OATH browser's
-    cursor name, even when an op is pending while the cursor sits on a
-    different, named account (V1: op 9 named GITHUB, cursor moved to
-    OVH:PRO — the prompt still reads GITHUB); `N CPT` when more than one
-    account is targeted (V16: op_count 12, label "12 COMPTES" — both the
-    digit and the words reach the screen), appended right after the label
-    when it used 4 lines or fewer (review I1: the WHOLE label still shows,
-    `N CPT` never silently displaces any of it), or — only once the label
-    needed every one of the 5 lines (33 or 34 characters) — the label is
-    RE-CUT to 4 lines with the `~` marker and `N CPT` takes the freed 5th
-    line (the marker stays visible: what's displaced is shown to be
-    displaced, never silently);
-  - a label/name longer than its budget is cut hard at 8 characters per
-    line (untrusted, sanitized text — no word-awareness; `memlcd_couper_8`
-    bounds its scan with `strnlen(s, CHEST_LABEL_MAX)`, not `strlen`,
-    since this is untrusted text one hop removed from the wire — review
-    M-b), the last shown line's last character replaced with `~` so a cut
-    is never silent (UNSCII has no ellipsis glyph);
+    review I3, the code's digits never on a prompt): the op
+    (`chest_op_label`) alone in Montserrat 24 when it fits 66 px (SIGN,
+    OTP, FIDO, TOTP, OP nn), else Montserrat 14 (DECRYP, AUTH, RESET!…);
+    a 1 px rule; the CHEST's OWN label (register 0x14) cut by PIXEL width
+    in Montserrat 14 — NEVER the OATH browser's cursor name, even when an
+    op is pending while the cursor sits on a different, named account (V1:
+    op named GITHUB, cursor moved to OVH:PRO — the prompt still reads
+    GITHUB); `N CPT` in Montserrat 14 when more than one account is
+    targeted (V16: op_count 12, label "12 COMPTES" — both reach the
+    screen); `OK ?` in Montserrat 14 at the bottom (y 142). The label is
+    NEVER cut (review C1 of Task 5 stands): when its Montserrat lines do not
+    fit above `N CPT` / `OK ?`, it falls back to UNSCII 8, 8 characters a
+    line, 5 lines for the chest's 34 — which always fits (a
+    `_Static_assert`); the lines concatenated ARE the label, no `~` on a
+    prompt ever. The cut is hard (untrusted, sanitized text: no word
+    awareness) and the scan is bounded by `strnlen(s, CHEST_LABEL_MAX)`
+    (review M-b, ASan-pinned by test_chest_sanitized);
   - code visible (after `K_OATH_CODE` AND `K_SEC_CONFIRM`, the account
     still under the cursor — chest_oath's own gate, re-proven here end to
-    end): the account name over TWO lines (review M-a: a single truncated
-    line was silently losing names over 8 characters, e.g. "OVH:PERSO"),
-    the code (6 digits on one line, 8 split 4+4), and a countdown in whole
-    seconds ROUNDED UP (never 0 while still shown) — gone at the deadline,
-    gone on the first navigation key, never refreshed on its own, and
-    BOUNDED even if the transport stalls (`chest_view_age`, review I2,
-    below);
-  - browsing (OATH active, a page cached, nothing pending/shown): the
-    cursor's 1-based position over the total, the account name, and
-    `NO TIME` in place of the code hint whenever the chest's TIME_VALID bit
-    is clear (V15) — never shown once the bit is set, even with the exact
-    same op/label/active-mode shape otherwise (contrast against V1).
+    end; never on `coffre_code_visible` false, whatever `coffre_code`
+    holds): the account name in Montserrat 14 on up to 2 lines (cut with a
+    `~` — the browser's copy, not a security text), the code as 3 + 3
+    digits in Montserrat 28 (6 digits) or 4 + 4 in Montserrat 24 (8
+    digits), a countdown bar (seconds left / 30) and `NN s` in Montserrat
+    24, the seconds ROUNDED UP (never 0 while still shown) — gone at the
+    deadline, gone on the first navigation key, never refreshed on its
+    own, and BOUNDED even if the transport stalls (`chest_view_age`,
+    review I2, below);
+  - browsing (OATH active, a page cached, nothing pending/shown), bottom
+    zone only: the cursor's 1-based position over the total in Montserrat
+    14, the account name in Montserrat 14 on up to 2 lines (UNSCII 8 when
+    it needs more, as many lines as the zone holds, a `~` marking a cut),
+    and `NO TIME` in Montserrat 14 at the bottom whenever the chest's
+    TIME_VALID bit is clear (V15) — never shown once the bit is set.
   - Countdown cadence note (corrected, review M-e): the memlcd halves'
     display-refresh cadence is `status_disp_periode_ms()` (`cadence.h`) —
     1000 ms at rest, but 100 ms whenever USB is present (`STATUS_DISP_USB_MS`),
@@ -867,8 +875,9 @@ means a test, or a line.
   when the chest's counter moves, one retry after 200 ms at most.
 - [smoke:Chest link] Protocol v3 on the wire (plan Task 6, 2026-09-29;
   contract Niphar_chest `docs/LINK_CONTRACT.md` §1/§5/§6/§13 at 46499d6).
-  USB mode: K_CHEST_NEXT cycles the WANTED mode (none → msc → pgp → otp →
-  fido → oath → none) on a READY chest only; 0x3A (one byte, never in the
+  USB mode: K_CHEST_NEXT cycles the WANTED mode (none → storage → pgp →
+  otp → fido → oath → none; shown as disk/pgp/otp/fido/totp) on a READY
+  chest only; 0x3A (one byte, never in the
   confirm write) is rewritten whenever its read-back differs — the
   self-heal after a chest reboot or the confirm reclaim's word RMW; the
   wanted mode returns to none on presence lost (and therefore also after
