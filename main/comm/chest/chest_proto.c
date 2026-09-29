@@ -1,6 +1,6 @@
 /* Niphar_chest link, S3 side — pure logic, protocol version 2. Contract:
  * Niphar_chest LINK_CONTRACT.md at 14f9352, vectors V1-V14; spec:
- * docs/superpowers/specs/2026-08-07-lien-s3-coffre-design.md. */
+ * docs/superpowers/specs/2026-09-29-chest-link-v2-design.md. */
 #include "chest_proto.h"
 #include <stdio.h>
 #include <string.h>

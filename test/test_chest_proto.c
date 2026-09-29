@@ -192,6 +192,13 @@ static void test_chest_confirm_rule_v2(void)
     chest_confirm_step(&c, &a, 3000);
     b = a; b.confirm_count = 43;
     TEST_ASSERT(!chest_confirm_step(&c, &b, 3050), "delivered");
+    /* Counter moves AT the 200 ms retry boundary: still delivered, no retry
+     * fires even though the timer alone would allow one. */
+    chest_confirm_request(&c, &a, 5000);
+    TEST_ASSERT(chest_confirm_step(&c, &a, 5000), "write at t");
+    b = a; b.confirm_count = a.confirm_count + 1;
+    TEST_ASSERT(!chest_confirm_step(&c, &b, 5200), "counter moved at 200 ms: delivered, no retry");
+    TEST_ASSERT(!c.armed, "disarmed on delivery, not left armed for a phantom retry");
     b = a; b.pending_op = 0;
     TEST_ASSERT(!chest_confirm_request(&c, &b, 4000), "nothing pending: dropped");
 }
@@ -225,6 +232,15 @@ static void test_chest_mode_track(void)
     TEST_ASSERT_EQ(chest_mode_track(&t, CHEST_MODE_STORAGE, CHEST_MODE_OATH), CHEST_MODE_FAULT, "persisting: fault");
     TEST_ASSERT_EQ(chest_mode_track(&t, CHEST_MODE_IN_FLIGHT, CHEST_MODE_OATH), CHEST_MODE_PENDING, "in flight resets the count");
     TEST_ASSERT_EQ(chest_mode_track(&t, CHEST_MODE_OATH, CHEST_MODE_OATH), CHEST_MODE_ARRIVED, "caught up");
+    /* ARRIVED itself must reset the fault counter, not just the IN_FLIGHT
+     * branch that happened to precede it above: drive differ_reads back up
+     * to FAULT_READS - 1 with no IN_FLIGHT read in between, land on ARRIVED,
+     * then one more difference. If ARRIVED did not reset, this read would
+     * be the FAULT_READS-th difference and report FAULT, not PENDING. */
+    for (int i = 0; i < CHEST_MODE_FAULT_READS - 1; i++)
+        TEST_ASSERT_EQ(chest_mode_track(&t, CHEST_MODE_STORAGE, CHEST_MODE_OATH), CHEST_MODE_PENDING, "differs again, not yet a fault");
+    TEST_ASSERT_EQ(chest_mode_track(&t, CHEST_MODE_OATH, CHEST_MODE_OATH), CHEST_MODE_ARRIVED, "arrived again, counter reset (not via IN_FLIGHT)");
+    TEST_ASSERT_EQ(chest_mode_track(&t, CHEST_MODE_STORAGE, CHEST_MODE_OATH), CHEST_MODE_PENDING, "arrived reset the fault counter: fresh difference is pending, not fault");
 }
 
 static void test_chest_mode_label(void)
