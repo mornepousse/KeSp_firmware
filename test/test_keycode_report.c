@@ -569,6 +569,26 @@ static void test_kp_sec_confirm_held_confirms_chest_once(void)
     chest_gate_publish(0);
 }
 
+/* Security invariant: only a NEW physical press may confirm — a chest op
+ * that arrives while K_SEC_CONFIRM is already held must NOT be confirmed by
+ * that hold. Catches `&&` operand reordering: `!chest_gate_press() &&
+ * is_new_press(...)` would call chest_gate_press() on every scan and this
+ * test would go red. */
+static void test_kp_sec_confirm_held_before_chest_op_does_not_confirm(void)
+{
+    reset_kp_state();
+    chest_gate_publish(0);
+    keymaps[0][0][0] = T_K_SEC_CONFIRM;
+    press_key(0, 0, 0);
+    build_keycode_report();                /* new press, nothing pending: goes to the local gate */
+
+    chest_gate_publish(1);                 /* op arrives while the key is STILL held */
+    build_keycode_report();
+    build_keycode_report();                /* no release, no new press */
+    TEST_ASSERT(!chest_gate_take_press(), "a chest op arriving mid-hold is not confirmed by the held key");
+    chest_gate_publish(0);
+}
+
 /* ══════════════════════════════════════════════════════════════════════ */
 /* expand_macro tests via the pipeline                                   */
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -775,6 +795,7 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_sec_confirm_authorizes);
     TEST_RUN(test_kp_sec_confirm_routes_to_chest);
     TEST_RUN(test_kp_sec_confirm_held_confirms_chest_once);
+    TEST_RUN(test_kp_sec_confirm_held_before_chest_op_does_not_confirm);
     TEST_RUN(test_kp_macro_inline_injects_steps);
     TEST_RUN(test_kp_macro_empty_name_noop);
     TEST_RUN(test_kp_macro_delay_sets_pending);

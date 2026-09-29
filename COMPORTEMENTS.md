@@ -305,9 +305,12 @@ means a test, or a line.
 - [test:test_kp_sec_confirm_routes_to_chest] K_SEC_CONFIRM goes to the chest
   while it has an operation pending, to the local gate otherwise — one press,
   one destination; a held key confirms once
-  [test:test_kp_sec_confirm_held_confirms_chest_once]. chest_gate_press() is
-  called from key_processor.c only — never from CDC; enforced by
-  scripts/tripwire.d/chest-confirm.sh (proven biting).
+  [test:test_kp_sec_confirm_held_confirms_chest_once]; only a NEW physical
+  press may confirm — a chest op that arrives while the key is already held
+  is NOT confirmed by that hold
+  [test:test_kp_sec_confirm_held_before_chest_op_does_not_confirm].
+  chest_gate_press() is called from key_processor.c only — never from CDC;
+  enforced by scripts/tripwire.d/chest-confirm.sh (proven biting).
 - [smoke:New board from the template] A board is one folder:
   `scripts/new-board.sh <name>` copies `boards/_template/` (board.h with the
   pin tables and `BOARD_PINS(X)`, keymap, layout, sdkconfig.defaults, README)
