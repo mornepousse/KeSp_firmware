@@ -137,8 +137,8 @@ static void chest_task(void *arg)
             s_view = CHEST_VIEW_PRESENT | (st.state & 0x07);
             s_view_op = st.pending_op;
             chest_gate_publish(st.pending_op);
-            if (chest_press_matches(pressed, blk, &st)) chest_confirm_request(&s_confirm, st.pending_op, st.confirm_count, now);
-            if (chest_confirm_step(&s_confirm, st.pending_op, st.confirm_count, now)) write_confirm();
+            if (chest_press_matches(CHEST_TAG(pressed, st.instance), blk, &st)) chest_confirm_request(&s_confirm, &st, now);
+            if (chest_confirm_step(&s_confirm, &st, now)) write_confirm();
             break;
         case CHEST_BLOCK_BAD_VERSION:
             if (!s_badver_logged) { ESP_LOGW(TAG, "chest speaks protocol %u, we speak %u: ignored", s_rx[4], CHEST_PROTO_VERSION); s_badver_logged = 1; }

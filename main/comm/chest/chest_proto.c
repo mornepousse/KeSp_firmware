@@ -1,5 +1,6 @@
-/* Niphar_chest link, S3 side — pure logic. Contract: Niphar_chest
- * docs/LINK_CONTRACT.md; spec: docs/superpowers/specs/2026-09-29-chest-link-s3-master-design.md. */
+/* Niphar_chest link, S3 side — pure logic, protocol version 2. Contract:
+ * Niphar_chest LINK_CONTRACT.md at 14f9352, vectors V1-V14; spec:
+ * docs/superpowers/specs/2026-08-07-lien-s3-coffre-design.md. */
 #include "chest_proto.h"
 #include <stdio.h>
 #include <string.h>
@@ -26,12 +27,17 @@ chest_block_t chest_proto_parse(const uint8_t *regs, size_t len, chest_status_t 
     if (chest_proto_is_absent(regs, CHEST_REG_SIZE)) return CHEST_BLOCK_ABSENT;
     if (memcmp(regs, k_magic, 4) != 0) return CHEST_BLOCK_CORRUPT;
     if (regs[0x04] != CHEST_PROTO_VERSION) return CHEST_BLOCK_BAD_VERSION;
-    if (get_u16(&regs[0x0C]) != cr_crc16(regs, 0x0C)) return CHEST_BLOCK_CORRUPT;
+    if (get_u16(&regs[CHEST_REG_CRC]) != cr_crc16(regs, CHEST_REG_CRC_SPAN)) return CHEST_BLOCK_CORRUPT;
+    uint8_t active = regs[CHEST_REG_MODE_ACTIVE];
+    if ((regs[0x05] & CHEST_STATE_USB) && !(active >= CHEST_MODE_STORAGE && active <= CHEST_MODE_OATH))
+        return CHEST_BLOCK_CORRUPT;                    /* mounted without a mode: contract §1 */
     if (out) {
         out->version = regs[0x04];
         out->state = regs[0x05];
         out->pending_op = get_u16(&regs[0x06]);
         out->confirm_count = get_u32(&regs[0x08]);
+        out->instance = regs[CHEST_REG_INSTANCE];
+        out->active_mode = active;
     }
     return CHEST_BLOCK_OK;
 }
@@ -48,28 +54,60 @@ void chest_op_label(uint16_t op, char out[CHEST_LABEL_BUF])
     else snprintf(out, CHEST_LABEL_BUF, "OP ?");
 }
 
-bool chest_press_matches(uint16_t pressed_op, chest_block_t block, const chest_status_t *st)
+bool chest_press_matches(uint32_t pressed_tag, chest_block_t block, const chest_status_t *st)
 {
-    if (block != CHEST_BLOCK_OK || !st) return false;
+    if (block != CHEST_BLOCK_OK || !st || pressed_tag == 0) return false;
     if (!(st->state & CHEST_STATE_READY)) return false;
-    if (pressed_op == 0) return false;
-    return pressed_op == st->pending_op;
+    return CHEST_TAG_OP(pressed_tag) == st->pending_op && st->pending_op != 0
+        && CHEST_TAG_INST(pressed_tag) == st->instance;
 }
 
-bool chest_confirm_request(chest_confirm_t *c, uint16_t pending_op, uint32_t count, uint32_t now_ms)
+bool chest_confirm_request(chest_confirm_t *c, const chest_status_t *st, uint32_t now_ms)
 {
-    if (pending_op == 0) return false;
-    c->armed = true; c->writes = 0; c->op = pending_op; c->count0 = count; c->t_ms = now_ms;
+    if (!st || st->pending_op == 0) return false;
+    c->armed = true; c->writes = 0; c->op = st->pending_op; c->instance = st->instance;
+    c->count0 = st->confirm_count; c->t_ms = now_ms;
     return true;
 }
 
-bool chest_confirm_step(chest_confirm_t *c, uint16_t pending_op, uint32_t count, uint32_t now_ms)
+bool chest_confirm_step(chest_confirm_t *c, const chest_status_t *st, uint32_t now_ms)
 {
-    if (!c->armed) return false;
-    if (count != c->count0 || pending_op != c->op) { c->armed = false; return false; }
+    if (!c->armed || !st) return false;
+    if (st->confirm_count != c->count0 || st->pending_op != c->op || st->instance != c->instance) {
+        c->armed = false; return false;
+    }
     if (c->writes == 0) { c->writes = 1; c->t_ms = now_ms; return true; }
     if ((uint32_t)(now_ms - c->t_ms) < CHEST_CONFIRM_RETRY_MS) return false;
     if (c->writes == 1) { c->writes = 2; c->t_ms = now_ms; return true; }
     c->armed = false;
     return false;
+}
+
+uint8_t chest_mode_next(uint8_t mode)
+{
+    return (mode < CHEST_MODE_OATH) ? (uint8_t)(mode + 1) : CHEST_MODE_NONE;
+}
+
+bool chest_mode_needs_write(const uint8_t *regs, uint8_t wanted)
+{
+    return regs && regs[CHEST_REG_MODE_REQ] != wanted;
+}
+
+chest_mode_state_t chest_mode_track(chest_mode_track_t *t, uint8_t active, uint8_t wanted)
+{
+    if (active == wanted) { t->differ_reads = 0; return CHEST_MODE_ARRIVED; }
+    if (active == CHEST_MODE_IN_FLIGHT) { t->differ_reads = 0; return CHEST_MODE_PENDING; }
+    if (t->differ_reads < CHEST_MODE_FAULT_READS) t->differ_reads++;
+    return (t->differ_reads >= CHEST_MODE_FAULT_READS) ? CHEST_MODE_FAULT : CHEST_MODE_PENDING;
+}
+
+void chest_mode_label(chest_mode_state_t s, uint8_t active, uint8_t wanted, char out[CHEST_MODE_LABEL_BUF])
+{
+    static const char *const up[CHEST_MODE_COUNT] = { "", "MSC", "PGP", "OTP", "FIDO", "OATH" };
+    static const char *const lo[CHEST_MODE_COUNT] = { "", "msc", "pgp", "otp", "fido", "oath" };
+    const char *txt = "";
+    if (s == CHEST_MODE_FAULT) txt = "ERR";
+    else if (s == CHEST_MODE_ARRIVED) txt = (active < CHEST_MODE_COUNT) ? up[active] : "";
+    else txt = (wanted < CHEST_MODE_COUNT) ? lo[wanted] : "";
+    snprintf(out, CHEST_MODE_LABEL_BUF, "%s", txt);
 }
