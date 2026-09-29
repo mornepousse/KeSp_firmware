@@ -486,7 +486,16 @@ void build_keycode_report(void)
          * character once, then switched. Re-latch this cycle's new presses on
          * the LT layer and re-resolve the plain keycodes already in the report;
          * anything that is not a plain HID code is absorbed this cycle and
-         * resolves fully next cycle from the latched layer. */
+         * resolves fully next cycle from the latched layer.
+         *
+         * Except K_IS_SEC (I2, review 2026-09-29): K_SEC_CONFIRM/K_CHEST_NEXT/
+         * K_OATH_* gate their action on is_new_press(row,col), which is only
+         * ever true on THIS cycle (prev_press_row/col latch at Step 11, below
+         * this loop) — "resolves fully next cycle" does not hold for them,
+         * next cycle is_new_press is already false and the action never
+         * fires, forever (found via K_OATH_NEXT under a held LT). Call
+         * process_advanced_key() here, in the one cycle its is_new_press gate
+         * is still open, instead of silently zeroing the slot. */
         int8_t lt_after = tap_hold_get_active_layer();
         if (lt_after >= 0 && lt_after != lt_layer) {
             for (uint8_t i = 0; i < 6; i++) {
@@ -495,7 +504,13 @@ void build_keycode_report(void)
                 press_layer[row][col] = (uint8_t)lt_after;
                 uint16_t kc2 = keymaps[lt_after][row][col];
                 if (kc2 == K_NO) kc2 = keymaps[last_layer][row][col];
-                keycodes[i] = (kc2 != 0 && kc2 <= 0xFF) ? (uint8_t)kc2 : 0;
+                if (K_IS_SEC(kc2)) {
+                    (void)process_advanced_key(kc2, row, col);
+                    extra_keycodes[i] = kc2;
+                    keycodes[i] = 0;
+                } else {
+                    keycodes[i] = (kc2 != 0 && kc2 <= 0xFF) ? (uint8_t)kc2 : 0;
+                }
             }
         }
     }

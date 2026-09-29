@@ -351,6 +351,17 @@ means a test, or a line.
   `is_new_press` sees as a fresh press — one extra queued nav step or code
   request. Harmless: a code is still never shown without a following
   K_SEC_CONFIRM on the left.
+  A K_IS_SEC key (K_SEC_CONFIRM/K_CHEST_NEXT/K_OATH_*) that resolves an LT
+  hold on its OWN press — the LT's tapping-term key is itself a security
+  action on the target layer — fires on that very cycle, not never: these
+  keys gate on `is_new_press`, which the LT re-latch step only ever sees
+  true on the resolving cycle, so folding them back in like a plain HID code
+  (zero the slot, wait for "next cycle") silently swallowed the press
+  forever [test:test_kp_lt_resolves_oath_next_on_its_press_cycle]
+  [test:test_kp_lt_resolves_sec_confirm_from_left_confirms_once]. The
+  left-only filter on K_SEC_CONFIRM survives this path unchanged — a remote
+  column reached through an LT resolution still confirms nothing
+  [test:test_kp_lt_resolves_sec_confirm_from_right_confirms_nothing].
 - [smoke:New board from the template] A board is one folder:
   `scripts/new-board.sh <name>` copies `boards/_template/` (board.h with the
   pin tables and `BOARD_PINS(X)`, keymap, layout, sdkconfig.defaults, README)

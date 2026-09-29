@@ -535,6 +535,74 @@ static void test_kp_key_that_resolves_an_lt_hold_is_on_the_lt_layer(void)
     TEST_ASSERT(keycode_in_report(T_KC_B) && !keycode_in_report(0x06), "LT released, the held key stays a B");
 }
 
+/* I2 (review 2026-09-29, fix round 1): when the SAME cycle that resolves an
+ * LT hold reads its resolving key on the LT layer, and that key is a
+ * K_IS_SEC action (K_SEC_CONFIRM/K_CHEST_NEXT/K_OATH_*) rather than a plain
+ * HID code, the re-latch loop (~line 492) only knew how to fold a plain
+ * keycode back in — for an advanced keycode it just zeroed keycodes[i] and
+ * moved on, never calling process_advanced_key. On every later cycle
+ * is_new_press(row,col) is already false for that slot (latched as
+ * "previously pressed" at Step 11 of THIS same cycle), so the action's own
+ * is_new_press gate never opens again: the press is silently swallowed
+ * forever. This is the RED test: before the fix, the OATH request never
+ * queues. */
+static void test_kp_lt_resolves_oath_next_on_its_press_cycle(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = 0x4000u | (1u << 8) | 0x2Cu;   /* K_LT(1, Space) */
+    keymaps[0][0][1] = 0x06u;          /* base: C */
+    keymaps[1][0][1] = T_K_OATH_NEXT;  /* layer 1: OATH Next */
+    press_key(0, 0, 0);
+    build_keycode_report();
+    press_key(1, 0, 1);
+    build_keycode_report();            /* THIS cycle resolves the LT as a hold */
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "the second key resolves the LT as a hold");
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 1,
+                   "K_OATH_NEXT fires on the very cycle its LT resolves, not never");
+    TEST_ASSERT(!keycode_in_report(0x06), "never a C");
+}
+
+/* Same bug, K_SEC_CONFIRM from a LOCAL (left) column: one confirm, on the
+ * resolving cycle. sec_confirm_from_local's gate and chest_gate_press()'s
+ * ordering are untouched — this goes through the same process_advanced_key
+ * branch as every other K_SEC_CONFIRM press. */
+static void test_kp_lt_resolves_sec_confirm_from_left_confirms_once(void)
+{
+    reset_kp_state();
+    chest_gate_publish(1, 0);                          /* chest: op 1 pending */
+    keymaps[0][0][0] = 0x4000u | (1u << 8) | 0x2Cu;    /* K_LT(1, Space) */
+    keymaps[0][0][1] = 0x06u;                           /* base: C */
+    keymaps[1][0][1] = T_K_SEC_CONFIRM;                 /* layer 1, LOCAL column 1 */
+    press_key(0, 0, 0);
+    build_keycode_report();
+    press_key(1, 0, 1);
+    build_keycode_report();
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "the second key resolves the LT as a hold");
+    TEST_ASSERT_EQ(chest_gate_take_press(), CHEST_TAG(1, 0),
+                   "K_SEC_CONFIRM from the left confirms on the resolving cycle");
+    chest_gate_publish(0, 0);
+}
+
+/* Mirror: K_SEC_CONFIRM from a REMOTE (right-half) column (>=
+ * SEC_CONFIRM_LOCAL_COLS, 4 in this host build) confirms nothing, even
+ * reached through an LT resolution — the left-only filter survives the fix. */
+static void test_kp_lt_resolves_sec_confirm_from_right_confirms_nothing(void)
+{
+    reset_kp_state();
+    chest_gate_publish(1, 0);
+    keymaps[0][0][0] = 0x4000u | (1u << 8) | 0x2Cu;    /* K_LT(1, Space) */
+    keymaps[0][0][5] = 0x06u;                           /* base col 5 (remote): C */
+    keymaps[1][0][5] = T_K_SEC_CONFIRM;                 /* layer 1, REMOTE column 5 */
+    press_key(0, 0, 0);
+    build_keycode_report();
+    press_key(1, 0, 5);
+    build_keycode_report();
+    TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "the second key resolves the LT as a hold");
+    TEST_ASSERT_EQ(chest_gate_take_press(), 0,
+                   "no confirm from a remote column, even via an LT resolution");
+    chest_gate_publish(0, 0);
+}
+
 static void test_kp_sec_confirm_authorizes(void)
 {
     reset_kp_state();
@@ -1074,6 +1142,9 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_held_key_keeps_the_layer_it_was_pressed_on);
     TEST_RUN(test_kp_key_pressed_before_mo_keeps_the_base_layer);
     TEST_RUN(test_kp_key_that_resolves_an_lt_hold_is_on_the_lt_layer);
+    TEST_RUN(test_kp_lt_resolves_oath_next_on_its_press_cycle);
+    TEST_RUN(test_kp_lt_resolves_sec_confirm_from_left_confirms_once);
+    TEST_RUN(test_kp_lt_resolves_sec_confirm_from_right_confirms_nothing);
     TEST_RUN(test_kp_sec_confirm_authorizes);
     TEST_RUN(test_kp_sec_confirm_routes_to_chest);
     TEST_RUN(test_kp_sec_confirm_held_confirms_chest_once);
