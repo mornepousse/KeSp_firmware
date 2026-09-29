@@ -422,6 +422,9 @@ static const uint16_t TO_L9 = 0x1400;
 #define K_SEC_BASE                   0x3E00
 #define K_SEC_CONFIRM                0x3E00  /* authorize a pending CR request */
 #define K_CHEST_NEXT                 0x3E01  /* cycle the Niphar_chest USB mode (none->storage->pgp->otp->fido->oath) */
+#define K_OATH_PREV                  0x3E02  /* move the OATH account cursor back one step */
+#define K_OATH_NEXT                  0x3E03  /* move the OATH account cursor forward one step */
+#define K_OATH_CODE                  0x3E04  /* request a TOTP code for the account under the cursor */
 #define K_IS_SEC(kc)                 (((kc) & 0xFF00) == K_SEC_BASE)
 #define K_SEC_TYPE(kc)               ((kc) & 0xFF)
 

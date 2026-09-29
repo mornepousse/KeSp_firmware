@@ -31,6 +31,17 @@ uint32_t chest_gate_take_press(void);
 void     chest_gate_mode_next(void);
 /* link task: consume the request (false = none pending). */
 bool     chest_gate_take_mode_next(void);
+/* key_processor: a new K_OATH_PREV/K_OATH_NEXT press — accumulate the cursor
+ * move (delta = -1 or +1), saturating at +-16 pending steps. Not security-
+ * bound: browsing the account list carries no authority (Mae, 2026-09-29). */
+void     chest_gate_oath_nav(int8_t delta);
+/* link task: consume the accumulated delta (0 = none) and clear it. */
+int8_t   chest_gate_take_oath_nav(void);
+/* key_processor: a new K_OATH_CODE press (a request for the account under
+ * the cursor's code — not an arming, the chest still needs K_SEC_CONFIRM). */
+void     chest_gate_oath_code(void);
+/* link task: consume the request (false = none pending). */
+bool     chest_gate_take_oath_code(void);
 /* Pure: is this keymap column one of the board's LOCAL (left) columns?
  * On a split master (keymap_cols > local_cols) the columns >= local_cols come
  * over the inter-half radio, which is unauthenticated: K_SEC_CONFIRM there is

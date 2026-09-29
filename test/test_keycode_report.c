@@ -43,6 +43,9 @@
 #define T_MOD_LSFT 0x02u   /* MOD_LSFT */
 #define T_K_SEC_CONFIRM 0x3E00u
 #define T_K_CHEST_NEXT  0x3E01u
+#define T_K_OATH_PREV   0x3E02u
+#define T_K_OATH_NEXT   0x3E03u
+#define T_K_OATH_CODE   0x3E04u
 
 /* ── Definitions of all extern globals required by key_processor.c ── */
 
@@ -194,6 +197,8 @@ static void reset_kp_state(void)
     chest_gate_publish(0, 0);
     (void)chest_gate_take_press();
     (void)chest_gate_take_mode_next();
+    (void)chest_gate_take_oath_nav();
+    (void)chest_gate_take_oath_code();
 
     /* Two idle cycles to flush prev_press_row/col and prev_shift_pressed */
     build_keycode_report();
@@ -659,6 +664,116 @@ static void test_kp_chest_next_requests_a_mode_change_once(void)
     TEST_ASSERT_EQ(keycodes[0], 0, "absorbed, not typed");
 }
 
+/* K_OATH_NEXT: one new press -> +1 queued; a held key does not queue again;
+ * absorbed (not typed). Mirrors test_kp_chest_next_requests_a_mode_change_once. */
+static void test_kp_oath_next_requests_nav_once(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_K_OATH_NEXT;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 1, "a new press queues +1");
+    press_key(0, 0, 0);
+    build_keycode_report();                /* still held, no release */
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 0, "a held key does not queue again");
+    TEST_ASSERT_EQ(keycodes[0], 0, "absorbed, not typed");
+}
+
+/* K_OATH_PREV: symmetric, -1 queued. */
+static void test_kp_oath_prev_requests_nav_once(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_K_OATH_PREV;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), -1, "a new press queues -1");
+    press_key(0, 0, 0);
+    build_keycode_report();                /* still held, no release */
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 0, "a held key does not queue again");
+    TEST_ASSERT_EQ(keycodes[0], 0, "absorbed, not typed");
+}
+
+/* K_OATH_CODE: one new press -> requested once; a held key does not
+ * re-request; absorbed. */
+static void test_kp_oath_code_requests_once(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_K_OATH_CODE;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT(chest_gate_take_oath_code(), "a new press requests a code");
+    press_key(0, 0, 0);
+    build_keycode_report();                /* still held, no release */
+    TEST_ASSERT(!chest_gate_take_oath_code(), "a held key does not request again");
+    TEST_ASSERT_EQ(keycodes[0], 0, "absorbed, not typed");
+}
+
+/* NEXT, NEXT, PREV, each a separate physical press (release between), then
+ * one take == +1 and a second take == 0 (cleared). */
+static void test_kp_oath_nav_sequence_take_once(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_K_OATH_NEXT;
+    press_key(0, 0, 0);
+    build_keycode_report();                /* NEXT: +1 */
+    release_all_keys();
+    build_keycode_report();
+    press_key(0, 0, 0);
+    build_keycode_report();                /* NEXT: +1 (total +2) */
+    release_all_keys();
+    build_keycode_report();
+    keymaps[0][0][0] = T_K_OATH_PREV;
+    press_key(0, 0, 0);
+    build_keycode_report();                /* PREV: -1 (total +1) */
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 1, "NEXT,NEXT,PREV -> +1 queued");
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 0, "a second take is cleared");
+}
+
+/* The queued delta saturates at +16, even with more presses. */
+static void test_kp_oath_nav_saturates_positive(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_K_OATH_NEXT;
+    for (int i = 0; i < 20; i++) {
+        press_key(0, 0, 0);
+        build_keycode_report();
+        release_all_keys();
+        build_keycode_report();
+    }
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 16, "20 NEXT presses saturate at +16");
+}
+
+/* Symmetric: saturates at -16. */
+static void test_kp_oath_nav_saturates_negative(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_K_OATH_PREV;
+    for (int i = 0; i < 20; i++) {
+        press_key(0, 0, 0);
+        build_keycode_report();
+        release_all_keys();
+        build_keycode_report();
+    }
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), -16, "20 PREV presses saturate at -16");
+}
+
+/* K_OATH_CODE pressed twice (two distinct physical presses) before any
+ * take(): the request is a flag, not a counter -> one take true, then
+ * false. */
+static void test_kp_oath_code_twice_before_take_yields_one(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_K_OATH_CODE;
+    press_key(0, 0, 0);
+    build_keycode_report();                /* press 1 */
+    release_all_keys();
+    build_keycode_report();
+    press_key(0, 0, 0);
+    build_keycode_report();                /* press 2, still before any take */
+    TEST_ASSERT(chest_gate_take_oath_code(), "first take: true");
+    TEST_ASSERT(!chest_gate_take_oath_code(), "second take: false (cleared)");
+}
+
 static void test_sec_confirm_from_local(void)
 {
     TEST_ASSERT(sec_confirm_from_local(0, 7, 14), "left col 0");
@@ -880,6 +995,13 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_sec_confirm_records_the_instance);
     TEST_RUN(test_kp_sec_confirm_ignored_from_the_right_half);
     TEST_RUN(test_kp_chest_next_requests_a_mode_change_once);
+    TEST_RUN(test_kp_oath_next_requests_nav_once);
+    TEST_RUN(test_kp_oath_prev_requests_nav_once);
+    TEST_RUN(test_kp_oath_code_requests_once);
+    TEST_RUN(test_kp_oath_nav_sequence_take_once);
+    TEST_RUN(test_kp_oath_nav_saturates_positive);
+    TEST_RUN(test_kp_oath_nav_saturates_negative);
+    TEST_RUN(test_kp_oath_code_twice_before_take_yields_one);
     TEST_RUN(test_sec_confirm_from_local);
     TEST_RUN(test_kp_macro_inline_injects_steps);
     TEST_RUN(test_kp_macro_empty_name_noop);
