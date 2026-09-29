@@ -35,21 +35,24 @@ closes both.
 
 ## 2. Register map v2
 
+Settled with the chest on 2026-09-29 (option (b): the CRC covers everything
+before it, contiguously):
+
 | offset | owner | content |
 |---|---|---|
 | `0x00-0x0B` | chest | unchanged (magic, version **2**, state, pending op, counter) |
-| `0x0C-0x0D` | chest | CRC16 over `0x00..0x0B`, unchanged |
-| **`0x0E`** | chest | **instance number**, incremented at every arming, covered by… see below |
-| `0x0F` | chest | reserved, zero |
+| **`0x0C`** | chest | **instance number**, incremented at every arming |
+| `0x0D` | chest | reserved, zero |
+| **`0x0E-0x0F`** | chest | **CRC16 over `0x00..0x0D`** (little-endian) |
 | `0x10` | master | `0x5A` — confirmation |
-| **`0x11`** | master | **echo of the instance** read at `0x0E` |
+| **`0x11`** | master | **echo of the instance** read at `0x0C` |
 | **`0x12`** | master | **requested USB mode** |
 | `0x13` | master | reserved, zero |
 
-⚠ The CRC span: the chest said "covered by the CRC" for `0x0E`, but the CRC
-sits at `0x0C` and v1 covers `0x00..0x0B`. Whether v2 extends the span, moves
-the CRC, or leaves `0x0E` uncovered is read from the published contract and
-its vectors — never assumed. The KeSp parse follows the contract's vectors.
+The CRC moves (so the version must change): a discontinuous span would force
+every implementation to reproduce the same gap, and an uncovered instance would
+let one flipped bit cause a refused confirmation nobody could explain. The
+chest owns `0x00..0x0F` whole, the master `0x10..0x13` — no shared word.
 
 **Confirmation**: the chest accepts only `0x10 == 0x5A` AND `0x11 == the
 instance currently armed`; otherwise it ignores it silently and the counter
@@ -65,8 +68,9 @@ value is refused (it stays in its current mode and logs it).
 
 - **Version**: `CHEST_PROTO_VERSION 2`. A v1 chest is BAD_VERSION (refused,
   logged once, `P4?` on screen).
-- **Parse** adds `instance` (`0x0E`) to `chest_status_t`, per the contract's
-  parse order and vectors.
+- **Parse** adds `instance` (`0x0C`) to `chest_status_t`; the CRC is read at
+  `0x0E` and computed over `0x00..0x0D` — per the contract's parse order and
+  vectors.
 - **Confirmation write**: ONE WRBUF of 2 bytes at `0x10`: `{0x5A, instance}`,
   the instance taken from the SAME block that showed the op the owner saw
   (the press already carries the op code, `chest_press_matches`); the retry
@@ -85,6 +89,16 @@ value is refused (it stays in its current mode and logs it).
   same lock-free gate pattern as the confirm (key_processor sets, the link task
   writes) — but it is NOT a security gesture and may sit on either half.
 - **Presence lost** (USB unplugged): `wanted_mode` back to none.
+- **The chest applies a mode on change of the last APPLIED value** (initialized
+  to `0x00` at its boot), not of what it reads — so after a chest reboot the
+  master's rewrite of `0x12` is seen as `0 → mode` and applied (confirmed by
+  the chest, 2026-09-29).
+- **Known limit, accepted by the contract**: `0x12` has no physical
+  confirmation (`storage` exposes the microSD, `pgp` loads the private keys in
+  RAM). Accepted because writing it requires being the bus master, i.e. being
+  inside the left half. The master writes `0x12` only when the wanted mode
+  differs from what it reads back — never in a loop; a mode change comes only
+  from a new `K_CHEST_NEXT` press or from the self-heal after a chest reboot.
 
 ## 4. Left-only confirm
 
