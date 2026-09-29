@@ -327,17 +327,30 @@ means a test, or a line.
   K_CHEST_NEXT requests the next chest USB mode once per physical press
   [test:test_kp_chest_next_requests_a_mode_change_once].
   K_OATH_PREV/K_OATH_NEXT queue a cursor move over the TOTP accounts, one
-  step per physical press, saturating the queued delta at +-16 steps
-  [test:test_kp_oath_next_requests_nav_once]
+  step per physical press, saturating the queued delta at +-16 steps, and
+  touching no other channel (not a code request, not a mode change, not a
+  chest confirm) [test:test_kp_oath_next_requests_nav_once]
   [test:test_kp_oath_prev_requests_nav_once]
   [test:test_kp_oath_nav_sequence_take_once]
   [test:test_kp_oath_nav_saturates_positive]
-  [test:test_kp_oath_nav_saturates_negative]. K_OATH_CODE requests a code for
-  the account under the cursor, once per physical press
+  [test:test_kp_oath_nav_saturates_negative]. The accumulator has two
+  writers — key_processor.c accumulates, the link task's take clears — and
+  is a CAS loop, not a plain store, so a take racing an accumulate never
+  drops or duplicates a step [test:test_chest_gate_oath_nav_cas_survives_a_concurrent_take].
+  K_OATH_CODE requests a code for the account under the cursor, once per
+  physical press and touching no other channel
   [test:test_kp_oath_code_requests_once]
-  [test:test_kp_oath_code_twice_before_take_yields_one]. Neither key is
-  left-only or security-bound: browsing the list and asking for a code carry
-  no authority by themselves — only K_SEC_CONFIRM arms or authorizes.
+  [test:test_kp_oath_code_twice_before_take_yields_one]. None of the three
+  keys is left-only or security-bound: browsing the list and asking for a
+  code carry no authority by themselves — only K_SEC_CONFIRM arms or
+  authorizes; a press on any of them from a remote (right-half) column is
+  accepted the same as from the left
+  [test:test_kp_oath_keys_accepted_from_the_right_half]. A right-half key
+  held through more than `HALF_LINK_TIMEOUT_MS` (400 ms) of radio silence is
+  released by the left and then re-affirmed once the link resumes, which
+  `is_new_press` sees as a fresh press — one extra queued nav step or code
+  request. Harmless: a code is still never shown without a following
+  K_SEC_CONFIRM on the left.
 - [smoke:New board from the template] A board is one folder:
   `scripts/new-board.sh <name>` copies `boards/_template/` (board.h with the
   pin tables and `BOARD_PINS(X)`, keymap, layout, sdkconfig.defaults, README)

@@ -27,6 +27,14 @@
 #include "sec_confirm.h"
 #include "chest_gate.h"
 
+/* Test-only seam for chest_gate_oath_nav's CAS loop (I1, review 2026-09-29).
+ * chest_gate.c is compiled ONLY for this translation unit (see
+ * test/CMakeLists.txt) with -DCHEST_GATE_TEST_SEAM=chest_gate_test_seam_hook;
+ * every test leaves s_oath_nav_seam NULL so the seam is a no-op for them,
+ * only test_chest_gate_oath_nav_cas_survives_a_concurrent_take arms it. */
+static void (*s_oath_nav_seam)(void) = NULL;
+void chest_gate_test_seam_hook(void) { if (s_oath_nav_seam) s_oath_nav_seam(); }
+
 /* ── Local HID constants (avoids the key_definitions.h/tinyusb chain) ── */
 #define T_KC_A      0x04u
 #define T_KC_B      0x05u
@@ -664,8 +672,10 @@ static void test_kp_chest_next_requests_a_mode_change_once(void)
     TEST_ASSERT_EQ(keycodes[0], 0, "absorbed, not typed");
 }
 
-/* K_OATH_NEXT: one new press -> +1 queued; a held key does not queue again;
- * absorbed (not typed). Mirrors test_kp_chest_next_requests_a_mode_change_once. */
+/* K_OATH_NEXT: one new press -> +1 queued, and ONLY the nav channel (M2,
+ * review 2026-09-29: catches NEXT also requesting a code or a mode change);
+ * a held key does not queue again; absorbed (not typed). Mirrors
+ * test_kp_chest_next_requests_a_mode_change_once. */
 static void test_kp_oath_next_requests_nav_once(void)
 {
     reset_kp_state();
@@ -673,13 +683,16 @@ static void test_kp_oath_next_requests_nav_once(void)
     press_key(0, 0, 0);
     build_keycode_report();
     TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 1, "a new press queues +1");
+    TEST_ASSERT(!chest_gate_take_oath_code(), "NEXT must not also request a code");
+    TEST_ASSERT(!chest_gate_take_mode_next(), "NEXT must not also request a mode change");
+    TEST_ASSERT_EQ(chest_gate_take_press(), 0, "NEXT must not also confirm the chest");
     press_key(0, 0, 0);
     build_keycode_report();                /* still held, no release */
     TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 0, "a held key does not queue again");
     TEST_ASSERT_EQ(keycodes[0], 0, "absorbed, not typed");
 }
 
-/* K_OATH_PREV: symmetric, -1 queued. */
+/* K_OATH_PREV: symmetric, -1 queued, same cross-channel isolation. */
 static void test_kp_oath_prev_requests_nav_once(void)
 {
     reset_kp_state();
@@ -687,13 +700,17 @@ static void test_kp_oath_prev_requests_nav_once(void)
     press_key(0, 0, 0);
     build_keycode_report();
     TEST_ASSERT_EQ(chest_gate_take_oath_nav(), -1, "a new press queues -1");
+    TEST_ASSERT(!chest_gate_take_oath_code(), "PREV must not also request a code");
+    TEST_ASSERT(!chest_gate_take_mode_next(), "PREV must not also request a mode change");
+    TEST_ASSERT_EQ(chest_gate_take_press(), 0, "PREV must not also confirm the chest");
     press_key(0, 0, 0);
     build_keycode_report();                /* still held, no release */
     TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 0, "a held key does not queue again");
     TEST_ASSERT_EQ(keycodes[0], 0, "absorbed, not typed");
 }
 
-/* K_OATH_CODE: one new press -> requested once; a held key does not
+/* K_OATH_CODE: one new press -> requested once, and ONLY the code channel
+ * (M2: catches CODE also pushing a nav step); a held key does not
  * re-request; absorbed. */
 static void test_kp_oath_code_requests_once(void)
 {
@@ -702,10 +719,45 @@ static void test_kp_oath_code_requests_once(void)
     press_key(0, 0, 0);
     build_keycode_report();
     TEST_ASSERT(chest_gate_take_oath_code(), "a new press requests a code");
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 0, "CODE must not also queue a nav step");
+    TEST_ASSERT(!chest_gate_take_mode_next(), "CODE must not also request a mode change");
+    TEST_ASSERT_EQ(chest_gate_take_press(), 0, "CODE must not also confirm the chest");
     press_key(0, 0, 0);
     build_keycode_report();                /* still held, no release */
     TEST_ASSERT(!chest_gate_take_oath_code(), "a held key does not request again");
     TEST_ASSERT_EQ(keycodes[0], 0, "absorbed, not typed");
+}
+
+/* M1 (review 2026-09-29): none of the three OATH keys is left-only —
+ * browsing and asking for a code carry no authority, unlike K_SEC_CONFIRM.
+ * A remote (right-half) column (>= SEC_CONFIRM_LOCAL_COLS, 4 in this host
+ * build) is accepted the same as a local one. Mutant to kill: NEXT (or
+ * PREV/CODE) gated by sec_confirm_from_local like K_SEC_CONFIRM. */
+static void test_kp_oath_keys_accepted_from_the_right_half(void)
+{
+    reset_kp_state();
+    keymaps[0][0][5] = T_K_OATH_NEXT;
+    press_key(0, 0, 5);
+    build_keycode_report();
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 1,
+                   "K_OATH_NEXT from a remote column still queues +1");
+    release_all_keys();
+    build_keycode_report();
+
+    keymaps[0][0][5] = T_K_OATH_PREV;
+    press_key(0, 0, 5);
+    build_keycode_report();
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), -1,
+                   "K_OATH_PREV from a remote column still queues -1");
+    release_all_keys();
+    build_keycode_report();
+
+    keymaps[0][0][5] = T_K_OATH_CODE;
+    press_key(0, 0, 5);
+    build_keycode_report();
+    TEST_ASSERT(chest_gate_take_oath_code(),
+                "K_OATH_CODE from a remote column still requests a code");
+    keymaps[0][0][5] = 0;
 }
 
 /* NEXT, NEXT, PREV, each a separate physical press (release between), then
@@ -772,6 +824,41 @@ static void test_kp_oath_code_twice_before_take_yields_one(void)
     build_keycode_report();                /* press 2, still before any take */
     TEST_ASSERT(chest_gate_take_oath_code(), "first take: true");
     TEST_ASSERT(!chest_gate_take_oath_code(), "second take: false (cleared)");
+}
+
+/* Race oracle for the CAS loop in chest_gate_oath_nav (I1, review
+ * 2026-09-29): a concurrent chest_gate_take_oath_nav() landing between the
+ * loop's load and its store must never lose or duplicate a step. Seeds the
+ * accumulator to v, then arms the seam so that mid-attempt a "link task"
+ * takes the seeded v and resets to 0; the writer's compare_exchange must
+ * then retry against the new value and land on 1 (0 + the racing +1).
+ * taken + remaining must equal v + 1 — the plain load/saturate/store this
+ * replaced gives 2v+1 instead (the take's v survives the race AND the
+ * writer's stale store overwrites the take's reset to 0 with v+1). */
+static int8_t s_seam_taken;
+static bool   s_seam_fired;
+static void oath_nav_race_seam(void)
+{
+    if (s_seam_fired) return;      /* interleave once: the first CAS attempt */
+    s_seam_fired = true;
+    s_seam_taken = chest_gate_take_oath_nav();
+}
+
+static void test_chest_gate_oath_nav_cas_survives_a_concurrent_take(void)
+{
+    reset_kp_state();
+    const int8_t v = 5;
+    for (int8_t i = 0; i < v; i++) chest_gate_oath_nav(1);   /* seed to v */
+
+    s_seam_fired = false;
+    s_seam_taken = 0;
+    s_oath_nav_seam = oath_nav_race_seam;
+    chest_gate_oath_nav(1);                    /* the racing writer: +1 */
+    s_oath_nav_seam = NULL;
+
+    int8_t remaining = chest_gate_take_oath_nav();
+    TEST_ASSERT_EQ((int)s_seam_taken + (int)remaining, (int)v + 1,
+                   "CAS: no step lost or duplicated across a concurrent take");
 }
 
 static void test_sec_confirm_from_local(void)
@@ -998,10 +1085,12 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_oath_next_requests_nav_once);
     TEST_RUN(test_kp_oath_prev_requests_nav_once);
     TEST_RUN(test_kp_oath_code_requests_once);
+    TEST_RUN(test_kp_oath_keys_accepted_from_the_right_half);
     TEST_RUN(test_kp_oath_nav_sequence_take_once);
     TEST_RUN(test_kp_oath_nav_saturates_positive);
     TEST_RUN(test_kp_oath_nav_saturates_negative);
     TEST_RUN(test_kp_oath_code_twice_before_take_yields_one);
+    TEST_RUN(test_chest_gate_oath_nav_cas_survives_a_concurrent_take);
     TEST_RUN(test_sec_confirm_from_local);
     TEST_RUN(test_kp_macro_inline_injects_steps);
     TEST_RUN(test_kp_macro_empty_name_noop);

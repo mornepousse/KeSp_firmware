@@ -13,6 +13,14 @@ check_keycode_map() {
 import re
 hdr = open("main/input/key_definitions.h").read()
 doc = open("docs/KEYCODE_MAP.md").read()
+# A "reserved" range row (e.g. "0x3E00-0x3EFF ... Block reserved for
+# security keys") documents a BLOCK, not its individual keycodes — it must
+# not let the brick treat a keycode inside it as covered without its own
+# row. Otherwise the block row alone satisfies the check for every value in
+# its span, even one added later with no row of its own (I3, review of
+# K_OATH_PREV/NEXT/CODE, 2026-09-29).
+doc = "\n".join(l for l in doc.splitlines()
+                 if not ("reserved" in l.lower() and re.search(r"`0x[0-9A-Fa-f]{4}-0x", l)))
 defs = {}
 for name, val in re.findall(r"^#define\s+(K_\w+|MO_\w+|TO_\w+)\s+(0x[0-9A-Fa-f]{4})\b", hdr, re.M):
     v = int(val, 16)

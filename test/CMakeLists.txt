@@ -122,6 +122,12 @@ add_executable(test_runner
 
 target_compile_definitions(test_runner PRIVATE SEC_CONFIRM_LOCAL_COLS=4)
 
+# chest_gate.c's oath-nav CAS loop takes a test-only seam (I1, review
+# 2026-09-29) — scoped to this one source file, not the whole target, so no
+# other translation unit sees CHEST_GATE_TEST_SEAM.
+set_source_files_properties(../main/comm/chest/chest_gate.c PROPERTIES
+    COMPILE_DEFINITIONS "CHEST_GATE_TEST_SEAM=chest_gate_test_seam_hook")
+
 target_include_directories(test_runner PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../boards/kase_v2_debug

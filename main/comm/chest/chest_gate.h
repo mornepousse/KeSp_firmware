@@ -7,7 +7,9 @@
  * seen on (protocol v2, spec 2026-09-29 §5); key_processor asks whether a
  * K_SEC_CONFIRM press is for the chest. Lock-free (one writer per field,
  * __atomic builtins), compiled on every keyboard board — without a chest,
- * nothing is ever published and every press stays local. */
+ * nothing is ever published and every press stays local. Exception:
+ * chest_gate_oath_nav()'s accumulator has TWO writers (see its comment) and
+ * uses a CAS loop instead of a plain store. */
 void     chest_gate_publish(uint16_t pending_op, uint8_t instance);   /* link task only; op 0 = none */
 uint16_t chest_gate_pending(void);             /* op only (0 = none) */
 /* SECURITY: called ONLY by key_processor.c on a new physical press
@@ -33,9 +35,14 @@ void     chest_gate_mode_next(void);
 bool     chest_gate_take_mode_next(void);
 /* key_processor: a new K_OATH_PREV/K_OATH_NEXT press — accumulate the cursor
  * move (delta = -1 or +1), saturating at +-16 pending steps. Not security-
- * bound: browsing the account list carries no authority (Mae, 2026-09-29). */
+ * bound: browsing the account list carries no authority (Mae, 2026-09-29).
+ * TWO writers on this one field (this function AND chest_gate_take_oath_nav's
+ * exchange, from two different tasks): a CAS loop, not a plain store — a
+ * plain load+store races the take and silently drops or duplicates a step
+ * (review 2026-09-29, see chest_gate.c). */
 void     chest_gate_oath_nav(int8_t delta);
-/* link task: consume the accumulated delta (0 = none) and clear it. */
+/* link task: consume the accumulated delta (0 = none) and clear it. The
+ * other writer of s_oath_nav — see chest_gate_oath_nav()'s comment. */
 int8_t   chest_gate_take_oath_nav(void);
 /* key_processor: a new K_OATH_CODE press (a request for the account under
  * the cursor's code — not an arming, the chest still needs K_SEC_CONFIRM). */

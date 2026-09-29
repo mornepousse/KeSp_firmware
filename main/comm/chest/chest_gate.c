@@ -1,6 +1,17 @@
 /* See chest_gate.h. */
 #include "chest_gate.h"
 
+/* Test seam for the CAS loop below (I1, review 2026-09-29): a no-op in the
+ * firmware; the host test build (test/CMakeLists.txt) compiles this file
+ * ONLY with -DCHEST_GATE_TEST_SEAM=chest_gate_test_seam_hook, so a single
+ * test can race a concurrent chest_gate_take_oath_nav() into the middle of
+ * the loop without instrumenting every other call site or test. */
+#ifdef CHEST_GATE_TEST_SEAM
+void CHEST_GATE_TEST_SEAM(void);   /* defined by the host test only */
+#else
+#define CHEST_GATE_TEST_SEAM() ((void)0)
+#endif
+
 static uint32_t s_pending_tag;   /* CHEST_TAG(op, instance), written by the link task */
 static uint32_t s_press_tag;     /* tag stored at press time; 0 = none */
 static bool     s_mode_next;
@@ -26,12 +37,19 @@ bool chest_gate_take_mode_next(void) { return __atomic_exchange_n(&s_mode_next, 
 
 void chest_gate_oath_nav(int8_t delta)
 {
-    /* Single writer (key_processor.c, one call per new press): a plain
-     * load + saturate + store is enough, same discipline as s_pending_tag. */
-    int32_t v = (int32_t)__atomic_load_n(&s_oath_nav, __ATOMIC_RELAXED) + delta;
-    if (v > 16) v = 16;
-    if (v < -16) v = -16;
-    __atomic_store_n(&s_oath_nav, (int8_t)v, __ATOMIC_RELEASE);
+    /* TWO writers, unlike the other gate fields: key_processor.c accumulates
+     * here, AND the link task's chest_gate_take_oath_nav() resets it to 0
+     * via exchange — a plain load+store loses a step whenever a take lands
+     * between this function's load and its store (measured net drift over
+     * 5M balanced pairs: -128655, +118369, -62439; a CAS loop nets 0,
+     * review 2026-09-29). */
+    int8_t cur = __atomic_load_n(&s_oath_nav, __ATOMIC_RELAXED), next;
+    do {
+        int v = cur + delta;
+        CHEST_GATE_TEST_SEAM();   /* test-only hook, empty in the firmware */
+        next = (int8_t)(v > 16 ? 16 : v < -16 ? -16 : v);
+    } while (!__atomic_compare_exchange_n(&s_oath_nav, &cur, next, false,
+                                          __ATOMIC_ACQ_REL, __ATOMIC_RELAXED));
 }
 int8_t chest_gate_take_oath_nav(void) { return __atomic_exchange_n(&s_oath_nav, (int8_t)0, __ATOMIC_ACQ_REL); }
 
