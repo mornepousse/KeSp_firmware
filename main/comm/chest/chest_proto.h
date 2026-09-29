@@ -123,5 +123,6 @@ typedef struct { uint8_t differ_reads; } chest_mode_track_t;
 chest_mode_state_t chest_mode_track(chest_mode_track_t *t, uint8_t active, uint8_t wanted);
 /* 4-character line: ARRIVED -> upper name of `active` ("" for none);
  * PENDING -> lower name of `wanted` ("" for none); FAULT -> "ERR".
- * Names: none "", storage MSC, pgp PGP, otp OTP, fido FIDO, oath OATH. */
+ * Names in plain words: none "", storage DISK, pgp PGP, otp OTP, fido FIDO,
+ * oath TOTP (MSC/OATH until 2026-09-29, plan chest-link-v3 Task 8). */
 void    chest_mode_label(chest_mode_state_t s, uint8_t active, uint8_t wanted, char out[CHEST_MODE_LABEL_BUF]);

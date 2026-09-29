@@ -125,8 +125,10 @@ chest_mode_state_t chest_mode_track(chest_mode_track_t *t, uint8_t active, uint8
 
 void chest_mode_label(chest_mode_state_t s, uint8_t active, uint8_t wanted, char out[CHEST_MODE_LABEL_BUF])
 {
-    static const char *const up[CHEST_MODE_COUNT] = { "", "MSC", "PGP", "OTP", "FIDO", "OATH" };
-    static const char *const lo[CHEST_MODE_COUNT] = { "", "msc", "pgp", "otp", "fido", "oath" };
+    /* Plain words (Mae, 2026-09-29): what the user does with the mode, not
+     * the USB class — mass storage is DISK, OATH is TOTP. */
+    static const char *const up[CHEST_MODE_COUNT] = { "", "DISK", "PGP", "OTP", "FIDO", "TOTP" };
+    static const char *const lo[CHEST_MODE_COUNT] = { "", "disk", "pgp", "otp", "fido", "totp" };
     const char *txt = "";
     if (s == CHEST_MODE_FAULT) txt = "ERR";
     else if (s == CHEST_MODE_ARRIVED) txt = (active < CHEST_MODE_COUNT) ? up[active] : "";

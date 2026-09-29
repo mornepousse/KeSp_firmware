@@ -682,12 +682,22 @@ static void test_chest_mode_label(void)
     char l[CHEST_MODE_LABEL_BUF];
     chest_mode_label(CHEST_MODE_ARRIVED, CHEST_MODE_FIDO, CHEST_MODE_FIDO, l);
     TEST_ASSERT(strcmp(l, "FIDO") == 0, "arrived: upper");
+    /* Plain words (plan Task 8, Mae 2026-09-29): the mass storage is DISK,
+     * OATH is TOTP — what the user does with it, not the USB class name. */
+    static const char *const up[CHEST_MODE_COUNT] = { "", "DISK", "PGP", "OTP", "FIDO", "TOTP" };
+    static const char *const lo[CHEST_MODE_COUNT] = { "", "disk", "pgp", "otp", "fido", "totp" };
+    for (uint8_t m = 0; m < CHEST_MODE_COUNT; m++) {
+        chest_mode_label(CHEST_MODE_ARRIVED, m, m, l);
+        TEST_ASSERT(strcmp(l, up[m]) == 0, "arrived: the plain word, upper case");
+        chest_mode_label(CHEST_MODE_PENDING, CHEST_MODE_IN_FLIGHT, m, l);
+        TEST_ASSERT(strcmp(l, lo[m]) == 0, "in flight: the wanted mode's word, lower case");
+    }
     chest_mode_label(CHEST_MODE_ARRIVED, CHEST_MODE_STORAGE, CHEST_MODE_STORAGE, l);
-    TEST_ASSERT(strcmp(l, "MSC") == 0, "storage is MSC");
+    TEST_ASSERT(strcmp(l, "DISK") == 0, "storage is DISK (was MSC)");
     chest_mode_label(CHEST_MODE_ARRIVED, CHEST_MODE_NONE, CHEST_MODE_NONE, l);
     TEST_ASSERT(l[0] == '\0', "none: nothing");
     chest_mode_label(CHEST_MODE_PENDING, CHEST_MODE_IN_FLIGHT, CHEST_MODE_OATH, l);
-    TEST_ASSERT(strcmp(l, "oath") == 0, "pending: wanted, lower");
+    TEST_ASSERT(strcmp(l, "totp") == 0, "pending: wanted, lower (OATH reads totp)");
     chest_mode_label(CHEST_MODE_FAULT, CHEST_MODE_STORAGE, CHEST_MODE_PGP, l);
     TEST_ASSERT(strcmp(l, "ERR") == 0, "fault");
     for (uint8_t m = 0; m < CHEST_MODE_COUNT; m++) {
