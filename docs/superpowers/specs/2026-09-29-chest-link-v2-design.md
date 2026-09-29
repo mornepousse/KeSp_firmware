@@ -42,7 +42,7 @@ before it, contiguously):
 |---|---|---|
 | `0x00-0x0B` | chest | unchanged (magic, version **2**, state, pending op, counter) |
 | **`0x0C`** | chest | **instance number**, incremented at every arming |
-| `0x0D` | chest | reserved, zero |
+| **`0x0D`** | chest | **ACTIVE USB mode** (same wire values as `0x12`) — added by the chest before any v2 was flashed, version stays 2 |
 | **`0x0E-0x0F`** | chest | **CRC16 over `0x00..0x0D`** (little-endian) |
 | `0x10` | master | `0x5A` — confirmation |
 | **`0x11`** | master | **echo of the instance** read at `0x0C` |
@@ -68,7 +68,7 @@ value is refused (it stays in its current mode and logs it).
 
 - **Version**: `CHEST_PROTO_VERSION 2`. A v1 chest is BAD_VERSION (refused,
   logged once, `P4?` on screen).
-- **Parse** adds `instance` (`0x0C`) to `chest_status_t`; the CRC is read at
+- **Parse** adds `instance` (`0x0C`) and `active_mode` (`0x0D`) to `chest_status_t`; the CRC is read at
   `0x0E` and computed over `0x00..0x0D` — per the contract's parse order and
   vectors.
 - **Confirmation write**: ONE WRBUF of 2 bytes at `0x10`: `{0x5A, instance}`,
@@ -89,6 +89,14 @@ value is refused (it stays in its current mode and logs it).
   same lock-free gate pattern as the confirm (key_processor sets, the link task
   writes) — but it is NOT a security gesture and may sit on either half.
 - **Presence lost** (USB unplugged): `wanted_mode` back to none.
+- **The chest's reclaim of `0x10` rewrites the master's whole word** (driver
+  read-modify-write): a `0x12` write landing in those cycles can be overwritten
+  stale, silently (no counter for modes). The "read back `0x12`, rewrite if it
+  differs" loop closes it; `0x0D` makes it observable.
+- **The instance is a counter inside the chest's `sec_confirm`**, incremented
+  under lock at arming and published in the same call as the op (not guessed
+  from transitions, which a 20 ms poll cannot see twice) — the master reads
+  `0x0C` from the same block as the op the owner saw.
 - **The chest applies a mode on change of the last APPLIED value** (initialized
   to `0x00` at its boot), not of what it reads — so after a chest reboot the
   master's rewrite of `0x12` is seen as `0 → mode` and applied (confirmed by
@@ -112,13 +120,19 @@ works as before.
 
 ## 5. Screen
 
-The third chest line under the logo shows the mode instead of the bare `USB`,
-4 UNSCII characters max (35 px): the WANTED mode in **lower case while the
-chest does not yet report `USB_MOUNTED`** (`msc`, `pgp`, `otp`, `fido`,
-`oath`) and in **upper case once mounted** (`MSC`, `PGP`, `OTP`, `FIDO`,
-`OATH`). Nothing when the wanted mode is none. Pure, tested
-(`memlcd_lignes_coffre` gains the wanted mode). Every redraw stays driven by
-the model diff (the wanted mode enters the diff).
+The third chest line under the logo shows the chest's **ACTIVE** mode read at
+`0x0D` — what the host really sees — not the mode the keyboard asked for:
+`MSC`, `PGP`, `OTP`, `FIDO`, `OATH` in **upper case when `active == wanted`**;
+while they differ (a switch in progress, refused or retrying) it shows the
+WANTED mode in **lower case** (`pgp`…) so the owner sees that her request has
+not taken yet. Nothing when both are none. 4 UNSCII characters max (35 px).
+Pure, tested (`memlcd_lignes_coffre` gains active and wanted modes; both enter
+the model diff). The chest session found why this matters: Mae once had a
+chest stuck in `none` with nothing saying so — a screen showing the requested
+mode would have repeated that silence.
+
+A switch that has not taken after several reads (`0x0D != 0x12`) is visible on
+screen (lower case stays); no automatic action beyond the `0x12` self-heal.
 
 ## 6. Contract and tests
 
