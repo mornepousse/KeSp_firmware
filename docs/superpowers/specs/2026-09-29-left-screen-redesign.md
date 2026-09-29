@@ -34,9 +34,7 @@ column, separators, imbalance), ugly icons. Scope: the whole LEFT screen
    bottom, never touching text); underground water (battery gauge and code
    countdown are a water level with a wavy surface in an outlined vessel);
    ordered (Bayer) dithering for stone/shadow, never behind text.
-4. **Two variants of one layout**: LIGHT (dark ink on pale paper — safer on a
-   reflective panel) and DARK (inverted). Pick after seeing both; DARK must be
-   checked on the real panel in low light before it can be the default.
+4. **DARK chosen** (Mae, 2026-09-29) — inverted, pale ink on black; still to be checked on the real panel in low light. The light variant stays in the simulator only.
 5. **Full screen** only for the confirmation prompt and the code; the browser
    stays in the lower part and the top status (route, battery) stays visible.
 6. **One font family** (Montserrat), a size ladder chosen by width; words in
@@ -56,22 +54,27 @@ column, separators, imbalance), ugly icons. Scope: the whole LEFT screen
   `TEST:RFC6238` pixel-cut to `TEST:RFC` / `6238` as a truncated code). Names
   break at `:` first, then spaces/punctuation, mid-word only as a last resort;
   no line may contain digits without a letter (`:4021` is as bad as `4021`);
-  if the only safe break is ugly, use a smaller size on ONE line
-  (`BANQUE:4021`). Proof cases: `TEST:RFC6238` → `TEST:` / `RFC6238`;
-  `BANQUE:4021` → one line.
+  when the only break at `:` would strand the digits, the break moves back into
+  the letters. Proof cases: `TEST:RFC6238` → `TEST:` / `RFC6238`;
+  `BANQUE:4021` → `BANQU` / `E:4021` (safe, not pretty).
+- **Text floor: Montserrat 12.** Below it the 1-bit threshold erases glyphs
+  (at 8 px `:` `.` `,` `;` `_` have zero ink, `:` and `.` are identical; at
+  10 px the apostrophe vanishes) — measured by the simulator's
+  `check_glyph_ink.c`. No text is ever drawn smaller; room is made by shrinking
+  the op title, the divider and `PRESS`, and by thinning the rock edges on
+  full-screen states.
 - The code has a treatment no name ever gets (large digits, the water
   countdown frame). No code without a press; it vanishes at the end of its
   window or on navigation (unchanged engagements).
 
-## Open defects of round 2 (being fixed)
+## Open points after round 3
 
-State 7 label cut (`-2FA01` missing, `PRESS` overlapping); `BANQUE:4021`
-rendered `BANQU` / `E:4021` (LVGL wrap overriding the safe cut); `RADIO`
-clipped by the logo; voltage with a `~`; water vessel reads as a black block;
-browser lost the top status.
+Top block crowded (battery vessel touching the layer name, voltage touching
+`TOTP`); `NAVIGATION` split `NAVIG` / `ATION` at the floor; the battery gauge's
+shape is not understood by Mae (options being rendered).
 
 ## Next
 
-Mae picks LIGHT or DARK (or a mix) from the contact sheets → a plan task
+Gauge shape settled → a plan task
 ports the chosen module into `main/display/memlcd/`, moves the simulator into
 `tools/`, and keeps the host tests (safe wrap, label fit, width oracle).
