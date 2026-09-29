@@ -269,3 +269,39 @@ Test chain, one test per case, starting from the chest's RAW vector bytes: `ches
 - [ ] Flash the left over its USB-C (never the ESP-Prog).
 - [ ] `K_CHEST_NEXT` to `OATH`; `niphar-oath set-time`; browse (`i/total`, names); `K_OATH_CODE` → prompt with the account name → `K_SEC_CONFIRM` → code + countdown, gone at the end of the window, gone on navigation; without the press no code; without set-time `NO TIME`; the prompt of a RESET shows `N CPT`; `K_SEC_CONFIRM` on the right half does nothing.
 - [ ] Memory note updated.
+
+---
+
+### Task 8: screen rework — readable sizes (Mae, bench 2026-09-29: "c'est tout petit")
+
+Mae's decision (2026-09-29): **the confirmation prompt and the code take the WHOLE screen** (icon column, logo, separators, chest status lines, layer name and status lines hidden while they show — a prompt lives until confirmed/cancelled, a code ≤ 30 s); **the browser stays in the bottom zone** (Y_SEP+1..159, 67 px) so the layer stays visible while typing in OATH mode. UNSCII 8 is replaced by Montserrat wherever it fits.
+
+Measured glyph advances (LVGL 8 built-in fonts, `adv_w/16`): Montserrat 14 digit 9.3, `A` 10.3, `W` 15.8, `I` 4.3, line 16; M24 digit 16, line 27; M28 digit 18.7, line 30; M48 digit 32. Panel 68 px wide.
+
+**Files:** `main/display/memlcd/memlcd_model.h` (+ a generated width table header, e.g. `memlcd_font_widths.h`), `main/display/memlcd/memlcd_backend.c`, `test/test_memlcd_model.c`, a generator script under `scripts/` if the table is generated, `COMPORTEMENTS.md`, `docs/HARDWARE_SMOKE_TEST.md`.
+
+**Pure layout (tested):** replace `memlcd_bas_coffre`'s 6×8-char lines with a structured view:
+
+```c
+typedef enum { MEMLCD_F_U8, MEMLCD_F_M14, MEMLCD_F_M24, MEMLCD_F_M28 } memlcd_font_t;
+typedef enum { MEMLCD_VC_NONE, MEMLCD_VC_PROMPT, MEMLCD_VC_CODE, MEMLCD_VC_BROWSE } memlcd_vc_kind_t;
+typedef struct { uint8_t font; char text[/* ≥ 9 */]; } memlcd_vc_line_t;
+typedef struct {
+    uint8_t kind;             /* memlcd_vc_kind_t; PROMPT and CODE = full screen, BROWSE = bottom zone */
+    uint8_t n;                /* lines used */
+    memlcd_vc_line_t l[/* enough for the U8 fallback */];
+    uint8_t bar_pct;          /* CODE only: seconds left / 30, 0..100 */
+} memlcd_vue_coffre_t;
+void memlcd_vue_coffre(const memlcd_model_t *m, memlcd_vue_coffre_t *v);
+uint16_t memlcd_text_width(uint8_t font, const char *s);   /* sum of advances, U8 = 8 px/char */
+```
+
+- **Width oracle:** a per-font advance table for 0x20..0x7E (M14, M24, M28), generated from `managed_components/lvgl__lvgl/src/font/lv_font_montserrat_{14,24,28}.c` by a script (table committed; a test or brick must fail if the table drifts from the font file when that file is present). Usable width budget **66 px** (2 px margin for kerning, which LVGL applies and the table ignores).
+- **PROMPT (full screen, 160 px):** line 0 the op (`chest_op_label`) in M24 if it fits 66 px, else M14; the chest label (`coffre_label`, never the browser name) cut by PIXEL width into M14 lines (hard cut, untrusted text); `N CPT` in M14 when op_count > 1; last line `OK ?` in M14. Height: stack line heights (U8 11, M14 16, M24 27, M28 30) + a 1-px rule under the op, ≤ 160. **The whole label is always shown, never cut** (C1 of Task 5 stands): if the M14 cut does not fit the height budget, the label falls back to UNSCII 8 (8 chars/line, ≤ 5 lines — always fits). No `~` on a prompt.
+- **CODE (full screen):** the account name in M14, ≤ 2 lines (cut with `~` if longer — the browser's copy, not a security text); the code in M28 as 3+3 (6 digits) or in M24 as 4+4 (8 digits); a countdown bar (`bar_pct`); `NN s` in M24. Same engagements as before: shown only while `coffre_code_visible`, the countdown from `coffre_code_secs`.
+- **BROWSE (bottom zone, 67 px):** `i/total` M14, the name in M14 ≤ 2 lines (fallback UNSCII 8 ≤ 4 lines with `~`), `NO TIME` M14 when the TIME bit is clear — ≤ 67 px.
+- Priority unchanged: prompt > code > browser > nothing.
+
+**Backend:** group the normal widgets (icon column, logo, separators, chest status, zZ, layer/status lines) so a full-screen view hides them in one place; a full-screen set of labels (fonts set per frame from the view) + an `lv_bar` for the countdown; the bottom-zone browser labels. `lv_obj_is_valid` / LVGL lock rules as elsewhere. Sleep image unchanged (the code veto already keeps the half awake while a code shows).
+
+- [ ] Tests first: every line of every case ≤ 66 px by `memlcd_text_width`, total height within its zone; prompt with a 34-char label of wide letters (`WWW…`) → U8 fallback, concatenated label == the full label; a 34-char normal label → M14, concatenation == label; `RESET!` (or the widest op label) falls back to M14 if it exceeds 66 px in M24; prompt uses `coffre_label` when the browser name differs; 6 digits → two M28 lines "418" "902"; 8 digits → two M24 lines of 4; bar_pct 40 at 12 s; browse `3/12`, NO TIME with V15's state; priority prompt > code > browse. RED → implement → GREEN → bite proofs (width budget off by a few px, fallback disabled, label source swapped) → six boards → commit `feat(memlcd): the chest's prompt and code take the whole screen in Montserrat; the browser in readable type`.
