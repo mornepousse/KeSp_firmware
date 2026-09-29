@@ -16,13 +16,21 @@
  * hand-built chest_list_t/chest_code_t structs, so this suite also proves
  * the two tasks compose end to end. Some tests below use hand-built
  * chest_list_t pages (not from any chest vector) to control an account's
- * index independently from its cursor position — the browser model does
- * not care where the bytes came from, only what chest_list_decode produced,
- * so this is a faithful stand-in. */
+ * index independently from its cursor position, or a hand-built LIST byte
+ * buffer (review round 1, item 5) to exercise a malformed-but-CRC-valid
+ * page the real chest is not expected to ever emit — the browser model
+ * does not care where the bytes came from, only what chest_list_decode
+ * produced, so these are faithful stand-ins.
+ *
+ * Since review round 1: every accepted chest_oath_on_code call below is
+ * preceded by chest_oath_code_requested() for the same index — the request
+ * lock (item 4) is now the sole gate on_code checks; a call without it is
+ * always a no-op. */
 #include "test_framework.h"
 #include <string.h>
 #include "../main/comm/chest/chest_oath.h"
 #include "../main/comm/chest/chest_proto.h"
+#include "../main/security/cr_crc16.h"
 
 /* L1 — one LIST page: twelve accounts total, three in this page from index
  * 0, the "more" flag set. Niphar_chest test/test_link_proto.c, 440d79d. */
@@ -53,6 +61,21 @@ static chest_code_t decode_c1(void)
     return c;
 }
 
+/* A single-entry page whose account index is `idx`, cursor lands on it at
+ * position 0. Used everywhere below a code needs a cached entry to be
+ * requested/answered for, without depending on L1's own index layout. */
+static chest_list_t one_entry_page(uint8_t idx, const char *name)
+{
+    chest_list_t l;
+    memset(&l, 0, sizeof l);
+    l.total = 1;
+    l.count = 1;
+    l.first = 0;
+    l.e[0].index = idx;
+    strcpy(l.e[0].name, name);
+    return l;
+}
+
 static void test_chest_oath_reset(void)
 {
     chest_oath_t o;
@@ -61,6 +84,7 @@ static void test_chest_oath_reset(void)
     TEST_ASSERT(!o.have_page, "reset: no page cached");
     TEST_ASSERT_EQ(o.cursor, 0, "reset: cursor 0");
     TEST_ASSERT(!o.code_shown, "reset: no code shown");
+    TEST_ASSERT(!o.code_requested, "reset: no pending code request");
 }
 
 static void test_chest_oath_on_list_cursor_and_entry(void)
@@ -81,6 +105,12 @@ static void test_chest_oath_on_list_cursor_and_entry(void)
     TEST_ASSERT(strcmp(e->name, "OVH:PERSO") == 0, "nav +1: OVH:PERSO");
 }
 
+/* Review round 1, item 6 (plan text corrected: "nav -4 from 3 (after the
+ * three +1) wraps to 11" — a continuation of the SAME scenario, not a
+ * fresh nav(-4) from cursor 0). Continues in place: three nav(+1) reach
+ * position 3 (outside L1's cached [0,3)), then nav(-4) from there wraps to
+ * 11 (3 - 4 == -1, mod 12 == 11) — the literal sequence the plan
+ * describes, asserted end to end in one place. */
 static void test_chest_oath_page_needed_forward(void)
 {
     chest_oath_t o;
@@ -97,33 +127,17 @@ static void test_chest_oath_page_needed_forward(void)
     TEST_ASSERT_EQ(o.cursor, 3, "three navigations land on position 3");
     TEST_ASSERT(chest_oath_page_needed(&o, &first), "position 3 is outside [0,3): a fetch is needed");
     TEST_ASSERT_EQ(first, 3, "page_needed starts the request at the cursor's own position");
-}
 
-/* Plan deviation (docs/superpowers/plans/2026-09-29-chest-link-v3.md, Task 3
- * Step 1): the plan's illustrative text says "nav -4 from 0 wraps to 11",
- * but that is arithmetically wrong for a single nav(-4) over total 12: full
- * modulo wraparound gives (0 - 4) mod 12 == 8 (11 is only what a single
- * nav(-1) would give). Implemented and tested against the correct value —
- * see the report for this deviation. */
-static void test_chest_oath_page_needed_wrap(void)
-{
-    chest_oath_t o;
-    chest_list_t l = decode_l1();
-    uint8_t first = 0xFF;
-
-    chest_oath_reset(&o);
-    chest_oath_on_list(&o, &l);
+    /* Plan's literal continuation (item 6): nav(-4) from position 3. */
     chest_oath_nav(&o, -4);
-    TEST_ASSERT_EQ(o.cursor, 8, "nav -4 from 0 over 12 accounts wraps to 8 (0 - 4 mod 12)");
-    TEST_ASSERT(chest_oath_page_needed(&o, &first), "position 8 is outside the cached page [0,3)");
-    TEST_ASSERT_EQ(first, 8, "first is the wrapped cursor's own position");
+    TEST_ASSERT_EQ(o.cursor, 11, "nav -4 from position 3 wraps to 11 (3 - 4 == -1, mod 12 == 11)");
+    TEST_ASSERT(chest_oath_page_needed(&o, &first), "position 11 is outside [0,3) too");
+    TEST_ASSERT_EQ(first, 11, "first is the wrapped cursor's own position");
 }
 
-/* The plan's own illustrative number (11) IS correct for a single-step
- * PREV: nav(-1) from cursor 0 over total 12 wraps to total-1 == 11. Kept as
- * its own test so the single-step boundary the plan actually describes
- * elsewhere in the flow (K_OATH_PREV, one press at a time) is still pinned
- * literally. */
+/* The general wraparound rule, pinned independently of the plan's specific
+ * continuation above: a single nav(-1) from a fresh cursor 0 wraps to
+ * total - 1 == 11. */
 static void test_chest_oath_page_needed_wrap_single_step(void)
 {
     chest_oath_t o;
@@ -136,6 +150,21 @@ static void test_chest_oath_page_needed_wrap_single_step(void)
     TEST_ASSERT_EQ(o.cursor, 11, "nav -1 from 0 over 12 accounts wraps to 11 (total - 1)");
     TEST_ASSERT(chest_oath_page_needed(&o, &first), "position 11 is outside the cached page [0,3)");
     TEST_ASSERT_EQ(first, 11, "first is the wrapped cursor's own position");
+}
+
+/* The general wraparound rule for a multi-step negative delta applied in
+ * ONE call, from a fresh cursor 0 (not the plan's specific continuation,
+ * which starts from cursor 3 — see test_chest_oath_page_needed_forward):
+ * full modulo wraparound, (0 - 4) mod 12 == 8. */
+static void test_chest_oath_nav_wraps_negative_from_zero(void)
+{
+    chest_oath_t o;
+    chest_list_t l = decode_l1();
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l);
+    chest_oath_nav(&o, -4);
+    TEST_ASSERT_EQ(o.cursor, 8, "nav -4 from cursor 0 over 12 accounts wraps to 8 (0 - 4 mod 12)");
 }
 
 static void test_chest_oath_total_zero(void)
@@ -161,34 +190,85 @@ static void test_chest_oath_total_zero(void)
     TEST_ASSERT(!chest_oath_cursor_entry(&o, &e), "total 0: no entry under the cursor");
 }
 
+/* Review round 1, item 1 — bite proof done separately (see report): a REAL
+ * empty chest (a well-formed empty page, total == count == first == 0,
+ * "an empty list is still published" per contract §13) must need no
+ * further fetch, or the transport would loop on LIST(0) forever. */
+static void test_chest_oath_page_needed_empty_chest(void)
+{
+    chest_oath_t o;
+    chest_list_t empty;
+    memset(&empty, 0, sizeof empty);
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &empty);
+    TEST_ASSERT(!chest_oath_page_needed(&o, NULL), "a real empty chest (total 0) needs no fetch, ever");
+}
+
+/* Review round 1, item 2 (page_needed with no page): after reset, with
+ * nothing cached at all, a fetch is needed starting at position 0. */
+static void test_chest_oath_page_needed_no_page_yet(void)
+{
+    chest_oath_t o;
+    uint8_t first = 0xFF;
+
+    chest_oath_reset(&o);
+    TEST_ASSERT(chest_oath_page_needed(&o, &first), "no page cached at all: a fetch is needed");
+    TEST_ASSERT_EQ(first, 0, "first is the cursor's starting position, 0");
+}
+
+/* Review round 1, item 2 (shrinking clamp): on_list(L1) [total 12], a
+ * single nav(-1) reaches 11; a LATER on_list with a SMALLER total (5) must
+ * clamp the cursor to total - 1 == 4, not leave it dangling at 11. */
+static void test_chest_oath_on_list_shrinks_cursor(void)
+{
+    chest_oath_t o;
+    chest_list_t l = decode_l1();
+    chest_list_t small;
+
+    memset(&small, 0, sizeof small);
+    small.total = 5;
+    small.count = 1;
+    small.first = 4;
+    small.e[0].index = 40;
+    strcpy(small.e[0].name, "FIFTH");
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l);
+    chest_oath_nav(&o, -1);
+    TEST_ASSERT_EQ(o.cursor, 11, "cursor 11 before the shrinking LIST");
+
+    chest_oath_on_list(&o, &small);
+    TEST_ASSERT_EQ(o.cursor, 4, "a LIST with a smaller total (5) clamps the cursor to total - 1 == 4");
+}
+
 static void test_chest_oath_code_lifecycle(void)
 {
     chest_oath_t o;
-    chest_list_t l5;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
     chest_code_t c = decode_c1();   /* index 5, seconds 12 */
     uint8_t secs;
-
-    /* A single-entry page whose account index matches C1's (5), so the
-     * cursor's cached entry matches the code's index and on_code is
-     * accepted. */
-    memset(&l5, 0, sizeof l5);
-    l5.total = 1;
-    l5.count = 1;
-    l5.first = 0;
-    l5.e[0].index = 5;
-    strcpy(l5.e[0].name, "SOMEACC");
 
     chest_oath_reset(&o);
     chest_oath_on_list(&o, &l5);
 
     TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs), "no code shown before on_code");
 
+    chest_oath_code_requested(&o, 5);
     chest_oath_on_code(&o, &c, 1000);
     TEST_ASSERT(chest_oath_code_visible(&o, 1000, &secs), "code visible right after on_code");
     TEST_ASSERT_EQ(secs, 12, "12 s left at on_code time (rounded up)");
 
     TEST_ASSERT(chest_oath_code_visible(&o, 12000, &secs), "code still visible near the end of the window");
     TEST_ASSERT_EQ(secs, 1, "1 s left at 12000 ms (deadline 13000)");
+
+    /* Review round 1, item 2 (rounding up): deadline 13000, now 12500 ->
+     * 500 ms == 0.5 s left, must round UP to 1, never truncate to 0. Bite
+     * proof done separately (see report): a `remaining_ms / 1000` mutant
+     * (floor instead of the `(remaining_ms + 999) / 1000` ceiling) gives 0
+     * here, not 1. */
+    TEST_ASSERT(chest_oath_code_visible(&o, 12500, &secs), "code still visible 500 ms before its deadline");
+    TEST_ASSERT_EQ(secs, 1, "500 ms (0.5 s) left rounds UP to 1, not down to 0");
 
     TEST_ASSERT(!chest_oath_code_visible(&o, 13000, &secs), "code hidden exactly at its deadline");
     TEST_ASSERT(!chest_oath_code_visible(&o, 13001, &secs), "code stays hidden after its deadline, asked again");
@@ -197,19 +277,13 @@ static void test_chest_oath_code_lifecycle(void)
 static void test_chest_oath_code_visible_no_resurrection(void)
 {
     chest_oath_t o;
-    chest_list_t l5;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
     chest_code_t c = decode_c1();
     uint8_t secs;
 
-    memset(&l5, 0, sizeof l5);
-    l5.total = 1;
-    l5.count = 1;
-    l5.first = 0;
-    l5.e[0].index = 5;
-    strcpy(l5.e[0].name, "SOMEACC");
-
     chest_oath_reset(&o);
     chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 5);
     chest_oath_on_code(&o, &c, 1000);   /* deadline 13000 */
 
     TEST_ASSERT(!chest_oath_code_visible(&o, 13500, &secs), "code hidden past its deadline");
@@ -217,6 +291,60 @@ static void test_chest_oath_code_visible_no_resurrection(void)
      * NOT resurrect it — once hidden, hidden for good. */
     TEST_ASSERT(!chest_oath_code_visible(&o, 1500, &secs),
                 "a later call with an earlier now_ms does not resurrect an already-hidden code");
+}
+
+/* Review round 1, item 2 (2^32 wrap): on_code at a now_ms close to
+ * UINT32_MAX with a 12 s window makes code_deadline_ms wrap past 0 (uint32
+ * arithmetic: 0xFFFFF000 + 12000, mod 2^32, == 0x1EE0). The code must
+ * still read as visible while the (also wrapped) query time is before that
+ * wrapped deadline, and hidden once it is at or past it. */
+static void test_chest_oath_code_visible_wraps_uint32(void)
+{
+    chest_oath_t o;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
+    chest_code_t c = decode_c1();   /* index 5, seconds 12 */
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 5);
+    chest_oath_on_code(&o, &c, 0xFFFFF000u);   /* deadline wraps to 0x1EE0 */
+
+    TEST_ASSERT(chest_oath_code_visible(&o, 0x00001000u, &secs), "visible just after the uint32 wrap, before the wrapped deadline");
+    TEST_ASSERT(!chest_oath_code_visible(&o, 0x00002000u, &secs), "hidden at/after the wrapped deadline");
+}
+
+/* The check points above (0x1000, 0x2000) do NOT actually discriminate a
+ * `now_ms >= code_deadline_ms` (naive, non-wrap-safe) mutant from the
+ * correct implementation: because code_deadline_ms itself already wrapped
+ * via ordinary uint32 ADDITION at on_code time (0xFFFFF000 + 12000, mod
+ * 2^32, == 0x1EE0), both query points here and the stored deadline sit in
+ * the SAME "post-wrap" small range, where plain unsigned comparison
+ * happens to agree with the wrap-safe subtraction. Verified empirically
+ * (bite proof round 2, reported separately): that mutant survives the test
+ * above. This second test queries from the OTHER side of the wrap — a
+ * `now_ms` still numerically large (close to UINT32_MAX, chronologically
+ * BEFORE the wrap and therefore before the deadline) — which IS where a
+ * naive `now_ms >= deadline` gets it backwards: numerically
+ * 0xFFFFFFF0 > 0x1EE0, so the naive check reads "already past deadline"
+ * even though only ~7.9 s of the 12 s window have elapsed. */
+static void test_chest_oath_code_visible_wraps_uint32_from_the_other_side(void)
+{
+    chest_oath_t o;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
+    chest_code_t c = decode_c1();   /* index 5, seconds 12 */
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 5);
+    chest_oath_on_code(&o, &c, 0xFFFFF000u);   /* deadline wraps to 0x1EE0 */
+
+    /* Chronologically ~7.92 s before the deadline: 0xFFFFFFF0 is 0x10
+     * (16 ms) short of the uint32 wrap, plus the 0x1EE0 (7904 ms) still to
+     * go after it — about 7920 ms remaining, well inside the 12 s window. */
+    TEST_ASSERT(chest_oath_code_visible(&o, 0xFFFFFFF0u, &secs),
+                "still visible when queried from BEFORE the wrap, numerically far past the (already-wrapped) deadline");
 }
 
 static void test_chest_oath_nav_hides_code(void)
@@ -237,6 +365,7 @@ static void test_chest_oath_nav_hides_code(void)
 
     chest_oath_reset(&o);
     chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 5);
     chest_oath_on_code(&o, &c, 1000);
     TEST_ASSERT(chest_oath_code_visible(&o, 1000, &secs), "code visible before navigating");
 
@@ -244,7 +373,118 @@ static void test_chest_oath_nav_hides_code(void)
     TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs), "navigation hides the code, still well within its window");
 }
 
-static void test_chest_oath_on_code_ignored_off_cursor(void)
+/* Review round 1, item 2 (nav(0) hides the code): the mutant under test
+ * elsewhere guards the hide behind `if (delta)`, which nav(0) would skip.
+ * Bite proof done separately (see report). */
+static void test_chest_oath_nav_zero_hides_code(void)
+{
+    chest_oath_t o;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
+    chest_code_t c = decode_c1();
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 5);
+    chest_oath_on_code(&o, &c, 1000);
+    TEST_ASSERT(chest_oath_code_visible(&o, 1000, &secs), "code visible before nav(0)");
+
+    chest_oath_nav(&o, 0);
+    TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs), "nav(0) still hides the code: the key itself is the trigger");
+}
+
+/* Review round 1, item 3: a LIST refresh that moves a DIFFERENT account
+ * under the cursor must hide a code already shown for the account that
+ * used to be there. Positive control alongside: a refresh that leaves the
+ * SAME account under the cursor must NOT hide it. */
+static void test_chest_oath_on_list_moves_cursor_hides_code(void)
+{
+    chest_oath_t o;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
+    chest_code_t c = decode_c1();   /* index 5 */
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 5);
+    chest_oath_on_code(&o, &c, 1000);
+    TEST_ASSERT(chest_oath_code_visible(&o, 1000, &secs), "code visible right after on_code");
+
+    /* Positive control: a LIST refresh that leaves the SAME index (5) at
+     * the cursor's position must not hide the code. */
+    chest_list_t same = one_entry_page(5, "SOMEACC-RENAMED");
+    chest_oath_on_list(&o, &same);
+    TEST_ASSERT(chest_oath_code_visible(&o, 1000, &secs), "same account still under the cursor: code stays shown");
+
+    /* A LIST refresh that puts a DIFFERENT account under the cursor must
+     * hide the code — it would otherwise sit next to the wrong account. */
+    chest_list_t other = one_entry_page(9, "DIFFERENT");
+    chest_oath_on_list(&o, &other);
+    TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs), "a different account slid under the cursor: code hidden");
+}
+
+/* A LIST refresh where the cursor's position no longer has ANY cached
+ * entry (not just a different one) must also hide a shown code. */
+static void test_chest_oath_on_list_entry_gone_hides_code(void)
+{
+    chest_oath_t o;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
+    chest_code_t c = decode_c1();   /* index 5 */
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 5);
+    chest_oath_on_code(&o, &c, 1000);
+    TEST_ASSERT(chest_oath_code_visible(&o, 1000, &secs), "code visible right after on_code");
+
+    chest_list_t empty;
+    memset(&empty, 0, sizeof empty);
+    chest_oath_on_list(&o, &empty);   /* total 0: nothing under the cursor any more */
+    TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs), "the account vanished from the list: code hidden");
+}
+
+/* Review round 1, item 4: on_code is now gated on a pending request for
+ * the exact index — calling it without ever requesting is a no-op. */
+static void test_chest_oath_on_code_ignored_without_request(void)
+{
+    chest_oath_t o;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
+    chest_code_t c = decode_c1();   /* index 5 */
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l5);
+    /* No chest_oath_code_requested call at all. */
+    chest_oath_on_code(&o, &c, 1000);
+
+    TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs), "on_code without a pending request is ignored");
+}
+
+/* A request pending for a DIFFERENT index than the answer's must also be
+ * ignored — the lock is exact, not "any request will do". */
+static void test_chest_oath_on_code_ignored_wrong_requested_index(void)
+{
+    chest_oath_t o;
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
+    chest_code_t c = decode_c1();   /* index 5 */
+    uint8_t secs;
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 9);   /* requested a DIFFERENT index */
+    chest_oath_on_code(&o, &c, 1000);
+
+    TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs), "an answer for an index other than the one requested is ignored");
+}
+
+/* Review round 1, item 4: CODE requested, nav away, nav back to the SAME
+ * position — the late answer must still be ignored, because nav ALWAYS
+ * retracts the pending request (chest_oath.h), even a nav that returns to
+ * where it started. This is exactly the case the request lock exists to
+ * cover: a plain cursor-position check (the pre-review-round-1 design)
+ * would have wrongly accepted this. */
+static void test_chest_oath_on_code_nav_away_and_back_ignores_late_answer(void)
 {
     chest_oath_t o;
     chest_list_t l5;
@@ -252,31 +492,92 @@ static void test_chest_oath_on_code_ignored_off_cursor(void)
     uint8_t secs;
 
     memset(&l5, 0, sizeof l5);
-    l5.total = 1;
-    l5.count = 1;
+    l5.total = 2;
+    l5.count = 2;
     l5.first = 0;
-    l5.e[0].index = 9;   /* NOT the code's index 5: the owner navigated away before the answer arrived */
-    strcpy(l5.e[0].name, "NOTIT");
+    l5.e[0].index = 5;
+    strcpy(l5.e[0].name, "SOMEACC");
+    l5.e[1].index = 6;
+    strcpy(l5.e[1].name, "OTHERACC");
 
     chest_oath_reset(&o);
     chest_oath_on_list(&o, &l5);
-    chest_oath_on_code(&o, &c, 1000);
+    chest_oath_code_requested(&o, 5);
 
+    chest_oath_nav(&o, +1);   /* away: retracts the request */
+    chest_oath_nav(&o, -1);   /* back to the SAME position (index 5) */
+    TEST_ASSERT_EQ(o.cursor, 0, "cursor is back on the original account");
+
+    chest_oath_on_code(&o, &c, 1000);   /* the late answer for index 5 */
     TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs),
-                "an answer for an index other than the cursor's cached entry is ignored");
+                "a late answer after nav-away-and-back is ignored: the request was retracted, not just the cursor moved");
 }
 
-static void test_chest_oath_on_code_ignored_no_cached_entry(void)
+/* Review round 1, item 4: once consumed, a second (duplicate) answer for
+ * the same index is ignored — one code per request, never refreshed. */
+static void test_chest_oath_on_code_duplicate_after_success_ignored(void)
 {
     chest_oath_t o;
-    chest_code_t c = decode_c1();
+    chest_list_t l5 = one_entry_page(5, "SOMEACC");
+    chest_code_t c = decode_c1();   /* index 5, seconds 12 */
+    chest_code_t c2 = c;
     uint8_t secs;
 
-    chest_oath_reset(&o);
-    /* No on_list at all: nothing cached under the cursor. */
-    chest_oath_on_code(&o, &c, 1000);
+    c2.seconds = 30;   /* a distinctly different window, to prove a duplicate is not even re-applied identically */
 
-    TEST_ASSERT(!chest_oath_code_visible(&o, 1000, &secs), "on_code with nothing cached under the cursor is ignored");
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l5);
+    chest_oath_code_requested(&o, 5);
+
+    chest_oath_on_code(&o, &c, 1000);   /* accepted: deadline 1000 + 12000 == 13000 */
+    TEST_ASSERT(chest_oath_code_visible(&o, 1000, &secs), "first answer accepted");
+    TEST_ASSERT_EQ(secs, 12, "12 s window from the first (accepted) answer");
+
+    chest_oath_on_code(&o, &c2, 1000);   /* duplicate, same index, request already consumed */
+    TEST_ASSERT(chest_oath_code_visible(&o, 1000, &secs), "still visible (the first answer's state)");
+    TEST_ASSERT_EQ(secs, 12, "the duplicate's different seconds (30) did NOT overwrite the original window");
+
+    TEST_ASSERT(!chest_oath_code_visible(&o, 13000, &secs),
+                "hidden at the ORIGINAL deadline (13000), proving the duplicate never re-armed a fresh 30 s window");
+}
+
+/* Review round 1, item 5: a malformed-but-CRC-valid LIST page — total 0
+ * (no account exists) yet count 1 with a real entry present in the bytes.
+ * cursor_entry (and, through it, may_request_code) must never surface a
+ * phantom account just because the bytes happen to carry one: total is
+ * authoritative. Built as real wire bytes through chest_list_decode, like
+ * chest_dma.c's own "well-formed but pathological" vectors, not a
+ * hand-built chest_list_t — the CRC must be real for chest_list_decode to
+ * accept it at all. */
+static void test_chest_oath_cursor_entry_malformed_total_zero(void)
+{
+    uint8_t b[8];
+    chest_list_t l;
+    chest_oath_t o;
+    const chest_list_entry_t *e;
+    uint8_t index = 0xFF;
+
+    b[CHEST_LIST_OFF_TOTAL] = 0;    /* NO account, despite what follows */
+    b[CHEST_LIST_OFF_COUNT] = 1;
+    b[CHEST_LIST_OFF_FIRST] = 0;
+    b[CHEST_LIST_OFF_FLAGS] = 0;
+    b[4] = 7;    /* entry index */
+    b[5] = 0;    /* empty name */
+    uint16_t crc = cr_crc16(b, 6);
+    b[6] = (uint8_t)(crc & 0xFF);
+    b[7] = (uint8_t)(crc >> 8);
+
+    TEST_ASSERT(chest_list_decode(b, sizeof b, &l), "malformed page (total 0, count 1) still decodes: valid CRC, in-bounds entry");
+    TEST_ASSERT_EQ(l.total, 0, "total really is 0");
+    TEST_ASSERT_EQ(l.count, 1, "count really is 1: the malformation chest_list_decode does not itself reject");
+
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &l);
+    TEST_ASSERT_EQ(o.cursor, 0, "cursor clamped to 0 (total 0)");
+
+    TEST_ASSERT(!chest_oath_cursor_entry(&o, &e), "cursor_entry refuses the phantom entry: total 0 means no account");
+    TEST_ASSERT(!chest_oath_may_request_code(&o, (uint8_t)(CHEST_STATE_READY | CHEST_STATE_TIME), &index),
+                "may_request_code is false against the same malformed page");
 }
 
 static void test_chest_oath_may_request_code(void)
@@ -346,14 +647,25 @@ void test_chest_oath(void)
     TEST_RUN(test_chest_oath_reset);
     TEST_RUN(test_chest_oath_on_list_cursor_and_entry);
     TEST_RUN(test_chest_oath_page_needed_forward);
-    TEST_RUN(test_chest_oath_page_needed_wrap);
     TEST_RUN(test_chest_oath_page_needed_wrap_single_step);
+    TEST_RUN(test_chest_oath_nav_wraps_negative_from_zero);
     TEST_RUN(test_chest_oath_total_zero);
+    TEST_RUN(test_chest_oath_page_needed_empty_chest);
+    TEST_RUN(test_chest_oath_page_needed_no_page_yet);
+    TEST_RUN(test_chest_oath_on_list_shrinks_cursor);
     TEST_RUN(test_chest_oath_code_lifecycle);
     TEST_RUN(test_chest_oath_code_visible_no_resurrection);
+    TEST_RUN(test_chest_oath_code_visible_wraps_uint32);
+    TEST_RUN(test_chest_oath_code_visible_wraps_uint32_from_the_other_side);
     TEST_RUN(test_chest_oath_nav_hides_code);
-    TEST_RUN(test_chest_oath_on_code_ignored_off_cursor);
-    TEST_RUN(test_chest_oath_on_code_ignored_no_cached_entry);
+    TEST_RUN(test_chest_oath_nav_zero_hides_code);
+    TEST_RUN(test_chest_oath_on_list_moves_cursor_hides_code);
+    TEST_RUN(test_chest_oath_on_list_entry_gone_hides_code);
+    TEST_RUN(test_chest_oath_on_code_ignored_without_request);
+    TEST_RUN(test_chest_oath_on_code_ignored_wrong_requested_index);
+    TEST_RUN(test_chest_oath_on_code_nav_away_and_back_ignores_late_answer);
+    TEST_RUN(test_chest_oath_on_code_duplicate_after_success_ignored);
+    TEST_RUN(test_chest_oath_cursor_entry_malformed_total_zero);
     TEST_RUN(test_chest_oath_may_request_code);
     TEST_RUN(test_chest_oath_may_request_code_index_not_cursor_position);
     TEST_RUN(test_chest_oath_may_request_code_no_cached_entry);

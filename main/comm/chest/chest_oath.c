@@ -2,8 +2,8 @@
  * docs/superpowers/specs/2026-09-29-chest-link-v3-design.md §4; IHM
  * engagements: Niphar_chest docs/LINK_CONTRACT.md §13 (32e8257). See
  * chest_oath.h for the design choices behind each function (page_needed's
- * `first`, on_code's off-cursor guard, code_visible's wrap-safe, one-way
- * hide). */
+ * `first` and its empty-chest early exit, on_list's cursor-moved hide,
+ * on_code's request lock, code_visible's wrap-safe one-way hide). */
 #include "chest_oath.h"
 #include <string.h>
 
@@ -23,12 +23,22 @@ void chest_oath_on_list(chest_oath_t *o, const chest_list_t *l)
     } else if (o->cursor >= l->total) {
         o->cursor = (uint8_t)(l->total - 1u);
     }
+
+    /* Review round 1, item 3: a LIST refresh can move accounts around. Keep
+     * a shown code only if the cursor, after this refresh, still lands on
+     * the SAME chest account (entry.index) the code was issued for. */
+    if (o->code_shown) {
+        const chest_list_entry_t *e;
+        if (!chest_oath_cursor_entry(o, &e) || e->index != o->code.index)
+            o->code_shown = false;
+    }
 }
 
 void chest_oath_nav(chest_oath_t *o, int8_t delta)
 {
     if (!o) return;
-    o->code_shown = false;   /* IHM engagement: every navigation key hides the code, unconditionally */
+    o->code_shown = false;      /* IHM engagement: every navigation key hides the code, unconditionally */
+    o->code_requested = false;  /* review round 1, item 4: a nav key also retracts any pending request */
 
     uint8_t total = o->have_page ? o->page.total : 0;
     if (total == 0) {
@@ -46,6 +56,12 @@ bool chest_oath_page_needed(const chest_oath_t *o, uint8_t *first)
 {
     if (!o) return false;
 
+    /* Review round 1, item 1: a REAL empty chest (total == 0) needs no
+     * further fetch — nothing more will ever come back. Without this, an
+     * empty cached page always reads as "outside" its own trivial range
+     * [0,0) and the transport would re-request LIST(0) forever. */
+    if (o->have_page && o->page.total == 0) return false;
+
     bool needed;
     if (!o->have_page) {
         needed = true;
@@ -61,6 +77,10 @@ bool chest_oath_cursor_entry(const chest_oath_t *o, const chest_list_entry_t **e
 {
     if (!o || !e) return false;
     if (!o->have_page) return false;
+    /* Review round 1, item 5: total == 0 means NO account, whatever a
+     * malformed page's count/entries otherwise carry; same for a cursor at
+     * or past total — both independent of page.first/page.count. */
+    if (o->page.total == 0 || o->cursor >= o->page.total) return false;
     if (o->cursor < o->page.first) return false;
 
     uint16_t idx_in_page = (uint16_t)(o->cursor - o->page.first);
@@ -70,17 +90,25 @@ bool chest_oath_cursor_entry(const chest_oath_t *o, const chest_list_entry_t **e
     return true;
 }
 
+void chest_oath_code_requested(chest_oath_t *o, uint8_t chest_index)
+{
+    if (!o) return;
+    o->code_requested = true;
+    o->requested_index = chest_index;
+}
+
 void chest_oath_on_code(chest_oath_t *o, const chest_code_t *c, uint32_t now_ms)
 {
     if (!o || !c) return;
-
-    const chest_list_entry_t *e;
-    if (!chest_oath_cursor_entry(o, &e)) return;      /* nothing cached under the cursor: ignore */
-    if (e->index != c->index) return;                 /* the owner navigated away: ignore */
+    /* Review round 1, item 4: accepted only against a pending request for
+     * EXACTLY this index; consumed right away so a duplicate answer, or a
+     * late one after nav retracted the request, is ignored. */
+    if (!o->code_requested || o->requested_index != c->index) return;
 
     o->code = *c;
     o->code_shown = true;
     o->code_deadline_ms = now_ms + (uint32_t)c->seconds * 1000u;
+    o->code_requested = false;
 }
 
 bool chest_oath_code_visible(chest_oath_t *o, uint32_t now_ms, uint8_t *secs_left)
