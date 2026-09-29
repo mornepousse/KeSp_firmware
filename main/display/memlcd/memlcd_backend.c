@@ -57,7 +57,12 @@
 #include "half_link.h"         /* half_link_tx_dongle_vu */
 #endif
 #if CONFIG_KASE_CHEST_LINK
-#include "chest_link.h"        /* chest_link_view */
+#include "chest_link.h"        /* chest_link_view, CHEST_VIEW_* */
+/* The chest_link.h bits and the memlcd model's MEMLCD_COFFRE_* (memlcd_model.h)
+ * are two independent #defines on either side of the display_backend vtable
+ * boundary: nothing but this assert stops them from drifting apart. */
+_Static_assert(CHEST_VIEW_PRESENT == MEMLCD_COFFRE_PRESENT, "chest_link.h CHEST_VIEW_PRESENT vs memlcd_model.h MEMLCD_COFFRE_PRESENT");
+_Static_assert(CHEST_VIEW_BADVER == MEMLCD_COFFRE_BADVER, "chest_link.h CHEST_VIEW_BADVER vs memlcd_model.h MEMLCD_COFFRE_BADVER");
 #endif
 
 static const char *TAG = "memlcd_be";

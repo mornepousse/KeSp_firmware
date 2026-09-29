@@ -252,6 +252,7 @@ static void test_left_chest_link_pins(void)
 {
     TEST_ASSERT_EQ(BOARD_CHEST_CS, 3, "CS_P4 = GPIO3");
     TEST_ASSERT_EQ(BOARD_CHEST_IRQ, 46, "IRQ_P4 = GPIO46");
+    TEST_ASSERT(!BOARD_PINS_STRAPPING_WIRED(0) && !BOARD_PINS_STRAPPING_WIRED(45), "only 3 and 46 are exempt");
     const int matrix[] = { ROWS0, ROWS1, ROWS2, ROWS3,
                            COLS0, COLS1, COLS2, COLS3, COLS4, COLS5, COLS6 };
     for (unsigned i = 0; i < sizeof matrix / sizeof matrix[0]; i++) {

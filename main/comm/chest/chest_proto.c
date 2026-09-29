@@ -48,6 +48,14 @@ void chest_op_label(uint16_t op, char out[CHEST_LABEL_BUF])
     else snprintf(out, CHEST_LABEL_BUF, "OP ?");
 }
 
+bool chest_press_matches(uint16_t pressed_op, chest_block_t block, const chest_status_t *st)
+{
+    if (block != CHEST_BLOCK_OK || !st) return false;
+    if (!(st->state & CHEST_STATE_READY)) return false;
+    if (pressed_op == 0) return false;
+    return pressed_op == st->pending_op;
+}
+
 bool chest_confirm_request(chest_confirm_t *c, uint16_t pending_op, uint32_t count, uint32_t now_ms)
 {
     if (pending_op == 0) return false;

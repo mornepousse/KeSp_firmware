@@ -546,8 +546,8 @@ static void test_kp_sec_confirm_routes_to_chest(void)
     keymaps[0][0][0] = T_K_SEC_CONFIRM;
     press_key(0, 0, 0);
     build_keycode_report();
-    TEST_ASSERT(chest_gate_take_press(), "press queued for the chest");
-    TEST_ASSERT(!chest_gate_take_press(), "exactly one press");
+    TEST_ASSERT_EQ(chest_gate_take_press(), 1, "press queued for the chest (op 1)");
+    TEST_ASSERT_EQ(chest_gate_take_press(), 0, "exactly one press");
     uint8_t slot = 0xFF;
     TEST_ASSERT(sec_confirm_poll(1, &slot) != SEC_CONFIRM_AUTHORIZED, "local gate NOT authorized");
     TEST_ASSERT_EQ(keycodes[0], 0, "absorbed");
@@ -564,8 +564,8 @@ static void test_kp_sec_confirm_held_confirms_chest_once(void)
     build_keycode_report();
     build_keycode_report();
     build_keycode_report();
-    TEST_ASSERT(chest_gate_take_press(), "first cycle queues");
-    TEST_ASSERT(!chest_gate_take_press(), "held key does not queue again");
+    TEST_ASSERT_EQ(chest_gate_take_press(), 1, "first cycle queues (op 1)");
+    TEST_ASSERT_EQ(chest_gate_take_press(), 0, "held key does not queue again");
     chest_gate_publish(0);
 }
 
@@ -585,7 +585,31 @@ static void test_kp_sec_confirm_held_before_chest_op_does_not_confirm(void)
     chest_gate_publish(1);                 /* op arrives while the key is STILL held */
     build_keycode_report();
     build_keycode_report();                /* no release, no new press */
-    TEST_ASSERT(!chest_gate_take_press(), "a chest op arriving mid-hold is not confirmed by the held key");
+    TEST_ASSERT_EQ(chest_gate_take_press(), 0, "a chest op arriving mid-hold is not confirmed by the held key");
+    chest_gate_publish(0);
+}
+
+/* chest_gate_press() stores the op it SAW at press time, not a live pointer
+ * to the gate: take_press must hand back that recorded op even though the
+ * gate itself may have changed by the time the link task reads it. And once
+ * the chest clears its op, a fresh physical press (release + new press)
+ * finds nothing pending and goes to the local gate, not the chest — no
+ * leftover op to be confirmed against. */
+static void test_kp_sec_confirm_press_records_the_seen_op(void)
+{
+    reset_kp_state();
+    chest_gate_publish(7);                 /* chest: OATH_CODE pending */
+    keymaps[0][0][0] = T_K_SEC_CONFIRM;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT_EQ(chest_gate_take_press(), 7, "press records the op seen at press time");
+
+    chest_gate_publish(0);                 /* the chest cleared its op */
+    release_all_keys();
+    build_keycode_report();                /* release cycle */
+    press_key(0, 0, 0);
+    build_keycode_report();                /* new press, nothing pending: local gate */
+    TEST_ASSERT_EQ(chest_gate_take_press(), 0, "nothing pending: goes to the local gate, not the chest");
     chest_gate_publish(0);
 }
 
@@ -796,6 +820,7 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_sec_confirm_routes_to_chest);
     TEST_RUN(test_kp_sec_confirm_held_confirms_chest_once);
     TEST_RUN(test_kp_sec_confirm_held_before_chest_op_does_not_confirm);
+    TEST_RUN(test_kp_sec_confirm_press_records_the_seen_op);
     TEST_RUN(test_kp_macro_inline_injects_steps);
     TEST_RUN(test_kp_macro_empty_name_noop);
     TEST_RUN(test_kp_macro_delay_sets_pending);

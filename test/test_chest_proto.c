@@ -138,6 +138,35 @@ static void test_chest_confirm_rule(void)
     TEST_ASSERT(chest_confirm_step(&c, 1, 3, 3000), "write for SIGN");
     TEST_ASSERT(!chest_confirm_step(&c, 2, 3, 3250), "op changed: no retry for DECRYPT");
     TEST_ASSERT(!c.armed, "disarmed on op change");
+
+    /* Minor 2f: no retry at delta = 199 ms, one at delta = 200 ms exactly. */
+    chest_confirm_request(&c, 1, 3, 4000);
+    TEST_ASSERT(chest_confirm_step(&c, 1, 3, 4000), "write at t");
+    TEST_ASSERT(!chest_confirm_step(&c, 1, 3, 4199), "delta 199 ms: no retry yet");
+    TEST_ASSERT(chest_confirm_step(&c, 1, 3, 4200), "delta 200 ms: retry fires");
+}
+
+/* Review Important: a press stored for op A must not confirm op B (or a
+ * not-READY chest, or a non-OK round). chest_gate_press() stores the op it
+ * saw; the link task must re-check it against the chest's CURRENT state
+ * before writing the confirmation. */
+static void test_chest_press_matches(void)
+{
+    chest_status_t st;
+    TEST_ASSERT_EQ(chest_proto_parse(V1, 20, &st), CHEST_BLOCK_OK, "V1: OK, READY, op 1 pending");
+
+    TEST_ASSERT(chest_press_matches(1, CHEST_BLOCK_OK, &st), "pressed op matches the chest's pending op, READY");
+    TEST_ASSERT(!chest_press_matches(2, CHEST_BLOCK_OK, &st), "pressed op 2 does not match pending op 1");
+    TEST_ASSERT(!chest_press_matches(0, CHEST_BLOCK_OK, &st), "no press stored (0): nothing to confirm");
+
+    chest_status_t st9;
+    TEST_ASSERT_EQ(chest_proto_parse(V9, 20, &st9), CHEST_BLOCK_OK, "V9: OK, but not READY (booting)");
+    st9.pending_op = 1;   /* same op as the press: only READY differs */
+    TEST_ASSERT(!chest_press_matches(1, CHEST_BLOCK_OK, &st9), "chest not READY: not confirmed");
+
+    TEST_ASSERT(!chest_press_matches(1, CHEST_BLOCK_ABSENT, &st), "ABSENT round: press dropped, not carried over");
+    TEST_ASSERT(!chest_press_matches(1, CHEST_BLOCK_CORRUPT, &st), "CORRUPT round: press dropped");
+    TEST_ASSERT(!chest_press_matches(1, CHEST_BLOCK_BAD_VERSION, &st), "BAD_VERSION round: press dropped");
 }
 
 void test_chest_proto(void)
@@ -149,4 +178,5 @@ void test_chest_proto(void)
     TEST_RUN(test_chest_absence_full_scan);
     TEST_RUN(test_chest_op_labels);
     TEST_RUN(test_chest_confirm_rule);
+    TEST_RUN(test_chest_press_matches);
 }

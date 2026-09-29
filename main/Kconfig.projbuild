@@ -137,6 +137,7 @@ config KASE_CHEST_LINK
     bool "Chest link: SPI master of Niphar_chest (left half)"
     default n
     depends on KASE_KBD_WIRELESS
+    depends on KASE_VEILLE   # presence hand-off comes from veille_task.c; without it the link never starts
     help
         The left half talks to the Niphar_chest ESP32-P4 over the shared SPI
         bus (CS GPIO3, IRQ GPIO46) while a USB host is present: status on

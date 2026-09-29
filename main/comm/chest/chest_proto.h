@@ -35,6 +35,13 @@ typedef enum {
 bool          chest_proto_is_absent(const uint8_t *regs, size_t len);
 /* Contract §4 order: short, absent, magic, version, CRC. `out` written only on OK. */
 chest_block_t chest_proto_parse(const uint8_t *regs, size_t len, chest_status_t *out);
+/* True only when a press stored earlier by the chest gate (chest_gate.h)
+ * should confirm THIS round's chest state: an OK block, the chest READY, a
+ * real press (pressed_op != 0), and that press's op still equal to what the
+ * chest currently has pending. A press taken on a non-OK round (chest
+ * reboot, CORRUPT, BAD_VERSION, a skipped read) must not confirm whatever op
+ * shows up at the next OK block. */
+bool          chest_press_matches(uint16_t pressed_op, chest_block_t block, const chest_status_t *st);
 /* Label of a chest sec_op_t code. Known codes 1-10: lookup table; 11-99: "OP nn" format;
  * >= 100: "OP ?" (controller-mandated limit). Always <= 6 characters. */
 void          chest_op_label(uint16_t op, char out[CHEST_LABEL_BUF]);

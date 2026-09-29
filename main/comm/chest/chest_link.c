@@ -20,8 +20,7 @@
 static const char *TAG = "chest";
 #define CHEST_SPI_HZ   1000000
 #define CHEST_POLL_MS  250u
-#define CHEST_VIEW_PRESENT 0x80   /* = MEMLCD_COFFRE_PRESENT */
-#define CHEST_VIEW_BADVER  0x40   /* = MEMLCD_COFFRE_BADVER */
+#define CHEST_DEV_RETRY_MS 1000u   /* spi_bus_add_device failed: retry, don't block forever */
 
 static TaskHandle_t         s_task;
 static spi_device_handle_t  s_dev;
@@ -29,6 +28,8 @@ static volatile bool        s_want;          /* presence asked by the sleep task
 static volatile uint8_t     s_view;
 static volatile uint16_t    s_view_op;
 static chest_confirm_t      s_confirm;
+static uint8_t               s_badver_logged;  /* once per presence session, reset in go_absent */
+static uint8_t               s_corrupt_logged; /* once per presence session, reset in go_absent */
 static WORD_ALIGNED_ATTR uint8_t s_rx[CHEST_REG_SIZE];
 static WORD_ALIGNED_ATTR uint8_t s_tx[4];
 
@@ -85,21 +86,38 @@ static void write_confirm(void)
 static void go_absent(void)
 {
     gpio_intr_disable(BOARD_CHEST_IRQ);
-    if (s_dev) { spi_bus_remove_device(s_dev); s_dev = NULL; }
+    if (s_dev) {
+        esp_err_t e = spi_bus_remove_device(s_dev);
+        if (e != ESP_OK) ESP_LOGW(TAG, "spi_bus_remove_device: %s", esp_err_to_name(e));
+        s_dev = NULL;
+    }
     cs_release();
     chest_gate_publish(0);
-    (void)chest_gate_take_press();
     s_confirm.armed = false;
     s_view = 0; s_view_op = 0;
+    s_badver_logged = 0; s_corrupt_logged = 0;   /* once-per-presence-session logs, next session starts fresh */
     ESP_LOGI(TAG, "chest gone: CS released");
 }
 
 static void chest_task(void *arg)
 {
     (void)arg;
-    uint8_t badver_logged = 0;
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, s_dev ? pdMS_TO_TICKS(CHEST_POLL_MS) : portMAX_DELAY);
+        /* s_dev: poll cadence. s_want && !s_dev: device add failed, retry
+         * instead of blocking forever. Otherwise (battery, no chest): block
+         * until the sleep task's presence hand-off wakes us — unchanged. */
+        TickType_t wait = portMAX_DELAY;
+        if (s_dev) wait = pdMS_TO_TICKS(CHEST_POLL_MS);
+        else if (s_want) wait = pdMS_TO_TICKS(CHEST_DEV_RETRY_MS);
+        ulTaskNotifyTake(pdTRUE, wait);
+
+        /* Taken on EVERY round, whatever happens below — a press queued for
+         * an operation the owner saw must not survive a non-OK round (chest
+         * reboot -> ABSENT, CORRUPT, BAD_VERSION, a bus-busy skipped read)
+         * and confirm a different op at the next OK block (review Important,
+         * 2026-09-29). Matched against the CURRENT chest state below. */
+        uint16_t pressed = chest_gate_take_press();
+
         if (s_want && !s_dev) {
             if (!dev_add()) { ESP_LOGE(TAG, "spi_bus_add_device failed"); continue; }
             gpio_intr_enable(BOARD_CHEST_IRQ);
@@ -113,20 +131,26 @@ static void chest_task(void *arg)
 
         chest_status_t st;
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-        switch (chest_proto_parse(s_rx, CHEST_REG_SIZE, &st)) {
+        chest_block_t blk = chest_proto_parse(s_rx, CHEST_REG_SIZE, &st);
+        switch (blk) {
         case CHEST_BLOCK_OK:
             s_view = CHEST_VIEW_PRESENT | (st.state & 0x07);
             s_view_op = st.pending_op;
             chest_gate_publish(st.pending_op);
-            if (chest_gate_take_press()) chest_confirm_request(&s_confirm, st.pending_op, st.confirm_count, now);
+            if (chest_press_matches(pressed, blk, &st)) chest_confirm_request(&s_confirm, st.pending_op, st.confirm_count, now);
             if (chest_confirm_step(&s_confirm, st.pending_op, st.confirm_count, now)) write_confirm();
             break;
         case CHEST_BLOCK_BAD_VERSION:
-            if (!badver_logged) { ESP_LOGW(TAG, "chest speaks protocol %u, we speak %u: ignored", s_rx[4], CHEST_PROTO_VERSION); badver_logged = 1; }
+            if (!s_badver_logged) { ESP_LOGW(TAG, "chest speaks protocol %u, we speak %u: ignored", s_rx[4], CHEST_PROTO_VERSION); s_badver_logged = 1; }
             s_view = CHEST_VIEW_PRESENT | CHEST_VIEW_BADVER; s_view_op = 0;
             chest_gate_publish(0);
             break;
-        default:   /* absent (booting, unpowered) or corrupt: nothing acted on, no log */
+        case CHEST_BLOCK_CORRUPT:
+            if (!s_corrupt_logged) { ESP_LOGW(TAG, "chest block corrupt (magic/CRC/short read): ignored"); s_corrupt_logged = 1; }
+            s_view = 0; s_view_op = 0;
+            chest_gate_publish(0);
+            break;
+        default:   /* CHEST_BLOCK_ABSENT: booting or unpowered, the ordinary case, never logged */
             s_view = 0; s_view_op = 0;
             chest_gate_publish(0);
             break;
