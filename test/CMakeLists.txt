@@ -52,6 +52,8 @@ add_executable(test_runner
     ../main/security/sec_store.c
     test_cdc_sec.c
     ../main/comm/cdc/cdc_sec_cmds.c
+    test_chest_proto.c
+    ../main/comm/chest/chest_proto.c
     test_cr_crc16.c
     ../main/security/cr_crc16.c
     test_otp_proto.c
@@ -119,6 +121,7 @@ target_include_directories(test_runner PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/periph/trackpad
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/rf
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/link
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/chest
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/input
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/power
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/ble

@@ -37,6 +37,7 @@ extern void test_modified_key(void);
 extern void test_sec_confirm(void);
 extern void test_sec_store(void);
 extern void test_cdc_sec(void);
+extern void test_chest_proto(void);
 extern void test_cr_crc16(void);
 extern void test_otp_proto(void);
 extern void test_apdu(void);
@@ -119,6 +120,7 @@ int main(void) {
     test_sec_confirm();
     test_sec_store();
     test_cdc_sec();
+    test_chest_proto();
     test_cr_crc16();
     test_otp_proto();
     test_apdu();
