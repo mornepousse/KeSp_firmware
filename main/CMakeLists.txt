@@ -22,6 +22,11 @@ set(srcs
 
     # Security confirmation gate — compiled for all roles (key_processor calls it)
     "security/sec_confirm.c"
+    # Chest link, pure half: key→link hand-off and the register protocol
+    # (spec 2026-09-29). All roles: key_processor calls chest_gate_press().
+    "comm/chest/chest_gate.c"
+    "comm/chest/chest_proto.c"
+    "security/cr_crc16.c"
 
 )
 
@@ -146,14 +151,14 @@ endif()
 # Dongle CDC stubs (no-op symbols for bt/display referenced by cdc_binary_cmds.c)
 # and dongle-specific binary commands (RF status, pair list/reset, battery).
 # cr_hmac is kept unconditional: cdc_sec_cmds.c KAT self-test references it directly.
-# cr_crc16 is kept unconditional: tiny file, linker-stripped under NONE/OPENPGP.
+# cr_crc16 now lives in the base source list (chest link, all roles) — do not
+# list it here too, or the link fails on a duplicate symbol.
 if(CONFIG_KASE_DEVICE_ROLE_DONGLE)
     list(APPEND srcs
         "comm/cdc/cdc_dongle_stubs.c"
         "comm/cdc/cdc_dongle_cmds.c"
         "security/sec_store.c"
         "comm/cdc/cdc_sec_cmds.c"
-        "security/cr_crc16.c"
         "security/cr_hmac.c"
     )
     # OTP transport (YubiKey CR-HMAC personality only)
@@ -374,6 +379,7 @@ idf_component_register(
         "comm/ble"
         "comm/rf"
         "comm/link"
+        "comm/chest"
         "input"
         "periph"
         "periph/trackpad"

@@ -25,6 +25,7 @@
 #include "keyboard_task.h"
 #include "keyboard_actions.h"
 #include "sec_confirm.h"
+#include "chest_gate.h"
 
 /* ── Local HID constants (avoids the key_definitions.h/tinyusb chain) ── */
 #define T_KC_A      0x04u
@@ -187,6 +188,10 @@ static void reset_kp_state(void)
 
     /* Clears the internal pending macro (static opaque in key_processor.c) */
     (void)key_processor_consume_macro();
+
+    /* Chest gate: nothing pending, no stray press left over from a prior test. */
+    chest_gate_publish(0);
+    (void)chest_gate_take_press();
 
     /* Two idle cycles to flush prev_press_row/col and prev_shift_pressed */
     build_keycode_report();
@@ -531,6 +536,39 @@ static void test_kp_sec_confirm_authorizes(void)
     TEST_ASSERT_EQ(keycodes[0], 0, "K_SEC_CONFIRM absorbed (not in HID report)");
 }
 
+/* A chest operation pending: the press goes to the chest, not the local gate. */
+static void test_kp_sec_confirm_routes_to_chest(void)
+{
+    reset_kp_state();
+    sec_confirm_reset();
+    sec_confirm_arm(2, 0);                 /* a local request exists too */
+    chest_gate_publish(1);                 /* chest: SIGN pending */
+    keymaps[0][0][0] = T_K_SEC_CONFIRM;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT(chest_gate_take_press(), "press queued for the chest");
+    TEST_ASSERT(!chest_gate_take_press(), "exactly one press");
+    uint8_t slot = 0xFF;
+    TEST_ASSERT(sec_confirm_poll(1, &slot) != SEC_CONFIRM_AUTHORIZED, "local gate NOT authorized");
+    TEST_ASSERT_EQ(keycodes[0], 0, "absorbed");
+    chest_gate_publish(0);
+}
+
+/* Held key: one press, not one per scan (review focus). */
+static void test_kp_sec_confirm_held_confirms_chest_once(void)
+{
+    reset_kp_state();
+    chest_gate_publish(1);
+    keymaps[0][0][0] = T_K_SEC_CONFIRM;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    build_keycode_report();
+    build_keycode_report();
+    TEST_ASSERT(chest_gate_take_press(), "first cycle queues");
+    TEST_ASSERT(!chest_gate_take_press(), "held key does not queue again");
+    chest_gate_publish(0);
+}
+
 /* ══════════════════════════════════════════════════════════════════════ */
 /* expand_macro tests via the pipeline                                   */
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -735,6 +773,8 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_key_pressed_before_mo_keeps_the_base_layer);
     TEST_RUN(test_kp_key_that_resolves_an_lt_hold_is_on_the_lt_layer);
     TEST_RUN(test_kp_sec_confirm_authorizes);
+    TEST_RUN(test_kp_sec_confirm_routes_to_chest);
+    TEST_RUN(test_kp_sec_confirm_held_confirms_chest_once);
     TEST_RUN(test_kp_macro_inline_injects_steps);
     TEST_RUN(test_kp_macro_empty_name_noop);
     TEST_RUN(test_kp_macro_delay_sets_pending);

@@ -46,6 +46,7 @@ add_executable(test_runner
     ../main/comm/cdc/cdc_binary_protocol.c
     test_keycode_report.c
     ../main/input/key_processor.c
+    ../main/comm/chest/chest_gate.c
     test_sec_confirm.c
     ../main/security/sec_confirm.c
     test_sec_store.c

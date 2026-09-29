@@ -302,6 +302,12 @@ means a test, or a line.
   board contract exempts exactly these two strapping pins
   (BOARD_PINS_STRAPPING_WIRED). The chest's own HARDWARE.md said IO7/IO11:
   those are the P4-side numbers.
+- [test:test_kp_sec_confirm_routes_to_chest] K_SEC_CONFIRM goes to the chest
+  while it has an operation pending, to the local gate otherwise — one press,
+  one destination; a held key confirms once
+  [test:test_kp_sec_confirm_held_confirms_chest_once]. chest_gate_press() is
+  called from key_processor.c only — never from CDC; enforced by
+  scripts/tripwire.d/chest-confirm.sh (proven biting).
 - [smoke:New board from the template] A board is one folder:
   `scripts/new-board.sh <name>` copies `boards/_template/` (board.h with the
   pin tables and `BOARD_PINS(X)`, keymap, layout, sdkconfig.defaults, README)
