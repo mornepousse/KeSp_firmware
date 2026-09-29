@@ -111,7 +111,7 @@ appear within the chest's 15 s window, and the status line follows the chest).
 ## 5. The security invariant
 
 **A confirmation is written only from a real key press.** The only caller of
-`chest_link_confirm_press()` is the `K_SEC_CONFIRM` branch of
+`chest_gate_press()` (`main/comm/chest/chest_gate.c`) is the `K_SEC_CONFIRM` branch of
 `key_processor.c`, gated by `is_new_press` (a held key confirms once). Never
 from the CDC protocol, never from a timer, never from the CDC-reachable test
 modes. Enforced by a `check.sh` rule: the symbol may appear only in
