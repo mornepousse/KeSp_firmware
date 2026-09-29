@@ -55,6 +55,8 @@ add_executable(test_runner
     ../main/comm/cdc/cdc_sec_cmds.c
     test_chest_proto.c
     ../main/comm/chest/chest_proto.c
+    test_chest_dma.c
+    ../main/comm/chest/chest_dma.c
     test_cr_crc16.c
     ../main/security/cr_crc16.c
     test_otp_proto.c

@@ -26,6 +26,7 @@ set(srcs
     # (spec 2026-09-29). All roles: key_processor calls chest_gate_press().
     "comm/chest/chest_gate.c"
     "comm/chest/chest_proto.c"
+    "comm/chest/chest_dma.c"
     "security/cr_crc16.c"
 
 )
