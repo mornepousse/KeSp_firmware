@@ -120,19 +120,27 @@ works as before.
 
 ## 5. Screen
 
-The third chest line under the logo shows the chest's **ACTIVE** mode read at
-`0x0D` — what the host really sees — not the mode the keyboard asked for:
-`MSC`, `PGP`, `OTP`, `FIDO`, `OATH` in **upper case when `active == wanted`**;
-while they differ (a switch in progress, refused or retrying) it shows the
-WANTED mode in **lower case** (`pgp`…) so the owner sees that her request has
-not taken yet. Nothing when both are none. 4 UNSCII characters max (35 px).
-Pure, tested (`memlcd_lignes_coffre` gains active and wanted modes; both enter
-the model diff). The chest session found why this matters: Mae once had a
-chest stuck in `none` with nothing saying so — a screen showing the requested
-mode would have repeated that silence.
+The third chest line under the logo shows the mode, from `0x0D` (active) and
+the keyboard's wanted mode, in three cases (contract §1 "Active USB mode", §6.4,
+vector V14):
 
-A switch that has not taken after several reads (`0x0D != 0x12`) is visible on
-screen (lower case stays); no automatic action beyond the `0x12` self-heal.
+1. **Arrived** — `active == wanted`: the mode in upper case (`MSC`, `PGP`,
+   `OTP`, `FIDO`, `OATH`); nothing when both are none.
+2. **In flight** — `active == 0xFF` (the chest publishes it while a switch runs,
+   up to ~15 s), or `active != wanted` for fewer than
+   `CHEST_MODE_FAULT_READS` consecutive reads: the WANTED mode in lower case
+   (`pgp`…). Never an error.
+3. **Fault** — `active` and `wanted` are two KNOWN values that differ for
+   `CHEST_MODE_FAULT_READS` (= 8, i.e. 2 s at the 250 ms cadence) consecutive
+   reads: `ERR`. The self-heal keeps rewriting `0x12` when it reads back
+   different; the fault clears by itself when the chest catches up.
+
+4 UNSCII characters max (35 px). Pure and tested (`chest_mode_view()` in
+chest_proto, `memlcd_lignes_coffre` renders it); the rendered state enters the
+model diff.
+
+A block with `USB_MOUNTED` set and an active mode that is not a known non-zero
+value is self-contradictory (contract §1): treated as CORRUPT.
 
 ## 6. Contract and tests
 
