@@ -311,6 +311,13 @@ means a test, or a line.
   [test:test_kp_sec_confirm_held_before_chest_op_does_not_confirm].
   chest_gate_press() is called from key_processor.c only — never from CDC;
   enforced by scripts/tripwire.d/chest-confirm.sh (proven biting).
+  The press carries the op code seen on screen at press time, not a live
+  reference: the link task confirms it only if the chest's CURRENT block is
+  OK, the chest is READY, and its pending op still equals that stored op —
+  otherwise the press is dropped, never applied to a different operation
+  [test:chest_press_matches]. A press taken on a non-OK round (chest reboot,
+  a corrupt block, a bad version, a skipped read) does not survive to the
+  next OK block [test:test_kp_sec_confirm_press_records_the_seen_op].
 - [smoke:New board from the template] A board is one folder:
   `scripts/new-board.sh <name>` copies `boards/_template/` (board.h with the
   pin tables and `BOARD_PINS(X)`, keymap, layout, sdkconfig.defaults, README)
@@ -707,8 +714,11 @@ means a test, or a line.
   left's USB): absent, the SPI device is removed and GPIO3 is an input —
   R48 pulls CS to the chest's rail, driving it into a dead rail would cost
   ~0.33 mA; no poller on battery (the link task blocks, the sleep task's
-  1 s USB check hands presence over). Present: a read every 250 ms or at
-  once on a GPIO46 rising edge, under the radio owner's bus lock; a block
-  that is absent/corrupt is never acted on; a real K_SEC_CONFIRM press
-  writes 0x5A at 0x10, delivered when the chest's counter moves, one retry
-  after 200 ms at most.
+  1 s USB check hands presence over). If `spi_bus_add_device` fails on
+  presence, the task retries every 1 s instead of blocking forever; a
+  non-OK `spi_bus_remove_device` on the way out is logged. Present: a read
+  every 250 ms or at once on a GPIO46 rising edge, under the radio owner's
+  bus lock; an absent block is never acted on and never logged (the
+  ordinary case), a corrupt block is logged once per presence session; a
+  real K_SEC_CONFIRM press writes 0x5A at 0x10, delivered when the chest's
+  counter moves, one retry after 200 ms at most.
