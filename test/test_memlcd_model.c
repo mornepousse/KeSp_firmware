@@ -425,15 +425,15 @@ static void test_bas_coffre_end_to_end(void)
     char b[MEMLCD_BAS_LIGNES][MEMLCD_ETAT_BUF];
 
     /* V16: a RESET pending — the label says "12 COMPTES" and 0x0F says 12
-     * in one byte; both must reach the screen. Note: V16's PENDING OP is
-     * 12 (not 10/RESET!), so chest_op_label(12) formats "OP 12" — pinned on
-     * the vector's actual bytes, not the review's illustrative "RESET! ?". */
+     * in one byte; both must reach the screen. V16's pending op is 10,
+     * SEC_OP_OATH_RESET (chest e5ee37d fixed a hand-picked 12 that was no
+     * enum value), so the op line reads "RESET! ?". */
     TEST_ASSERT_EQ(chest_proto_parse(V16, 64, &st), CHEST_BLOCK_OK, "V16 parses");
     chest_view_build(&v, CHEST_BLOCK_OK, &st, st.active_mode, CHEST_MODE_ARRIVED, NULL, 0);
     memset(&m, 0, sizeof m); m.osl = MEMLCD_OSL_AUCUNE;
     memlcd_model_set_coffre(&m, &v);
     TEST_ASSERT(memlcd_bas_coffre(&m, b), "V16: prompt shown");
-    TEST_ASSERT(strcmp(b[0], "OP 12 ?") == 0, "V16: op 12, no named label, formats OP 12 ?");
+    TEST_ASSERT(strcmp(b[0], "RESET! ?") == 0, "V16: op 10 = OATH_RESET, RESET! ?");
     TEST_ASSERT(strcmp(b[1], "12 COMPT") == 0 && strcmp(b[2], "ES") == 0, "V16: the label, 12 COMPTES, across the label lines");
     TEST_ASSERT(strcmp(b[3], "12 CPT") == 0, "V16: 12 CPT, from op_count == 12, not clamped to 1");
 
