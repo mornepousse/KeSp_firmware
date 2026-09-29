@@ -144,6 +144,18 @@ config KASE_CHEST_LINK
         the screen, a real K_SEC_CONFIRM press relayed to a pending
         operation. Spec: docs/superpowers/specs/2026-09-29-chest-link-s3-master-design.md
 
+config KASE_CHEST_DIAG
+    bool "Chest link: bench trace of the DMA channel"
+    default n
+    depends on KASE_CHEST_LINK
+    help
+        Logs every DMA transaction of the chest link (WRDMA with the request
+        bytes and doorbell, RDDMA with its length and first bytes, the WHOLE
+        first LIST of a boot in hex) and every LIST/CODE decode result, plus
+        the chest task's stack high-water mark after the first LIST. A CODE's
+        digits are never logged, only its index, digit count and seconds.
+        Bench only: off in every board default.
+
 config KASE_VEILLE
     bool "Hybrid sleep: light sleep then deep sleep (brick B7)"
     default n

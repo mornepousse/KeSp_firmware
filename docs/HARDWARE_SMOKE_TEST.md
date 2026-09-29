@@ -185,8 +185,7 @@ in the PR/release.
 - [ ] Power Phase 2: left + right independently
 - [ ] Chest link (left, chest flashed, USB-C plugged): status shows "P4",
       "SD" (card in), the USB mode line ("PGP" upper case once a mode is
-      mounted — the lower-case PENDING and "ERR" cases need Task 6's mode
-      transport, not bench-checkable yet); `gpg --card-status`, then
+      mounted, lower case while the switch runs); `gpg --card-status`, then
       `echo t | gpg --sign` → line 0 reads "SIGN ?" (the op and the
       confirmation question folded into one line, review C1) and the lines
       below it read the account's REAL label from the chest (not a
@@ -208,11 +207,43 @@ in the PR/release.
       ?`, `NO TIME`, `i/total`, an account name like `OVH:PERSO`, the `~`
       cut marker) — none render as a blank/tofu box; confirm the six bottom
       lines never visually overlap the top-of-screen chest status (P4/SD/
-      mode) nor run off the bottom edge of the 160 px panel. (OATH browsing
-      and the TOTP code/countdown are not reachable at the bench until Task
-      6 wires the DMA channel and the K_OATH_* keys — until then this item
-      is limited to the prompt case, the only one the current transport can
-      actually put on screen.)
+      mode) nor run off the bottom edge of the 160 px panel; same check for
+      the browser (`i/total` + name) and the code with its countdown.
+- [ ] Chest link protocol v3 (left flashed with the Task 6 transport, chest
+      flashed with its v3 head, USB-C plugged; for the raw traces build the
+      left with `CONFIG_KASE_CHEST_DIAG=y` and read the console detached,
+      `dtr=rts=False`), in this order — stop at the first that fails, the
+      later ones depend on it:
+      1. idle block: status shows `P4 SD`; the chest's `link` dump matches
+         the reference idle block `4E 49 50 48 03 05 00…` with CRC `76 A3`
+         at 0x36 (version 3, SD|READY, nothing armed) — anything else at
+         idle is the wire, not the composition;
+      2. `K_CHEST_NEXT` pressed five times from none: the mode line walks
+         `msc`/`MSC` … `oath`/`OATH` (lower case while each switch runs);
+         unplug/replug → back to none;
+      3. in OATH: the first LIST arrives with no press — the bottom area
+         shows `1/total` and the first name; `K_OATH_NEXT`/`K_OATH_PREV`
+         walk the names and wrap; past the first page a new LIST follows
+         (diag: one WRDMA per page, never one per 250 ms; paste the raw
+         first LIST for the chest session, success or failure);
+      4. `niphar-oath set-time` → TIME_VALID (the `NO TIME` hint goes);
+      5. `K_OATH_CODE` → the prompt names the account under the cursor
+         (the CHEST's label, `TOTP ?` on line 0) → `K_SEC_CONFIRM` on the
+         left → the code, large, with its countdown in seconds;
+      6. no press after `K_OATH_CODE` → the prompt expires after 15 s and
+         NO code ever shows; `K_OATH_CODE` alone never shows a code;
+      7. the code disappears at the end of its window (countdown reaches
+         the end, the panel clears even with no key touched — the half does
+         not sleep meanwhile, HB `vetos=…code`), and at once on
+         `K_OATH_NEXT`/`K_OATH_PREV`; it is never refreshed without a new
+         `K_OATH_CODE` + `K_SEC_CONFIRM`;
+      8. after a chest replug and BEFORE `niphar-oath set-time`:
+         `NO TIME` in the browser, and `K_OATH_CODE` sends nothing (diag:
+         no WRDMA CODE);
+      9. a RESET armed from the host → the prompt shows `RESET! ?`, the
+         label and `N CPT` with the number of accounts;
+      10. `K_SEC_CONFIRM` placed on the right half does nothing: the prompt
+          stays, the chest's counter does not move.
 
 ## BLE (relevant boards)
 - [ ] Host pairing OK, types with no drop for 1 min

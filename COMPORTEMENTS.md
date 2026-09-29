@@ -455,9 +455,10 @@ means a test, or a line.
   the 5 s light-sleep threshold of 2026-09-25 (Backspace held while the host
   auto-repeats, a layer key held while reading).
 - [test:test_veille_veto] Sleep veto registry (`power/veille_veto.h`,
-  pure): one state per name (usb, lien, sync, test, pair), a posted veto
-  blocks all sleep, lifting an absent veto has no effect, names bounded
-  for the HB (all five fit in its 24 bytes). Wired into the single sleep
+  pure): one state per name (usb, lien, sync, test, pair, key, code), a
+  posted veto blocks all sleep, lifting an absent veto has no effect,
+  names bounded for the HB (all seven fit in `VEILLE_VETOS_STR_MAX`, 40
+  bytes since the `code` veto). Wired into the single sleep
   task (Task 7 of the power structure plan). The `pair` veto is posted by
   both active pairing tasks (`kbd_pairing_task`,
   `half_fusion_pairing_task`): each round holds the chip for ~150 ms over
@@ -823,18 +824,12 @@ means a test, or a line.
     (<= 30 s window), never a new periodic wait, so the tickless-sleep rule
     (nothing below `CADENCE_REPOS_MIN_MS`) is unaffected.
   - `chest_link.c` (transport) builds the view with `chest_view_build()`
-    every read round and copies the result under a critical section
+    every round — also a round whose read failed on a busy bus, from the
+    last block seen — and copies the result under a critical section
     (`s_view_mux`) for the display task to read — no field is filled by
-    hand. The DMA channel and the `K_OATH_*` key hand-off are NOT wired yet
-    (plan Task 6): `mode_wanted` is passed as the block's own
-    `active_mode` (nothing pending a switch) and `mode_state` is always
-    ARRIVED, and the OATH model (`s_oath`) stays statically reset (never
-    fed a LIST/CODE) — honest, minimal stand-ins, not a claim that a
-    switch or a browse is in flight. On today's bench this means: the
-    prompt (chest label, `N CPT`, the folded `"<op> ?"` line) and the mode
-    line's upper-case ACTIVE name are real; the mode line's lower-case
-    PENDING/`ERR` cases, browsing, and the code/countdown are exercised
-    only by the host tests above until Task 6 lands.
+    hand. Since plan Task 6 it passes the REAL `mode_wanted` and
+    `mode_state` (`chest_mode_track`) and the OATH model fed by the DMA
+    channel.
   - review I2, bounding a stale code: `memlcd_backend.c`'s `lire_modele()`
     calls `chest_view_age(&v, esp_timer_get_time() / 1000)` on the view
     snapshot right after `chest_link_view(&v)`, BEFORE mapping it into the
@@ -842,10 +837,11 @@ means a test, or a line.
     function now used by both the backend and the host tests instead of
     each hand-rolling its own copy). Without this, a code could stay on
     the panel past its deadline for as long as the transport keeps
-    failing to read the chest (`chest_task`'s `continue` on a bus-busy/
-    corrupt/absent round skips `chest_view_build()` entirely, so the OLD
+    failing to read the chest (before Task 6, `chest_task`'s `continue` on
+    a bus-busy round skipped `chest_view_build()` entirely, so the OLD
     code only re-evaluated `code_visible` on a round that actually got
-    that far): `chest_view_age` ages the FROZEN SNAPSHOT on the display
+    that far; the task now rebuilds every round, and the display-side
+    ageing still bounds a task that stops running): `chest_view_age` ages the FROZEN SNAPSHOT on the display
     task's own clock read instead, independently of whether the link task
     ever reads the chest again — same millisecond clock both sides use
     (`esp_timer_get_time() / 1000`), same round-up rule as
@@ -866,5 +862,58 @@ means a test, or a line.
   every 250 ms or at once on a GPIO46 rising edge, under the radio owner's
   bus lock; an absent block is never acted on and never logged (the
   ordinary case), a corrupt block is logged once per presence session; a
-  real K_SEC_CONFIRM press writes 0x5A at 0x10, delivered when the chest's
-  counter moves, one retry after 200 ms at most.
+  real K_SEC_CONFIRM press writes `{0x5A, instance}` at 0x38 in ONE write
+  (contract §5 — the instance of the block that showed the op), delivered
+  when the chest's counter moves, one retry after 200 ms at most.
+- [smoke:Chest link] Protocol v3 on the wire (plan Task 6, 2026-09-29;
+  contract Niphar_chest `docs/LINK_CONTRACT.md` §1/§5/§6/§13 at 46499d6).
+  USB mode: K_CHEST_NEXT cycles the WANTED mode (none → msc → pgp → otp →
+  fido → oath → none) on a READY chest only; 0x3A (one byte, never in the
+  confirm write) is rewritten whenever its read-back differs — the
+  self-heal after a chest reboot or the confirm reclaim's word RMW; the
+  wanted mode returns to none on presence lost (and therefore also after
+  a keyboard reboot under a powered chest); the mode line tracks
+  arrived/pending/ERR from 0x0D (`chest_mode_track`). OATH (active mode 5
+  and READY): LIST on entry and whenever the cursor leaves the cached page;
+  K_OATH_CODE → CODE(the entry's chest index) → the chest's prompt names
+  the account → K_SEC_CONFIRM → the code and its countdown. A request is
+  WRDMA (8 bytes) + WR_END, then the doorbell at 0x3C, all under one bus
+  lock; a segment is RDDMA of exactly the published length + INT0, under
+  one bus lock, into a static 512-byte buffer wiped after decoding. Every
+  decision is `chest_round` (below). A chest key (K_OATH_*, K_CHEST_NEXT, a
+  K_SEC_CONFIRM the chest takes) wakes the link task at once instead of at
+  the next 250 ms poll; a navigation key moves the cursor and hides a code
+  even on a round where the bus is busy. A CODE segment's digits never
+  reach the log, diagnostic or not. `CONFIG_KASE_CHEST_DIAG` (off in every
+  default) traces each DMA transaction, the whole first LIST in hex, each
+  decode result and the task's stack high-water mark after the first LIST.
+- [test:test_chest_round] The DMA channel's decisions, pure
+  (`main/comm/chest/chest_round.c`), each mutant-proven: a segment is read
+  only when 0x11 CHANGED and `chest_dma_segment_ok`, never on 0x10 alone,
+  first contact only takes the reference; an unreadable announcement is
+  consumed, not retried; one request in flight; a LIST is never re-sent
+  for the same first index until a decision (OATH entry, navigation key,
+  timeout retry — at most 2), so neither a tick nor a chest answering a
+  page that misses the cursor drives a loop, and an empty chest asks
+  nothing; nothing is sent outside OATH+READY; K_OATH_CODE with TIME_VALID
+  clear sends nothing and is not kept for later; a CODE is never sent over
+  a prompt already up or behind a request in flight (the press is
+  dropped), only retried when the bus refused the send and dropped by a
+  navigation key; the code request is cancelled when the chest does not
+  arm it within 2 s, when another arming replaces it, when the prompt ends
+  without a CODE segment in the same block, and on leaving OATH (which
+  also resets the browser) — never on the wire timeout of a request that
+  was armed; the doorbell is seeded from its read-back at first contact
+  (a keyboard reboot under a powered chest never re-sends the value the
+  chest already served) and advances only on a send that went out.
+- [test:test_chest_gate_notify_wakes_the_link_task] The chest gate calls a
+  registered wake-up hook (chest_link.c's task notify) on K_CHEST_NEXT,
+  K_OATH_PREV/NEXT/CODE, and on a K_SEC_CONFIRM the chest takes — not on
+  one it does not; NULL (host, boards without the chest) calls nothing, so
+  the gate stays FreeRTOS-free.
+- [test:test_code_visible_est_un_veto] A TOTP code on the screen vetoes
+  sleep (`VEILLE_VETO_CODE`, "code" in the HB; Mae, 2026-09-29): light sleep
+  after 5 s is shorter than a 30 s window and the memory LCD keeps its
+  image asleep. Posted by the chest link task from the view it builds,
+  lifted when the code expires or hides (at most one 250 ms round late),
+  and on presence lost — bounded by the code's own deadline.
