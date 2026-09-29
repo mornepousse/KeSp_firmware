@@ -43,6 +43,21 @@ void chest_view_build(chest_view_t *v, chest_block_t blk, const chest_status_t *
             strncpy(v->code, o->code.code, sizeof v->code - 1);
             v->code[sizeof v->code - 1] = '\0';
             v->code_secs = secs;
+            v->code_deadline_ms = o->code_deadline_ms;
         }
     }
+}
+
+void chest_view_age(chest_view_t *v, uint32_t now_ms)
+{
+    if (!v || !v->code_visible) return;
+
+    int32_t remaining_ms = (int32_t)(v->code_deadline_ms - now_ms);
+    if (remaining_ms <= 0) {
+        v->code_visible = false;
+        v->code[0] = '\0';
+        v->code_secs = 0;
+        return;
+    }
+    v->code_secs = (uint8_t)(((uint32_t)remaining_ms + 999u) / 1000u);
 }

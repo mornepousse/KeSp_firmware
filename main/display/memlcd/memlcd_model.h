@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "../../comm/chest/chest_proto.h"
+#include "../../comm/chest/chest_view.h"
 
 /* Halves' Sharp memory-LCD screen — pure logic, tested on host
  * (test/test_memlcd_model.c). LS011B7DH03 panel (nice!view module) mounted in
@@ -159,6 +160,27 @@ typedef struct {
 #define MEMLCD_COFFRE_BUF     5        /* 4 UNSCII 8 characters in the 35 px zone + NUL */
 _Static_assert(MEMLCD_COFFRE_BUF >= CHEST_MODE_LABEL_BUF, "MEMLCD_COFFRE_BUF must fit chest_mode_label's output");
 
+/* chest_view_t (main/comm/chest/chest_view.h) -> the model's coffre_*
+ * fields — the SAME mapping used by both memlcd_backend.c's lire_modele()
+ * and the host tests (review M-c: a single pure function instead of the
+ * mapping being hand-duplicated in the backend and reinvented in the test).
+ * Only the coffre_* fields are touched: the caller is expected to have
+ * already zeroed/filled the rest of *m (route_rf, battery, layer…). */
+static inline void memlcd_model_set_coffre(memlcd_model_t *m, const chest_view_t *v)
+{
+    m->coffre = v->bits; m->coffre_op = v->op; m->coffre_op_count = v->op_count;
+    strncpy(m->coffre_label, v->label, sizeof m->coffre_label - 1);
+    m->coffre_label[sizeof m->coffre_label - 1] = '\0';
+    m->coffre_mode_active = v->mode_active; m->coffre_mode_wanted = v->mode_wanted; m->coffre_mode_state = v->mode_state;
+    m->coffre_browsing = v->browsing; m->coffre_pos = v->pos; m->coffre_total = v->total;
+    strncpy(m->coffre_nom, v->name, sizeof m->coffre_nom - 1);
+    m->coffre_nom[sizeof m->coffre_nom - 1] = '\0';
+    m->coffre_code_visible = v->code_visible;
+    strncpy(m->coffre_code, v->code, sizeof m->coffre_code - 1);
+    m->coffre_code[sizeof m->coffre_code - 1] = '\0';
+    m->coffre_code_secs = v->code_secs;
+}
+
 /* Chest status under the logo: "P4" ready ("P4.." booting, "P4?" unknown
  * protocol version), then "SD", then the USB mode line (chest_mode_label:
  * ACTIVE upper case once ARRIVED, WANTED lower case while PENDING, "ERR" on
@@ -191,7 +213,11 @@ static inline uint8_t memlcd_couper_8(const char *s, uint8_t n, char lines[][MEM
 {
     for (uint8_t i = 0; i < n; i++) lines[i][0] = '\0';
     if (n == 0) return 0;
-    size_t len = s ? strlen(s) : 0;
+    /* strnlen, bounded at CHEST_LABEL_MAX: every string this cuts (chest
+     * label, an OATH account name) is already NUL-terminated within that
+     * bound by its own producer, but this is untrusted text one hop removed
+     * from the wire — bound the scan defensively rather than trust it. */
+    size_t len = s ? strnlen(s, CHEST_LABEL_MAX) : 0;
     if (len == 0) return 1;
     size_t pos = 0;
     uint8_t nl = 0;
@@ -216,33 +242,83 @@ static inline uint8_t memlcd_couper_8(const char *s, uint8_t n, char lines[][MEM
 
 #define MEMLCD_BAS_LIGNES 6
 
-/* The bottom area's six UNSCII lines (spec §5 / plan Task 5), priority
- * order prompt > code visible > browsing > (nothing — the caller falls back
- * to the layer/status widgets). Returns true when one of the first three
- * cases applies (the caller must show these lines instead of the layer). */
+/* Line 0 of the prompt is "<op label> ?" — chest_op_label's own contract
+ * ("Always <= 6 characters", test_chest_op_labels) plus " ?" (2) must fit
+ * the 8 UNSCII columns (MEMLCD_ETAT_BUF - 1 = 8). That 6-character bound is
+ * a RUNTIME/behavioral promise, not the buffer's own size (CHEST_LABEL_BUF
+ * is 8, i.e. up to 7 content bytes — looser than the promise, so a
+ * _Static_assert against the buffer alone would be a false safety net):
+ * test_prompt_op_fits_with_the_question_mark (test_memlcd_model.c) walks
+ * the op range instead and checks the ACTUAL formatted length.
+ *
+ * CHEST_LABEL_MAX (34, the chest's own limit) must fit 5 UNSCII lines of 8:
+ * this is what lets a full-length label NEVER be cut in the common case
+ * (op_count <= 1) — review C1, the bug a 34-char label used to hide behind
+ * (two labels differing only past character 32 rendered identically, since
+ * the OLD layout only budgeted 4 lines for the label). */
+_Static_assert(CHEST_LABEL_MAX <= 5 * MEMLCD_COUP8_COLS, "CHEST_LABEL_MAX must fit 5 UNSCII lines of 8");
+
+/* The bottom area's six UNSCII lines (spec §5 / plan Task 5, C1 review
+ * round), priority order prompt > code visible > browsing > (nothing — the
+ * caller falls back to the layer/status widgets). Returns true when one of
+ * the first three cases applies (the caller must show these lines instead
+ * of the layer). */
 static inline bool memlcd_bas_coffre(const memlcd_model_t *m, char lines[MEMLCD_BAS_LIGNES][MEMLCD_ETAT_BUF])
 {
     for (int i = 0; i < MEMLCD_BAS_LIGNES; i++) lines[i][0] = '\0';
 
     if (m->coffre_op) {
-        chest_op_label(m->coffre_op, lines[0]);   /* CHEST_LABEL_BUF (8) fits MEMLCD_ETAT_BUF (9) */
-        char lbl[4][MEMLCD_ETAT_BUF];
-        uint8_t nl = memlcd_couper_8(m->coffre_label, 4, lbl);
+        /* Line 0 folds the confirmation question into the op itself ("TOTP
+         * ?", "RESET! ?", "OP 42 ?") — this frees ALL FIVE remaining lines
+         * for the label (the old layout spent a whole dedicated line on a
+         * bare "OK ?", capping the label at 4 lines: CHEST_LABEL_MAX (34)
+         * does not fit 4 * 8 = 32, so a near-max label was silently cut
+         * every time, and two labels differing only past character 32 were
+         * indistinguishable on screen — review C1). */
+        char op[CHEST_LABEL_BUF];
+        chest_op_label(m->coffre_op, op);
+        /* %.6s: chest_op_label's own contract is "always <= 6 characters",
+         * but GCC's -Wformat-truncation only sees the DECLARATION (op's
+         * buffer, CHEST_LABEL_BUF == 8, up to 7 content bytes) — a
+         * precision on the conversion is what proves the 8-column bound
+         * to the compiler too, not just to test_prompt_op_fits_with_the_
+         * question_mark at runtime. */
+        snprintf(lines[0], MEMLCD_ETAT_BUF, "%.6s ?", op);
+
+        char lbl[5][MEMLCD_ETAT_BUF];
+        uint8_t nl = memlcd_couper_8(m->coffre_label, 5, lbl);
         for (uint8_t i = 0; i < nl; i++) strcpy(lines[1 + i], lbl[i]);
         if (m->coffre_op_count > 1) {
             char cpt[MEMLCD_ETAT_BUF];
             snprintf(cpt, sizeof cpt, "%u CPT", (unsigned)m->coffre_op_count);
-            uint8_t idx = (nl >= 4) ? 4 : (uint8_t)(1 + nl);   /* room left: appended; full: replaces the last label line */
-            strncpy(lines[idx], cpt, MEMLCD_ETAT_BUF - 1);
-            lines[idx][MEMLCD_ETAT_BUF - 1] = '\0';
+            if (nl <= 4) {
+                /* room left after the label (nl <= 4 of the 5 available
+                 * lines): append right after it, nothing lost. */
+                strcpy(lines[1 + nl], cpt);
+            } else {
+                /* nl == 5: the label needed every line (33 or 34
+                 * characters — CHEST_LABEL_MAX itself). Re-cut it to 4
+                 * lines WITH the '~' marker (never silently — the label's
+                 * tail is what N CPT is displacing, and the marker says
+                 * so) and put N CPT on the freed 5th line. */
+                uint8_t nl4 = memlcd_couper_8(m->coffre_label, 4, lbl);
+                for (uint8_t i = 0; i < nl4; i++) strcpy(lines[1 + i], lbl[i]);
+                for (uint8_t i = nl4; i < 4; i++) lines[1 + i][0] = '\0';
+                strcpy(lines[5], cpt);
+            }
         }
-        strcpy(lines[5], "OK ?");
         return true;
     }
     if (m->coffre_code_visible) {
-        strncpy(lines[0], m->coffre_nom, MEMLCD_ETAT_BUF - 1); lines[0][MEMLCD_ETAT_BUF - 1] = '\0';
-        /* line 1 stays empty. digits is 6 or 8 only (chest_code_decode's own
-         * contract) — the code string's length says which. */
+        /* The account name gets TWO lines (review M-a): a single truncated
+         * line was silently losing names longer than 8 characters
+         * ("OVH:PERSO" already does not fit one line). */
+        char nm[2][MEMLCD_ETAT_BUF];
+        memlcd_couper_8(m->coffre_nom, 2, nm);
+        strcpy(lines[0], nm[0]);
+        strcpy(lines[1], nm[1]);
+        /* digits is 6 or 8 only (chest_code_decode's own contract) — the
+         * code string's length says which. */
         if (strlen(m->coffre_code) == 8) {
             memcpy(lines[2], m->coffre_code, 4); lines[2][4] = '\0';
             strcpy(lines[3], m->coffre_code + 4);

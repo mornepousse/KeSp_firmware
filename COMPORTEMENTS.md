@@ -762,37 +762,66 @@ means a test, or a line.
   wrong struct field (added after the chest found a RESET path publishing
   op_count 1 to the wire while the contract and V16 said 12 — the vectors
   alone proved the parser, never that the screen showed it):
-  - prompt (an operation is pending): line 0 the op label (`chest_op_label`),
-    then the CHEST's OWN label (register 0x14) cut into up to 4 UNSCII lines
-    of 8 characters — NEVER the OATH browser's cursor name, even when an op
-    is pending while the cursor sits on a different, named account (V1: op
-    9 named GITHUB, cursor moved to OVH:PRO — the prompt still reads
-    GITHUB); `N CPT` when more than one account is targeted (V16: op_count
-    12, label "12 COMPTES" — both the digit and the words reach the
-    screen), appended after the label when room is left, replacing its
-    last line when all 4 are already used; last line `OK ?`;
+  - prompt (an operation is pending, beats a simultaneously-visible code —
+    review I3): line 0 folds the op label AND the confirmation question
+    into one line, `"<chest_op_label> ?"` ("TOTP ?", "RESET! ?", "OP 42 ?"
+    — every op label is <= 6 characters, `+2` for `" ?"` always fits the 8
+    UNSCII columns, walked by `test_prompt_op_fits_with_the_question_mark`
+    over the whole op range); lines 1-5 the CHEST's OWN label (register
+    0x14) cut into up to 5 UNSCII lines of 8 characters (`5 * 8 = 40 >=
+    CHEST_LABEL_MAX (34)`: a label at the chest's own maximum length is
+    NEVER cut in the common case — review C1, fixing a bug where two
+    labels differing only past character 32 rendered identically, since
+    the old layout spent a whole dedicated line on a bare "OK ?" and
+    therefore capped the label at 4 lines) — NEVER the OATH browser's
+    cursor name, even when an op is pending while the cursor sits on a
+    different, named account (V1: op 9 named GITHUB, cursor moved to
+    OVH:PRO — the prompt still reads GITHUB); `N CPT` when more than one
+    account is targeted (V16: op_count 12, label "12 COMPTES" — both the
+    digit and the words reach the screen), appended right after the label
+    when it used 4 lines or fewer (review I1: the WHOLE label still shows,
+    `N CPT` never silently displaces any of it), or — only once the label
+    needed every one of the 5 lines (33 or 34 characters) — the label is
+    RE-CUT to 4 lines with the `~` marker and `N CPT` takes the freed 5th
+    line (the marker stays visible: what's displaced is shown to be
+    displaced, never silently);
   - a label/name longer than its budget is cut hard at 8 characters per
-    line (untrusted, sanitized text — no word-awareness), the last shown
-    line's last character replaced with `~` so a cut is never silent
-    (UNSCII has no ellipsis glyph);
+    line (untrusted, sanitized text — no word-awareness; `memlcd_couper_8`
+    bounds its scan with `strnlen(s, CHEST_LABEL_MAX)`, not `strlen`,
+    since this is untrusted text one hop removed from the wire — review
+    M-b), the last shown line's last character replaced with `~` so a cut
+    is never silent (UNSCII has no ellipsis glyph);
   - code visible (after `K_OATH_CODE` AND `K_SEC_CONFIRM`, the account
     still under the cursor — chest_oath's own gate, re-proven here end to
-    end): the account name, the code (6 digits on one line, 8 split 4+4),
-    and a countdown in whole seconds ROUNDED UP (never 0 while still
-    shown) — gone at the deadline, gone on the first navigation key, never
-    refreshed on its own;
+    end): the account name over TWO lines (review M-a: a single truncated
+    line was silently losing names over 8 characters, e.g. "OVH:PERSO"),
+    the code (6 digits on one line, 8 split 4+4), and a countdown in whole
+    seconds ROUNDED UP (never 0 while still shown) — gone at the deadline,
+    gone on the first navigation key, never refreshed on its own, and
+    BOUNDED even if the transport stalls (`chest_view_age`, review I2,
+    below);
   - browsing (OATH active, a page cached, nothing pending/shown): the
     cursor's 1-based position over the total, the account name, and
     `NO TIME` in place of the code hint whenever the chest's TIME_VALID bit
     is clear (V15) — never shown once the bit is set, even with the exact
     same op/label/active-mode shape otherwise (contrast against V1).
-  - Countdown cadence note: `coffre_code_secs` changes at most once a
-    second while a code is visible (<= 30 s window) — this rides the
-    memlcd halves' EXISTING 1 s status/LVGL tick
-    (`STATUS_DISP_PERIODE_MS`/`LVGL_REFR_MS`, `cadence.h`), no new faster
-    periodic wait is introduced, so the tickless-sleep rule (nothing below
-    `CADENCE_REPOS_MIN_MS`) is unaffected — only more of the already
-    scheduled ticks produce a real redraw during that window.
+  - Countdown cadence note (corrected, review M-e): the memlcd halves'
+    display-refresh cadence is `status_disp_periode_ms()` (`cadence.h`) —
+    1000 ms at rest, but 100 ms whenever USB is present (`STATUS_DISP_USB_MS`),
+    since a USB-powered half has no rest cadence to protect and follows the
+    typing; the chest link task itself only rebuilds the view every
+    `CHEST_POLL_MS` (250 ms, `chest_link.c`) or on a GPIO46 IRQ. Neither
+    number changed for this review round, and `chest_view_age()` (I2)
+    introduces NO new periodic wait of its own: it runs INLINE inside the
+    already-scheduled `lire_modele()` call, at whatever cadence the caller
+    already uses (100 ms on USB, 1000 ms on battery) — it is a pure
+    computation on already-read data, not a new task or timer. Net effect:
+    `coffre_code_secs` can now change (and trigger a real redraw via
+    `memlcd_model_diff`) as often as the EXISTING refresh cadence allows
+    (100 ms on USB, 1000 ms at rest) rather than only on the chest link
+    task's own ~250 ms read cadence — more frequent while a code is visible
+    (<= 30 s window), never a new periodic wait, so the tickless-sleep rule
+    (nothing below `CADENCE_REPOS_MIN_MS`) is unaffected.
   - `chest_link.c` (transport) builds the view with `chest_view_build()`
     every read round and copies the result under a critical section
     (`s_view_mux`) for the display task to read — no field is filled by
@@ -802,10 +831,28 @@ means a test, or a line.
     ARRIVED, and the OATH model (`s_oath`) stays statically reset (never
     fed a LIST/CODE) — honest, minimal stand-ins, not a claim that a
     switch or a browse is in flight. On today's bench this means: the
-    prompt (chest label, `N CPT`, `OK ?`) and the mode line's upper-case
-    ACTIVE name are real; the mode line's lower-case PENDING/`ERR` cases,
-    browsing, and the code/countdown are exercised only by the host tests
-    above until Task 6 lands.
+    prompt (chest label, `N CPT`, the folded `"<op> ?"` line) and the mode
+    line's upper-case ACTIVE name are real; the mode line's lower-case
+    PENDING/`ERR` cases, browsing, and the code/countdown are exercised
+    only by the host tests above until Task 6 lands.
+  - review I2, bounding a stale code: `memlcd_backend.c`'s `lire_modele()`
+    calls `chest_view_age(&v, esp_timer_get_time() / 1000)` on the view
+    snapshot right after `chest_link_view(&v)`, BEFORE mapping it into the
+    model (`memlcd_model_set_coffre`, review M-c — the same pure mapping
+    function now used by both the backend and the host tests instead of
+    each hand-rolling its own copy). Without this, a code could stay on
+    the panel past its deadline for as long as the transport keeps
+    failing to read the chest (`chest_task`'s `continue` on a bus-busy/
+    corrupt/absent round skips `chest_view_build()` entirely, so the OLD
+    code only re-evaluated `code_visible` on a round that actually got
+    that far): `chest_view_age` ages the FROZEN SNAPSHOT on the display
+    task's own clock read instead, independently of whether the link task
+    ever reads the chest again — same millisecond clock both sides use
+    (`esp_timer_get_time() / 1000`), same round-up rule as
+    `chest_oath_code_visible` (`(remaining_ms + 999) / 1000`), wrap-safe.
+    A visible code still SURVIVES one CORRUPT/ABSENT round on its own
+    (armed on the live `chest_oath_t`, untouched by a transport hiccup —
+    review M-d) but is always bounded by its real deadline regardless.
 
 ## Chest link (Niphar_chest)
 

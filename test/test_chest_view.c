@@ -191,6 +191,118 @@ static void test_view_code_lifecycle(void)
     TEST_ASSERT(!v.code_visible, "stays gone (chest_oath_code_visible latches false)");
 }
 
+/* review I2: a code shown on the panel could stay there past its deadline,
+ * unbounded, whenever the transport stalls (rf_bus_lock kept failing,
+ * chest_view_build() only being called on a round the link task actually
+ * gets a fresh status for). chest_view_age() ages a SNAPSHOT in place, on
+ * the display side's own clock read, independently of the transport. */
+static void test_view_age_expires_and_rounds_up(void)
+{
+    chest_code_t c;
+    TEST_ASSERT(chest_code_decode(C1, sizeof C1, &c), "C1 decodes");
+    chest_list_t page; memset(&page, 0, sizeof page);
+    page.total = 1; page.count = 1; page.e[0].index = 5; strcpy(page.e[0].name, "WORK");
+    chest_oath_t o;
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &page);
+    chest_oath_code_requested(&o, 5);
+    chest_oath_on_code(&o, &c, 1000);   /* C1: 12 s window -> deadline 13000 */
+
+    chest_block_t blk;
+    chest_status_t st = parse(V1, &blk);
+    chest_view_t v;
+    chest_view_build(&v, blk, &st, st.active_mode, CHEST_MODE_ARRIVED, &o, 1000);
+    TEST_ASSERT(v.code_visible, "visible at t0");
+    TEST_ASSERT_EQ(v.code_deadline_ms, 13000u, "the view carries the SAME deadline chest_oath computed");
+
+    /* Age the FROZEN snapshot directly — no further chest_view_build call,
+     * proving chest_view_age alone (not a fresh build) is what expires it. */
+    chest_view_t v_500ms_left = v;
+    chest_view_age(&v_500ms_left, 12500);
+    TEST_ASSERT(v_500ms_left.code_visible, "aged at t=12500 (500 ms left): still visible");
+    TEST_ASSERT_EQ(v_500ms_left.code_secs, 1, "500 ms rounds UP to 1 s, never 0 while still shown");
+
+    chest_view_t v_at_deadline = v;
+    chest_view_age(&v_at_deadline, 13000);
+    TEST_ASSERT(!v_at_deadline.code_visible, "aged at t=13000 (the deadline): no code");
+    TEST_ASSERT(v_at_deadline.code[0] == '\0', "the code text is cleared too, not just the flag");
+    TEST_ASSERT_EQ(v_at_deadline.code_secs, 0, "the countdown is cleared too");
+}
+
+/* Same wrap-safety scrutiny as chest_oath_code_visible's own tests
+ * (test_chest_oath.c): a naive `now_ms >= code_deadline_ms` comparison can
+ * agree with the correct wrap-safe one on ONE side of a uint32 wrap by
+ * accident — querying from the OTHER side (now_ms numerically large,
+ * chronologically before a deadline that has already wrapped to a small
+ * number) is what actually discriminates them. chest_view_age has its OWN
+ * copy of the wrap-safe subtraction (it does not call chest_oath at all,
+ * by design — see its header comment), so it needs its own proof. */
+static void test_view_age_wraps_uint32(void)
+{
+    chest_code_t c;
+    TEST_ASSERT(chest_code_decode(C1, sizeof C1, &c), "C1 decodes");
+    chest_list_t page; memset(&page, 0, sizeof page);
+    page.total = 1; page.count = 1; page.e[0].index = 5; strcpy(page.e[0].name, "WORK");
+    chest_oath_t o;
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &page);
+    chest_oath_code_requested(&o, 5);
+    chest_oath_on_code(&o, &c, 0xFFFFF000u);   /* deadline wraps to 0x1EE0, same vector as test_chest_oath's own wrap tests */
+
+    chest_block_t blk;
+    chest_status_t st = parse(V1, &blk);
+    chest_view_t v;
+    chest_view_build(&v, blk, &st, st.active_mode, CHEST_MODE_ARRIVED, &o, 0xFFFFF000u);
+    TEST_ASSERT(v.code_visible, "captured at arming time: visible");
+    TEST_ASSERT_EQ(v.code_deadline_ms, 0x1EE0u, "the deadline snapshot itself wrapped, same as chest_oath's own");
+
+    chest_view_t v1 = v;
+    chest_view_age(&v1, 0x00001000u);
+    TEST_ASSERT(v1.code_visible, "aged just after the wrap, before the wrapped deadline: still visible");
+
+    chest_view_t v2 = v;
+    chest_view_age(&v2, 0x00002000u);
+    TEST_ASSERT(!v2.code_visible, "aged at/after the wrapped deadline: gone");
+
+    /* From the OTHER side of the wrap: now_ms still numerically large
+     * (0xFFFFFFF0), chronologically ~7.92 s before the (already-wrapped)
+     * deadline — the case a naive comparison gets wrong. */
+    chest_view_t v3 = v;
+    chest_view_age(&v3, 0xFFFFFFF0u);
+    TEST_ASSERT(v3.code_visible, "aged from BEFORE the wrap, numerically far past the wrapped deadline: still visible");
+}
+
+/* review M-d: a visible code must survive a CORRUPT or ABSENT round (a
+ * transport hiccup, not a real navigation/expiry event) — it is armed on
+ * the live chest_oath_t, which chest_view_build does not touch differently
+ * depending on `blk`. It still ages out on time regardless (I2). */
+static void test_view_code_survives_corrupt_round_then_ages_out(void)
+{
+    chest_code_t c;
+    TEST_ASSERT(chest_code_decode(C1, sizeof C1, &c), "C1 decodes");
+    chest_list_t page; memset(&page, 0, sizeof page);
+    page.total = 1; page.count = 1; page.e[0].index = 5; strcpy(page.e[0].name, "WORK");
+    chest_oath_t o;
+    chest_oath_reset(&o);
+    chest_oath_on_list(&o, &page);
+    chest_oath_code_requested(&o, 5);
+    chest_oath_on_code(&o, &c, 1000);   /* deadline 13000 */
+
+    chest_status_t bad = {0};
+    chest_view_t v;
+    chest_view_build(&v, CHEST_BLOCK_CORRUPT, &bad, 0, CHEST_MODE_ARRIVED, &o, 1500);
+    TEST_ASSERT(v.code_visible, "code survives a CORRUPT round");
+    TEST_ASSERT(strcmp(v.code, "418902") == 0, "code text intact through a CORRUPT round");
+
+    chest_view_build(&v, CHEST_BLOCK_ABSENT, &bad, 0, CHEST_MODE_ARRIVED, &o, 2000);
+    TEST_ASSERT(v.code_visible, "code survives an ABSENT round too");
+
+    /* Still bounded: ages out on time via chest_view_age, whether or not
+     * the transport ever reads the chest again. */
+    chest_view_age(&v, 13000);
+    TEST_ASSERT(!v.code_visible, "still ages out on time regardless of the transport (I2)");
+}
+
 void test_chest_view(void)
 {
     TEST_SUITE("chest link screen view (S3 master, v3, bytes -> pixels)");
@@ -201,4 +313,7 @@ void test_chest_view(void)
     TEST_RUN(test_view_v9_has_nothing_to_show_either_way);
     TEST_RUN(test_view_v15_no_time_while_browsing);
     TEST_RUN(test_view_code_lifecycle);
+    TEST_RUN(test_view_age_expires_and_rounds_up);
+    TEST_RUN(test_view_age_wraps_uint32);
+    TEST_RUN(test_view_code_survives_corrupt_round_then_ages_out);
 }

@@ -285,14 +285,18 @@ static void lire_modele(memlcd_model_t *m)
     m->caps_lock   = !m->route_rf && (hid_led_state & HID_LED_CAPS_LOCK);
 #if CONFIG_KASE_CHEST_LINK
     { chest_view_t v; chest_link_view(&v);
-      m->coffre = v.bits; m->coffre_op = v.op; m->coffre_op_count = v.op_count;
-      strncpy(m->coffre_label, v.label, sizeof m->coffre_label - 1); m->coffre_label[sizeof m->coffre_label - 1] = '\0';
-      m->coffre_mode_active = v.mode_active; m->coffre_mode_wanted = v.mode_wanted; m->coffre_mode_state = v.mode_state;
-      m->coffre_browsing = v.browsing; m->coffre_pos = v.pos; m->coffre_total = v.total;
-      strncpy(m->coffre_nom, v.name, sizeof m->coffre_nom - 1); m->coffre_nom[sizeof m->coffre_nom - 1] = '\0';
-      m->coffre_code_visible = v.code_visible;
-      strncpy(m->coffre_code, v.code, sizeof m->coffre_code - 1); m->coffre_code[sizeof m->coffre_code - 1] = '\0';
-      m->coffre_code_secs = v.code_secs; }
+      /* Ages the SNAPSHOT on our own clock read before mapping it into the
+       * model (review I2): the link task only rebuilds the view on a round
+       * it actually gets to read the chest (chest_task's `continue` skips
+       * chest_view_build entirely on a bus-busy/corrupt/absent round), so a
+       * visible code could otherwise stay frozen on the panel long past its
+       * real deadline whenever reads stall. chest_view_age is pure and
+       * wrap-safe; esp_timer_get_time()/1000 is the SAME millisecond clock
+       * chest_link.c's own round uses for `now` (chest_task, `now =
+       * (uint32_t)(esp_timer_get_time() / 1000)`) — the two must agree for
+       * the deadline comparison to mean anything. */
+      chest_view_age(&v, (uint32_t)(esp_timer_get_time() / 1000));
+      memlcd_model_set_coffre(m, &v); }
 #endif
 #else
     m->is_left   = 0;

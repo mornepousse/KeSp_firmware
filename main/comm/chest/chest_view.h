@@ -36,6 +36,13 @@ typedef struct {
     bool     code_visible;
     char     code[9];                    /* 6 or 8 digits, NUL-terminated */
     uint8_t  code_secs;                  /* whole seconds left, rounded up (chest_oath_code_visible) */
+    /* Snapshot of the OATH model's own deadline (chest_oath_t.code_deadline_ms)
+     * at the moment code_visible was last set true — carried into the view so
+     * a caller holding only a chest_view_t snapshot (no access to the live
+     * chest_oath_t, e.g. the display task) can still age the code out on its
+     * OWN clock reads, independently of whether the transport ever reads the
+     * chest again (chest_view_age, below). Meaningless while !code_visible. */
+    uint32_t code_deadline_ms;
 } chest_view_t;
 
 /* Pure builder, called once per read round.
@@ -56,3 +63,23 @@ typedef struct {
 void chest_view_build(chest_view_t *v, chest_block_t blk, const chest_status_t *st,
                       uint8_t mode_wanted, uint8_t mode_state,
                       chest_oath_t *o, uint32_t now_ms);
+
+/* Ages a VIEW SNAPSHOT in place, without needing the live chest_oath_t or a
+ * fresh read round — fixes a stale code that could otherwise stay on the
+ * panel past its deadline, unbounded, whenever the transport stalls
+ * (rf_bus_lock kept failing, a run of CORRUPT/ABSENT blocks…): the old
+ * design only re-evaluated code_visible inside chest_view_build(), which the
+ * link task calls only on a round it actually got to build a view for. The
+ * display task calls this on ITS OWN clock read, every time it re-reads the
+ * view (chest_link_view()), so the code always expires on wall time — never
+ * later than its real deadline, whatever the transport is doing.
+ *
+ * Wrap-safe and rounds up EXACTLY like chest_oath_code_visible (same
+ * (remaining_ms + 999) / 1000 formula, deliberately duplicated rather than
+ * shared: this function has no chest_oath_t to call it on, only the view's
+ * own uint32_t snapshot). A no-op when !v->code_visible. Once the deadline
+ * has passed: code_visible, code and code_secs are all cleared — for good,
+ * like chest_oath_code_visible, a later call with an EARLIER now_ms never
+ * resurrects it (chest_view_build is what re-arms code_visible, from a
+ * fresh chest_oath_t answer, never this function). */
+void chest_view_age(chest_view_t *v, uint32_t now_ms);

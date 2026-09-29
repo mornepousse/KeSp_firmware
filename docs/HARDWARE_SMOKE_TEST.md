@@ -187,19 +187,25 @@ in the PR/release.
       "SD" (card in), the USB mode line ("PGP" upper case once a mode is
       mounted — the lower-case PENDING and "ERR" cases need Task 6's mode
       transport, not bench-checkable yet); `gpg --card-status`, then
-      `echo t | gpg --sign` → the prompt's SECOND line reads the account's
-      REAL label from the chest (not a placeholder), over "OK ?", a press on
-      K_SEC_CONFIRM signs; no press → 6985 after 15 s and the prompt goes;
+      `echo t | gpg --sign` → line 0 reads "SIGN ?" (the op and the
+      confirmation question folded into one line, review C1) and the lines
+      below it read the account's REAL label from the chest (not a
+      placeholder), a press on K_SEC_CONFIRM signs; no press → 6985 after
+      15 s and the prompt goes;
       radio and screen keep working meanwhile; unplug USB → status gone; on
       battery the sleep current is unchanged (GPIO3 released).
 - [ ] Chest bottom-area panel, what only the physical screen shows (host
-      tests pin the STRINGS, not whether they FIT the 68x160 panel): with a
-      long account label pending (5+ characters over one UNSCII-8 line),
-      confirm the prompt's label lines are legible and, if the label is cut,
-      the trailing `~` is a distinct visible glyph, not confused with
-      another character; confirm every character actually used by the panel
-      is present in the compiled-in UNSCII-8 font — digits, upper-case
-      letters, space, `~`, `/`, `?` (`OK ?`, `NO TIME`, `i/total`, the `~`
+      tests pin the STRINGS, not whether they FIT the 68x160 panel): with an
+      account label near the chest's 34-character maximum pending, confirm
+      line 0 reads `"<op> ?"` (the confirmation question folded into the op
+      line, e.g. "TOTP ?" — no separate "OK ?" line any more, review C1)
+      and the label spans up to 5 legible lines below it, using the WHOLE
+      length rather than stopping early; if the label is cut (only when `N
+      CPT` also needs a line), the trailing `~` is a distinct visible
+      glyph, not confused with another character; confirm every character
+      actually used by the panel is present in the compiled-in UNSCII-8
+      font — digits, upper-case letters, space, `~`, `/`, `?`, `:` (`TOTP
+      ?`, `NO TIME`, `i/total`, an account name like `OVH:PERSO`, the `~`
       cut marker) — none render as a blank/tofu box; confirm the six bottom
       lines never visually overlap the top-of-screen chest status (P4/SD/
       mode) nor run off the bottom edge of the 160 px panel. (OATH browsing

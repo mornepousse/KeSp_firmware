@@ -181,6 +181,13 @@ add_executable(test_chest_sanitized
     test_chest_view.c
     ../main/comm/chest/chest_view.c
     ../main/security/cr_crc16.c
+    # test_memlcd_model.c (review M-f, 2026-09-29): pure header-only logic
+    # (memlcd_model.h — memlcd_couper_8/memlcd_bas_coffre index caller-sized
+    # stack arrays the same way chest_dma.c's LIST decoder does), and all of
+    # its OWN dependencies (chest_op_label/chest_mode_label from
+    # chest_proto.c, chest_view_build/chest_view_age from chest_view.c) are
+    # already sources of this binary — no new ones needed.
+    test_memlcd_model.c
     test_main_chest_sanitized.c
 )
 
