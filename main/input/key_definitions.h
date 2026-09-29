@@ -421,6 +421,7 @@ static const uint16_t TO_L9 = 0x1400;
  * process_advanced_key dispatch, avoids int16_t sign issues of >=0x8000) */
 #define K_SEC_BASE                   0x3E00
 #define K_SEC_CONFIRM                0x3E00  /* authorize a pending CR request */
+#define K_CHEST_NEXT                 0x3E01  /* cycle the Niphar_chest USB mode (none->storage->pgp->otp->fido->oath) */
 #define K_IS_SEC(kc)                 (((kc) & 0xFF00) == K_SEC_BASE)
 #define K_SEC_TYPE(kc)               ((kc) & 0xFF)
 

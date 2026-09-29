@@ -116,6 +116,8 @@ add_executable(test_runner
     test_main.c
 )
 
+target_compile_definitions(test_runner PRIVATE SEC_CONFIRM_LOCAL_COLS=4)
+
 target_include_directories(test_runner PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../boards/kase_v2_debug

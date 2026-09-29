@@ -92,7 +92,7 @@ static void go_absent(void)
         s_dev = NULL;
     }
     cs_release();
-    chest_gate_publish(0);
+    chest_gate_publish(0, 0);
     s_confirm.armed = false;
     s_view = 0; s_view_op = 0;
     s_badver_logged = 0; s_corrupt_logged = 0;   /* once-per-presence-session logs, next session starts fresh */
@@ -116,7 +116,7 @@ static void chest_task(void *arg)
          * reboot -> ABSENT, CORRUPT, BAD_VERSION, a bus-busy skipped read)
          * and confirm a different op at the next OK block (review Important,
          * 2026-09-29). Matched against the CURRENT chest state below. */
-        uint16_t pressed = chest_gate_take_press();
+        uint32_t pressed = chest_gate_take_press();
 
         if (s_want && !s_dev) {
             if (!dev_add()) { ESP_LOGE(TAG, "spi_bus_add_device failed"); continue; }
@@ -136,23 +136,23 @@ static void chest_task(void *arg)
         case CHEST_BLOCK_OK:
             s_view = CHEST_VIEW_PRESENT | (st.state & 0x07);
             s_view_op = st.pending_op;
-            chest_gate_publish(st.pending_op);
-            if (chest_press_matches(CHEST_TAG(pressed, st.instance), blk, &st)) chest_confirm_request(&s_confirm, &st, now);
+            chest_gate_publish(st.pending_op, st.instance);
+            if (chest_press_matches(pressed, blk, &st)) chest_confirm_request(&s_confirm, &st, now);
             if (chest_confirm_step(&s_confirm, &st, now)) write_confirm();
             break;
         case CHEST_BLOCK_BAD_VERSION:
             if (!s_badver_logged) { ESP_LOGW(TAG, "chest speaks protocol %u, we speak %u: ignored", s_rx[4], CHEST_PROTO_VERSION); s_badver_logged = 1; }
             s_view = CHEST_VIEW_PRESENT | CHEST_VIEW_BADVER; s_view_op = 0;
-            chest_gate_publish(0);
+            chest_gate_publish(0, 0);
             break;
         case CHEST_BLOCK_CORRUPT:
             if (!s_corrupt_logged) { ESP_LOGW(TAG, "chest block corrupt (magic/CRC/short read): ignored"); s_corrupt_logged = 1; }
             s_view = 0; s_view_op = 0;
-            chest_gate_publish(0);
+            chest_gate_publish(0, 0);
             break;
         default:   /* CHEST_BLOCK_ABSENT: booting or unpowered, the ordinary case, never logged */
             s_view = 0; s_view_op = 0;
-            chest_gate_publish(0);
+            chest_gate_publish(0, 0);
             break;
         }
     }

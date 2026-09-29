@@ -25,6 +25,10 @@
 #include "chest_gate.h"
 #include "esp_log.h"
 
+#ifndef SEC_CONFIRM_LOCAL_COLS
+#define SEC_CONFIRM_LOCAL_COLS MATRIX_COLS   /* host tests override it (test/CMakeLists.txt) */
+#endif
+
 static const char *TAG = "KEY_PROC";
 
 /* ── State ───────────────────────────────────────────────────────── */
@@ -281,11 +285,14 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
      * host could chain sign+decrypt+auth on a single hold). One tap = one
      * authorization, like the K_TAMA_* actions below. (Pentest 2026-06-25.) */
     if (kc == K_SEC_CONFIRM) {
-        /* A chest operation pending takes the press (spec 2026-09-29 §5);
-         * otherwise the local gate, as before. One press, one destination. */
-        if (is_new_press(row, col) && !chest_gate_press()) sec_confirm_authorize();
+        /* Left half only (Mae, 2026-09-29): a remote column arrived over the
+         * unauthenticated inter-half radio — it confirms nothing. Then a chest
+         * op pending takes the press; otherwise the local gate. */
+        if (is_new_press(row, col) && sec_confirm_from_local(col, SEC_CONFIRM_LOCAL_COLS, KEYMAP_COLS)
+            && !chest_gate_press()) sec_confirm_authorize();
         return 0;
     }
+    if (kc == K_CHEST_NEXT) { if (is_new_press(row, col)) chest_gate_mode_next(); return 0; }
     if (kc == K_LAYER_LOCK){ layer_lock_toggle(); return 0; }
     if (kc == K_DISP_NEXT) { if (is_new_press(row, col)) km_post_display_next(); return 0; }
     /* K_TAMA_* (0x3500-0x3800): keycodes kept (shared with KaSe_soft) but

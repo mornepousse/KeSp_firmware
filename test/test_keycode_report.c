@@ -42,6 +42,7 @@
 #define T_OSL_1  0x3101u   /* K_OSL(1) = K_OSL_BASE | 1 */
 #define T_MOD_LSFT 0x02u   /* MOD_LSFT */
 #define T_K_SEC_CONFIRM 0x3E00u
+#define T_K_CHEST_NEXT  0x3E01u
 
 /* ── Definitions of all extern globals required by key_processor.c ── */
 
@@ -190,8 +191,9 @@ static void reset_kp_state(void)
     (void)key_processor_consume_macro();
 
     /* Chest gate: nothing pending, no stray press left over from a prior test. */
-    chest_gate_publish(0);
+    chest_gate_publish(0, 0);
     (void)chest_gate_take_press();
+    (void)chest_gate_take_mode_next();
 
     /* Two idle cycles to flush prev_press_row/col and prev_shift_pressed */
     build_keycode_report();
@@ -542,7 +544,7 @@ static void test_kp_sec_confirm_routes_to_chest(void)
     reset_kp_state();
     sec_confirm_reset();
     sec_confirm_arm(2, 0);                 /* a local request exists too */
-    chest_gate_publish(1);                 /* chest: SIGN pending */
+    chest_gate_publish(1, 0);                 /* chest: SIGN pending */
     keymaps[0][0][0] = T_K_SEC_CONFIRM;
     press_key(0, 0, 0);
     build_keycode_report();
@@ -551,14 +553,14 @@ static void test_kp_sec_confirm_routes_to_chest(void)
     uint8_t slot = 0xFF;
     TEST_ASSERT(sec_confirm_poll(1, &slot) != SEC_CONFIRM_AUTHORIZED, "local gate NOT authorized");
     TEST_ASSERT_EQ(keycodes[0], 0, "absorbed");
-    chest_gate_publish(0);
+    chest_gate_publish(0, 0);
 }
 
 /* Held key: one press, not one per scan (review focus). */
 static void test_kp_sec_confirm_held_confirms_chest_once(void)
 {
     reset_kp_state();
-    chest_gate_publish(1);
+    chest_gate_publish(1, 0);
     keymaps[0][0][0] = T_K_SEC_CONFIRM;
     press_key(0, 0, 0);
     build_keycode_report();
@@ -566,7 +568,7 @@ static void test_kp_sec_confirm_held_confirms_chest_once(void)
     build_keycode_report();
     TEST_ASSERT_EQ(chest_gate_take_press(), 1, "first cycle queues (op 1)");
     TEST_ASSERT_EQ(chest_gate_take_press(), 0, "held key does not queue again");
-    chest_gate_publish(0);
+    chest_gate_publish(0, 0);
 }
 
 /* Security invariant: only a NEW physical press may confirm — a chest op
@@ -577,16 +579,16 @@ static void test_kp_sec_confirm_held_confirms_chest_once(void)
 static void test_kp_sec_confirm_held_before_chest_op_does_not_confirm(void)
 {
     reset_kp_state();
-    chest_gate_publish(0);
+    chest_gate_publish(0, 0);
     keymaps[0][0][0] = T_K_SEC_CONFIRM;
     press_key(0, 0, 0);
     build_keycode_report();                /* new press, nothing pending: goes to the local gate */
 
-    chest_gate_publish(1);                 /* op arrives while the key is STILL held */
+    chest_gate_publish(1, 0);                 /* op arrives while the key is STILL held */
     build_keycode_report();
     build_keycode_report();                /* no release, no new press */
     TEST_ASSERT_EQ(chest_gate_take_press(), 0, "a chest op arriving mid-hold is not confirmed by the held key");
-    chest_gate_publish(0);
+    chest_gate_publish(0, 0);
 }
 
 /* chest_gate_press() stores the op it SAW at press time, not a live pointer
@@ -598,19 +600,72 @@ static void test_kp_sec_confirm_held_before_chest_op_does_not_confirm(void)
 static void test_kp_sec_confirm_press_records_the_seen_op(void)
 {
     reset_kp_state();
-    chest_gate_publish(7);                 /* chest: OATH_CODE pending */
+    chest_gate_publish(7, 0);                 /* chest: OATH_CODE pending */
     keymaps[0][0][0] = T_K_SEC_CONFIRM;
     press_key(0, 0, 0);
     build_keycode_report();
     TEST_ASSERT_EQ(chest_gate_take_press(), 7, "press records the op seen at press time");
 
-    chest_gate_publish(0);                 /* the chest cleared its op */
+    chest_gate_publish(0, 0);                 /* the chest cleared its op */
     release_all_keys();
     build_keycode_report();                /* release cycle */
     press_key(0, 0, 0);
     build_keycode_report();                /* new press, nothing pending: local gate */
     TEST_ASSERT_EQ(chest_gate_take_press(), 0, "nothing pending: goes to the local gate, not the chest");
-    chest_gate_publish(0);
+    chest_gate_publish(0, 0);
+}
+
+/* The press carries the ARMING seen on screen, not just the op code. */
+static void test_kp_sec_confirm_records_the_instance(void)
+{
+    reset_kp_state();
+    chest_gate_publish(1, 7);
+    keymaps[0][0][0] = T_K_SEC_CONFIRM;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT_EQ(chest_gate_take_press(), CHEST_TAG(1, 7), "op 1 instance 7 recorded");
+    chest_gate_publish(0, 0);
+}
+
+/* Left half only: a K_SEC_CONFIRM at a remote (right-half) column reaches
+ * neither the chest nor the local gate. The host build sets
+ * SEC_CONFIRM_LOCAL_COLS=4 so columns >= 4 are "remote". */
+static void test_kp_sec_confirm_ignored_from_the_right_half(void)
+{
+    reset_kp_state();
+    sec_confirm_reset();
+    sec_confirm_arm(2, 0);
+    chest_gate_publish(1, 3);
+    keymaps[0][0][5] = T_K_SEC_CONFIRM;
+    press_key(0, 0, 5);
+    build_keycode_report();
+    TEST_ASSERT_EQ(chest_gate_take_press(), 0, "no chest press from the right half");
+    uint8_t slot = 0xFF;
+    TEST_ASSERT(sec_confirm_poll(1, &slot) != SEC_CONFIRM_AUTHORIZED, "local gate not authorized either");
+    chest_gate_publish(0, 0);
+    keymaps[0][0][5] = 0;
+}
+
+static void test_kp_chest_next_requests_a_mode_change_once(void)
+{
+    reset_kp_state();
+    (void)chest_gate_take_mode_next();
+    keymaps[0][0][0] = T_K_CHEST_NEXT;
+    press_key(0, 0, 0);
+    build_keycode_report();
+    build_keycode_report();
+    TEST_ASSERT(chest_gate_take_mode_next(), "a new press requests the next mode");
+    TEST_ASSERT(!chest_gate_take_mode_next(), "a held key requests it once");
+    TEST_ASSERT_EQ(keycodes[0], 0, "absorbed, not typed");
+}
+
+static void test_sec_confirm_from_local(void)
+{
+    TEST_ASSERT(sec_confirm_from_local(0, 7, 14), "left col 0");
+    TEST_ASSERT(sec_confirm_from_local(6, 7, 14), "left col 6");
+    TEST_ASSERT(!sec_confirm_from_local(7, 7, 14), "right col 7");
+    TEST_ASSERT(!sec_confirm_from_local(13, 7, 14), "right col 13");
+    TEST_ASSERT(sec_confirm_from_local(12, 13, 13), "non-split board: every column");
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -821,6 +876,10 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_sec_confirm_held_confirms_chest_once);
     TEST_RUN(test_kp_sec_confirm_held_before_chest_op_does_not_confirm);
     TEST_RUN(test_kp_sec_confirm_press_records_the_seen_op);
+    TEST_RUN(test_kp_sec_confirm_records_the_instance);
+    TEST_RUN(test_kp_sec_confirm_ignored_from_the_right_half);
+    TEST_RUN(test_kp_chest_next_requests_a_mode_change_once);
+    TEST_RUN(test_sec_confirm_from_local);
     TEST_RUN(test_kp_macro_inline_injects_steps);
     TEST_RUN(test_kp_macro_empty_name_noop);
     TEST_RUN(test_kp_macro_delay_sets_pending);

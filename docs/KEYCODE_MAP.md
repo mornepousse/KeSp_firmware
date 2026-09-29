@@ -29,7 +29,8 @@ All hex values in CDC commands use **hex format** (e.g. `29` = 0x29 = ESC).
 | `0x3C00` | Auto Shift Toggle | Toggle auto-shift on/off | `K_AUTO_SHIFT_TOGGLE` |
 | `0x3D00-0x3DFF` | Key Override | Trigger key override slot | `K_OVERRIDE(n)` |
 | `0x3E00` | Security Confirm | Physical confirmation of a pending security operation (CR-HMAC gate; Niphar_chest OpenPGP/FIDO/OTP/OATH op on the Niphargus left). A new press only — a held key confirms once | `K_SEC_CONFIRM` |
-| `0x3E00-0x3EFF` | Security actions | Block reserved for security keys (`K_IS_SEC`); only `0x3E00` is defined today | `K_SEC_BASE` |
+| `0x3E01` | Chest Next | Cycle the Niphar_chest USB mode: none → storage → pgp → otp → fido → oath → none (Niphargus left) | `K_CHEST_NEXT` |
+| `0x3E00-0x3EFF` | Security actions | Block reserved for security keys (`K_IS_SEC`); `0x3E00` and `0x3E01` are defined | `K_SEC_BASE` |
 | `0x3F00` | Display Next | Cycle the idle OLED screen (HOME → STATS → TAMA) | `K_DISP_NEXT` |
 | `0x4000-0x4FFF` | Layer-Tap (LT) | `0x4000 \| (layer << 8) \| keycode` | `K_LT(2, Space)` = `0x422C` |
 | `0x5000-0x5FFF` | Mod-Tap (MT) | `0x5000 \| (mod << 8) \| keycode` | `K_MT(Shift, A)` = `0x5204` |

@@ -318,6 +318,14 @@ means a test, or a line.
   [test:chest_press_matches]. A press taken on a non-OK round (chest reboot,
   a corrupt block, a bad version, a skipped read) does not survive to the
   next OK block [test:test_kp_sec_confirm_press_records_the_seen_op].
+  The press carries the ARMING (instance) seen on screen at press time, not
+  just the op code [test:test_kp_sec_confirm_records_the_instance].
+  K_SEC_CONFIRM from the right half (a remote column, over the
+  unauthenticated inter-half radio) is ignored — it confirms neither the
+  chest nor the local gate [test:test_kp_sec_confirm_ignored_from_the_right_half]
+  [test:test_sec_confirm_from_local].
+  K_CHEST_NEXT requests the next chest USB mode once per physical press
+  [test:test_kp_chest_next_requests_a_mode_change_once].
 - [smoke:New board from the template] A board is one folder:
   `scripts/new-board.sh <name>` copies `boards/_template/` (board.h with the
   pin tables and `BOARD_PINS(X)`, keymap, layout, sdkconfig.defaults, README)
