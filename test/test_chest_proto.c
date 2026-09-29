@@ -10,6 +10,16 @@
 #include "../main/comm/chest/chest_proto.h"
 #include "../main/security/cr_crc16.h"
 
+/* Contract literals, pinned at compile time: a drift here is a wire-format
+ * break, not a runtime bug, and the build should say so before a test does.
+ * Values from Niphar_chest main/link/link_proto.h at cfd7b35. */
+_Static_assert(CHEST_DMA_MAX == 512, "CHEST_DMA_MAX must equal the chest's LINK_DMA_MAX");
+_Static_assert(CHEST_REG_REQ_SEQ == 0x3C, "CHEST_REG_REQ_SEQ must equal the chest's LINK_REG_REQ_SEQ (the doorbell)");
+_Static_assert(CHEST_REG_USER_CONFIRM == 0x38, "CHEST_REG_USER_CONFIRM must equal the chest's LINK_REG_USER_CONFIRM");
+_Static_assert(CHEST_REG_ECHO == 0x39, "CHEST_REG_ECHO must equal the chest's LINK_REG_CONFIRM_ECHO");
+_Static_assert(CHEST_REG_MODE_REQ == 0x3A, "CHEST_REG_MODE_REQ must equal the chest's LINK_REG_USB_MODE_REQ");
+_Static_assert(CHEST_LABEL_MAX == 34, "CHEST_LABEL_MAX must equal the chest's LINK_LABEL_MAX");
+
 /* Niphar_chest test/test_link_proto.c, commit cfd7b35 — copied verbatim, never edited. */
 
 /* V1 — nominal v3: a pending OATH code for GITHUB. SD + USB mounted + ready +
@@ -230,7 +240,9 @@ static void test_chest_v3_vectors_accepted(void)
 {
     chest_status_t s;
 
-    memset(&s, 0, sizeof s);
+    /* 0xAA, not 0: a dropped or misplaced NUL terminator must not hide
+     * behind a buffer that already reads as zero. */
+    memset(&s, 0xAA, sizeof s);
     TEST_ASSERT_EQ(chest_proto_parse(V1, 64, &s), CHEST_BLOCK_OK, "V1 nominal");
     TEST_ASSERT_EQ(s.version, 3, "V1 version 3");
     TEST_ASSERT_EQ(s.state, 0x0F, "V1 state: SD + mounted + ready + time valid");
@@ -348,12 +360,136 @@ static void test_chest_label_sanitized_and_terminated(void)
     b[CHEST_REG_CRC] = (uint8_t)(crc & 0xFF);
     b[CHEST_REG_CRC + 1] = (uint8_t)(crc >> 8);
 
-    memset(&s, 0, sizeof s);
+    memset(&s, 0xAA, sizeof s);
     TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_OK, "a non-printable label byte does not corrupt the block");
     TEST_ASSERT_EQ(s.label[0], 'G', "byte before is untouched");
     TEST_ASSERT_EQ(s.label[1], '?', "the non-printable byte is shown as '?'");
     TEST_ASSERT_EQ(memcmp(&s.label[2], "THUB", 4), 0, "the rest is untouched");
     TEST_ASSERT_EQ(s.label[6], '\0', "still NUL-terminated at label_len");
+}
+
+/* Review Focus boundary: label_len == CHEST_LABEL_MAX (34) must be OK, not
+ * CORRUPT — the one length that legitimately fills the whole field, edge to
+ * edge with no padding left. Catches `> CHEST_LABEL_MAX` weakened to
+ * `> CHEST_LABEL_MAX - 1`, which would refuse it. Not one of the chest's
+ * pinned vectors: built from V1 with label_len set to 34, the field filled
+ * with printable bytes, and the CRC recomputed. */
+static void test_chest_label_len_34_is_ok(void)
+{
+    uint8_t b[64];
+    chest_status_t s;
+    memcpy(b, V1, 64);
+    b[CHEST_REG_LABEL_LEN] = CHEST_LABEL_MAX;
+    for (uint8_t i = 0; i < CHEST_LABEL_MAX; i++)
+        b[CHEST_REG_LABEL + i] = (uint8_t)('A' + (i % 26));
+    uint16_t crc = cr_crc16(b, CHEST_REG_CRC_SPAN);
+    b[CHEST_REG_CRC] = (uint8_t)(crc & 0xFF);
+    b[CHEST_REG_CRC + 1] = (uint8_t)(crc >> 8);
+
+    memset(&s, 0xAA, sizeof s);
+    TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_OK, "label_len == CHEST_LABEL_MAX (34) is accepted, not corrupt");
+    TEST_ASSERT_EQ(s.label_len, CHEST_LABEL_MAX, "label_len decoded as 34");
+    TEST_ASSERT_EQ(s.label[33], (char)('A' + (33 % 26)), "last byte of a full-width label copied");
+    TEST_ASSERT_EQ(s.label[34], '\0', "NUL right after the last byte, still in bounds (array is CHEST_LABEL_MAX + 1)");
+}
+
+/* DMA fields decoded straight off their own offsets, not swapped and not
+ * truncated: kind=LIST, seq=7, len=0x0180 (384). Not one of the chest's
+ * vectors: built from V1 with the DMA fields patched and the CRC
+ * recomputed. */
+static void test_chest_dma_fields_decoded_from_regs(void)
+{
+    uint8_t b[64];
+    chest_status_t s;
+    memcpy(b, V1, 64);
+    b[CHEST_REG_DMA_KIND]     = CHEST_DMA_LIST;   /* 0x10 */
+    b[CHEST_REG_DMA_SEQ]      = 0x07;             /* 0x11 */
+    b[CHEST_REG_DMA_LEN]      = 0x80;             /* 0x12, LE low byte */
+    b[CHEST_REG_DMA_LEN + 1]  = 0x01;             /* 0x13, LE high byte: 0x0180 = 384 */
+    uint16_t crc = cr_crc16(b, CHEST_REG_CRC_SPAN);
+    b[CHEST_REG_CRC] = (uint8_t)(crc & 0xFF);
+    b[CHEST_REG_CRC + 1] = (uint8_t)(crc >> 8);
+
+    memset(&s, 0xAA, sizeof s);
+    TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_OK, "DMA-carrying block accepted");
+    TEST_ASSERT_EQ(s.dma_kind, CHEST_DMA_LIST, "dma_kind decoded — not swapped with dma_seq");
+    TEST_ASSERT_EQ(s.dma_seq, 7, "dma_seq decoded — not swapped with dma_kind");
+    TEST_ASSERT_EQ(s.dma_len, 384, "dma_len decoded little-endian — high byte not dropped");
+}
+
+/* A uniform block, either polarity, is ABSENT — the ordinary case (chest on
+ * battery, no chest wired at all), not a corruption. */
+static void test_chest_absent_blocks(void)
+{
+    uint8_t zero[64], ones[64];
+    chest_status_t s;
+    memset(zero, 0x00, sizeof zero);
+    memset(ones, 0xFF, sizeof ones);
+    TEST_ASSERT_EQ(chest_proto_parse(zero, 64, &s), CHEST_BLOCK_ABSENT, "64 zero bytes: absent");
+    TEST_ASSERT_EQ(chest_proto_parse(ones, 64, &s), CHEST_BLOCK_ABSENT, "64 0xFF bytes: absent");
+}
+
+/* An older version (2, and 1) must be refused specifically as BAD_VERSION,
+ * not silently accepted. Catches the version check's `!=` weakened to `>`,
+ * which would let anything below CHEST_PROTO_VERSION slip through as OK.
+ * Not one of the chest's vectors: built from V1 with the version byte
+ * lowered and the CRC recomputed. */
+static void test_chest_older_version_is_bad_version(void)
+{
+    uint8_t b[64];
+    chest_status_t s;
+
+    memcpy(b, V1, 64);
+    b[0x04] = 2;
+    uint16_t crc = cr_crc16(b, CHEST_REG_CRC_SPAN);
+    b[CHEST_REG_CRC] = (uint8_t)(crc & 0xFF);
+    b[CHEST_REG_CRC + 1] = (uint8_t)(crc >> 8);
+    TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_BAD_VERSION, "version 2 refused as BAD_VERSION");
+
+    memcpy(b, V1, 64);
+    b[0x04] = 1;
+    crc = cr_crc16(b, CHEST_REG_CRC_SPAN);
+    b[CHEST_REG_CRC] = (uint8_t)(crc & 0xFF);
+    b[CHEST_REG_CRC + 1] = (uint8_t)(crc >> 8);
+    TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_BAD_VERSION, "version 1 refused as BAD_VERSION");
+}
+
+/* Master-word offsets checked against the chest's OWN vectors
+ * (test/test_link_proto.c, cfd7b35, test_shared_vectors_master_side): V8
+ * carries a well-formed confirmation echoing the armed instance (m.confirm
+ * == LINK_USER_CONFIRM_MAGIC, m.echo == 3); V13 carries a requested mode of
+ * pgp (m.usb_mode == LINK_USB_MODE_PGP == 0x02). Read here at the raw
+ * offsets chest_link.c uses to write/read that range. */
+static void test_chest_master_offsets_against_chest_vectors(void)
+{
+    TEST_ASSERT_EQ(V8[CHEST_REG_USER_CONFIRM], CHEST_CONFIRM_MAGIC, "V8 confirm byte");
+    TEST_ASSERT_EQ(V8[CHEST_REG_ECHO], 3, "V8 echoes the armed instance");
+    TEST_ASSERT_EQ(V13[CHEST_REG_MODE_REQ], CHEST_MODE_PGP, "V13 requests pgp");
+}
+
+/* Sanitize bounds: 0x7E ('~') is the top of the kept range, 0x7F (DEL) and
+ * 0x80 (high bit) sit just outside it on either side and both become '?'.
+ * Not one of the chest's vectors: built from V1 with three label bytes
+ * patched and the CRC recomputed. */
+static void test_chest_label_sanitize_bounds(void)
+{
+    uint8_t b[64];
+    chest_status_t s;
+    memcpy(b, V1, 64);
+    b[CHEST_REG_LABEL_LEN] = 3;
+    b[CHEST_REG_LABEL + 0] = 0x7E;   /* '~', top of the kept range */
+    b[CHEST_REG_LABEL + 1] = 0x7F;   /* DEL, just above: refused */
+    b[CHEST_REG_LABEL + 2] = 0x80;   /* high bit, refused */
+    uint16_t crc = cr_crc16(b, CHEST_REG_CRC_SPAN);
+    b[CHEST_REG_CRC] = (uint8_t)(crc & 0xFF);
+    b[CHEST_REG_CRC + 1] = (uint8_t)(crc >> 8);
+
+    memset(&s, 0xAA, sizeof s);
+    TEST_ASSERT_EQ(chest_proto_parse(b, 64, &s), CHEST_BLOCK_OK, "block accepted");
+    TEST_ASSERT_EQ(s.label[0], '~', "0x7E kept: top of the printable range");
+    TEST_ASSERT_EQ(s.label[1], '?', "0x7F (DEL) replaced");
+    TEST_ASSERT_EQ(s.label[2], '?', "0x80 replaced");
+    TEST_ASSERT_EQ(s.label[3], '\0', "NUL-terminated at label_len 3");
 }
 
 static void test_chest_dma_segment_ok(void)
@@ -568,6 +704,12 @@ void test_chest_proto(void)
     TEST_RUN(test_chest_v3_vectors_rejected);
     TEST_RUN(test_chest_v3_states);
     TEST_RUN(test_chest_label_sanitized_and_terminated);
+    TEST_RUN(test_chest_label_len_34_is_ok);
+    TEST_RUN(test_chest_dma_fields_decoded_from_regs);
+    TEST_RUN(test_chest_absent_blocks);
+    TEST_RUN(test_chest_older_version_is_bad_version);
+    TEST_RUN(test_chest_master_offsets_against_chest_vectors);
+    TEST_RUN(test_chest_label_sanitize_bounds);
     TEST_RUN(test_chest_dma_segment_ok);
     TEST_RUN(test_chest_mounted_without_mode_is_corrupt);
     TEST_RUN(test_chest_noise_is_not_a_chest);
