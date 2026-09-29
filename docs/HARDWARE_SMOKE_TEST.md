@@ -183,6 +183,12 @@ in the PR/release.
 - [ ] Power Phase 2: no key stuck/ghosted on wake; release handled
 - [ ] Power Phase 2: if wake doesn't trigger on a key, invert the column GPIO polarity (see half_scan_arm_key_wake BENCH-TUNE)
 - [ ] Power Phase 2: left + right independently
+- [ ] Chest link (left, chest flashed, USB-C plugged): status shows "P4",
+      "SD" (card in), "USB" once a mode is mounted; `gpg --card-status`, then
+      `echo t | gpg --sign` → the prompt shows "SIGN / OK ?", a press on
+      K_SEC_CONFIRM signs; no press → 6985 after 15 s and the prompt goes;
+      radio and screen keep working meanwhile; unplug USB → status gone; on
+      battery the sleep current is unchanged (GPIO3 released).
 
 ## BLE (relevant boards)
 - [ ] Host pairing OK, types with no drop for 1 min

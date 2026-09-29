@@ -700,3 +700,15 @@ means a test, or a line.
   "USB"), nothing without a chest; while the chest has an operation pending
   the bottom area names it (SIGN, DECRYP, FIDO +, DELETE, RESET!…) over
   "OK ?" instead of the layer — the owner sees what she authorizes.
+
+## Chest link (Niphar_chest)
+
+- [smoke:Chest link] Presence = a USB host (the chest is powered by the
+  left's USB): absent, the SPI device is removed and GPIO3 is an input —
+  R48 pulls CS to the chest's rail, driving it into a dead rail would cost
+  ~0.33 mA; no poller on battery (the link task blocks, the sleep task's
+  1 s USB check hands presence over). Present: a read every 250 ms or at
+  once on a GPIO46 rising edge, under the radio owner's bus lock; a block
+  that is absent/corrupt is never acted on; a real K_SEC_CONFIRM press
+  writes 0x5A at 0x10, delivered when the chest's counter moves, one retry
+  after 200 ms at most.

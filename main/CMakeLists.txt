@@ -268,6 +268,11 @@ if(CONFIG_KASE_LINK_WIRE)
     list(APPEND srcs "comm/link/link_uart.c")
 endif()
 
+# Chest link (Niphar_chest ESP32-P4): SPI master, left half only.
+if(CONFIG_KASE_CHEST_LINK)
+    list(APPEND srcs "comm/chest/chest_link.c")   # chest_proto.c/chest_gate.c are in the base list (Task 3)
+endif()
+
 # Veille hybride (B7) — light sleep puis deep sleep.
 if(CONFIG_KASE_VEILLE)
     list(APPEND srcs "power/veille.c" "power/veille_task.c")

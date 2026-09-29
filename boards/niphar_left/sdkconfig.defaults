@@ -110,3 +110,6 @@ CONFIG_KASE_VEILLE_LEGERE_S=5
 
 # Icon column of the memory-LCD (2026-09-26): route symbol ~30 px wide, the 28 overflows the 32 px column
 CONFIG_LV_FONT_MONTSERRAT_24=y
+
+# Chest link (Niphar_chest ESP32-P4): status + confirmation relay (2026-09-29)
+CONFIG_KASE_CHEST_LINK=y

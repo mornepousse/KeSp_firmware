@@ -10,6 +10,9 @@
 #if CONFIG_KASE_LINK_WIRE
 #include "link_uart.h"
 #endif
+#if CONFIG_KASE_CHEST_LINK
+#include "chest_link.h"   /* chest_link_start: after the radio, on the same shared SPI bus */
+#endif
 #if CONFIG_KASE_BATT_SENSE
 #include "batt_sense.h"
 #endif
@@ -409,6 +412,9 @@ void app_main(void) {
 
 #if CONFIG_KASE_KBD_WIRELESS
   kbd_relay_init();
+#endif
+#if CONFIG_KASE_CHEST_LINK
+  chest_link_start();   /* after the radio: it creates the shared SPI bus */
 #endif
 
   ESP_LOGI(TAG, "Task Matrix init");

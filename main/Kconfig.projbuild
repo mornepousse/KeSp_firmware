@@ -133,6 +133,16 @@ config KASE_LINK_WIRE
         exchange (probe + ACK). A half that is charging stays awake: the
         link vetoes sleep as long as its switch is closed.
 
+config KASE_CHEST_LINK
+    bool "Chest link: SPI master of Niphar_chest (left half)"
+    default n
+    depends on KASE_KBD_WIRELESS
+    help
+        The left half talks to the Niphar_chest ESP32-P4 over the shared SPI
+        bus (CS GPIO3, IRQ GPIO46) while a USB host is present: status on
+        the screen, a real K_SEC_CONFIRM press relayed to a pending
+        operation. Spec: docs/superpowers/specs/2026-09-29-chest-link-s3-master-design.md
+
 config KASE_VEILLE
     bool "Hybrid sleep: light sleep then deep sleep (brick B7)"
     default n

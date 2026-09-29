@@ -24,6 +24,9 @@
 #if CONFIG_KASE_BATT_SENSE
 #include "batt_sense.h"     /* critical battery: sleep sooner */
 #endif
+#if CONFIG_KASE_CHEST_LINK
+#include "chest_link.h"     /* the chest lives on the USB: presence hand-off */
+#endif
 #include <stdio.h>
 
 static const char *TAG = "sleep";
@@ -97,6 +100,9 @@ static void veille_task(void *arg)
         /* Both halves: the DFS APB lock follows the same rule, or a missed
          * unmount keeps automatic light sleep out for good (pm_dfs.c). */
         pm_dfs_usb_rattrapage(usb_presence_cable());
+#endif
+#if CONFIG_KASE_CHEST_LINK
+        chest_link_presence(usb_presence_cable());   /* no new poller: this 1 s loop already reads it */
 #endif
 #if CONFIG_KASE_BATT_SENSE
         /* CRITICAL battery (< 3.3 V): the light stage at 5 s instead of 15 —

@@ -438,6 +438,7 @@ main/
 │   │   └── hid_bluetooth_manager.c
 │   ├── usb/              # USB HID + CDC TinyUSB init
 │   │   └── usb_hid.c
+│   ├── chest/            # Niphar_chest link (left): chest_proto (pure), chest_gate (key→link), chest_link (SPI master)
 │   └── hid_transport.c   # USB/BLE routing (usb_bl_state)
 ├── input/
 │   ├── matrix_scan.c     # keyboard_button driver wrapper
