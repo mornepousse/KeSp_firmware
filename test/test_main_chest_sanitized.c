@@ -20,6 +20,7 @@ int _test_fail_count = 0;
 extern void test_chest_proto(void);
 extern void test_chest_dma(void);
 extern void test_chest_oath(void);
+extern void test_chest_view(void);
 
 int main(void)
 {
@@ -29,6 +30,7 @@ int main(void)
     test_chest_proto();
     test_chest_dma();
     test_chest_oath();
+    test_chest_view();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);

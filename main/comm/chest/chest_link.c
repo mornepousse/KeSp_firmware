@@ -6,6 +6,7 @@
  * an IRQ edge, every transaction under the radio owner's bus lock. */
 #include "chest_link.h"
 #include "chest_proto.h"
+#include "chest_oath.h"
 #include "chest_gate.h"
 #include "rf_bus.h"
 #include "board.h"
@@ -25,8 +26,20 @@ static const char *TAG = "chest";
 static TaskHandle_t         s_task;
 static spi_device_handle_t  s_dev;
 static volatile bool        s_want;          /* presence asked by the sleep task */
-static volatile uint8_t     s_view;
-static volatile uint16_t    s_view_op;
+/* Screen view snapshot: written by chest_task (below) after every round,
+ * read by chest_link_view() from the display task. A whole-struct copy, not
+ * scalars, so it goes under a critical section rather than the plain
+ * volatile reads/writes the old bits/op pair used — a torn read across
+ * fields would show one frame's stale label next to another's op, which a
+ * lock costs nothing here to avoid. */
+static portMUX_TYPE         s_view_mux = portMUX_INITIALIZER_UNLOCKED;
+static chest_view_t         s_view;
+/* OATH browser model: Task 6 (DMA channel — LIST/CODE requests, the
+ * K_OATH_* key hand-off) is not wired yet. Kept zero-initialized (BSS),
+ * which chest_oath_reset() itself does (memset 0): no page is ever cached,
+ * so chest_view_build() always finds browsing == false and no code, the
+ * honest state for "nothing feeds this model yet". */
+static chest_oath_t         s_oath;
 static chest_confirm_t      s_confirm;
 static uint8_t               s_badver_logged;  /* once per presence session, reset in go_absent */
 static uint8_t               s_corrupt_logged; /* once per presence session, reset in go_absent */
@@ -94,7 +107,8 @@ static void go_absent(void)
     cs_release();
     chest_gate_publish(0, 0);
     s_confirm.armed = false;
-    s_view = 0; s_view_op = 0;
+    { chest_view_t v = {0};
+      taskENTER_CRITICAL(&s_view_mux); s_view = v; taskEXIT_CRITICAL(&s_view_mux); }
     s_badver_logged = 0; s_corrupt_logged = 0;   /* once-per-presence-session logs, next session starts fresh */
     ESP_LOGI(TAG, "chest gone: CS released");
 }
@@ -129,31 +143,38 @@ static void chest_task(void *arg)
         }
         if (!s_dev || !read_block()) continue;
 
-        chest_status_t st;
+        chest_status_t st = {0};   /* chest_proto_parse writes it only on OK (its own contract) */
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
         chest_block_t blk = chest_proto_parse(s_rx, CHEST_REG_SIZE, &st);
         switch (blk) {
         case CHEST_BLOCK_OK:
-            s_view = CHEST_VIEW_PRESENT | (st.state & 0x07);
-            s_view_op = st.pending_op;
             chest_gate_publish(st.pending_op, st.instance);
             if (chest_press_matches(pressed, blk, &st)) chest_confirm_request(&s_confirm, &st, now);
             if (chest_confirm_step(&s_confirm, &st, now)) write_confirm();
             break;
         case CHEST_BLOCK_BAD_VERSION:
             if (!s_badver_logged) { ESP_LOGW(TAG, "chest speaks protocol %u, we speak %u: ignored", s_rx[4], CHEST_PROTO_VERSION); s_badver_logged = 1; }
-            s_view = CHEST_VIEW_PRESENT | CHEST_VIEW_BADVER; s_view_op = 0;
             chest_gate_publish(0, 0);
             break;
         case CHEST_BLOCK_CORRUPT:
             if (!s_corrupt_logged) { ESP_LOGW(TAG, "chest block corrupt (magic/CRC/short read): ignored"); s_corrupt_logged = 1; }
-            s_view = 0; s_view_op = 0;
             chest_gate_publish(0, 0);
             break;
         default:   /* CHEST_BLOCK_ABSENT: booting or unpowered, the ordinary case, never logged */
-            s_view = 0; s_view_op = 0;
             chest_gate_publish(0, 0);
             break;
+        }
+        /* Screen view — pure builder (chest_view.c), Task 6 (DMA channel,
+         * K_OATH_* wiring, real mode tracking) not landed yet: mode_wanted
+         * is the block's own active_mode (nothing pending a switch) and
+         * mode_state is ARRIVED (never PENDING/FAULT) — both honest and
+         * minimal stand-ins, not a claim that a switch is in flight or
+         * refused. s_oath stays untouched (reset/zero): chest_view_build
+         * finds no cached page, so browsing and any code stay off. */
+        {
+            chest_view_t v;
+            chest_view_build(&v, blk, &st, st.active_mode, CHEST_MODE_ARRIVED, &s_oath, now);
+            taskENTER_CRITICAL(&s_view_mux); s_view = v; taskEXIT_CRITICAL(&s_view_mux);
         }
     }
 }
@@ -179,8 +200,8 @@ void chest_link_presence(bool usb_host)
     xTaskNotifyGive(s_task);
 }
 
-uint8_t chest_link_view(uint16_t *op)
+void chest_link_view(chest_view_t *v)
 {
-    if (op) *op = s_view_op;
-    return s_view;
+    if (!v) return;
+    taskENTER_CRITICAL(&s_view_mux); *v = s_view; taskEXIT_CRITICAL(&s_view_mux);
 }

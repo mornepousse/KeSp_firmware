@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdio.h>
 #include "../../comm/chest/chest_proto.h"
 
 /* Halves' Sharp memory-LCD screen — pure logic, tested on host
@@ -139,17 +140,30 @@ typedef struct {
     uint8_t osm;                       /* armed one-shot modifiers, HID mask */
     uint8_t osl;                       /* armed one-shot layer, MEMLCD_OSL_AUCUNE if none */
     uint8_t veille;                    /* last image before sleep: zZ */
-    uint8_t  coffre;                   /* MEMLCD_COFFRE_* | CHEST_STATE_*; 0 = no chest */
+    uint8_t  coffre;                   /* MEMLCD_COFFRE_* | CHEST_STATE_* (incl. TIME); 0 = no chest */
     uint16_t coffre_op;                /* chest op awaiting confirmation, 0 = none */
+    uint8_t  coffre_op_count;          /* accounts targeted by that op: 0 none, 1, N (RESET) */
+    char     coffre_label[CHEST_LABEL_MAX + 1];   /* the CHEST's own label for the pending op */
+    uint8_t  coffre_mode_active, coffre_mode_wanted, coffre_mode_state;
+    uint8_t  coffre_browsing;          /* OATH active mode AND a LIST page cached */
+    uint8_t  coffre_pos, coffre_total; /* cursor position (0-based), cached page's total */
+    char     coffre_nom[CHEST_LABEL_MAX + 1];     /* entry under the cursor, "" if not cached */
+    uint8_t  coffre_code_visible;
+    char     coffre_code[9];           /* 6 or 8 digits, NUL-terminated */
+    uint8_t  coffre_code_secs;         /* whole seconds left, rounded up */
     uint8_t is_left;
 } memlcd_model_t;
 
 #define MEMLCD_COFFRE_PRESENT 0x80
 #define MEMLCD_COFFRE_BADVER  0x40
 #define MEMLCD_COFFRE_BUF     5        /* 4 UNSCII 8 characters in the 35 px zone + NUL */
+_Static_assert(MEMLCD_COFFRE_BUF >= CHEST_MODE_LABEL_BUF, "MEMLCD_COFFRE_BUF must fit chest_mode_label's output");
 
 /* Chest status under the logo: "P4" ready ("P4.." booting, "P4?" unknown
- * protocol version), then "SD", then "USB", lines packed upwards. */
+ * protocol version), then "SD", then the USB mode line (chest_mode_label:
+ * ACTIVE upper case once ARRIVED, WANTED lower case while PENDING, "ERR" on
+ * FAULT — v2 rule, kept as-is in v3: 2026-09-29). Lines packed upwards: a
+ * line only used when the previous one was. */
 static inline void memlcd_lignes_coffre(const memlcd_model_t *m, char l[3][MEMLCD_COFFRE_BUF])
 {
     for (int i = 0; i < 3; i++) l[i][0] = '\0';
@@ -158,8 +172,95 @@ static inline void memlcd_lignes_coffre(const memlcd_model_t *m, char l[3][MEMLC
     if (!(m->coffre & CHEST_STATE_READY)) { strcpy(l[0], "P4.."); return; }
     int n = 0;
     strcpy(l[n++], "P4");
-    if (m->coffre & CHEST_STATE_SD)  strcpy(l[n++], "SD");
-    if (m->coffre & CHEST_STATE_USB) strcpy(l[n++], "USB");
+    if (m->coffre & CHEST_STATE_SD) strcpy(l[n++], "SD");
+    char mode[CHEST_MODE_LABEL_BUF];
+    chest_mode_label((chest_mode_state_t)m->coffre_mode_state, m->coffre_mode_active, m->coffre_mode_wanted, mode);
+    if (mode[0] && n < 3) strcpy(l[n++], mode);
+}
+
+/* Cuts `s` into up to `n` UNSCII lines of up to 8 characters (hard cut at
+ * column 8 — sanitized/untrusted text, not prose: no space-awareness like
+ * memlcd_couper_nom above). If text remains once the n-th line is full, that
+ * line's LAST character is replaced with '~' (UNSCII has no ellipsis
+ * glyph — "cut into lines of 8, with ~ marking a cut", plan Task 5): 7
+ * characters of real content plus the marker, so a cut is never silent.
+ * Returns the number of lines written, 1..n (never 0: an empty string still
+ * produces one empty line, like memlcd_couper_nom). */
+#define MEMLCD_COUP8_COLS 8
+static inline uint8_t memlcd_couper_8(const char *s, uint8_t n, char lines[][MEMLCD_ETAT_BUF])
+{
+    for (uint8_t i = 0; i < n; i++) lines[i][0] = '\0';
+    if (n == 0) return 0;
+    size_t len = s ? strlen(s) : 0;
+    if (len == 0) return 1;
+    size_t pos = 0;
+    uint8_t nl = 0;
+    while (pos < len && nl < n) {
+        bool last_slot = (nl == (uint8_t)(n - 1));
+        size_t remain = len - pos;
+        if (!last_slot || remain <= MEMLCD_COUP8_COLS) {
+            size_t take = remain < MEMLCD_COUP8_COLS ? remain : MEMLCD_COUP8_COLS;
+            memcpy(lines[nl], s + pos, take);
+            lines[nl][take] = '\0';
+            pos += take;
+        } else {
+            memcpy(lines[nl], s + pos, MEMLCD_COUP8_COLS - 1);
+            lines[nl][MEMLCD_COUP8_COLS - 1] = '~';
+            lines[nl][MEMLCD_COUP8_COLS] = '\0';
+            pos = len;   /* the rest is dropped — the '~' says so */
+        }
+        nl++;
+    }
+    return nl ? nl : 1;
+}
+
+#define MEMLCD_BAS_LIGNES 6
+
+/* The bottom area's six UNSCII lines (spec §5 / plan Task 5), priority
+ * order prompt > code visible > browsing > (nothing — the caller falls back
+ * to the layer/status widgets). Returns true when one of the first three
+ * cases applies (the caller must show these lines instead of the layer). */
+static inline bool memlcd_bas_coffre(const memlcd_model_t *m, char lines[MEMLCD_BAS_LIGNES][MEMLCD_ETAT_BUF])
+{
+    for (int i = 0; i < MEMLCD_BAS_LIGNES; i++) lines[i][0] = '\0';
+
+    if (m->coffre_op) {
+        chest_op_label(m->coffre_op, lines[0]);   /* CHEST_LABEL_BUF (8) fits MEMLCD_ETAT_BUF (9) */
+        char lbl[4][MEMLCD_ETAT_BUF];
+        uint8_t nl = memlcd_couper_8(m->coffre_label, 4, lbl);
+        for (uint8_t i = 0; i < nl; i++) strcpy(lines[1 + i], lbl[i]);
+        if (m->coffre_op_count > 1) {
+            char cpt[MEMLCD_ETAT_BUF];
+            snprintf(cpt, sizeof cpt, "%u CPT", (unsigned)m->coffre_op_count);
+            uint8_t idx = (nl >= 4) ? 4 : (uint8_t)(1 + nl);   /* room left: appended; full: replaces the last label line */
+            strncpy(lines[idx], cpt, MEMLCD_ETAT_BUF - 1);
+            lines[idx][MEMLCD_ETAT_BUF - 1] = '\0';
+        }
+        strcpy(lines[5], "OK ?");
+        return true;
+    }
+    if (m->coffre_code_visible) {
+        strncpy(lines[0], m->coffre_nom, MEMLCD_ETAT_BUF - 1); lines[0][MEMLCD_ETAT_BUF - 1] = '\0';
+        /* line 1 stays empty. digits is 6 or 8 only (chest_code_decode's own
+         * contract) — the code string's length says which. */
+        if (strlen(m->coffre_code) == 8) {
+            memcpy(lines[2], m->coffre_code, 4); lines[2][4] = '\0';
+            strcpy(lines[3], m->coffre_code + 4);
+        } else {
+            strcpy(lines[2], m->coffre_code);
+        }
+        snprintf(lines[5], MEMLCD_ETAT_BUF, "  %2u s", (unsigned)m->coffre_code_secs);
+        return true;
+    }
+    if (m->coffre_browsing) {
+        snprintf(lines[0], MEMLCD_ETAT_BUF, "%u/%u", (unsigned)m->coffre_pos + 1, (unsigned)m->coffre_total);
+        char nm[4][MEMLCD_ETAT_BUF];
+        uint8_t nl = memlcd_couper_8(m->coffre_nom, 4, nm);
+        for (uint8_t i = 0; i < nl; i++) strcpy(lines[1 + i], nm[i]);
+        if (!(m->coffre & CHEST_STATE_TIME)) strcpy(lines[5], "NO TIME");
+        return true;
+    }
+    return false;
 }
 
 /* The two status lines under the layer name (see test_ligne_etat). */
@@ -192,5 +293,13 @@ static inline bool memlcd_model_diff(const memlcd_model_t *a, const memlcd_model
            a->caps_lock != b->caps_lock ||
            a->caps_word != b->caps_word || a->osm != b->osm || a->osl != b->osl ||
            a->veille != b->veille ||
-           a->coffre != b->coffre || a->coffre_op != b->coffre_op;
+           a->coffre != b->coffre || a->coffre_op != b->coffre_op ||
+           a->coffre_op_count != b->coffre_op_count || strcmp(a->coffre_label, b->coffre_label) != 0 ||
+           a->coffre_mode_active != b->coffre_mode_active ||
+           a->coffre_mode_wanted != b->coffre_mode_wanted || a->coffre_mode_state != b->coffre_mode_state ||
+           a->coffre_browsing != b->coffre_browsing ||
+           a->coffre_pos != b->coffre_pos || a->coffre_total != b->coffre_total ||
+           strcmp(a->coffre_nom, b->coffre_nom) != 0 ||
+           a->coffre_code_visible != b->coffre_code_visible ||
+           strcmp(a->coffre_code, b->coffre_code) != 0 || a->coffre_code_secs != b->coffre_code_secs;
 }

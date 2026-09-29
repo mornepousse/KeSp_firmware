@@ -748,9 +748,64 @@ means a test, or a line.
   of the screen goes blank), right, 2026-09-14).
 - [test:test_memlcd_model] The left shows the chest's status under the logo
   ("P4" ready, "P4.." booting, "P4?" unknown protocol version, then "SD",
-  "USB"), nothing without a chest; while the chest has an operation pending
-  the bottom area names it (SIGN, DECRYP, FIDO +, DELETE, RESET!…) over
-  "OK ?" instead of the layer — the owner sees what she authorizes.
+  then the USB mode: the ACTIVE mode upper case once ARRIVED, the WANTED one
+  lower case while a switch is PENDING (0xFF or not yet taken), "ERR" once
+  active and wanted have disagreed for 8 reads straight — nothing without a
+  chest [test:test_chest_mode_track].
+- [test:test_memlcd_model][test:test_chest_view] The bottom area — prompt,
+  code, browser, in that priority, otherwise the layer/status widgets stay —
+  is built end to end from the chest's own raw register/DMA bytes through
+  `chest_proto_parse` -> `chest_view_build` (pure, `main/comm/chest/
+  chest_view.c`) -> the memlcd model -> `memlcd_bas_coffre` (pure,
+  `memlcd_model.h`), pinned on the chest's V1/V9/V15/V16/L1/C1 vectors so a
+  regression anywhere in the chain shows up as a wrong string, not just a
+  wrong struct field (added after the chest found a RESET path publishing
+  op_count 1 to the wire while the contract and V16 said 12 — the vectors
+  alone proved the parser, never that the screen showed it):
+  - prompt (an operation is pending): line 0 the op label (`chest_op_label`),
+    then the CHEST's OWN label (register 0x14) cut into up to 4 UNSCII lines
+    of 8 characters — NEVER the OATH browser's cursor name, even when an op
+    is pending while the cursor sits on a different, named account (V1: op
+    9 named GITHUB, cursor moved to OVH:PRO — the prompt still reads
+    GITHUB); `N CPT` when more than one account is targeted (V16: op_count
+    12, label "12 COMPTES" — both the digit and the words reach the
+    screen), appended after the label when room is left, replacing its
+    last line when all 4 are already used; last line `OK ?`;
+  - a label/name longer than its budget is cut hard at 8 characters per
+    line (untrusted, sanitized text — no word-awareness), the last shown
+    line's last character replaced with `~` so a cut is never silent
+    (UNSCII has no ellipsis glyph);
+  - code visible (after `K_OATH_CODE` AND `K_SEC_CONFIRM`, the account
+    still under the cursor — chest_oath's own gate, re-proven here end to
+    end): the account name, the code (6 digits on one line, 8 split 4+4),
+    and a countdown in whole seconds ROUNDED UP (never 0 while still
+    shown) — gone at the deadline, gone on the first navigation key, never
+    refreshed on its own;
+  - browsing (OATH active, a page cached, nothing pending/shown): the
+    cursor's 1-based position over the total, the account name, and
+    `NO TIME` in place of the code hint whenever the chest's TIME_VALID bit
+    is clear (V15) — never shown once the bit is set, even with the exact
+    same op/label/active-mode shape otherwise (contrast against V1).
+  - Countdown cadence note: `coffre_code_secs` changes at most once a
+    second while a code is visible (<= 30 s window) — this rides the
+    memlcd halves' EXISTING 1 s status/LVGL tick
+    (`STATUS_DISP_PERIODE_MS`/`LVGL_REFR_MS`, `cadence.h`), no new faster
+    periodic wait is introduced, so the tickless-sleep rule (nothing below
+    `CADENCE_REPOS_MIN_MS`) is unaffected — only more of the already
+    scheduled ticks produce a real redraw during that window.
+  - `chest_link.c` (transport) builds the view with `chest_view_build()`
+    every read round and copies the result under a critical section
+    (`s_view_mux`) for the display task to read — no field is filled by
+    hand. The DMA channel and the `K_OATH_*` key hand-off are NOT wired yet
+    (plan Task 6): `mode_wanted` is passed as the block's own
+    `active_mode` (nothing pending a switch) and `mode_state` is always
+    ARRIVED, and the OATH model (`s_oath`) stays statically reset (never
+    fed a LIST/CODE) — honest, minimal stand-ins, not a claim that a
+    switch or a browse is in flight. On today's bench this means: the
+    prompt (chest label, `N CPT`, `OK ?`) and the mode line's upper-case
+    ACTIVE name are real; the mode line's lower-case PENDING/`ERR` cases,
+    browsing, and the code/countdown are exercised only by the host tests
+    above until Task 6 lands.
 
 ## Chest link (Niphar_chest)
 

@@ -104,6 +104,11 @@ static lv_obj_t *s_l_route, *s_l_dongle, *s_bar, *s_l_volt, *s_img_lien, *s_l_zz
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 static lv_obj_t *s_l_nom[MEMLCD_NOM_LIGNES], *s_l_etat[2];
 static lv_obj_t *s_l_coffre[3];
+/* The chest's bottom area (memlcd_bas_coffre): prompt / code / browser, six
+ * UNSCII 8 lines over the same full-width zone the layer name and status
+ * lines occupy — shown instead of them, never alongside (dessiner() hides
+ * whichever set does not apply). */
+static lv_obj_t *s_l_bas[MEMLCD_BAS_LIGNES];
 #endif
 
 /* TRRS link pictogram, 16x12, one arrow each way: the cable carries the 5 V
@@ -229,6 +234,13 @@ static void construire(void)
      * left never sleeps while the chest exists (USB veto). */
     for (int i = 0; i < 3; i++)
         s_l_coffre[i] = texte_centre(scr, &lv_font_unscii_8, 0, 44 + i * 12, COL_X - 1);
+    /* Chest bottom area (memlcd_bas_coffre): 6 UNSCII 8 lines over the same
+     * 68 px the layer name + status lines occupy (Y_SEP..MEMLCD_H, 68 px —
+     * 6 lines at an 11 px pitch fit with 2 px to spare). Built even without
+     * CONFIG_KASE_CHEST_LINK: harmless (memlcd_bas_coffre always returns
+     * false without a chest, dessiner() then hides this set). */
+    for (int i = 0; i < MEMLCD_BAS_LIGNES; i++)
+        s_l_bas[i] = texte_centre(scr, &lv_font_unscii_8, 0, Y_SEP + 2 + i * 11, MEMLCD_W);
 #else
     (void)image(scr, &img_niphargus_60, (MEMLCD_W - 60) / 2, Y_SEP + 1 + (MEMLCD_H - Y_SEP - 1 - 60) / 2);
 #endif
@@ -272,7 +284,15 @@ static void lire_modele(memlcd_model_t *m)
      * be stale — shown on the USB route only. */
     m->caps_lock   = !m->route_rf && (hid_led_state & HID_LED_CAPS_LOCK);
 #if CONFIG_KASE_CHEST_LINK
-    m->coffre = chest_link_view(&m->coffre_op);
+    { chest_view_t v; chest_link_view(&v);
+      m->coffre = v.bits; m->coffre_op = v.op; m->coffre_op_count = v.op_count;
+      strncpy(m->coffre_label, v.label, sizeof m->coffre_label - 1); m->coffre_label[sizeof m->coffre_label - 1] = '\0';
+      m->coffre_mode_active = v.mode_active; m->coffre_mode_wanted = v.mode_wanted; m->coffre_mode_state = v.mode_state;
+      m->coffre_browsing = v.browsing; m->coffre_pos = v.pos; m->coffre_total = v.total;
+      strncpy(m->coffre_nom, v.name, sizeof m->coffre_nom - 1); m->coffre_nom[sizeof m->coffre_nom - 1] = '\0';
+      m->coffre_code_visible = v.code_visible;
+      strncpy(m->coffre_code, v.code, sizeof m->coffre_code - 1); m->coffre_code[sizeof m->coffre_code - 1] = '\0';
+      m->coffre_code_secs = v.code_secs; }
 #endif
 #else
     m->is_left   = 0;
@@ -317,22 +337,31 @@ static void dessiner(const memlcd_model_t *m)
     char lc[3][MEMLCD_COFFRE_BUF];
     memlcd_lignes_coffre(m, lc);
     for (int i = 0; i < 3; i++) lv_label_set_text(s_l_coffre[i], m->veille ? "" : lc[i]);
-    if (m->coffre_op) {
-        /* The prompt names WHAT is authorized (spec §6): the operation, then OK ?. */
-        char op[CHEST_LABEL_BUF];
-        chest_op_label(m->coffre_op, op);
-        lv_label_set_text(s_l_nom[0], op);
-        lv_label_set_text(s_l_nom[1], "OK ?");
-        lv_label_set_text(s_l_etat[0], "");
-        lv_label_set_text(s_l_etat[1], "");
+    /* Bottom area: the chest's prompt / code / browser (memlcd_bas_coffre)
+     * takes over the same zone the layer name and status lines occupy —
+     * one set shown, the other hidden, never both (spec §5 / plan Task 5). */
+    char bas[MEMLCD_BAS_LIGNES][MEMLCD_ETAT_BUF];
+    bool chest_prend_la_zone = !m->veille && memlcd_bas_coffre(m, bas);
+    if (chest_prend_la_zone) {
+        for (int i = 0; i < MEMLCD_BAS_LIGNES; i++) {
+            lv_label_set_text(s_l_bas[i], bas[i]);
+            lv_obj_clear_flag(s_l_bas[i], LV_OBJ_FLAG_HIDDEN);
+        }
+        for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) lv_obj_add_flag(s_l_nom[i], LV_OBJ_FLAG_HIDDEN);
+        for (int i = 0; i < 2; i++) lv_obj_add_flag(s_l_etat[i], LV_OBJ_FLAG_HIDDEN);
     } else {
+        for (int i = 0; i < MEMLCD_BAS_LIGNES; i++) lv_obj_add_flag(s_l_bas[i], LV_OBJ_FLAG_HIDDEN);
         char lignes[MEMLCD_NOM_LIGNES][MEMLCD_NOM_BUF];
         memlcd_couper_nom(m->nom, lignes);
-        for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) lv_label_set_text(s_l_nom[i], lignes[i]);
+        for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) {
+            lv_label_set_text(s_l_nom[i], lignes[i]);
+            lv_obj_clear_flag(s_l_nom[i], LV_OBJ_FLAG_HIDDEN);
+        }
         char e1[MEMLCD_ETAT_BUF], e2[MEMLCD_ETAT_BUF];
         memlcd_ligne_etat(m, e1, e2);
         lv_label_set_text(s_l_etat[0], e1);
         lv_label_set_text(s_l_etat[1], e2);
+        for (int i = 0; i < 2; i++) lv_obj_clear_flag(s_l_etat[i], LV_OBJ_FLAG_HIDDEN);
     }
 #endif
 }
