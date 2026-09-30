@@ -91,6 +91,18 @@ when low), simulator `gauge_lab.c`. Percent, not volts. To be judged again on
 the real panel — a better idea may come from seeing it lit, not from more
 mockups. Open: `NAVIGATION` still splits `NAVIG` / `ATION` at the 12 px floor.
 
+## Status icons (settled 2026-09-30)
+
+Mae on the panel: the drop was small, "100%" took room, words ("USB",
+"RADIO", "SEEN") worse than icons, wants more integration. Chosen: variant
+**V2** of the icon round — ONE band under the logo: a large drop (≈20 × 26)
+and the route icon beside it (USB plug, or radio waves: 3 waves + filled dot =
+dongle seen, 2 waves + hollow dot = not seen), TRRS ⇆ beside when linked.
+**The percentage is shown only when low, inside the drop** (Mae: "n'afficher
+le chiffre qu'à l'intérieur quand il est bas"); otherwise the drop's level
+alone. Route icon sized to balance the drop. The TOTP browser must keep the
+account name on two lines (the V2 mockup truncated `OVH:PERSO` to `OVH:~`).
+
 ## Next
 
 A plan task
