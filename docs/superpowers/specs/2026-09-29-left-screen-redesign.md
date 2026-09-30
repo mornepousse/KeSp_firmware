@@ -1,6 +1,6 @@
 # Left-half screen redesign — "cave" (design record)
 
-Status: design in progress (2026-09-29). Supersedes the layout of chest v3 Task 8
+Status: implemented and validated on the panel by Mae (2026-09-30, 8f797a10). Supersedes the layout of chest v3 Task 8
 (commits d9de081b, 0616260b — their mode names and width oracle stay).
 
 ## Why
