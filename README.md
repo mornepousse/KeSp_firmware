@@ -32,8 +32,8 @@ Configuration and updates go over USB; there is no WiFi and no BLE on either
 half — the power budget forbids it.
 
 **Status — 2026-09-30.** On top of what follows: the left half now talks to
-**Niphar_chest**, an ESP32-P4 security vault, over SPI (below); the left screen
-was redesigned (the right follows); the sleep and battery figures below were replaced by
+**Niphar_chest**, an ESP32-P4 security vault, over SPI (below); both screens
+were redesigned; the sleep and battery figures below were replaced by
 multimeter measurements.
 
 **Hardware status — 2026-09-21.** The keyboard works in its nominal mode: both
@@ -70,8 +70,8 @@ bounded number of times.
 LS011B7DH03 (nice!view module) mounted upright, 68 × 160, on the SPI bus they
 share with the radio — the radio owner lends the bus under a lock, so a refresh
 never lands in the middle of a frame. The keyboard lives in a transparent case
-and is named after a blind cave shrimp, so the left screen became a **cave** (the right is being brought to the same
-style): pale
+and is named after a blind cave shrimp, so both screens became a **cave** (the right: the same band under the
+stalactites, the logo large in place of the layer name): pale
 ink on black, stalactites and a rock floor in ordered dithering, the real
 Niphargus logo (`scripts/gen_logo_memlcd.sh`), and one status band — a water
 drop whose level is the battery (the number appears inside it only at 15 % and
