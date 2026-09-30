@@ -57,6 +57,11 @@ column, separators, imbalance), ugly icons. Scope: the whole LEFT screen
   when the only break at `:` would strand the digits, the break moves back into
   the letters. Proof cases: `TEST:RFC6238` → `TEST:` / `RFC6238`;
   `BANQUE:4021` → `BANQU` / `E:4021` (safe, not pretty).
+- **Continuation mark** (Mae, 2026-09-30): when a label cannot be both whole
+  and free of digits-only lines (`AWS:123456789012`), it stays whole and every
+  line that continues the previous one starts with a drawn `↳` mark (1-bit
+  bitmap — the built-in fonts have no such glyph), so a line of digits reads as
+  the rest of a name, never as a code.
 - **Text floor: Montserrat 12.** Below it the 1-bit threshold erases glyphs
   (at 8 px `:` `.` `,` `;` `_` have zero ink, `:` and `.` are identical; at
   10 px the apostrophe vanishes) — measured by the simulator's
