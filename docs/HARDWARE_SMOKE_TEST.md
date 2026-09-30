@@ -176,6 +176,17 @@ in the PR/release.
       and with `KASE_VEILLE_DIAG` "lines at exit" non-zero. Left AND right,
       over wireless (fusion). Done 2026-09-21 on the left (761 s) and both
       halves typed
+- [ ] Held key on battery (LEFT, route=RF): unplug USB, hold a key down for
+      more than the 5 s light-sleep threshold → HB keeps showing
+      "vetos=…key…", NO "light sleep" line while it's held, screen does NOT
+      flash to "zZ"; release → veto drops, normal sleep resumes after 5 s of
+      real inactivity. Regression bug (2026-09-30): the fusion early-return
+      (left off USB never types locally, `matrix_scan.c`) used to skip the
+      `VEILLE_VETO_TOUCHE` post entirely on every scan, so a key held on
+      battery never blocked sleep at all — the half slept key-down, woke at
+      once on the held row (cause=0/7), and looped every ~5 s. On USB the
+      bug did not show (the early return isn't taken), which is why an
+      earlier capture over USB looked fine
 - [ ] e-ink displays the 'PAIRED' splash at pairing
 - [ ] e-ink dashboard: L/R/USB + battery, without corruption
 - [ ] Trackpad (if present): cursor, L/R/M click, scroll

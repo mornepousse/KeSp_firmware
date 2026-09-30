@@ -455,6 +455,26 @@ means a test, or a line.
   half slept key down, woke at once on the high row, and looped. Required by
   the 5 s light-sleep threshold of 2026-09-25 (Backspace held while the host
   auto-repeats, a layer key held while reading).
+- [smoke:Held key on battery (LEFT, route=RF)] The `VEILLE_VETO_TOUCHE` post
+  runs unconditionally, right after `new_state` is built in
+  `keyboard_btn_cb()` (`matrix_scan.c`) — NOT at the end of the function.
+  Found 2026-09-30: the fusion block just below it (`!fusion_left_types_local(usb)`,
+  left off USB — the dongle fuses and types) returns early on every single
+  cycle while on battery, and used to do so BEFORE reaching the veto post at
+  the function's end. Holding a key on battery therefore never set the veto
+  at all: the half slept key-down, woke at once on the still-held row
+  (`cause=0` then `cause=7`, "wake: N key(s) captured"), and looped every
+  light-sleep threshold — visible in the HB as `vetos=- route=RF`. On USB the
+  bug didn't show (`fusion_left_types_local(usb)` is true there, no early
+  return), which is why an earlier bench capture taken over USB looked fine.
+  Not host-testable as pure logic: the bug is the ORDER of a veto post
+  relative to an early `return` inside an ESP-IDF driver callback
+  (`keyboard_btn_cb`, depends on `keyboard_btn_report_t`, `kbd_relay_send_matrix`,
+  `rf_matrix_to_bitmap` — none of it compiled for the host); the underlying
+  predicate (`veille_touche_tenue`) was already covered and stayed correct.
+  Proven on the bench by `console2.log`: two keys held, `vetos=-` at the very
+  first sleep of the session, captured again at every wake, no veto ever
+  shown while route=RF.
 - [test:test_veille_veto] Sleep veto registry (`power/veille_veto.h`,
   pure): one state per name (usb, lien, sync, test, pair, key, code), a
   posted veto blocks all sleep, lifting an absent veto has no effect,

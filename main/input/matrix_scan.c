@@ -143,6 +143,25 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
         }
     }
 
+#if CONFIG_KASE_VEILLE
+    /* A held key is a reason to stay awake: the driver reports changes only,
+     * so without this the half slept key down once the light threshold went
+     * by, woke at once on the high row and looped (VEILLE_VETO_TOUCHE). This
+     * callback runs on every change, the release included — the veto is
+     * posted and lifted here, nowhere else.
+     *
+     * MUST run before anything below that can `return` early — the fusion
+     * block right after (outside USB, this half emits raw and never types
+     * locally) returns before reaching the end of the function. On battery
+     * that `return` fires on EVERY cycle, so a veto posted at the end of
+     * the callback was simply never reached: the half went to sleep with a
+     * key physically held, woke on it at once (cause=0), and repeated every
+     * light-sleep threshold. Found on the bench 2026-09-30 (console2.log):
+     * `vetos=-` while (1,1)/(1,3) were held, captured again at every wake. */
+    veille_veto(VEILLE_VETO_TOUCHE,
+                veille_touche_tenue(&new_state[0][0], sizeof(new_state)));
+#endif
+
 #if CONFIG_KASE_MATRIX_LOG_CONSOLE
     /* Bench log: each change spelled out on the console, before
      * prev_matrix_state gets overwritten by one path or the other. Does not
@@ -314,15 +333,9 @@ static void keyboard_btn_cb(keyboard_btn_handle_t kbd_handle, keyboard_btn_repor
     memcpy(prev_matrix_state, new_state, sizeof(prev_matrix_state));
     matrix_flag_signal(&stat_matrix_changed);
     last_activity_time_ms = esp_timer_get_time() / 1000;
-#if CONFIG_KASE_VEILLE
-    /* A held key is a reason to stay awake: the driver reports changes only,
-     * so without this the half slept key down once the light threshold went
-     * by, woke at once on the high row and looped (VEILLE_VETO_TOUCHE). This
-     * callback runs on every change, the release included — the veto is
-     * posted and lifted here, nowhere else. */
-    veille_veto(VEILLE_VETO_TOUCHE,
-                veille_touche_tenue(&new_state[0][0], sizeof(new_state)));
-#endif
+    /* VEILLE_VETO_TOUCHE is posted earlier in this function, right after
+     * new_state is built — see there for why (must run before the fusion
+     * block's early return). */
 
     if (keyboard_task_handle != NULL)
         xTaskNotifyGive(keyboard_task_handle);
