@@ -312,6 +312,10 @@ static void test_statut_haut(void)
     m.lien_5v = 0; m.batt_local_dv = 0xFF;
     memlcd_cave_vue(&m, 100, &v);
     TEST_ASSERT(vue_cherche(&v, "?") >= 0 && v.goutte_pct == 0, "unknown voltage: ?, an empty drop, never 0 V");
+    m.batt_local_dv = 40;
+    memlcd_cave_vue(&m, 0xFF, &v);
+    TEST_ASSERT(vue_cherche(&v, "?") >= 0 && v.goutte_pct == 0 && vue_cherche(&v, "255%") < 0,
+                "unknown DISPLAYED percentage (batt_sense_pct 0xFF): ?, never 255%");
 }
 
 /* 34 characters, CHEST_LABEL_MAX — the alphabet (26) plus "ABCDEFGH" (8). */
@@ -683,6 +687,7 @@ static void test_model_diff(void)
     TEST_ASSERT(!memlcd_model_diff(&a, &b), "identical → no redraw");
     b.batt_local_dv = 39;  TEST_ASSERT(memlcd_model_diff(&a, &b), "local voltage changes → redraw");
     b = a; b.batt_local_chg = 2; TEST_ASSERT(memlcd_model_diff(&a, &b), "charge state changes → redraw");
+    b = a; b.batt_pct = 85; TEST_ASSERT(memlcd_model_diff(&a, &b), "displayed percentage changes → redraw (the voltage alone no longer carries it)");
     b = a; b.couche = 2;   TEST_ASSERT(memlcd_model_diff(&a, &b), "layer changes → redraw");
     b = a; strcpy(b.nom, "NAV"); TEST_ASSERT(memlcd_model_diff(&a, &b), "name changes → redraw");
     b = a; b.dongle_vu = 0; TEST_ASSERT(memlcd_model_diff(&a, &b), "dongle lost → redraw");

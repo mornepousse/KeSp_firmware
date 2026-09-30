@@ -396,7 +396,7 @@ static inline void memlcd_cave_debut(memlcd_cave_vue_t *v, uint8_t kind, bool th
 static inline void memlcd_cave_batt_texte(const memlcd_model_t *m, uint8_t pct, char out[MEMLCD_ETAT_BUF])
 {
     uint8_t chg = m->lien_5v ? 0 : m->batt_local_chg;
-    if (m->batt_local_dv == 0xFF) snprintf(out, MEMLCD_ETAT_BUF, "?");
+    if (m->batt_local_dv == 0xFF || pct == 0xFF) snprintf(out, MEMLCD_ETAT_BUF, "?");
     else if (chg == 2)            snprintf(out, MEMLCD_ETAT_BUF, "FULL");
     else                          snprintf(out, MEMLCD_ETAT_BUF, "%u%%%s", pct > 100 ? 100u : (unsigned)pct, chg == 1 ? "+" : "");
 }
@@ -443,7 +443,7 @@ static inline void memlcd_cave_statut(const memlcd_model_t *m, uint8_t pct, bool
 
     /* drop + reading: one row as tall as the drop */
     v->goutte = 1; v->goutte_x = 2; v->goutte_y = y;
-    v->goutte_pct = m->batt_local_dv == 0xFF ? 0 : (pct > 100 ? 100 : pct);
+    v->goutte_pct = (m->batt_local_dv == 0xFF || pct == 0xFF) ? 0 : (pct > 100 ? 100 : pct);
     v->goutte_low = m->batt_niveau ? 1 : 0;
     char bt[MEMLCD_ETAT_BUF];
     memlcd_cave_batt_texte(m, pct, bt);

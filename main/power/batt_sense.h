@@ -11,6 +11,7 @@
 void     batt_sense_init(void);
 void     batt_sense_sample_now(void);
 uint8_t  batt_sense_dv(void);
-uint8_t  batt_sense_charging(void);   /* batt_chg_t: 0 unknown, 1 probably charging, 2 full */
+uint8_t  batt_sense_charging(void);   /* batt_chg_t: 0 none, 1 charging, 2 full — never without USB power (batt_chg_affiche) */
+uint8_t  batt_sense_pct(void);        /* DISPLAYED %: mV curve, filtered, 5 % steps, never up on battery; 0xFF = unknown */
 uint8_t  batt_sense_niveau(void);     /* batt_niveau_t: 0 normal, 1 LOW (< 3.5 V), 2 CRITICAL (< 3.3 V) */
 uint32_t batt_sense_age_ms(void);     /* 0xFFFFFFFF = no valid sample yet */

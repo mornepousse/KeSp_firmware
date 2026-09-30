@@ -13,7 +13,8 @@
  * between ~3.0 V (DW01A cutoff) and 4.2 V.
  *
  * "Charging" is NOT measurable: the VBUS divider (GPIO33) is not populated
- * and the TP4056 has no STDBY wired. It is DEDUCED from voltage alone:
+ * and the TP4056 has no STDBY wired. What is SHOWN or SENT is gated by USB
+ * power (batt_chg_affiche, below); the deduction itself is from voltage alone:
  *   - FULL: plateau >= 4.15 V held >= 2 min (TP4056 end-of-charge), kept
  *     with hysteresis;
  *   - PROBABLY CHARGING: rise >= 0.1 V within a 5-min window — a
@@ -65,25 +66,125 @@ static inline uint8_t batt_dv_from_samples(const uint32_t *mv_adc, unsigned n)
     return batt_mv_to_dv_batt(batt_mv_from_samples(mv_adc, n));
 }
 
-/* Approximate SoC of a resting Li-ion 16340, piecewise:
- * 3.3 V -> 0%, 3.5 -> 15, 3.7 -> 40, 3.9 -> 70, 4.2 -> 100. 0xFF if unknown.
- * A comfort gauge, not a coulomb counter: load and temperature shift
- * it — that is accepted and documented on the CDC side. */
-static inline uint8_t batt_soc_pct(uint8_t dv)
+/* State of charge from the battery mV, 0xFF if unknown (0 mV).
+ *
+ * The curve is a GENERIC single-cell LiPo resting-voltage (open-circuit)
+ * chart, the one RC-hobby and battery vendors publish at 5-10 % steps (e.g.
+ * "LiPo voltage chart", ampow.com / rchelicopterfun.com: 4.20 V = 100 %,
+ * 3.84 V = 50 %, 3.27 V = 0 %). It is NOT measured on Mae's 16340 cell, and
+ * it is a resting curve: under load (20-36 mA awake) the half reads a few mV
+ * low, which the display's filter and hysteresis absorb. Twelve points, fine
+ * in the flat 3.7-3.9 V zone where the old five-point dV table (3.3 / 3.5 /
+ * 3.7 / 3.9 / 4.2 V) jumped 15 points per 0.1 V. Linear between points,
+ * rounded; bounded [0; 100], monotonic (test_batt_calc). A comfort gauge,
+ * not a coulomb counter. */
+static inline uint8_t batt_soc_pct_mv(uint16_t mv)
 {
-    if (dv == 0) return 0xFF;
-    static const struct { uint8_t dv, pct; } t[] =
-        { {33, 0}, {35, 15}, {37, 40}, {39, 70}, {42, 100} };
+    if (mv == 0) return 0xFF;
+    static const struct { uint16_t mv; uint8_t pct; } t[] = {
+        {3270,   0}, {3610,   5}, {3690,  10}, {3730,  20}, {3770,  30}, {3800,  40},
+        {3840,  50}, {3870,  60}, {3950,  70}, {4020,  80}, {4110,  90}, {4200, 100},
+    };
     const unsigned n = sizeof t / sizeof t[0];
-    if (dv <= t[0].dv) return 0;
+    if (mv <= t[0].mv) return 0;
     for (unsigned i = 1; i < n; i++) {
-        if (dv <= t[i].dv) {
-            uint32_t span = t[i].dv - t[i - 1].dv;
-            uint32_t off  = dv - t[i - 1].dv;
-            return (uint8_t)(t[i - 1].pct + (uint32_t)(t[i].pct - t[i - 1].pct) * off / span);
+        if (mv <= t[i].mv) {
+            uint32_t span = t[i].mv - t[i - 1].mv;
+            uint32_t off  = mv - t[i - 1].mv;
+            return (uint8_t)(t[i - 1].pct + ((uint32_t)(t[i].pct - t[i - 1].pct) * off + span / 2) / span);
         }
     }
     return 100;
+}
+
+/* The same curve from a dV (the dongle only gets the STATUS batt_dV: one
+ * curve, 0.1 V resolution there). 0xFF if unknown. */
+static inline uint8_t batt_soc_pct(uint8_t dv)
+{
+    return dv ? batt_soc_pct_mv((uint16_t)(dv * 100u)) : 0xFF;
+}
+
+/* -- Displayed percentage (2026-09-30) --------------------------------------
+ *
+ * Bench 2026-09-30, left half on battery: 90 % / 100 % / FULL alternating.
+ * The mV was rounded to dV before the curve (0.1 V = 10 % at the top), and
+ * the display showed every reading.
+ *
+ * 1) Filter: an EMA of the MILLIVOLTS, weight 1/8 per sample. The gauge
+ *    samples every 10 s awake (plus one on wake), so the time constant is
+ *    ~80 s of awake time: a cell loses a percent in tens of minutes, so
+ *    nothing real is hidden, while a sag (a keystroke, a radio burst, the
+ *    ADC's own noise) is divided by 8 — a -40 mV sample moves it 5 mV.
+ *    Filtering the mV rather than the % keeps the curve's non-linearity out
+ *    of the average. Kept in 1/16 mV so the 1/8 steps do not truncate. The
+ *    first sample is taken as is (boot shows right away); a rejected one (0)
+ *    teaches nothing.
+ * 2) Display: 5 % steps, hysteresis in time. Down only once the filtered SoC
+ *    has been >= one step below for BATT_AFF_HOLD_MS (60 s) in a row. On
+ *    battery it never goes up — except the escape hatch below. With USB power
+ *    (the single rule, usb_presence_cable) it may go up, same 60 s hold.
+ * 3) Escape hatch: the halves have no VBUS bridge and a wall charger does not
+ *    enumerate, so a wall charge is invisible to the USB rule. A reading
+ *    >= BATT_AFF_RECAL_PCT (20 %) above for BATT_AFF_RECAL_MS (5 min) on
+ *    battery is a charge nobody saw: the display re-anchors. A load removed
+ *    or a warm cell recovers far less than 20 %. */
+typedef struct { uint32_t ema_x16; bool valide; } batt_ema_t;
+
+static inline uint16_t batt_ema_step(batt_ema_t *e, uint16_t mv)
+{
+    if (mv == 0) return e->valide ? (uint16_t)((e->ema_x16 + 8u) >> 4) : 0;
+    if (!e->valide) { e->valide = true; e->ema_x16 = (uint32_t)mv << 4; }
+    else {
+        int32_t d = (int32_t)((uint32_t)mv << 4) - (int32_t)e->ema_x16;
+        e->ema_x16 = (uint32_t)((int32_t)e->ema_x16 + d / 8);
+    }
+    return (uint16_t)((e->ema_x16 + 8u) >> 4);
+}
+
+#define BATT_AFF_PAS          5u        /* displayed step, % */
+#define BATT_AFF_HOLD_MS      60000u    /* a move must hold this long */
+#define BATT_AFF_RECAL_PCT    20u       /* on battery: an unseen charge */
+#define BATT_AFF_RECAL_MS     300000u
+
+typedef struct {
+    uint8_t  aff;              /* displayed %, valid when valide */
+    bool     valide;
+    bool     bas, haut;        /* a candidate below / above is being timed */
+    bool     secteur;          /* USB power at the previous step */
+    uint32_t bas_ms, haut_ms;
+} batt_affiche_t;
+
+static inline uint8_t batt_pct_quantifie(uint8_t soc)
+{
+    if (soc > 100) soc = 100;
+    return (uint8_t)((soc + BATT_AFF_PAS / 2) / BATT_AFF_PAS * BATT_AFF_PAS);
+}
+
+/* soc: filtered SoC (0xFF = unknown); secteur: USB power present. Returns the
+ * displayed %, 0xFF if unknown. An unknown reading shows "?" and stops the
+ * timing (a move is never extended over a missing reading); the displayed
+ * value itself is kept for the next valid one. */
+static inline uint8_t batt_affiche_step(batt_affiche_t *s, uint8_t soc, bool secteur, uint32_t now_ms)
+{
+    if (soc == 0xFF) { s->bas = s->haut = false; return 0xFF; }
+    uint8_t q = batt_pct_quantifie(soc);
+    if (!s->valide) { s->valide = true; s->aff = q; s->bas = s->haut = false; s->secteur = secteur; return q; }
+    if (secteur != s->secteur) { s->haut = false; s->secteur = secteur; }   /* the up rule changed */
+    if (q + BATT_AFF_PAS <= s->aff) {
+        s->haut = false;
+        if (!s->bas) { s->bas = true; s->bas_ms = now_ms; }
+        else if ((uint32_t)(now_ms - s->bas_ms) >= BATT_AFF_HOLD_MS) { s->aff = q; s->bas = false; }
+    } else if (q >= s->aff + BATT_AFF_PAS) {
+        s->bas = false;
+        bool assez = secteur || q >= s->aff + BATT_AFF_RECAL_PCT;
+        uint32_t hold = secteur ? BATT_AFF_HOLD_MS : BATT_AFF_RECAL_MS;
+        if (!assez) s->haut = false;
+        else if (!s->haut) { s->haut = true; s->haut_ms = now_ms; }
+        else if ((uint32_t)(now_ms - s->haut_ms) >= hold) { s->aff = q; s->haut = false; }
+    } else {
+        s->bas = s->haut = false;
+    }
+    return s->aff;
 }
 
 typedef enum {
@@ -163,4 +264,16 @@ static inline batt_niveau_t batt_niveau_step(batt_niveau_t courant, uint8_t dv)
     if (courant == BATT_CRITIQUE) return (dv >= BATT_CRITIQUE_DV + BATT_NIVEAU_HYST_DV) ? BATT_FAIBLE : BATT_CRITIQUE;
     if (courant == BATT_FAIBLE)   return (dv >= BATT_FAIBLE_DV + BATT_NIVEAU_HYST_DV) ? BATT_NORMAL : BATT_FAIBLE;
     return BATT_NORMAL;
+}
+
+
+/* The charge marker that may be SHOWN (screen) or SENT (STATUS): only with
+ * USB power (usb_presence_cable, the single rule). With it, the charger is
+ * fed: "+" until the end-of-charge plateau (batt_state_step) says FULL.
+ * Without it, nothing — on battery the plateau of a full cell and the rise
+ * after a load were showing FULL / "+" (bench 2026-09-30). */
+static inline batt_chg_t batt_chg_affiche(batt_chg_t heur, bool usb)
+{
+    if (!usb) return BATT_CHG_UNKNOWN;
+    return heur == BATT_CHG_FULL ? BATT_CHG_FULL : BATT_CHG_PROBABLE;
 }

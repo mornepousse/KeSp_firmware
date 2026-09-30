@@ -12,6 +12,7 @@
 #include "batt_sense.h"
 #include "batt_calc.h"
 #include "board.h"
+#include "usb_presence.h"  /* usb_presence_cable: the single USB rule — "+"/FULL and an upward display need it */
 #if CONFIG_KASE_VEILLE
 #include "veille_task.h"   /* gauge hook: one measurement on wake */
 #endif
@@ -35,9 +36,12 @@ static esp_timer_handle_t        s_timer;
 
 static volatile uint8_t  s_dv;        /* last valid voltage, 0 = unknown */
 static volatile uint8_t  s_niveau;    /* batt_niveau_t: NORMAL / FAIBLE / CRITIQUE, with hysteresis */
-static volatile uint8_t  s_chg;       /* batt_chg_t */
+static volatile uint8_t  s_chg;       /* batt_chg_t, the voltage heuristic ALONE (gated by USB at read) */
+static volatile uint8_t  s_pct = 0xFF; /* displayed %, 5 % steps, 0xFF = unknown (batt_affiche_step) */
 static volatile uint32_t s_last_ms;   /* timestamp of the last valid measurement */
 static batt_state_t      s_state;
+static batt_ema_t        s_ema;       /* mV filter, 1/8 per sample (batt_calc.h) */
+static batt_affiche_t    s_aff;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -65,13 +69,19 @@ void batt_sense_sample_now(void)
     s_chg = (uint8_t)batt_state_step(&s_state, mv, t);
     if (dv) { s_dv = dv; s_last_ms = t; }
     else    { s_dv = 0; }
+    /* Displayed %: the mV end to end (never through dV), filtered, then
+     * the 5 % display with its hysteresis. A rejected sample shows "?". */
+    {
+        uint16_t f = dv ? batt_ema_step(&s_ema, (uint16_t)mv) : 0;
+        s_pct = batt_affiche_step(&s_aff, f ? batt_soc_pct_mv(f) : 0xFF, usb_presence_cable(), t);
+    }
     {
         uint8_t avant = s_niveau;
         s_niveau = (uint8_t)batt_niveau_step((batt_niveau_t)s_niveau, dv);
         if (s_niveau != avant)
             ESP_LOGW(TAG, "battery: %s (%u dV)", s_niveau == BATT_CRITIQUE ? "CRITICAL" : s_niveau == BATT_FAIBLE ? "LOW" : "normal", (unsigned)dv);
     }
-    ESP_LOGD(TAG, "%u mV (adc %u) -> %u dV, state %u", (unsigned)mv, (unsigned)s[0], dv, s_chg);
+    ESP_LOGD(TAG, "%u mV (adc %u) -> %u dV, state %u, shown %u %%", (unsigned)mv, (unsigned)s[0], dv, s_chg, s_pct);
 }
 
 static void timer_cb(void *arg) { (void)arg; batt_sense_sample_now(); }
@@ -114,11 +124,14 @@ void batt_sense_init(void)
     const esp_timer_create_args_t a = { .callback = timer_cb, .name = "batt", .skip_unhandled_events = true };
     if (esp_timer_create(&a, &s_timer) == ESP_OK)
         esp_timer_start_periodic(s_timer, BATT_PERIOD_US);
-    ESP_LOGI(TAG, "gauge: %u dV (state %u), ADC%d ch%d, measuring every 10 s",
-             s_dv, s_chg, (int)s_unit_id + 1, (int)s_chan);
+    ESP_LOGI(TAG, "gauge: %u dV (%u %%, state %u), ADC%d ch%d, measuring every 10 s",
+             s_dv, s_pct, s_chg, (int)s_unit_id + 1, (int)s_chan);
 }
 
 uint8_t  batt_sense_dv(void)       { return s_dv; }
 uint8_t  batt_sense_niveau(void)   { return s_niveau; }
-uint8_t  batt_sense_charging(void) { return s_chg; }
+/* Gated at READ time: "+" appears as soon as the cable is plugged, not at
+ * the next 10 s sample. The STATUS to the dongle carries this same value. */
+uint8_t  batt_sense_charging(void) { return (uint8_t)batt_chg_affiche((batt_chg_t)s_chg, usb_presence_cable()); }
+uint8_t  batt_sense_pct(void)      { return s_pct; }
 uint32_t batt_sense_age_ms(void)   { return s_last_ms ? (uint32_t)(now_ms() - s_last_ms) : 0xFFFFFFFFu; }

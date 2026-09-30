@@ -38,7 +38,6 @@
 #include <string.h>
 #if CONFIG_KASE_BATT_SENSE
 #include "batt_sense.h"
-#include "batt_calc.h"
 #endif
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 #include "memlcd_cave.h"       /* the left screen */
@@ -245,11 +244,13 @@ static void lire_modele(memlcd_model_t *m)
 {
     memset(m, 0, sizeof *m);
     m->batt_local_dv = 0xFF;
+    m->batt_pct = 0xFF;
 #if CONFIG_KASE_LINK_WIRE
     m->lien_5v = link_uart_active() ? 1 : 0;
 #endif
 #if CONFIG_KASE_BATT_SENSE
-    { uint8_t dv = batt_sense_dv(); m->batt_local_dv = dv ? dv : 0xFF; m->batt_local_chg = batt_sense_charging(); m->batt_niveau = batt_sense_niveau(); }
+    { uint8_t dv = batt_sense_dv(); m->batt_local_dv = dv ? dv : 0xFF; m->batt_local_chg = batt_sense_charging(); m->batt_niveau = batt_sense_niveau();
+      m->batt_pct = batt_sense_pct(); }   /* the percentage is batt_sense's DISPLAYED one (mV curve, filtered, 5 % steps) */
     /* Low / critical: the voltage stays displayed as-is (no
      * blinking — one more redraw every 2 s for nothing, request from
      * 2026-09-19); the alert is the thickened gauge border. */
@@ -317,25 +318,19 @@ static void dessiner(const memlcd_model_t *m)
     lv_label_set_text(s_l_volt, buf);
     if (m->lien_5v) lv_obj_clear_flag(s_img_lien, LV_OBJ_FLAG_HIDDEN);
     else            lv_obj_add_flag(s_img_lien, LV_OBJ_FLAG_HIDDEN);
-    uint8_t pct = 0;
-#if CONFIG_KASE_BATT_SENSE
-    pct = (m->batt_local_dv == 0xFF) ? 0 : batt_soc_pct(m->batt_local_dv);
-#endif
+    uint8_t pct = (m->batt_pct == 0xFF) ? 0 : m->batt_pct;   /* batt_sense_pct: filtered, 5 % steps */
     lv_bar_set_value(s_bar, pct, LV_ANIM_OFF);
     /* Low battery: gauge border thickened (a background/level inversion
      * made a full bar unreadable — bench 2026-09-19). */
     lv_obj_set_style_border_width(s_bar, m->batt_niveau ? 2 : 1, LV_PART_MAIN);
 }
 #else
-/* The left: the cave draws everything, the percentage from the displayed
- * (30 s stabilised) voltage — batt_soc_pct, the same curve as the right's bar. */
+/* The left: the cave draws everything, the percentage being batt_sense's
+ * DISPLAYED one (batt_sense_pct: mV curve, EMA, 5 % steps, never up on
+ * battery) — the same value as the right's bar. 0xFF reads "?". */
 static void dessiner(const memlcd_model_t *m)
 {
-    uint8_t pct = 0;
-#if CONFIG_KASE_BATT_SENSE
-    pct = (m->batt_local_dv == 0xFF) ? 0 : batt_soc_pct(m->batt_local_dv);
-#endif
-    memlcd_cave_draw(m, pct);
+    memlcd_cave_draw(m, m->batt_pct);
 }
 #endif
 

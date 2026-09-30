@@ -667,18 +667,41 @@ means a test, or a line.
 - [test:test_batt_calc] Battery voltage is converted from the 1M/1M
   divider (V_batt = 2 × V_adc), averaged, and rejected outside [2.5 V;
   4.5 V] (0 = unknown, never a wrong number); SoC is a bounded, monotonic
-  Li-ion 16340 table; "full" requires a plateau ≥ 4.15 V held for 2 min
+  12-point single-cell LiPo resting-voltage curve read in MILLIVOLTS
+  (`batt_soc_pct_mv`; generic chart, not measured on the cell — the dV
+  entry point `batt_soc_pct` reads the same curve, the dongle's); "full"
+  requires a plateau ≥ 4.15 V held for 2 min
   with hysteresis, "probably charging" a rise ≥ 0.1 V within a 5 min
   window — a discharge or a slow drift never counts; an unknown reading
   forgets everything.
+- [test:test_batt_calc] The DISPLAYED percentage (`batt_sense_pct`,
+  2026-09-30 — bench: 90 / 100 / FULL alternating on battery, the mV was
+  rounded to dV before a 5-point table): the mV goes end to end through an
+  EMA (1/8 per 10 s sample, ~80 s awake; a -40 mV sag moves it 5 mV), then
+  the curve, then `batt_affiche_step`: 5 % steps, the first reading after
+  boot at once, a drop only once ≥ one step below for 60 s in a row, NEVER
+  up on battery — except ≥ 20 % above for 5 min (a wall charge, invisible to
+  the USB rule, re-anchors); with USB power it may climb (60 s per step). An
+  hour of 4.10/4.15/4.20 V noise changes it once at most; a 10 h discharge
+  walks down 5 % at a time; an unknown reading shows "?".
+- [test:test_batt_calc] "+" and FULL only with USB power (`batt_chg_affiche`,
+  `usb_presence_cable` — the single USB rule): FULL = USB AND the plateau
+  heuristic, "+" = USB and not full; on battery neither, whatever the
+  heuristic says. Gated at read time (`batt_sense_charging`), so the screen
+  AND the STATUS to the dongle (same field, same values — the radio contract
+  is unchanged) carry it. A wall charger (no enumeration, no VBUS bridge on
+  the halves) shows no "+".
 - [test:test_rf_status_half_et_charge] STATUS carries half identity and
   charge state in its flags nibble, without changing size; an old frame
   reads as left / unknown (backward-compatible).
 - [smoke:Battery gauge] Both halves report a plausible voltage to the
   dongle (CDC BATTERY, left/right slots), the right through a STATUS every
   30 s without stopping itself from sleeping; an unknown voltage displays
-  as "inconnue" (unknown) (0xFF), never 0 V; while charging, FULL appears
-  after the plateau.
+  as "inconnue" (unknown) (0xFF), never 0 V; while charging on USB, FULL
+  appears after the plateau, never on battery.
+- [smoke:Battery percentage (2026-09-30)] On battery with a full cell the
+  left's reading settles on one multiple of 5 and stays; no "+" or FULL
+  without USB; USB brings "+" within ~1 s.
 - [test:test_batt_calc] Battery level with hysteresis (`batt_niveau_step`):
   LOW below 3.5 V, CRITICAL below 3.3 V, recovery with 0.1 V of margin; a
   rejected sample (0) KEEPS the level (a forced NORMAL was causing
@@ -755,7 +778,9 @@ means a test, or a line.
   corner and the chest padlock beside it, then in words `USB` / `RADIO` and
   `SEEN` on its own line, the WATER-DROP gauge (13 x 16, filled from the
   bottom with a wavy surface, outlined 2 px when LOW) with the PERCENTAGE
-  beside it — not volts: "87%", "+" charging, `FULL` charged, "?" unknown —
+  beside it — not volts: "85%" (batt_sense_pct: 5 % steps, filtered, never
+  up on battery), "+" charging and `FULL` charged (USB power only), "?"
+  unknown —
   the chest's rows, the layer name and its flags (Caps Lock only on the USB
   route, the host LED being unknown in RF and stale from the last USB
   session). Every layout decision is pure (`memlcd_cave_vue`,

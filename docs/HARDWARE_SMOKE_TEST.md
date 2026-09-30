@@ -140,8 +140,17 @@ in the PR/release.
       the battery; CDC BATTERY (dongle) gives BOTH halves with a fresh age
       (left ~1 s, right ≤ 30 s); the right still falls asleep at 15 s
       despite its slow STATUS; a half that's off shows back as "inconnue"
-      (unknown); battery charging → after ≥ 2 min at ≥ 4.15 V, charging = 2
-      (FULL)
+      (unknown); battery charging ON USB → "+" at once, then after ≥ 2 min
+      at ≥ 4.15 V, charging = 2 (FULL)
+- [ ] Battery percentage (2026-09-30): left on battery, USB unplugged, a
+      full cell (4.1-4.2 V) → the reading settles on ONE value (100 % or
+      95 %) and stays there for 10 min — no 90 / 100 / FULL alternation, no
+      "+", no `FULL` anywhere without USB (screen, CDC BATTERY charging = 0);
+      the percentage is a multiple of 5 and only ever goes DOWN on battery
+      (a drop shows ≥ 60 s after the cell got there); plug USB → "+" within
+      ~1 s, the percentage may climb (60 s per step); a charge on a WALL
+      charger (not seen by the USB rule) re-anchors the reading once it is
+      ≥ 20 % above for 5 min; after a reboot the first reading shows at once
 - [ ] Memory-LCD screens (left AND right): at boot, console "panneau
       attache (bus radio pret), mire ecrite" (panel attached (radio bus
       ready), test pattern written) AFTER "radio PTX … init OK"; crisp test
