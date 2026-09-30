@@ -222,6 +222,12 @@ in the PR/release.
       `NN s` under it — nothing of the normal screen shows through; every
       character used renders (no tofu box): digits, upper/lower case,
       space, `~`, `/`, `?`, `:`, `!`, `@`, `.`.
+      Stack (console on the ESP-Prog): after a prompt on the longest label
+      and a browse of a long name, read the heartbeat's
+      `HB status_disp stack: N bytes never used (new low)` — the status
+      display task has 6144 bytes; the view's own deepest path measures
+      ~1.6 KB of frames (xtensa `-fstack-usage`, 2026-09-30), LVGL's render
+      and flush come on top. Below ~1 KB free, raise the task's stack.
 - [ ] Chest link protocol v3 (left flashed with the Task 6 transport, chest
       flashed with its v3 head, USB-C plugged; for the raw traces build the
       left with `CONFIG_KASE_CHEST_DIAG=y` and read the console detached,

@@ -83,6 +83,27 @@ static void hb(uint32_t inactif_ms, const veille_vetos_t *v)
              veille_vetos_str(v, vb, sizeof vb), veille_hb_suffixe());
 }
 
+#if CONFIG_KASE_HAS_DISPLAY
+extern TaskHandle_t status_display_task_handle;   /* main.c, NULL in safe mode */
+/* Bench (review I3, 2026-09-30): the status display task's stack margin.
+ * Its deepest path — the cave view of a prompt (safe-wrap DP, label lines)
+ * then lv_refr_now's render and flush, all on that task's 6144 bytes — was
+ * never measured. The watermark is read here, every heartbeat, off every hot
+ * path, and logged only when it reaches a NEW low: one line per deeper path
+ * seen (show a long label's prompt on the bench, then read it). */
+static void hb_pile_affichage(void)
+{
+    static UBaseType_t s_min = (UBaseType_t)~0u;
+    TaskHandle_t t = status_display_task_handle;
+    if (!t) return;
+    UBaseType_t libre = uxTaskGetStackHighWaterMark(t);   /* bytes on ESP-IDF */
+    if (libre < s_min) {
+        s_min = libre;
+        ESP_LOGW(TAG, "HB status_disp stack: %u bytes never used (new low)", (unsigned)libre);
+    }
+}
+#endif
+
 static void veille_task(void *arg)
 {
     (void)arg;
@@ -113,7 +134,13 @@ static void veille_task(void *arg)
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
         uint32_t inactif = now - get_last_activity_time_ms();
         veille_vetos_t v = vetos_lire();
-        if ((uint32_t)(now - dernier_hb) >= HB_PERIODE_MS) { dernier_hb = now; hb(inactif, &v); }
+        if ((uint32_t)(now - dernier_hb) >= HB_PERIODE_MS) {
+            dernier_hb = now;
+            hb(inactif, &v);
+#if CONFIG_KASE_HAS_DISPLAY
+            hb_pile_affichage();
+#endif
+        }
         if (veille_bloquee(&v) && inactif >= veille_seuil_legere_ms()
             && (uint32_t)(now - dernier_refus) >= 30000u) {
             char vb[VEILLE_VETOS_STR_MAX]; dernier_refus = now;
