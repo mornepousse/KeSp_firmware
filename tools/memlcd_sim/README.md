@@ -27,6 +27,11 @@ Everything it builds goes to `tools/memlcd_sim/build/`, every image to
 
 ## What it proves (gates — a failure exits non-zero)
 
+`tools/memlcd_sim/build.sh --gates` runs these three and nothing else; the
+tripwire brick `scripts/tripwire.d/memlcd-sim-gates.sh` calls it from every
+`scripts/check.sh` (Stop hook, pre-push), and skips with a visible notice when
+`managed_components/lvgl__lvgl` has not been fetched.
+
 1. **Width oracle** (`check_widths.c`): the host tests lay the screen out with
    `memlcd_text_width()` (`memlcd_model.h` + the generated
    `memlcd_font_widths.h`, kerning included); LVGL draws with the fonts. Every

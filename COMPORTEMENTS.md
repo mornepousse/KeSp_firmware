@@ -797,7 +797,11 @@ means a test, or a line.
   security (`memlcd_cave_vue`, `memlcd_safe_wrap.h`, host-tested; widths from
   the width oracle, kerning included, `scripts/gen_memlcd_font_widths.py`,
   guarded by the `font-widths` tripwire brick and equal to lv_txt_get_width
-  on every printable pair; a line keeps 2 px of its box free):
+  on every printable pair — proven at every check.sh by the
+  `memlcd-sim-gates` brick, which also runs the 12 px glyph-ink floor and the
+  LVGL-measured safe wrap (`tools/memlcd_sim/build.sh --gates`; skipped with
+  a notice when managed_components is absent); a line keeps 2 px of its box
+  free):
   - NO NAME LINE READS LIKE A CODE (bench incident 2026-09-29: `TEST:RFC6238`
     pixel-cut to `TEST:RFC` / `6238` was read as a truncated code): a name or
     label broken over lines never leaves a line with a digit and no letter

@@ -14,7 +14,10 @@
 #   4. render_cave      — the 10 reference states and the proof sheets -> out/
 # Any gate failing stops the script with a non-zero status.
 #
-# Usage: tools/memlcd_sim/build.sh [--relib]   (--relib rebuilds liblvgl.a)
+# Usage: tools/memlcd_sim/build.sh [--relib] [--gates]
+#   --relib  rebuilds liblvgl.a
+#   --gates  runs the three gates only, no rendering (what the tripwire brick
+#            scripts/tripwire.d/memlcd-sim-gates.sh calls from check.sh)
 set -euo pipefail
 SIM="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SIM/../.." && pwd)"
@@ -33,7 +36,15 @@ fi
 mkdir -p "$BUILD/obj" "$OUT/cave_dark" "$OUT/gauges"
 
 # ---- LVGL, incremental: an object is rebuilt when its source or lv_conf.h is newer ----
-if [ ! -f "$BUILD/liblvgl.a" ] || [ "${1:-}" = "--relib" ] || [ "$SIM/lv_conf.h" -nt "$BUILD/liblvgl.a" ]; then
+RELIB=0; GATES_ONLY=0
+for a in "$@"; do
+    case "$a" in
+        --relib) RELIB=1 ;;
+        --gates) GATES_ONLY=1 ;;
+        *) echo "memlcd_sim: unknown argument $a" >&2; exit 2 ;;
+    esac
+done
+if [ ! -f "$BUILD/liblvgl.a" ] || [ "$RELIB" = 1 ] || [ "$SIM/lv_conf.h" -nt "$BUILD/liblvgl.a" ]; then
     echo "== liblvgl.a from $LVGL (read-only) =="
     objs=()
     while IFS= read -r f; do
@@ -65,6 +76,11 @@ echo "== 2. glyph ink of the engine's fonts (gate) =="
 echo "== 3. safe wrap, measured by LVGL (gate) =="
 "$CC" "${CFLAGS[@]}" "$SIM/test_safe_wrap.c" "${LIB[@]}" -o "$BUILD/test_safe_wrap"
 "$BUILD/test_safe_wrap"
+
+if [ "$GATES_ONLY" = 1 ]; then
+    echo "memlcd_sim: the three gates passed"
+    exit 0
+fi
 
 cd "$SIM"   # the renderer writes under out/, relative
 echo "== 4. the firmware engine: reference states and proofs =="
