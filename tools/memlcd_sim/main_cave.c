@@ -79,7 +79,7 @@ int main(void)
     }
     sheet_end("out/cave_dark/anim_countdown_cave_dark.png");
 
-    sheet_begin(2, 2, 3, &lv_font_montserrat_12, "CAVE / DARK -- security proof: no digit-only line");
+    sheet_begin(2, 3, 3, &lv_font_montserrat_12, "CAVE / DARK -- security proof: no unmarked digit-only line");
     for (int i = 0; i < N_SECURITY; i++) {
         frame(&sec[i].m, sec[i].batt_pct);
         snprintf(path, sizeof path, "out/cave_dark/%s.png", sec[i].id);
@@ -88,13 +88,15 @@ int main(void)
     }
     sheet_end("out/cave_dark/security_proof_cave_dark.png");
 
-    /* The bench states of plan Task 3: an 8-digit code, and a 34 'W' label
-     * (the UNSCII last resort). */
-    sheet_begin(3, 1, 3, &lv_font_montserrat_12, "CAVE / DARK -- bench extras");
+    /* The bench states of plan Task 3: an 8-digit code, a 34 'W' label (the
+     * UNSCII last resort) and a 34-character digit-heavy label (marked). */
+    sheet_begin(4, 1, 3, &lv_font_montserrat_12, "CAVE / DARK -- bench extras");
     { memlcd_model_t m = sc[8].m; strcpy(m.coffre_nom, "Jetable:huit"); strcpy(m.coffre_code, "12345678"); frame(&m, 88); }
     sheet_add("code 8 digits . Jetable:huit");
     { memlcd_model_t m = sc[5].m; strcpy(m.coffre_label, "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"); m.coffre_op_count = 12; frame(&m, 88); }
     sheet_add("prompt . 34 W . 12 accts");
+    { memlcd_model_t m = sc[5].m; strcpy(m.coffre_label, "AWS:123456789012345678901234567890"); m.coffre_op_count = 12; frame(&m, 88); }
+    sheet_add("prompt . 34 digit-heavy . 12");
     { memlcd_model_t m = sc[3].m; m.coffre &= (uint8_t)~CHEST_STATE_SD; m.dongle_vu = 1; m.caps_lock = 1; m.caps_word = 1; m.osm = 0x02; m.osl = 3; strcpy(m.nom, "NAVIGATION"); frame(&m, 50); }
     sheet_add("everything at once");
     sheet_end("out/cave_dark/bench_extras_cave_dark.png");

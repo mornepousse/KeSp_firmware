@@ -61,7 +61,16 @@ column, separators, imbalance), ugly icons. Scope: the whole LEFT screen
   and free of digits-only lines (`AWS:123456789012`), it stays whole and every
   line that continues the previous one starts with a drawn `↳` mark (1-bit
   bitmap — the built-in fonts have no such glyph), so a line of digits reads as
-  the rest of a name, never as a code.
+  the rest of a name, never as a code. Implemented 2026-09-30 (fix round
+  1): the mark is drawn on EVERY continuation line of a prompt's label, not
+  only when digits force it — one meaning everywhere, and it fits the band
+  (the 34-character brief label keeps Montserrat 12, at the price of one
+  mid-word break `ALICE.M` / `↳ARTIN@`). 6 × 11 px, 1 px stem rising above
+  the digits and an open arrow low on the line: a first 6 × 6 version read
+  as a `4` in the simulator. Its 8 px (mark + gap) come off the line; the
+  8-character raw UNSCII cut is gone. Only exception left: a label that
+  STARTS with a digit run wider than a line has an unmarked first line of
+  digits (nothing precedes it to continue). To judge on the panel.
 - **Text floor: Montserrat 12.** Below it the 1-bit threshold erases glyphs
   (at 8 px `:` `.` `,` `;` `_` have zero ink, `:` and `.` are identical; at
   10 px the apostrophe vanishes) — measured by the simulator's

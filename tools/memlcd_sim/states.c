@@ -155,4 +155,15 @@ void security_scenarios_build(scenario_t out[N_SECURITY])
     s->m = out[2].m; s->batt_pct = out[2].batt_pct;
     s->m.coffre_pos = 1;
     strcpy(s->m.coffre_nom, "BANQUE:4021");
+
+    s = &out[4];
+    s->id = "sec5_prompt_aws_id"; s->caption = "prompt . AWS:123456789012";
+    s->m = out[0].m; s->batt_pct = out[0].batt_pct;
+    strcpy(s->m.coffre_label, "AWS:123456789012");
+
+    s = &out[5];
+    s->id = "sec6_browse_aws_id"; s->caption = "browse . AWS:123456789012";
+    s->m = out[2].m; s->batt_pct = out[2].batt_pct;
+    s->m.coffre_pos = 2;
+    strcpy(s->m.coffre_nom, "AWS:123456789012");
 }

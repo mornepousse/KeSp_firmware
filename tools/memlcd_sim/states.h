@@ -17,8 +17,10 @@ typedef struct {
 void scenarios_build(scenario_t out[N_SCENARIOS]);
 
 /* Security proof set (Mae, 2026-09-29 bench incident): a prompt and a
- * browser entry for each of the two adversarial labels — "TEST:RFC6238"
- * (must not cut to "TEST:RFC" / "6238") and "BANQUE:4021" (must not cut to
- * "BANQUE:" / "4021" either — the colon does not make a digit run safe). */
-#define N_SECURITY 4
+ * browser entry for each of the three adversarial labels — "TEST:RFC6238"
+ * (must not cut to "TEST:RFC" / "6238"), "BANQUE:4021" (must not cut to
+ * "BANQUE:" / "4021" either — the colon does not make a digit run safe) and
+ * "AWS:123456789012" (no safe split exists: whole on the prompt, its digit
+ * lines behind the continuation mark; cut with '~' in the browser). */
+#define N_SECURITY 6
 void security_scenarios_build(scenario_t out[N_SECURITY]);

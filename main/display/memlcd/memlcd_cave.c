@@ -46,6 +46,7 @@ static struct {
     lv_obj_t *rule;
     lv_obj_t *eau_box, *eau_fill, *eau_wave, *eau_ombre;
     lv_obj_t *l[MEMLCD_CAVE_LIGNES];
+    lv_obj_t *marque[MEMLCD_CAVE_MARQUES];     /* continuation marks, used in line order */
 } s;
 
 static uint8_t s_goutte_map[MEMLCD_CAVE_GOUTTE_H * MEMLCD_CAVE_GOUTTE_STRIDE];
@@ -54,6 +55,14 @@ static lv_img_dsc_t s_goutte_img = {
     .header.w = MEMLCD_CAVE_GOUTTE_W, .header.h = MEMLCD_CAVE_GOUTTE_H,
     .data_size = sizeof s_goutte_map, .data = s_goutte_map,
 };
+/* The continuation mark "↳": one 1-bit bitmap (memlcd_cave.h) for every
+ * mark object — the fonts have no such glyph. */
+static const lv_img_dsc_t s_marque_img = {
+    .header.cf = LV_IMG_CF_ALPHA_1BIT, .header.always_zero = 0,
+    .header.w = MEMLCD_CAVE_MARQUE_W, .header.h = MEMLCD_CAVE_MARQUE_H,
+    .data_size = sizeof memlcd_cave_marque_bits, .data = memlcd_cave_marque_bits,
+};
+_Static_assert(MEMLCD_CAVE_MARQUE_W <= 8, "the mark's bitmap is one byte a row");
 static memlcd_cave_vue_t s_vue;                 /* ~600 bytes: static, not on the LVGL task's stack */
 static lv_point_t s_rule_pts[4], s_wave_pts[7];
 
@@ -123,6 +132,7 @@ void memlcd_cave_build(lv_obj_t *scr)
         lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
         s.l[i] = l;
     }
+    for (int i = 0; i < MEMLCD_CAVE_MARQUES; i++) s.marque[i] = image(scr, &s_marque_img);
 }
 
 static void montre(lv_obj_t *o, bool oui, lv_coord_t x, lv_coord_t y)
@@ -190,6 +200,7 @@ void memlcd_cave_draw(const memlcd_model_t *m, uint8_t batt_pct)
     montre(s.rule, v->rule, 0, 0);
     eau(v);
 
+    int nm = 0;
     for (int i = 0; i < MEMLCD_CAVE_LIGNES; i++) {
         lv_obj_t *l = s.l[i];
         if (i >= v->n) { lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN); continue; }
@@ -199,5 +210,11 @@ void memlcd_cave_draw(const memlcd_model_t *m, uint8_t batt_pct)
         lv_obj_set_width(l, li->w);
         lv_label_set_text(l, li->text);
         montre(l, true, li->x, li->y);
+        /* A continuation line and its mark go together: the view never marks
+         * more lines than there are mark objects (a label has at most
+         * MEMLCD_SW_MAX_LINES lines, the first unmarked). */
+        if (li->marque && nm < MEMLCD_CAVE_MARQUES)
+            montre(s.marque[nm++], true, li->x - MEMLCD_CAVE_MARQUE_PAS, li->y + memlcd_cave_marque_dy(li->font));
     }
+    while (nm < MEMLCD_CAVE_MARQUES) montre(s.marque[nm++], false, 0, 0);
 }

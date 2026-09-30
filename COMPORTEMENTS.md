@@ -808,7 +808,17 @@ means a test, or a line.
     `BANQUE:4021` -> `BANQU` / `E:4021`, `AB:123456789:CD` -> `AB:123456` /
     `789:CD`; pinned on a 20 000-string fuzz of issuer:account names and on
     every view that shows one. Only a text with no letter at all is exempt
-    (it IS digits);
+    (it IS digits). On a PROMPT, whose label is never cut, every line after
+    the label's first starts with the drawn CONTINUATION MARK `↳` (spec
+    "Continuation mark", Mae 2026-09-30; a 6 x 11 1-bit bitmap, its stem
+    rising above the digits so it never reads as a `4`, its 8 px — mark +
+    gap — taken off that line's budget): a safe split is still preferred,
+    and when none exists (`AWS:123456789012` -> `AWS:` / `↳1234567` /
+    `↳89012`) a marked line may hold digits alone — it reads as the rest of
+    a name. The invariant, fuzzed on every view: a line with digits and no
+    letter carries the mark; the one exception is a label's FIRST line when
+    the label starts with a digit run wider than a line (no first line can
+    reach a letter) [test:test_memlcd_safe_wrap];
   - prompt (an operation is pending, beats a simultaneously-visible code —
     review I3, the code's digits never on a prompt): FULL screen, thin rock;
     the op (`chest_op_label`) at most Montserrat 20 (TOTP), smaller when it
@@ -821,13 +831,12 @@ means a test, or a line.
     12, label "12 COMPTES" — both reach the screen); `PRESS` at the bottom.
     The label is NEVER cut (review C1 of Task 5 stands) and nothing overlaps
     it: room is made by shrinking the op title rung by rung to 12 px; past
-    that (only wide glyphs — 34 `W` need 9 lines at 12 px) UNSCII 8, a bitmap
-    font whose every glyph keeps its ink, safe-wrapped over the full width;
-    and when NO safe split exists at all (a run of digits and punctuation
-    wider than two lines — `AWS:123456789012`) a plain 8-character cut, the
-    label still WHOLE, flagged `coupe_brute` in the view: the one place a
-    line of digits may appear, on a prompt, which never shows a code
-    (`_Static_assert`: 5 UNSCII lines + N ACCTS + PRESS always fit). The
+    that (only wide glyphs — 34 `W` need 11 lines at 12 px) UNSCII 8, a
+    bitmap font whose every glyph keeps its ink, wrapped the same way (marks
+    included) over the full width — it always fits: 8 characters on the
+    first line and 7 after each mark put the chest's 34 in 5 lines, and 5
+    UNSCII lines + N ACCTS + PRESS fit (`_Static_assert`s). No 8-character
+    raw cut any more (review C1, 2026-09-30: it left `56789012` alone). The
     lines concatenated ARE the label, no `~` on a prompt ever; every scan is
     bounded by `strnlen(s, CHEST_LABEL_MAX)` (review M-b, ASan-pinned by
     test_chest_sanitized, which runs both memlcd suites);

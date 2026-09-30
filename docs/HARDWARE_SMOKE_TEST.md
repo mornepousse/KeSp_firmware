@@ -209,7 +209,10 @@ in the PR/release.
       when the time is not set, the logo, route and drop still visible
       above it, nothing running into the rock); a `K_OATH_CODE` prompt on
       the `TEST:RFC6238` test account reads `TEST:` / `RFC6238` — NEVER a
-      line of digits alone; a label near the chest's 34-character maximum
+      line of digits alone; a prompt on an `AWS:123456789012` test
+      account shows `AWS:` then two lines each starting with the `↳`
+      continuation mark — the mark reads as an arrow, never as a `4`, and
+      nothing of the label is missing; a label near the chest's 34-character maximum
       spans its 12 px lines with nothing clipped at either edge; a label of
       wide letters (a `WWW…` test account) switches to the small UNSCII 8
       type and still shows WHOLE (no `~` on a prompt); a RESET shows

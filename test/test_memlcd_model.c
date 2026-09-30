@@ -136,6 +136,25 @@ static void assert_vue_tient(const memlcd_cave_vue_t *v, const char *quoi)
             if (w && croise(x0, x0 + w, p[j].x0, p[j].x1) && croise(l->y, l->y + h, p[j].y0, p[j].y1))
                 TEST_ASSERT(0, "a line overlaps a pictogram");
     }
+    /* A continuation mark (prompt label): left-aligned text after it, the
+     * mark inside the box, clear of every line's ink and every pictogram. */
+    for (uint8_t i = 0; i < v->n; i++) {
+        const memlcd_cave_ligne_t *l = &v->l[i];
+        if (!l->marque) continue;
+        TEST_ASSERT(l->left, "a marked line is left-aligned after its mark");
+        int mx0 = l->x - MEMLCD_CAVE_MARQUE_PAS, my0 = l->y + memlcd_cave_marque_dy(l->font);
+        int mx1 = mx0 + MEMLCD_CAVE_MARQUE_W, my1 = my0 + MEMLCD_CAVE_MARQUE_H;
+        TEST_ASSERT(mx0 >= 0 && my0 >= v->top && my1 <= v->bottom, "the mark inside the content box");
+        for (uint8_t j = 0; j < v->n; j++) {
+            const memlcd_cave_ligne_t *k = &v->l[j];
+            int kx0 = ink_x0(k), kw = memlcd_text_width(k->font, k->text);
+            if (kw && croise(mx0, mx1, kx0, kx0 + kw) && croise(my0, my1, k->y, k->y + memlcd_font_pas(k->font)))
+                TEST_ASSERT(0, "a mark overlaps a line");
+        }
+        for (int j = 0; j < np; j++)
+            if (croise(mx0, mx1, p[j].x0, p[j].x1) && croise(my0, my1, p[j].y0, p[j].y1))
+                TEST_ASSERT(0, "a mark overlaps a pictogram");
+    }
 }
 
 /* Concatenation of the label/name lines — what the eye reads across them. */
@@ -384,6 +403,8 @@ static void test_vue_prompt(void)
     vue_texte(&v, txt, sizeof txt);
     TEST_ASSERT(strcmp(txt, LABEL34W) == 0, "34 W: the whole label, never cut");
     TEST_ASSERT(v.l[v.txt_i].font == MEMLCD_F_U8 && v.txt_n == 5, "... in UNSCII 8, 5 lines: the last resort");
+    for (uint8_t i = v.txt_i; i < v.txt_i + v.txt_n; i++)
+        TEST_ASSERT(!!v.l[i].marque == (i > v.txt_i), "... every line after the first carries the continuation mark");
     TEST_ASSERT(strchr(txt, '~') == NULL, "never a ~ on a prompt");
 
     /* The same with N ACCTS: still whole, N ACCTS and PRESS still there. */

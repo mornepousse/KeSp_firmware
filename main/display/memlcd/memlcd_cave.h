@@ -13,13 +13,18 @@
  *
  * Dark: pale ink on black paper (Mae's choice, 2026-09-29). One family,
  * Montserrat, from 32 down to the 12 px floor; UNSCII 8 only as the last
- * resort that keeps a pathological chest label whole on a prompt.
+ * resort that keeps a chest label of wide glyphs whole on a prompt (34 'W'
+ * cannot fit the band in Montserrat 12).
  *
  * Security rules (hard, spec "Security rules for text"):
  *  - a prompt shows the CHEST's label (coffre_label), never the browser's
  *    copy (coffre_nom), WHOLE, nothing overlapping it — the op title, the
  *    divider and the rock shrink first, UNSCII 8 last;
- *  - a name line never holds a digit without a letter (memlcd_safe_wrap.h);
+ *  - a name line never reads as a code: a browsed or code-screen name never
+ *    shows a line with a digit and no letter (memlcd_safe_wrap.h, cut with
+ *    '~'); a prompt's label, never cut, draws the CONTINUATION MARK before
+ *    every line that continues the previous one (spec "Continuation mark",
+ *    Mae 2026-09-30) — a line of digits there reads as the rest of a name;
  *  - no code without coffre_code_visible; priority prompt > code > browser. */
 #include "memlcd_model.h"
 #include "memlcd_safe_wrap.h"
@@ -51,6 +56,37 @@
 #define MEMLCD_CAVE_OMBRE_H      4       /* its dither shadow, under it */
 
 #define MEMLCD_CAVE_GAP          2
+/* The continuation mark "↳" (1-bit bitmap drawn by the engine: the built-in
+ * fonts have no such glyph) before every line of a prompt's label after the
+ * first, centred with its text as one group; its width + gap come off that
+ * line's budget (a continuation line of Montserrat 12 has 54 px, UNSCII 8
+ * 58 — "RFC6238" is 54). It must never read as a digit ("↳89012" is not
+ * "489012"): its 1 px stem rises from the line's top, ABOVE the digits'
+ * cap height, toward the line it continues, and turns into an open arrow
+ * low on the line — nothing crosses the stem the way a 4's bar does;
+ * 6 x 11. */
+#define MEMLCD_CAVE_MARQUE_W     6
+#define MEMLCD_CAVE_MARQUE_H     11
+#define MEMLCD_CAVE_MARQUE_GAP   2
+#define MEMLCD_CAVE_MARQUE_PAS   (MEMLCD_CAVE_MARQUE_W + MEMLCD_CAVE_MARQUE_GAP)
+#define MEMLCD_CAVE_MARQUES      (MEMLCD_SW_MAX_LINES - 1)   /* at most one per label line but the first */
+static const uint8_t memlcd_cave_marque_bits[MEMLCD_CAVE_MARQUE_H] = {   /* ALPHA_1BIT, MSB = leftmost */
+    0x80,   /* X.....  */
+    0x80,   /* X.....  */
+    0x80,   /* X.....  */
+    0x80,   /* X.....  */
+    0x80,   /* X.....  */
+    0x80,   /* X.....  */
+    0x90,   /* X..X..  */
+    0x88,   /* X...X.  */
+    0xFC,   /* XXXXXX  */
+    0x08,   /* ....X.  */
+    0x10,   /* ...X..  */
+};
+/* The mark's top below its line's top: 0 — the stem starts at the line's
+ * top (Montserrat 12's digits span rows 3..11, the arrow on row 8; UNSCII
+ * 8's rows 0..7, the arrow on its baseline). */
+static inline int memlcd_cave_marque_dy(uint8_t font) { (void)font; return 0; }
 #define MEMLCD_CAVE_LABEL_X      2       /* a name/label line: box 64 px, 62 px of text */
 #define MEMLCD_CAVE_LABEL_W      (MEMLCD_W - 4)
 #define MEMLCD_CAVE_FLOOR        MEMLCD_F_M12
@@ -64,6 +100,8 @@ typedef struct {
     uint8_t font;                  /* memlcd_font_t */
     uint8_t x, y, w;               /* the label's box: x..x+w, text inside w - 2 */
     uint8_t left;                  /* 1 = left-aligned, else centred */
+    uint8_t marque;                /* 1 = the continuation mark at (x - MARQUE_PAS, y + marque_dy):
+                                    * left-aligned text after it (a prompt label's line > 0) */
     char    text[MEMLCD_VC_TXT];
 } memlcd_cave_ligne_t;
 
@@ -80,8 +118,6 @@ typedef struct {
     uint8_t n;                     /* lines used */
     uint8_t txt_i, txt_n;          /* the lines holding the label (prompt) or the name (code, browse) */
     uint8_t tient;                 /* 1 = memlcd_cave_tient() held for the chosen layout */
-    uint8_t coupe_brute;           /* prompt: the label took the last resort (plain 8-character
-                                    * cut) — no safe split exists; the label stays WHOLE */
     memlcd_cave_ligne_t l[MEMLCD_CAVE_LIGNES];
 } memlcd_cave_vue_t;
 
@@ -133,7 +169,7 @@ static inline memlcd_cave_ligne_t *memlcd_cave_add(memlcd_cave_vue_t *v, uint8_t
 {
     if (v->n >= MEMLCD_CAVE_LIGNES) { v->tient = 0; return NULL; }
     memlcd_cave_ligne_t *l = &v->l[v->n++];
-    l->font = font; l->x = x; l->y = y; l->w = w; l->left = left ? 1 : 0;
+    l->font = font; l->x = x; l->y = y; l->w = w; l->left = left ? 1 : 0; l->marque = 0;
     snprintf(l->text, sizeof l->text, "%s", s ? s : "");
     return l;
 }
@@ -310,6 +346,13 @@ static inline memlcd_cave_boite_t memlcd_cave_boite_ligne(const memlcd_cave_lign
 static inline int memlcd_cave_boites(const memlcd_cave_vue_t *v, memlcd_cave_boite_t *b)
 {
     int n = 0;
+    for (uint8_t i = 0; i < v->n; i++) {             /* the continuation marks */
+        const memlcd_cave_ligne_t *l = &v->l[i];
+        if (!l->marque) continue;
+        b[n].x0 = l->x - MEMLCD_CAVE_MARQUE_PAS; b[n].y0 = l->y + memlcd_cave_marque_dy(l->font);
+        b[n].x1 = b[n].x0 + MEMLCD_CAVE_MARQUE_W; b[n].y1 = b[n].y0 + MEMLCD_CAVE_MARQUE_H;
+        n++;
+    }
     if (v->logo)    { b[n].x0 = v->logo_x; b[n].y0 = v->logo_y; b[n].x1 = v->logo_x + v->logo; b[n].y1 = v->logo_y + v->logo; n++; }
     if (v->cadenas) { b[n].x0 = v->cadenas_x; b[n].y0 = v->cadenas_y; b[n].x1 = v->cadenas_x + MEMLCD_CAVE_CADENAS_W; b[n].y1 = v->cadenas_y + MEMLCD_CAVE_CADENAS_H; n++; }
     if (v->goutte)  { b[n].x0 = v->goutte_x; b[n].y0 = v->goutte_y; b[n].x1 = v->goutte_x + MEMLCD_CAVE_GOUTTE_W; b[n].y1 = v->goutte_y + MEMLCD_CAVE_GOUTTE_H; n++; }
@@ -320,7 +363,7 @@ static inline int memlcd_cave_boites(const memlcd_cave_vue_t *v, memlcd_cave_boi
 }
 static inline bool memlcd_cave_tient(const memlcd_cave_vue_t *v)
 {
-    memlcd_cave_boite_t b[MEMLCD_CAVE_LIGNES + 8];
+    memlcd_cave_boite_t b[2 * MEMLCD_CAVE_LIGNES + 8];
     int n = memlcd_cave_boites(v, b);
     for (uint8_t i = 0; i < v->n; i++) {
         const memlcd_cave_ligne_t *l = &v->l[i];
@@ -462,15 +505,20 @@ static inline void memlcd_cave_statut(const memlcd_model_t *m, uint8_t pct, bool
 
 /* PROMPT, full screen: the op title (at most 20 px), a wavy divider, the
  * CHEST's label WHOLE, "N ACCTS" when more than one account is targeted,
- * "PRESS" at the bottom. Room for the label is made by shrinking the op
- * title rung by rung down to 12 px. Past that — only wide glyphs (34 'W'
- * need 9 lines at 12 px) or a digit run too long to split safely — UNSCII
- * 8, a bitmap font whose every glyph keeps its ink, safe-wrapped over the
- * full width, and as the very last resort a plain 8-character cut: the
+ * "PRESS" at the bottom. The label: on one line in Montserrat 14 or 12 when
+ * it fits, else wrapped at 12 px with the continuation mark before every
+ * line after the first (memlcd_safe_wrap_marque: a safe split first; when
+ * none exists — "AWS:123456789012" — the marked lines may hold digits
+ * alone). Room is made by shrinking the op title rung by rung down to
+ * 12 px. Past that — only wide glyphs (34 'W' need 11 lines at 12 px) —
+ * UNSCII 8, a bitmap font whose every glyph keeps its ink, wrapped the
+ * same way over the full width: it always fits (static asserts below). The
  * label is NEVER cut short. */
-static inline bool memlcd_cave_prompt_essai(const memlcd_model_t *m, memlcd_cave_vue_t *v, const char *op,
-                                            uint8_t op_font, char lines[][MEMLCD_SW_LINE_BUF], int n,
-                                            uint8_t lf, bool pleine_largeur)
+
+/* The prompt's head: the op title, the divider. Returns the y where the
+ * label starts, and in *band its height (N ACCTS and PRESS reserved). */
+static inline uint8_t memlcd_cave_prompt_tete(const memlcd_model_t *m, memlcd_cave_vue_t *v, const char *op,
+                                              uint8_t op_font, uint8_t *band)
 {
     const bool cpt = m->coffre_op_count > 1;
     const uint8_t lh12 = memlcd_font_pas(MEMLCD_F_M12);
@@ -481,15 +529,40 @@ static inline bool memlcd_cave_prompt_essai(const memlcd_model_t *m, memlcd_cave
     v->rule = 1; v->rule_y = y;
     y = (uint8_t)(y + 4);
     uint8_t reserve = (uint8_t)((cpt ? lh12 + 3 : 0) + lh12 + 3);
-    uint8_t band = (uint8_t)(v->bottom > y + reserve ? v->bottom - y - reserve : 0);
+    *band = (uint8_t)(v->bottom > y + reserve ? v->bottom - y - reserve : 0);
+    return y;
+}
+
+/* One line of the label in the box [bx, bx + bw): centred like any line;
+ * a continuation line's mark and text centred together as one group, the
+ * text left-aligned after the mark. */
+static inline bool memlcd_cave_label_ligne(memlcd_cave_vue_t *v, uint8_t f, uint8_t bx, uint8_t bw, uint8_t y,
+                                           const char *s, bool marque)
+{
+    if (!marque) return memlcd_cave_add(v, f, bx, y, bw, false, s) != NULL;
+    int gw = MEMLCD_CAVE_MARQUE_PAS + memlcd_text_width(f, s);
+    int gx = bx + (bw - gw) / 2;
+    if (gx < 0) gx = 0;
+    int x = gx + MEMLCD_CAVE_MARQUE_PAS;
+    memlcd_cave_ligne_t *l = memlcd_cave_add(v, f, (uint8_t)x, y, (uint8_t)(MEMLCD_W - x), true, s);
+    if (l) l->marque = 1;
+    return l != NULL;
+}
+
+static inline bool memlcd_cave_prompt_essai(const memlcd_model_t *m, memlcd_cave_vue_t *v, const char *op,
+                                            uint8_t op_font, char lines[][MEMLCD_SW_LINE_BUF], int n,
+                                            uint8_t lf, bool pleine_largeur)
+{
+    const bool cpt = m->coffre_op_count > 1;
+    const uint8_t lh12 = memlcd_font_pas(MEMLCD_F_M12);
+    uint8_t band;
+    uint8_t y = memlcd_cave_prompt_tete(m, v, op, op_font, &band);
     const uint8_t pas = memlcd_font_pas(lf);
-    if (n * pas > band) return false;
+    if (n < 1 || n * pas > band) return false;
+    const uint8_t bx = pleine_largeur ? 0 : MEMLCD_CAVE_LABEL_X, bw = pleine_largeur ? MEMLCD_W : MEMLCD_CAVE_LABEL_W;
     v->txt_i = v->n; v->txt_n = 0;
-    for (int i = 0; i < n; i++) {
-        if (memlcd_cave_add(v, lf, pleine_largeur ? 0 : MEMLCD_CAVE_LABEL_X, (uint8_t)(y + i * pas),
-                            pleine_largeur ? MEMLCD_W : MEMLCD_CAVE_LABEL_W, false, lines[i]))
-            v->txt_n++;
-    }
+    for (int i = 0; i < n; i++)
+        if (memlcd_cave_label_ligne(v, lf, bx, bw, (uint8_t)(y + i * pas), lines[i], i > 0)) v->txt_n++;
     y = (uint8_t)(y + n * pas + MEMLCD_CAVE_GAP);
     if (cpt) {
         char c[MEMLCD_ETAT_BUF + 4];
@@ -508,29 +581,35 @@ static inline void memlcd_cave_prompt(const memlcd_model_t *m, memlcd_cave_vue_t
     char op[CHEST_LABEL_BUF];
     chest_op_label(m->coffre_op, op);
     char lines[MEMLCD_SW_MAX_LINES][MEMLCD_SW_LINE_BUF];
-    uint8_t f;
-    bool ok;
-    int n = memlcd_cave_label_lignes(m->coffre_label, &f, lines, &ok);
-    if (ok)
+    const char *s = m->coffre_label;
+    uint8_t lf = MEMLCD_F_M12, band;
+    int n = 0;
+    static const uint8_t une[] = { MEMLCD_F_M14, MEMLCD_F_M12 };   /* whole on one line */
+    for (size_t i = 0; i < sizeof une && !n; i++)
+        if (memlcd_text_width(une[i], s) <= MEMLCD_CAVE_LABEL_BUDGET) {
+            lf = une[i];
+            snprintf(lines[0], MEMLCD_SW_LINE_BUF, "%.*s", (int)(MEMLCD_SW_LINE_BUF - 1), s);
+            n = 1;
+        }
+    if (!n) {   /* wrapped at 12 px, as many lines as the roomiest head (op at 12 px) leaves */
+        (void)memlcd_cave_prompt_tete(m, v, op, MEMLCD_F_M12, &band);
+        n = memlcd_safe_wrap_marque(s, MEMLCD_F_M12, MEMLCD_CAVE_LABEL_BUDGET, MEMLCD_CAVE_MARQUE_PAS,
+                                    lines, band / memlcd_font_pas(MEMLCD_F_M12));
+    }
+    if (n)
         for (int rang = MEMLCD_CAVE_RANG(MEMLCD_F_M20); rang < MEMLCD_CAVE_LADDER_N; rang++)
-            if (memlcd_cave_prompt_essai(m, v, op, memlcd_cave_ladder[rang], lines, n, f, false)) return;
-    /* UNSCII 8, safe-wrapped over the full width */
-    n = memlcd_safe_wrap(m->coffre_label, MEMLCD_F_U8, MEMLCD_W_BUDGET, lines, MEMLCD_SW_MAX_LINES);
-    if (memlcd_cave_lignes_ok(MEMLCD_F_U8, MEMLCD_W_BUDGET, lines, n)
-        && memlcd_cave_prompt_essai(m, v, op, MEMLCD_F_M12, lines, n, MEMLCD_F_U8, true)) return;
-    /* the very last resort: 8 characters a line, 5 lines for the chest's 34 */
-    size_t len = m->coffre_label[0] ? strnlen(m->coffre_label, CHEST_LABEL_MAX) : 0;
-    n = 0;
-    do {
-        size_t p = (size_t)n * 8;
-        snprintf(lines[n], MEMLCD_SW_LINE_BUF, "%.*s", (int)(len - p < 8 ? len - p : 8), m->coffre_label + p);
-        n++;
-    } while ((size_t)n * 8 < len);
-    (void)memlcd_cave_prompt_essai(m, v, op, MEMLCD_F_M12, lines, n, MEMLCD_F_U8, true);
-    v->coupe_brute = 1;
+            if (memlcd_cave_prompt_essai(m, v, op, memlcd_cave_ladder[rang], lines, n, lf, false)) return;
+    /* UNSCII 8 over the full width, the op at 12 px: always fits */
+    (void)memlcd_cave_prompt_tete(m, v, op, MEMLCD_F_M12, &band);
+    n = memlcd_safe_wrap_marque(s, MEMLCD_F_U8, MEMLCD_W_BUDGET, MEMLCD_CAVE_MARQUE_PAS,
+                                lines, band / memlcd_font_pas(MEMLCD_F_U8));
+    if (!memlcd_cave_prompt_essai(m, v, op, MEMLCD_F_M12, lines, n, MEMLCD_F_U8, true)) v->tient = 0;
 }
-/* The last resort always fits: op at 12 px, divider, 5 UNSCII lines, N ACCTS, PRESS. */
-_Static_assert(CHEST_LABEL_MAX <= 5 * 8, "the chest's label must fit 5 UNSCII lines of 8");
+/* The UNSCII wrap always fits: its fewest-lines fallback puts 8 characters
+ * on the first line and 7 after each mark, so the chest's 34 need 5 lines
+ * at most; 5 of them + N ACCTS + PRESS fit under the op at 12 px. */
+_Static_assert(MEMLCD_W_BUDGET / 8 + 4 * ((MEMLCD_W_BUDGET - MEMLCD_CAVE_MARQUE_PAS) / 8) >= CHEST_LABEL_MAX,
+               "the chest's label must fit 5 UNSCII lines, the marks included");
 _Static_assert(MEMLCD_CAVE_TOP_THIN + MEMLCD_CAVE_GAP + MEMLCD_FW_M12_LINE_H + 3 + 4 + 5 * 11 + MEMLCD_CAVE_GAP
                + (MEMLCD_FW_M12_LINE_H + 3) + MEMLCD_FW_M12_LINE_H + MEMLCD_CAVE_GAP <= MEMLCD_CAVE_BOTTOM_THIN,
                "the UNSCII last resort + N ACCTS + PRESS must always fit the prompt");

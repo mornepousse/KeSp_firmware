@@ -43,7 +43,9 @@ Everything it builds goes to `tools/memlcd_sim/build/`, every image to
    `memlcd_safe_wrap` never leaves a line with digits and no letter —
    `TEST:RFC6238` → `TEST:` / `RFC6238`, `BANQUE:4021` → `BANQU` / `E:4021`
    (bench incident 2026-09-29) — and every line it says fits, LVGL measures
-   within the budget.
+   within the budget. The marked wrap of a prompt's label
+   (`memlcd_safe_wrap_marque`) is re-measured the same way, each line after
+   the first within the budget minus the continuation mark's 8 px.
 
 ## What it renders
 
@@ -52,9 +54,11 @@ calls them:
 
 - `out/cave_dark/`: the 10 reference states of the design brief (`states.c`),
   one PNG each (×4) and a contact sheet; the water drop at 100/60/30/10 % and
-  LOW; the countdown draining; the security proof sheet (the two adversarial
-  labels on a prompt and in the browser); bench extras (an 8-digit code, a
-  34-`W` label on the UNSCII last resort, everything shown at once).
+  LOW; the countdown draining; the security proof sheet (the three
+  adversarial labels — `TEST:RFC6238`, `BANQUE:4021`, `AWS:123456789012` —
+  on a prompt and in the browser); bench extras (an 8-digit code, a 34-`W`
+  label on the UNSCII last resort, a 34-character digit-heavy label behind
+  its continuation marks, everything shown at once).
 - `out/gauges/gauge_G3.png`: the round-4 gauge sheet, from the firmware.
 
 ## Files
