@@ -12,26 +12,22 @@
  *     "distinguishable" is the requirement, not just "non-empty")
  *   - the ink-pixel count of the security-relevant marks : . , - @ _
  *
- * Two lists: the fonts the screen USES (k_used) — any failure there exits
+ * Two lists: the fonts the screen USES (the firmware's memlcd_cave_fonts,
+ * memlcd_cave.c — UNSCII 8 among them, the prompt label's last resort, a
+ * bitmap font with nothing to threshold away) — any failure there exits
  * 1 and fails build.sh — and reference fonts below the floor (k_ref),
  * printed so the floor stays explained by numbers (Montserrat 8 loses 7
  * glyphs and ':' == '.', Montserrat 10 loses the apostrophe; Montserrat 12
  * is the smallest size where every glyph keeps ink).
  */
 #include "lvgl.h"
+#include "memlcd_cave.h"
 #include <stdio.h>
 #include <string.h>
 
 LV_FONT_DECLARE(lv_font_montserrat_8);
 LV_FONT_DECLARE(lv_font_montserrat_10);
-LV_FONT_DECLARE(lv_font_montserrat_12);
-LV_FONT_DECLARE(lv_font_montserrat_14);
-LV_FONT_DECLARE(lv_font_montserrat_16);
-LV_FONT_DECLARE(lv_font_montserrat_18);
-LV_FONT_DECLARE(lv_font_montserrat_20);
-LV_FONT_DECLARE(lv_font_montserrat_24);
-LV_FONT_DECLARE(lv_font_montserrat_28);
-LV_FONT_DECLARE(lv_font_montserrat_32);
+
 
 /* This tool needs the raw per-pixel ink buffer (to compare glyph bitmaps
  * for the ':' vs '.' distinguishability check), which common.c's
@@ -104,13 +100,15 @@ int main(void)
     s_drv.full_refresh = 1;
     s_disp = lv_disp_drv_register(&s_drv);
 
-    /* The fonts the cave engine draws with (cave_ui.c: k_ladder). */
-    font_e used[] = {
-        { "montserrat_12", &lv_font_montserrat_12 }, { "montserrat_14", &lv_font_montserrat_14 },
-        { "montserrat_16", &lv_font_montserrat_16 }, { "montserrat_18", &lv_font_montserrat_18 },
-        { "montserrat_20", &lv_font_montserrat_20 }, { "montserrat_24", &lv_font_montserrat_24 },
-        { "montserrat_28", &lv_font_montserrat_28 }, { "montserrat_32", &lv_font_montserrat_32 },
+    /* The fonts the screen draws with: the firmware engine's own table
+     * (memlcd_cave.c, memlcd_cave_fonts) — a font added there is gated here. */
+    extern const lv_font_t *const memlcd_cave_fonts[MEMLCD_F_N];
+    static const char *const noms[MEMLCD_F_N] = {
+        "montserrat_12", "montserrat_14", "montserrat_16", "montserrat_18",
+        "montserrat_20", "montserrat_24", "montserrat_28", "montserrat_32", "unscii_8",
     };
+    font_e used[MEMLCD_F_N];
+    for (int i = 0; i < MEMLCD_F_N; i++) { used[i].name = noms[i]; used[i].f = memlcd_cave_fonts[i]; }
     /* Below the floor: reported, never gated. */
     font_e ref[] = {
         { "montserrat_8",  &lv_font_montserrat_8  },

@@ -3,13 +3,15 @@
  * Three things a bug would make visible on screen without ever crashing:
  *  - rev8: the panel reads LSB-first, the ESP32 transmits MSB-first. A wrong
  *    inversion = ignored commands, silent screen, no error anywhere.
- *  - the layer name cut at 68 px: 4 characters per line, 3 lines,
- *    then "…" — the user preferred readable lines over rotated text.
+ *  - the left screen's layout (memlcd_cave.h, "cave", 2026-09-30): every
+ *    line inside the panel, nothing overlapping, the chest's label WHOLE,
+ *    no name line that reads like a code, nothing under the 12 px floor.
  *  - the model diff: we only redraw if a displayed field has changed —
  *    every redraw is a transaction on the bus shared with the radio.
  * Spec: docs/superpowers/specs/2026-09-14-ecrans-memlcd-design.md */
 #include "test_framework.h"
 #include "../main/display/memlcd/memlcd_model.h"
+#include "../main/display/memlcd/memlcd_cave.h"
 #include "../main/comm/chest/chest_view.h"
 #include "chest_test_vectors.h"
 #include <string.h>
@@ -31,38 +33,6 @@ static void test_rev8(void)
     TEST_ASSERT_EQ(memlcd_rev8(0x86), 0x61, "0x86 (1000 0110) → 0x61 (0110 0001)");
     for (unsigned b = 0; b < 256; b++)
         TEST_ASSERT_EQ(memlcd_rev8(memlcd_rev8((uint8_t)b)), (uint8_t)b, "involution");
-}
-
-static void test_couper_nom(void)
-{
-    /* Full width under the icon column since 2026-09-26: 6 characters per
-     * line (Montserrat 14 on 68 px — "LAYER 2" is ~56 px), 2 lines, cut at
-     * the last space that fits so a word is not split when it can be avoided. */
-    char l[MEMLCD_NOM_LIGNES][MEMLCD_NOM_BUF];
-    TEST_ASSERT_EQ(MEMLCD_NOM_LIGNES, 2, "two name lines");
-    TEST_ASSERT_EQ(MEMLCD_NOM_COLS, 6, "six characters per line");
-    TEST_ASSERT_EQ(memlcd_couper_nom("DVORAK", l), 1, "6 letters → 1 line");
-    TEST_ASSERT(strcmp(l[0], "DVORAK") == 0 && l[1][0] == '\0', "DVORAK, 2nd line empty");
-    TEST_ASSERT_EQ(memlcd_couper_nom("NAV", l), 1, "3 letters → 1 line");
-    TEST_ASSERT(strcmp(l[0], "NAV") == 0, "NAV");
-    TEST_ASSERT_EQ(memlcd_couper_nom("", l), 1, "empty → 1 empty line (never 0)");
-    TEST_ASSERT(l[0][0] == '\0', "empty line");
-    TEST_ASSERT_EQ(memlcd_couper_nom(NULL, l), 1, "NULL → like empty, no crash");
-    TEST_ASSERT_EQ(memlcd_couper_nom("LAYER 2", l), 2, "7 characters → 2 lines");
-    TEST_ASSERT(strcmp(l[0], "LAYER") == 0 && strcmp(l[1], "2") == 0, "cut at the space: LAYER / 2");
-    TEST_ASSERT_EQ(memlcd_couper_nom("GAMING", l), 1, "exactly 6 → 1 line");
-    TEST_ASSERT_EQ(memlcd_couper_nom("SYMBOLS", l), 2, "7 letters, no space → hard cut");
-    TEST_ASSERT(strcmp(l[0], "SYMBOL") == 0 && strcmp(l[1], "S") == 0, "SYMBOL / S");
-    TEST_ASSERT_EQ(memlcd_couper_nom("NUM PAD", l), 2, "space at 3");
-    TEST_ASSERT(strcmp(l[0], "NUM") == 0 && strcmp(l[1], "PAD") == 0, "NUM / PAD");
-    TEST_ASSERT_EQ(memlcd_couper_nom("ABCDEFGHIJKL", l), 2, "12 letters → 2 full lines");
-    TEST_ASSERT(strcmp(l[1], "GHIJKL") == 0, "2nd line full, no …");
-    TEST_ASSERT_EQ(memlcd_couper_nom("ABCDEFGHIJKLMN", l), 2, "14 letters → truncated");
-    TEST_ASSERT(strcmp(l[1], "GHIJK\xE2\x80\xA6") == 0, "2nd line = 5 letters + … (UTF-8)");
-    TEST_ASSERT_EQ(memlcd_couper_nom("MEDIA KEYS 2", l), 2, "space cut, the rest fits exactly");
-    TEST_ASSERT(strcmp(l[0], "MEDIA") == 0 && strcmp(l[1], "KEYS 2") == 0, "MEDIA / KEYS 2");
-    TEST_ASSERT_EQ(memlcd_couper_nom("MEDIA KEYS ABC", l), 2, "space cut, then overflow");
-    TEST_ASSERT(strcmp(l[1], "KEYS\xE2\x80\xA6") == 0, "the ellipsis never follows a space: KEYS…");
 }
 
 /* Displayed layer: the STABLE one (base, TO, Layer Lock) = the engine's
@@ -118,67 +88,211 @@ static void test_ligne_etat(void)
     TEST_ASSERT(strcmp(l2, "L3") == 0, "one-shot layer alone, no leading space");
 }
 
-/* Chest status under the logo (plan Task 8, "SD c'est confusant", Mae
- * 2026-09-29): a PADLOCK pictogram = chest present; ".." beside it while not
- * READY, "?" on a protocol version mismatch; the mode in plain words
- * (chest_mode_label: DISK/PGP/OTP/FIDO/TOTP, lower case in flight, ERR);
- * the SD card only when MISSING ("NO" / "CARD"). Nothing without a chest. */
+/* ── The cave view (memlcd_cave.h) ────────────────────────────────────
+ * The test's OWN fit check — written apart from memlcd_cave_tient on
+ * purpose: a view is held to it whatever the layout believed. Every line
+ * inside the content box and inside its label box (2 px of air), no two
+ * lines' ink extents overlapping, every pictogram inside the box and clear
+ * of every line; no font under the 12 px floor, except UNSCII 8 for the
+ * label of a prompt (the last resort that keeps it whole). */
+static int ink_x0(const memlcd_cave_ligne_t *l)
+{
+    int w = memlcd_text_width(l->font, l->text);
+    return l->left ? l->x : l->x + (l->w - w) / 2;
+}
+static bool croise(int a0, int a1, int b0, int b1) { return a0 < b1 && b0 < a1; }
+static void assert_vue_tient(const memlcd_cave_vue_t *v, const char *quoi)
+{
+    TEST_ASSERT(v->n <= MEMLCD_CAVE_LIGNES, quoi);
+    struct { int x0, y0, x1, y1; } p[8];
+    int np = 0;
+    if (v->logo)    { p[np].x0 = v->logo_x; p[np].y0 = v->logo_y; p[np].x1 = v->logo_x + v->logo; p[np].y1 = v->logo_y + v->logo; np++; }
+    if (v->cadenas) { p[np].x0 = v->cadenas_x; p[np].y0 = v->cadenas_y; p[np].x1 = v->cadenas_x + 24; p[np].y1 = v->cadenas_y + 28; np++; }
+    if (v->goutte)  { p[np].x0 = v->goutte_x; p[np].y0 = v->goutte_y; p[np].x1 = v->goutte_x + 13; p[np].y1 = v->goutte_y + 16; np++; }
+    if (v->lien)    { p[np].x0 = v->lien_x; p[np].y0 = v->lien_y; p[np].x1 = v->lien_x + 16; p[np].y1 = v->lien_y + 12; np++; }
+    if (v->rule)    { p[np].x0 = 8; p[np].y0 = v->rule_y - 1; p[np].x1 = 61; p[np].y1 = v->rule_y + 2; np++; }
+    if (v->eau)     { p[np].x0 = v->eau_x; p[np].y0 = v->eau_y; p[np].x1 = v->eau_x + 44; p[np].y1 = v->eau_y + 14 + 5; np++; }
+    for (int i = 0; i < np; i++) {
+        TEST_ASSERT(p[i].x0 >= 0 && p[i].x1 <= MEMLCD_W && p[i].y0 >= v->top && p[i].y1 <= v->bottom, quoi);
+        for (int j = 0; j < i; j++)
+            if (croise(p[i].x0, p[i].x1, p[j].x0, p[j].x1) && croise(p[i].y0, p[i].y1, p[j].y0, p[j].y1))
+                TEST_ASSERT(0, "two pictograms overlap");
+    }
+    for (uint8_t i = 0; i < v->n; i++) {
+        const memlcd_cave_ligne_t *l = &v->l[i];
+        int w = memlcd_text_width(l->font, l->text), h = memlcd_font_pas(l->font);
+        bool label = v->kind == MEMLCD_CV_PROMPT && i >= v->txt_i && i < v->txt_i + v->txt_n;
+        TEST_ASSERT(l->font <= MEMLCD_F_M32 || (l->font == MEMLCD_F_U8 && label), "no font under the 12 px floor");
+        TEST_ASSERT(w + 2 <= l->w && l->x + l->w <= MEMLCD_W, quoi);
+        TEST_ASSERT(l->y >= v->top && l->y + h <= v->bottom, quoi);
+        int x0 = ink_x0(l);
+        for (uint8_t j = 0; j < i; j++) {
+            const memlcd_cave_ligne_t *k = &v->l[j];
+            int kx0 = ink_x0(k), kw = memlcd_text_width(k->font, k->text);
+            if (w && kw && croise(x0, x0 + w, kx0, kx0 + kw) && croise(l->y, l->y + h, k->y, k->y + memlcd_font_pas(k->font)))
+                TEST_ASSERT(0, "two lines overlap");
+        }
+        for (int j = 0; j < np; j++)
+            if (w && croise(x0, x0 + w, p[j].x0, p[j].x1) && croise(l->y, l->y + h, p[j].y0, p[j].y1))
+                TEST_ASSERT(0, "a line overlaps a pictogram");
+    }
+}
+
+/* Concatenation of the label/name lines — what the eye reads across them. */
+static void vue_texte(const memlcd_cave_vue_t *v, char *out, size_t n)
+{
+    out[0] = '\0';
+    for (uint8_t i = v->txt_i; i < v->txt_i + v->txt_n && i < v->n; i++)
+        strncat(out, v->l[i].text, n - strlen(out) - 1);
+}
+static int vue_cherche(const memlcd_cave_vue_t *v, const char *s)
+{
+    for (uint8_t i = 0; i < v->n; i++) if (strcmp(v->l[i].text, s) == 0) return i;
+    return -1;
+}
+static bool vue_contient(const memlcd_cave_vue_t *v, const char *s)
+{
+    for (uint8_t i = 0; i < v->n; i++) if (strstr(v->l[i].text, s)) return true;
+    return false;
+}
+
+/* The layer name is the normal screen's hero (plan 2026-09-30, cave): the
+ * WIDEST Montserrat of the ladder (32 down to the 12 px floor) that holds
+ * the whole name on one line; past the floor, two BALANCED lines
+ * ("NAVIG" / "ATION", never "NAVIGATIO" / "N"), never a font under 12 px.
+ * (2 lines of 6 UNSCII-width characters with "…" until 2026-09-30.) */
+static void test_nom_couche(void)
+{
+    memlcd_cave_vue_t v;
+    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE, .batt_local_dv = 40, .is_left = 1 };
+    strcpy(m.nom, "BASE");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_NORMAL, "no chest view: the normal screen");
+    assert_vue_tient(&v, "BASE fits");
+    int i = vue_cherche(&v, "BASE");
+    TEST_ASSERT(i >= 0, "BASE on screen, whole, on one line");
+    /* the widest that fits 66 px: M24 is 67 px (kerned), M20 55 */
+    TEST_ASSERT(i >= 0 && v.l[i].font == MEMLCD_F_M20, "BASE in Montserrat 20, the widest that fits");
+
+    strcpy(m.nom, "NAVIGATION");
+    memlcd_cave_vue(&m, 80, &v);
+    assert_vue_tient(&v, "NAVIGATION fits");
+    int a = vue_cherche(&v, "NAVIG"), b = vue_cherche(&v, "ATION");
+    TEST_ASSERT(a >= 0 && b == a + 1, "NAVIGATION: NAVIG / ATION, balanced");
+    TEST_ASSERT(a >= 0 && v.l[a].font == MEMLCD_F_M12 && v.l[b].font == MEMLCD_F_M12, "... at the 12 px floor, never under");
+    TEST_ASSERT(vue_cherche(&v, "N") < 0, "never a stranded letter");
+
+    strcpy(m.nom, "NAV");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(vue_cherche(&v, "NAV") >= 0, "a short name, whole");
+    m.nom[0] = '\0';
+    memlcd_cave_vue(&m, 80, &v);
+    assert_vue_tient(&v, "empty name: still a valid screen");
+    strcpy(m.nom, "WWWWWWWWWWWWWWW");                 /* 15, the buffer's max */
+    memlcd_cave_vue(&m, 80, &v);
+    assert_vue_tient(&v, "15 W: every line fits");
+    char t[64]; t[0] = '\0';
+    for (uint8_t k = 0; k < v.n; k++) if (v.l[k].text[0] == 'W') strcat(t, v.l[k].text);
+    TEST_ASSERT(strcmp(t, "WWWWWWWWWWWWWWW") == 0, "15 W: the whole name across its lines");
+}
+
+/* The chest's status on the normal screen (plan Task 8, "SD c'est
+ * confusant", Mae 2026-09-29; cave layout 2026-09-30): a PADLOCK = chest
+ * present, beside the corner logo; under the battery row ".." while not
+ * READY, "?" on a protocol version mismatch, the mode in plain words
+ * (chest_mode_label: DISK/PGP/OTP/FIDO/TOTP, lower case in flight, ERR),
+ * "NO CARD" only when the SD card is MISSING. Nothing without a chest. */
 static void test_etat_coffre(void)
 {
-    memlcd_etat_coffre_t e;
-    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE };
-    memlcd_etat_coffre(&m, &e);
-    TEST_ASSERT(!e.cadenas && !e.ligne[0][0] && !e.ligne[1][0] && !e.ligne[2][0], "absent: nothing at all");
+    memlcd_cave_vue_t v;
+    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE, .batt_local_dv = 40, .nom = "BASE" };
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(!v.cadenas && !vue_contient(&v, "..") && !vue_contient(&v, "CARD"), "absent: nothing at all");
 
     m.coffre = MEMLCD_COFFRE_PRESENT;
-    memlcd_etat_coffre(&m, &e);
-    TEST_ASSERT(e.cadenas, "present, booting: the padlock");
-    TEST_ASSERT(strcmp(e.ligne[0], "..") == 0 && !e.ligne[1][0] && !e.ligne[2][0], "booting: '..' and nothing else (no NO CARD before READY)");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(v.cadenas, "present, booting: the padlock");
+    TEST_ASSERT(vue_cherche(&v, "..") >= 0 && !vue_contient(&v, "CARD"), "booting: '..' and no NO CARD before READY");
+    assert_vue_tient(&v, "booting fits");
 
     m.coffre = MEMLCD_COFFRE_PRESENT | MEMLCD_COFFRE_BADVER;
-    memlcd_etat_coffre(&m, &e);
-    TEST_ASSERT(e.cadenas && strcmp(e.ligne[0], "?") == 0 && !e.ligne[1][0], "unknown protocol version: padlock + ?");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(v.cadenas && vue_cherche(&v, "?") >= 0, "unknown protocol version: padlock + ?");
 
-    /* Ready, card in, PGP mounted: the padlock and the mode, NO SD line. */
+    /* Ready, card in, PGP mounted: the padlock and the mode, no card line. */
     m.coffre = MEMLCD_COFFRE_PRESENT | CHEST_STATE_READY | CHEST_STATE_SD | CHEST_STATE_USB;
     m.coffre_mode_state = CHEST_MODE_ARRIVED; m.coffre_mode_active = CHEST_MODE_PGP; m.coffre_mode_wanted = CHEST_MODE_PGP;
-    memlcd_etat_coffre(&m, &e);
-    TEST_ASSERT(e.cadenas && strcmp(e.ligne[0], "PGP") == 0, "ready: padlock + PGP");
-    TEST_ASSERT(!e.ligne[1][0] && !e.ligne[2][0], "card present: nothing about the card (no more 'SD')");
-    for (int i = 0; i < 3; i++) TEST_ASSERT(strstr(e.ligne[i], "SD") == NULL, "the word SD is gone");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(v.cadenas && vue_cherche(&v, "PGP") >= 0, "ready: padlock + PGP");
+    TEST_ASSERT(!vue_contient(&v, "CARD") && !vue_contient(&v, "SD"), "card present: nothing about the card");
 
-    /* Card missing: NO / CARD under the mode. */
+    /* Card missing: NO CARD under the mode. */
     m.coffre = MEMLCD_COFFRE_PRESENT | CHEST_STATE_READY;
     m.coffre_mode_state = CHEST_MODE_PENDING; m.coffre_mode_active = CHEST_MODE_IN_FLIGHT; m.coffre_mode_wanted = CHEST_MODE_OATH;
-    memlcd_etat_coffre(&m, &e);
-    TEST_ASSERT(strcmp(e.ligne[0], "totp") == 0, "pending: the wanted mode, lower case, in plain words");
-    TEST_ASSERT(strcmp(e.ligne[1], "NO") == 0 && strcmp(e.ligne[2], "CARD") == 0, "card missing: NO / CARD");
+    memlcd_cave_vue(&m, 80, &v);
+    int a = vue_cherche(&v, "totp"), b = vue_cherche(&v, "NO CARD");
+    TEST_ASSERT(a >= 0, "pending: the wanted mode, lower case, in plain words");
+    TEST_ASSERT(b >= 0 && v.l[b].y > v.l[a].y, "card missing: NO CARD under the mode");
+    assert_vue_tient(&v, "mode + NO CARD fits");
 
-    /* No mode yet, card missing: NO CARD moves up, no blank line. */
     m.coffre_mode_state = CHEST_MODE_ARRIVED; m.coffre_mode_active = CHEST_MODE_NONE; m.coffre_mode_wanted = CHEST_MODE_NONE;
-    memlcd_etat_coffre(&m, &e);
-    TEST_ASSERT(strcmp(e.ligne[0], "NO") == 0 && strcmp(e.ligne[1], "CARD") == 0 && !e.ligne[2][0], "no mode: NO CARD packed upwards");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(vue_cherche(&v, "NO CARD") >= 0, "no mode: NO CARD alone");
 
     m.coffre_mode_state = CHEST_MODE_FAULT;
-    memlcd_etat_coffre(&m, &e);
-    TEST_ASSERT(strcmp(e.ligne[0], "ERR") == 0, "persisting refusal: ERR");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(vue_cherche(&v, "ERR") >= 0, "persisting refusal: ERR");
 
-    /* Every line fits the 35 px zone left of the icon column in UNSCII 8. */
+    /* Every mode word fits, with every flag armed and the dongle seen. */
     static const uint8_t modes[] = { CHEST_MODE_STORAGE, CHEST_MODE_PGP, CHEST_MODE_OTP, CHEST_MODE_FIDO, CHEST_MODE_OATH };
+    m.caps_lock = 1; m.caps_word = 1; m.osm = 0xFF; m.osl = 3; m.dongle_vu = 1; m.lien_5v = 1;
+    strcpy(m.nom, "NAVIGATION");
     for (size_t i = 0; i < sizeof modes; i++) {
         m.coffre_mode_state = CHEST_MODE_ARRIVED; m.coffre_mode_active = modes[i]; m.coffre_mode_wanted = modes[i];
-        memlcd_etat_coffre(&m, &e);
-        for (int k = 0; k < 3; k++)
-            TEST_ASSERT(memlcd_text_width(MEMLCD_F_U8, e.ligne[k]) <= MEMLCD_ETAT_COFFRE_W, "status line fits the 35 px zone");
+        memlcd_cave_vue(&m, 80, &v);
+        assert_vue_tient(&v, "every mode + NO CARD + every flag fits");
+        TEST_ASSERT(vue_cherche(&v, "NO CARD") >= 0 && vue_contient(&v, "CAPS") && vue_contient(&v, "L3"), "nothing dropped");
     }
-    /* The padlock and three UNSCII lines stay between the logo and the
-     * separator. UNSCII 8 (line_height 9, base_line 0) inks rows y+1..y+8
-     * of a label at y; the 34 px logo's ink ends at y 35. */
-    TEST_ASSERT(MEMLCD_CADENAS_Y > 35, "the padlock starts under the logo's ink");
-    TEST_ASSERT(MEMLCD_CADENAS_Y + MEMLCD_CADENAS_H <= MEMLCD_ETAT_COFFRE_Y0 + 1, "the first line's ink starts under the padlock");
-    TEST_ASSERT(MEMLCD_ETAT_COFFRE_Y0 + 2 * MEMLCD_ETAT_COFFRE_PAS + 9 <= MEMLCD_Y_SEP, "the third line's ink ends above the separator");
-    TEST_ASSERT(MEMLCD_CADENAS_W >= 24 && MEMLCD_CADENAS_H >= 28, "a BIG padlock (Mae: 24 x 28 or more)");
-    TEST_ASSERT(MEMLCD_CADENAS_X + MEMLCD_CADENAS_W <= MEMLCD_ETAT_COFFRE_W, "the padlock fits the zone's width");
+    TEST_ASSERT(MEMLCD_CAVE_CADENAS_W >= 24 && MEMLCD_CAVE_CADENAS_H >= 28, "a BIG padlock (Mae: 24 x 28 or more)");
+}
+
+/* The top status of the normal screen: route in words ("USB" / "RADIO"),
+ * "SEEN" on its own line when the dongle acks, the water drop with the
+ * percentage beside it (not volts), "+" charging, "FULL" charged, "?" when
+ * unknown, the TRRS link pictogram in place of the charge marker, the drop
+ * outlined 2 px when the battery is LOW. */
+static void test_statut_haut(void)
+{
+    memlcd_cave_vue_t v;
+    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE, .batt_local_dv = 40, .nom = "BASE" };
+    memlcd_cave_vue(&m, 87, &v);
+    TEST_ASSERT(vue_cherche(&v, "USB") >= 0 && vue_cherche(&v, "RADIO") < 0 && vue_cherche(&v, "SEEN") < 0, "USB, no SEEN");
+    TEST_ASSERT(v.logo == MEMLCD_CAVE_LOGO_S, "the 28 px corner logo");
+    int p = vue_cherche(&v, "87%");
+    TEST_ASSERT(p >= 0 && v.goutte && v.goutte_pct == 87 && !v.goutte_low, "the drop at 87 %, the percentage beside it");
+    TEST_ASSERT(p >= 0 && v.l[p].left && v.l[p].x >= v.goutte_x + MEMLCD_CAVE_GOUTTE_W, "... to the right of the drop");
+    TEST_ASSERT(!vue_contient(&v, "V"), "no volts anywhere");
+    assert_vue_tient(&v, "USB top fits");
+
+    m.route_rf = 1; m.dongle_vu = 1; m.batt_niveau = 1;
+    memlcd_cave_vue(&m, 12, &v);
+    int r = vue_cherche(&v, "RADIO"), s = vue_cherche(&v, "SEEN");
+    TEST_ASSERT(r >= 0 && s >= 0 && v.l[s].y > v.l[r].y, "RADIO, then SEEN on its own line");
+    TEST_ASSERT(v.goutte_low && v.goutte_pct == 12, "LOW: the thick outline");
+
+    m.batt_local_chg = 1;
+    memlcd_cave_vue(&m, 50, &v);
+    TEST_ASSERT(vue_cherche(&v, "50%+") >= 0, "charging: +");
+    m.batt_local_chg = 2;
+    memlcd_cave_vue(&m, 100, &v);
+    TEST_ASSERT(vue_cherche(&v, "FULL") >= 0, "charged: FULL, a word");
+    m.lien_5v = 1;
+    memlcd_cave_vue(&m, 100, &v);
+    TEST_ASSERT(v.lien && vue_cherche(&v, "100%") >= 0, "TRRS 5 V: the link pictogram in place of the charge marker");
+    assert_vue_tient(&v, "100% + link fits");
+    m.lien_5v = 0; m.batt_local_dv = 0xFF;
+    memlcd_cave_vue(&m, 100, &v);
+    TEST_ASSERT(vue_cherche(&v, "?") >= 0 && v.goutte_pct == 0, "unknown voltage: ?, an empty drop, never 0 V");
 }
 
 /* 34 characters, CHEST_LABEL_MAX — the alphabet (26) plus "ABCDEFGH" (8). */
@@ -188,174 +302,111 @@ static void test_etat_coffre(void)
 /* 34 of the widest upper-case letter. */
 #define LABEL34W "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"
 
-/* The width oracle itself: sums of the generated LVGL advances, UNSCII 8 px
- * per character. Values checked by hand against lv_font_montserrat_*.c
- * (adv_w 252 for 'W' in M14 -> (252 + 8) >> 4 = 16 px). */
+/* The width oracle: the generated LVGL advances WITH the class kerning,
+ * rounded glyph by glyph; UNSCII 8 px a character. Values checked against
+ * lv_font_montserrat_*.c (adv_w 252 for 'W' in M14 -> 16 px) and, for every
+ * printable pair, against lv_txt_get_width itself (tools/memlcd_sim's
+ * check_widths gate). */
 static void test_text_width(void)
 {
     TEST_ASSERT_EQ(memlcd_text_width(MEMLCD_F_U8, "ABCDEFGH"), 64, "UNSCII: 8 px a character");
     TEST_ASSERT_EQ(memlcd_text_width(MEMLCD_F_M14, "W"), 16, "M14 W: adv 252/16 rounded");
     TEST_ASSERT_EQ(memlcd_text_width(MEMLCD_F_M14, "I"), 4, "M14 I: adv 69/16 rounded");
-    TEST_ASSERT_EQ(memlcd_text_width(MEMLCD_F_M14, "WWWW"), 64, "per-glyph rounding, summed");
     TEST_ASSERT_EQ(memlcd_text_width(MEMLCD_F_M24, "TOTP"), 65, "M24 TOTP");
-    TEST_ASSERT_EQ(memlcd_text_width(MEMLCD_F_M28, "418"), 47, "M28 418");
+    TEST_ASSERT_EQ(memlcd_text_width(MEMLCD_F_M28, "418"), 46, "M28 418 (4 and 1 kern)");
+    TEST_ASSERT_EQ(memlcd_text_width(MEMLCD_F_M24, "BASE"), 67, "M24 BASE: kerning makes it one pixel too wide for 66");
+    TEST_ASSERT(memlcd_text_width(MEMLCD_F_M24, "AV") < 2 * memlcd_text_width(MEMLCD_F_M24, "A") + 1
+                && memlcd_text_width(MEMLCD_F_M24, "AV") < memlcd_text_width(MEMLCD_F_M24, "A") + memlcd_text_width(MEMLCD_F_M24, "V"),
+                "AV kerns tighter than A + V");
+    TEST_ASSERT_EQ(memlcd_text_width_n(MEMLCD_F_M24, "AVX", 1), memlcd_text_width(MEMLCD_F_M24, "A"),
+                   "a prefix is measured as a line of its own: no partner past its end");
     TEST_ASSERT_EQ(memlcd_text_width(MEMLCD_F_M14, ""), 0, "empty");
     TEST_ASSERT_EQ(memlcd_text_width(MEMLCD_F_M14, NULL), 0, "NULL");
     TEST_ASSERT_EQ(memlcd_font_pas(MEMLCD_F_U8), 11, "UNSCII pitch");
+    TEST_ASSERT_EQ(memlcd_font_pas(MEMLCD_F_M12), 15, "M12 line");
     TEST_ASSERT_EQ(memlcd_font_pas(MEMLCD_F_M14), 16, "M14 line");
     TEST_ASSERT_EQ(memlcd_font_pas(MEMLCD_F_M24), 27, "M24 line");
-    TEST_ASSERT_EQ(memlcd_font_pas(MEMLCD_F_M28), 30, "M28 line");
-    /* The widest printable M14 character must fit the budget on its own:
-     * otherwise the pixel cutter could not make progress. */
+    TEST_ASSERT_EQ(memlcd_font_pas(MEMLCD_F_M32), 35, "M32 line");
+    /* The widest printable character at the floor fits a label line on its
+     * own: otherwise the wrap could not make progress. */
     for (int c = 0x20; c <= 0x7E; c++) {
         char s[2] = { (char)c, 0 };
-        TEST_ASSERT(memlcd_text_width(MEMLCD_F_M14, s) <= MEMLCD_W_BUDGET, "one M14 glyph fits a line");
+        TEST_ASSERT(memlcd_text_width(MEMLCD_F_M12, s) <= MEMLCD_CAVE_LABEL_W - 2, "one M12 glyph fits a label line");
     }
 }
 
-/* memlcd_couper_px: hard cut by PIXEL width (untrusted text, no word
- * awareness) — every line <= MEMLCD_W_BUDGET, the concatenation is the
- * text, and the return value says how many lines the WHOLE text needs even
- * when fewer were written. */
-static void test_couper_px(void)
-{
-    memlcd_vc_line_t l[8];
-    TEST_ASSERT_EQ(memlcd_couper_px(MEMLCD_F_U8, "", 4, l), 1, "empty -> 1 empty line, never 0");
-    TEST_ASSERT(l[0].text[0] == '\0', "empty line");
-    TEST_ASSERT_EQ(memlcd_couper_px(MEMLCD_F_U8, NULL, 4, l), 1, "NULL -> like empty");
-    TEST_ASSERT_EQ(memlcd_couper_px(MEMLCD_F_U8, "ABCDEFGH", 4, l), 1, "8 UNSCII characters = 64 px, one line");
-    TEST_ASSERT_EQ(memlcd_couper_px(MEMLCD_F_U8, "ABCDEFGHI", 4, l), 2, "9 -> 2 lines");
-    TEST_ASSERT(strcmp(l[0].text, "ABCDEFGH") == 0 && strcmp(l[1].text, "I") == 0, "8 + 1");
-    TEST_ASSERT_EQ(memlcd_couper_px(MEMLCD_F_U8, LABEL34, 5, l), 5, "34 chars, 5 UNSCII lines");
-    TEST_ASSERT(strcmp(l[4].text, "GH") == 0, "the last 2");
-    TEST_ASSERT_EQ(memlcd_couper_px(MEMLCD_F_U8, LABEL34, 3, l), 5, "only 3 written, but 5 NEEDED is returned");
-    TEST_ASSERT_EQ(memlcd_couper_px(MEMLCD_F_M14, LABEL34W, 8, l), 9, "34 W in M14: 4 a line (64 px), 9 lines");
-    TEST_ASSERT(strcmp(l[0].text, "WWWW") == 0, "4 W = 64 px <= 66, a 5th would be 80");
-    for (int i = 0; i < 8; i++) TEST_ASSERT(l[i].font == MEMLCD_F_M14, "font set on every written line");
-
-    /* The tilde variant: the cut is never silent, and the marked line still fits. */
-    TEST_ASSERT_EQ(memlcd_couper_px_tilde(MEMLCD_F_M14, "OVH:PERSONAL-ACCOUNT-2", 2, l), 2, "long name, 2 lines");
-    size_t n1 = strlen(l[1].text);
-    TEST_ASSERT(n1 > 0 && l[1].text[n1 - 1] == '~', "the 2nd line ends in ~");
-    TEST_ASSERT(memlcd_text_width(MEMLCD_F_M14, l[1].text) <= MEMLCD_W_BUDGET, "the ~ line fits");
-    TEST_ASSERT_EQ(memlcd_couper_px_tilde(MEMLCD_F_M14, "WORK", 2, l), 1, "short: one line, no ~");
-    TEST_ASSERT(strcmp(l[0].text, "WORK") == 0, "WORK untouched");
-}
-
-/* Bounded scan (review M-b, carried over from memlcd_couper_8): 34 bytes, no
- * NUL anywhere, in a heap block of exactly 34 — strnlen(s, CHEST_LABEL_MAX)
- * never looks past byte 33; a strlen would, and ASan (test_chest_sanitized)
- * catches it. */
-static void test_couper_px_bounded_scan_no_terminator(void)
-{
-    char *buf = malloc(34);
-    TEST_ASSERT(buf != NULL, "allocation for the bounded-scan probe");
-    if (!buf) return;
-    memset(buf, 'X', 34);
-    memlcd_vc_line_t l[5];
-    TEST_ASSERT_EQ(memlcd_couper_px(MEMLCD_F_U8, buf, 5, l), 5, "34 X's, unterminated: 5 UNSCII lines");
-    TEST_ASSERT(strcmp(l[0].text, "XXXXXXXX") == 0 && strcmp(l[4].text, "XX") == 0, "34 X's split 8/8/8/8/2");
-    free(buf);
-}
-
-/* Every line of a view within the width budget, every line inside its zone. */
-static void assert_vue_tient(const memlcd_vue_coffre_t *v, const char *quoi)
-{
-    uint8_t zone = (v->kind == MEMLCD_VC_BROWSE) ? MEMLCD_ZONE_BAS_H : MEMLCD_H;
-    TEST_ASSERT(v->n <= MEMLCD_VC_LIGNES, quoi);
-    for (uint8_t i = 0; i < v->n; i++) {
-        TEST_ASSERT(memlcd_text_width(v->l[i].font, v->l[i].text) <= MEMLCD_W_BUDGET, quoi);
-        TEST_ASSERT(v->l[i].y + memlcd_font_pas(v->l[i].font) <= zone, quoi);
-        if (i > 0 && v->l[i].y < v->l[i - 1].y + memlcd_font_pas(v->l[i - 1].font))
-            TEST_ASSERT(0, "lines overlap");
-    }
-}
-
-/* Concatenation of the label/name lines — what the eye reads across them. */
-static void vue_texte(const memlcd_vue_coffre_t *v, char *out, size_t n)
-{
-    out[0] = '\0';
-    for (uint8_t i = v->txt_i; i < v->txt_i + v->txt_n && i < v->n; i++)
-        strncat(out, v->l[i].text, n - strlen(out) - 1);
-}
-static int vue_cherche(const memlcd_vue_coffre_t *v, const char *s)
-{
-    for (uint8_t i = 0; i < v->n; i++) if (strcmp(v->l[i].text, s) == 0) return i;
-    return -1;
-}
-
-/* The prompt takes the WHOLE screen (plan Task 8): op in M24 when it fits,
- * the chest's label in M14 cut by pixel width, falling back to UNSCII 8
- * rather than ever cutting it (C1 of Task 5 stands); N CPT; OK ?. */
+/* The prompt takes the WHOLE screen: the op title (at most 20 px), a wavy
+ * divider, the CHEST's label WHOLE — the op shrinks first, UNSCII 8 last,
+ * never a cut — "N ACCTS" when more than one account, "PRESS" at the bottom. */
 static void test_vue_prompt(void)
 {
-    memlcd_vue_coffre_t v;
+    memlcd_cave_vue_t v;
     char txt[64];
-    memlcd_model_t m = {0};
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_NONE, "nothing pending, no code, not browsing: the normal screen");
+    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE, .nom = "BASE", .batt_local_dv = 40 };
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_NORMAL, "nothing pending, no code, not browsing: the normal screen");
 
     m.coffre_op = 7; strcpy(m.coffre_label, "GITHUB"); m.coffre_op_count = 1;
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_PROMPT, "prompt");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_PROMPT, "prompt");
     assert_vue_tient(&v, "TOTP/GITHUB fits");
-    TEST_ASSERT(strcmp(v.l[0].text, "TOTP") == 0 && v.l[0].font == MEMLCD_F_M24, "the op, alone, in M24 (65 px)");
-    TEST_ASSERT(v.rule_y > v.l[0].y && v.rule_y < v.l[1].y, "a rule between the op and the label");
+    TEST_ASSERT(strcmp(v.l[0].text, "TOTP") == 0 && v.l[0].font == MEMLCD_F_M20, "the op alone, at its 20 px ceiling");
+    TEST_ASSERT(v.rule && v.rule_y > v.l[0].y && v.rule_y < v.l[v.txt_i].y, "a divider between the op and the label");
     vue_texte(&v, txt, sizeof txt);
-    TEST_ASSERT(strcmp(txt, "GITHUB") == 0 && v.l[v.txt_i].font == MEMLCD_F_M14, "the label in M14");
-    TEST_ASSERT(strcmp(v.l[v.n - 1].text, "OK ?") == 0 && v.l[v.n - 1].font == MEMLCD_F_M14, "last line OK ? in M14");
-    TEST_ASSERT(vue_cherche(&v, "1 CPT") < 0, "op_count 1: no N CPT");
+    TEST_ASSERT(strcmp(txt, "GITHUB") == 0 && v.l[v.txt_i].font == MEMLCD_F_M14, "the label, one line in M14");
+    TEST_ASSERT(strcmp(v.l[v.n - 1].text, "PRESS") == 0, "last line PRESS");
+    TEST_ASSERT(!v.logo && !v.goutte && !vue_contient(&v, "USB") && !vue_contient(&v, "BASE"), "full screen: nothing of the normal screen");
+    TEST_ASSERT(!vue_contient(&v, "ACCTS"), "op_count 1: no N ACCTS");
 
-    /* An op label too wide for M24 falls back to M14 — RESET! is 84 px in M24. */
+    /* RESET! is 70 px at 20: the op falls to 18 on its own. */
     m.coffre_op = 10;
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT(strcmp(v.l[0].text, "RESET!") == 0 && v.l[0].font == MEMLCD_F_M14, "RESET! > 66 px in M24: M14");
-    /* Every op label, whichever font it gets, fits. */
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(strcmp(v.l[0].text, "RESET!") == 0 && v.l[0].font == MEMLCD_F_M18, "RESET! in M18");
     static const uint16_t ops[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 42, 99, 100, 1042 };
     for (size_t i = 0; i < sizeof ops / sizeof ops[0]; i++) {
         m.coffre_op = ops[i];
-        memlcd_vue_coffre(&m, &v);
+        memlcd_cave_vue(&m, 80, &v);
         assert_vue_tient(&v, "every op label fits");
     }
 
-    /* A 34-character realistic label: M14, whole. */
+    /* The 34-character realistic label: whole, safe-wrapped at the 12 px floor. */
     m.coffre_op = 7; m.coffre_op_count = 1; strcpy(m.coffre_label, LABEL34N);
-    memlcd_vue_coffre(&m, &v);
+    memlcd_cave_vue(&m, 80, &v);
     assert_vue_tient(&v, "34-char normal label fits");
     vue_texte(&v, txt, sizeof txt);
     TEST_ASSERT(strcmp(txt, LABEL34N) == 0, "34 normal characters: the whole label");
-    TEST_ASSERT(v.l[v.txt_i].font == MEMLCD_F_M14, "... in M14");
+    TEST_ASSERT(v.l[v.txt_i].font == MEMLCD_F_M12, "... at the 12 px floor, never under");
 
-    /* 34 W: 9 M14 lines do not fit the height -> UNSCII 8, whole, no ~. */
+    /* 34 W: 9 lines at 12 px cannot fit — UNSCII 8, whole, no ~. */
     strcpy(m.coffre_label, LABEL34W);
-    memlcd_vue_coffre(&m, &v);
+    memlcd_cave_vue(&m, 80, &v);
     assert_vue_tient(&v, "34 W fits");
     vue_texte(&v, txt, sizeof txt);
     TEST_ASSERT(strcmp(txt, LABEL34W) == 0, "34 W: the whole label, never cut");
-    TEST_ASSERT(v.l[v.txt_i].font == MEMLCD_F_U8 && v.txt_n == 5, "... in UNSCII 8, 5 lines");
+    TEST_ASSERT(v.l[v.txt_i].font == MEMLCD_F_U8 && v.txt_n == 5, "... in UNSCII 8, 5 lines: the last resort");
     TEST_ASSERT(strchr(txt, '~') == NULL, "never a ~ on a prompt");
 
-    /* The same with N CPT: still whole, N CPT and OK ? still there. */
+    /* The same with N ACCTS: still whole, N ACCTS and PRESS still there. */
     m.coffre_op = 10; m.coffre_op_count = 12;
-    memlcd_vue_coffre(&m, &v);
-    assert_vue_tient(&v, "34 W + 12 CPT fits");
+    memlcd_cave_vue(&m, 80, &v);
+    assert_vue_tient(&v, "34 W + 12 ACCTS fits");
     vue_texte(&v, txt, sizeof txt);
-    TEST_ASSERT(strcmp(txt, LABEL34W) == 0, "34 W with N CPT: whole");
-    TEST_ASSERT(vue_cherche(&v, "12 CPT") > 0 && strcmp(v.l[v.n - 1].text, "OK ?") == 0, "12 CPT then OK ?");
+    TEST_ASSERT(strcmp(txt, LABEL34W) == 0, "34 W with N ACCTS: whole");
+    TEST_ASSERT(vue_cherche(&v, "12 ACCTS") > 0 && strcmp(v.l[v.n - 1].text, "PRESS") == 0, "12 ACCTS then PRESS");
     strcpy(m.coffre_label, LABEL34);
-    memlcd_vue_coffre(&m, &v);
-    assert_vue_tient(&v, "alphabet34 + 12 CPT fits");
+    memlcd_cave_vue(&m, 80, &v);
+    assert_vue_tient(&v, "alphabet34 + 12 ACCTS fits");
     vue_texte(&v, txt, sizeof txt);
-    TEST_ASSERT(strcmp(txt, LABEL34) == 0, "the alphabet label with N CPT: whole");
+    TEST_ASSERT(strcmp(txt, LABEL34) == 0, "the alphabet label with N ACCTS: whole");
 
     /* Two 34-char labels differing only at the last character render differently (C1). */
     {
-        memlcd_vue_coffre_t a, b;
+        memlcd_cave_vue_t a, b;
         char la[35], lb[35];
         strcpy(la, LABEL34); la[33] = '1';
         strcpy(lb, LABEL34); lb[33] = '2';
-        strcpy(m.coffre_label, la); memlcd_vue_coffre(&m, &a);
-        strcpy(m.coffre_label, lb); memlcd_vue_coffre(&m, &b);
+        strcpy(m.coffre_label, la); memlcd_cave_vue(&m, 80, &a);
+        strcpy(m.coffre_label, lb); memlcd_cave_vue(&m, 80, &b);
         char ta[64], tb[64];
         vue_texte(&a, ta, sizeof ta); vue_texte(&b, tb, sizeof tb);
         TEST_ASSERT(strcmp(ta, la) == 0 && strcmp(tb, lb) == 0, "C1: both whole, so they differ");
@@ -363,141 +414,146 @@ static void test_vue_prompt(void)
 
     /* op_count boundary: 2 is already more than one. */
     strcpy(m.coffre_label, "GITHUB"); m.coffre_op_count = 2;
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT(vue_cherche(&v, "2 CPT") > 0, "op_count 2: N CPT");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(vue_cherche(&v, "2 ACCTS") > 0, "op_count 2: N ACCTS");
     m.coffre_op_count = 0;
-    memlcd_vue_coffre(&m, &v);
-    for (uint8_t i = 0; i < v.n; i++) TEST_ASSERT(strstr(v.l[i].text, "CPT") == NULL, "op_count 0: no CPT");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(!vue_contient(&v, "ACCTS"), "op_count 0: no ACCTS");
 
     /* The prompt shows coffre_label, NEVER coffre_nom (the browser's copy). */
-    memset(&m, 0, sizeof m);
+    memset(&m, 0, sizeof m); m.osl = MEMLCD_OSL_AUCUNE;
     m.coffre_op = 7; strcpy(m.coffre_label, "GITHUB"); m.coffre_op_count = 1;
     strcpy(m.coffre_nom, "OVH:PRO"); m.coffre_browsing = 1; m.coffre_total = 3;
-    memlcd_vue_coffre(&m, &v);
+    memlcd_cave_vue(&m, 80, &v);
     vue_texte(&v, txt, sizeof txt);
     TEST_ASSERT(strcmp(txt, "GITHUB") == 0, "the chest's label, not the cursor's");
-    for (uint8_t i = 0; i < v.n; i++) TEST_ASSERT(strstr(v.l[i].text, "OVH") == NULL, "the browser's name nowhere on the prompt");
+    TEST_ASSERT(!vue_contient(&v, "OVH"), "the browser's name nowhere on the prompt");
 
     /* Priority: prompt > code. The code's digits never leak onto a prompt. */
     m.coffre_code_visible = 1; strcpy(m.coffre_code, "418902"); m.coffre_code_secs = 12;
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_PROMPT, "prompt beats a visible code");
-    for (uint8_t i = 0; i < v.n; i++) {
-        TEST_ASSERT(strstr(v.l[i].text, "418") == NULL && strstr(v.l[i].text, "902") == NULL, "no digit of the code on the prompt");
-    }
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_PROMPT, "prompt beats a visible code");
+    TEST_ASSERT(!vue_contient(&v, "418") && !vue_contient(&v, "902") && !v.eau, "no digit, no countdown of the code on the prompt");
+
+    /* The bench incident's labels, on a prompt: no line of digits without a letter. */
+    strcpy(m.coffre_label, "TEST:RFC6238");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(vue_cherche(&v, "TEST:") == (int)v.txt_i && vue_cherche(&v, "RFC6238") == (int)v.txt_i + 1, "TEST: / RFC6238");
+    strcpy(m.coffre_label, "BANQUE:4021");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(vue_cherche(&v, "BANQU") == (int)v.txt_i && vue_cherche(&v, "E:4021") == (int)v.txt_i + 1, "BANQU / E:4021");
 }
 
-/* The code takes the WHOLE screen: the name in M14 (<= 2 lines, ~ if cut),
- * 6 digits as two M28 lines of 3, 8 digits as two M24 lines of 4, a
- * countdown bar and "NN s" in M24 — only while coffre_code_visible. */
+/* The code takes the WHOLE screen: the name (<= 2 lines, ~ if cut — the
+ * browser's copy, not a security text), the code as two halves in the
+ * widest font that fits (3 + 3 in M32, 4 + 4 in M24), the countdown as a
+ * water bar, "NN s" — only while coffre_code_visible. */
 static void test_vue_code(void)
 {
-    memlcd_vue_coffre_t v;
+    memlcd_cave_vue_t v;
     char txt[64];
-    memlcd_model_t m = {0};
+    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE, .nom = "BASE" };
     m.coffre_code_visible = 1; strcpy(m.coffre_nom, "WORK"); strcpy(m.coffre_code, "418902"); m.coffre_code_secs = 12;
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_CODE, "code");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_CODE, "code");
     assert_vue_tient(&v, "6-digit code fits");
     vue_texte(&v, txt, sizeof txt);
     TEST_ASSERT(strcmp(txt, "WORK") == 0 && v.l[v.txt_i].font == MEMLCD_F_M14, "the name in M14");
     int a = vue_cherche(&v, "418"), b = vue_cherche(&v, "902");
     TEST_ASSERT(a >= 0 && b == a + 1, "6 digits: 418 then 902");
-    TEST_ASSERT(a >= 0 && v.l[a].font == MEMLCD_F_M28 && v.l[b].font == MEMLCD_F_M28, "... in M28");
+    TEST_ASSERT(a >= 0 && v.l[a].font == MEMLCD_F_M32 && v.l[b].font == MEMLCD_F_M32, "... in M32: bigger than any name");
     int s = vue_cherche(&v, "12 s");
-    TEST_ASSERT(s >= 0 && v.l[s].font == MEMLCD_F_M24, "12 s in M24");
-    TEST_ASSERT_EQ(v.bar_pct, 40, "12 s of 30: 40 %");
-    TEST_ASSERT(v.bar_y > v.l[b].y && v.bar_y + MEMLCD_BAR_H <= v.l[s].y, "the bar between the code and the seconds");
+    TEST_ASSERT(s >= 0 && v.l[s].font == MEMLCD_F_M14, "12 s");
+    TEST_ASSERT_EQ(v.eau_pct, 40, "12 s of 30: the water at 40 %");
+    TEST_ASSERT(v.eau && v.eau_y > v.l[b].y && v.eau_y + MEMLCD_CAVE_EAU_H <= v.l[s].y, "the water between the code and the seconds");
 
-    /* Every digit, 3 in M28 / 4 in M24, fits. */
     for (char d = '0'; d <= '9'; d++) {
         char c6[7], c8[9];
         memset(c6, d, 6); c6[6] = 0; memset(c8, d, 8); c8[8] = 0;
-        strcpy(m.coffre_code, c6); memlcd_vue_coffre(&m, &v); assert_vue_tient(&v, "6 x digit fits");
-        strcpy(m.coffre_code, c8); memlcd_vue_coffre(&m, &v); assert_vue_tient(&v, "8 x digit fits");
+        strcpy(m.coffre_code, c6); memlcd_cave_vue(&m, 80, &v); assert_vue_tient(&v, "6 x digit fits");
+        strcpy(m.coffre_code, c8); memlcd_cave_vue(&m, 80, &v); assert_vue_tient(&v, "8 x digit fits");
     }
 
     strcpy(m.coffre_code, "12345678"); m.coffre_code_secs = 30;
-    memlcd_vue_coffre(&m, &v);
+    memlcd_cave_vue(&m, 80, &v);
     a = vue_cherche(&v, "1234"); b = vue_cherche(&v, "5678");
     TEST_ASSERT(a >= 0 && b == a + 1 && v.l[a].font == MEMLCD_F_M24 && v.l[b].font == MEMLCD_F_M24, "8 digits: two M24 lines of 4");
-    TEST_ASSERT_EQ(v.bar_pct, 100, "30 s: full bar");
+    TEST_ASSERT_EQ(v.eau_pct, 100, "30 s: full");
     TEST_ASSERT(vue_cherche(&v, "30 s") >= 0, "30 s");
     m.coffre_code_secs = 45;
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.bar_pct, 100, "never above 100 %");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.eau_pct, 100, "never above 100 %");
 
-    /* A long name: 2 M14 lines, cut with ~ (the browser's copy, not a security text). */
-    strcpy(m.coffre_nom, LABEL34);
-    memlcd_vue_coffre(&m, &v);
+    /* A long name: 2 lines, cut with ~, and a code still whole below it. */
+    strcpy(m.coffre_nom, LABEL34); strcpy(m.coffre_code, "418902");
+    memlcd_cave_vue(&m, 80, &v);
     assert_vue_tient(&v, "long name fits");
     TEST_ASSERT(v.txt_n == 2, "the name on 2 lines");
     size_t n = strlen(v.l[v.txt_i + 1].text);
     TEST_ASSERT(n && v.l[v.txt_i + 1].text[n - 1] == '~', "cut with ~");
+    TEST_ASSERT(vue_cherche(&v, "418") >= 0 && vue_cherche(&v, "902") >= 0, "the code whole under a long name");
 
     /* No code without coffre_code_visible, whatever coffre_code holds. */
-    memset(&m, 0, sizeof m);
+    memset(&m, 0, sizeof m); m.osl = MEMLCD_OSL_AUCUNE;
     strcpy(m.coffre_code, "123456"); m.coffre_code_secs = 12; strcpy(m.coffre_nom, "WORK");
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_NONE, "code_visible false: never the code");
-    m.coffre_browsing = 1; m.coffre_total = 1;
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_BROWSE, "browsing, code not visible: the browser");
-    for (uint8_t i = 0; i < v.n; i++) TEST_ASSERT(strstr(v.l[i].text, "123") == NULL, "no digit of an invisible code");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(v.kind == MEMLCD_CV_NORMAL && !vue_contient(&v, "123") && !v.eau, "code_visible false: never the code");
+    m.coffre_browsing = 1; m.coffre_total = 1; m.coffre = CHEST_STATE_TIME;
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_BROWSE, "browsing, code not visible: the browser");
+    TEST_ASSERT(!vue_contient(&v, "123") && !v.eau, "no digit of an invisible code");
 
-    /* Priority code > browse. */
     m.coffre_code_visible = 1;
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_CODE, "code beats the browser");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_CODE, "code beats the browser");
 }
 
-/* The browser stays in the bottom zone (67 px): i/total, the name in M14 on
- * <= 2 lines (UNSCII 8 with ~ beyond), NO TIME when TIME_VALID is clear. */
+/* The browser keeps the top status (logo, route, drop) and the layer name
+ * (capped at 16 px), then "i/N", the name — whole when it fits, else cut
+ * with a ~ — and NO TIME when TIME_VALID is clear. */
 static void test_vue_browse(void)
 {
-    memlcd_vue_coffre_t v;
+    memlcd_cave_vue_t v;
     char txt[64];
-    memlcd_model_t m = {0};
+    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE, .nom = "BASE", .batt_local_dv = 40 };
+    m.coffre = MEMLCD_COFFRE_PRESENT | CHEST_STATE_READY | CHEST_STATE_SD | CHEST_STATE_TIME;
     m.coffre_browsing = 1; m.coffre_pos = 2; m.coffre_total = 12; strcpy(m.coffre_nom, "OVH:PRO");
-    m.coffre = CHEST_STATE_TIME;
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_BROWSE, "browse");
-    assert_vue_tient(&v, "browse fits 67 px");
-    TEST_ASSERT(strcmp(v.l[0].text, "3/12") == 0 && v.l[0].font == MEMLCD_F_M14, "3/12 in M14");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_BROWSE, "browse");
+    assert_vue_tient(&v, "browse fits");
+    TEST_ASSERT(vue_cherche(&v, "3/12") >= 0, "3/12, 1-based");
     vue_texte(&v, txt, sizeof txt);
-    TEST_ASSERT(strcmp(txt, "OVH:PRO") == 0 && v.l[v.txt_i].font == MEMLCD_F_M14, "the name, whole, in M14");
-    TEST_ASSERT(vue_cherche(&v, "NO TIME") < 0, "time set: no NO TIME");
+    TEST_ASSERT(strcmp(txt, "OVH:PRO") == 0, "the name, whole");
+    TEST_ASSERT(vue_cherche(&v, "USB") >= 0 && v.goutte, "the top status stays");
+    int h = vue_cherche(&v, "BASE");
+    TEST_ASSERT(h >= 0 && v.l[h].font <= MEMLCD_F_M16, "the layer name, capped at 16 px");
+    TEST_ASSERT(!vue_contient(&v, "NO TIME"), "time set: no NO TIME");
 
-    m.coffre = 0;
-    memlcd_vue_coffre(&m, &v);
-    assert_vue_tient(&v, "browse + NO TIME fits 67 px");
-    int t = vue_cherche(&v, "NO TIME");
-    TEST_ASSERT(t >= 0 && v.l[t].font == MEMLCD_F_M14, "TIME clear: NO TIME in M14");
+    m.coffre &= (uint8_t)~CHEST_STATE_TIME;
+    memlcd_cave_vue(&m, 80, &v);
+    assert_vue_tient(&v, "browse + NO TIME fits");
+    TEST_ASSERT(vue_cherche(&v, "NO TIME") >= 0, "TIME clear: NO TIME");
 
-    /* A name too long for 2 M14 lines: UNSCII 8, ~ marks the cut, still inside 67 px. */
+    /* A name too long for the room: cut with ~, still inside, NO TIME kept. */
     strcpy(m.coffre_nom, LABEL34);
-    memlcd_vue_coffre(&m, &v);
-    assert_vue_tient(&v, "long name + NO TIME fits 67 px");
-    TEST_ASSERT(v.l[v.txt_i].font == MEMLCD_F_U8, "fallback UNSCII 8");
+    memlcd_cave_vue(&m, 80, &v);
+    assert_vue_tient(&v, "long name + NO TIME fits");
     TEST_ASSERT(vue_cherche(&v, "NO TIME") >= 0, "NO TIME still shown");
-    m.coffre = CHEST_STATE_TIME;
-    memlcd_vue_coffre(&m, &v);
-    assert_vue_tient(&v, "long name fits 67 px");
-    TEST_ASSERT(v.txt_n == 4, "without NO TIME: 4 UNSCII lines");
-    size_t n = strlen(v.l[v.txt_i + 3].text);
-    TEST_ASSERT(n && v.l[v.txt_i + 3].text[n - 1] == '~', "cut with ~");
+    const char *last = v.l[v.txt_i + v.txt_n - 1].text;
+    TEST_ASSERT(v.txt_n >= 1 && last[strlen(last) - 1] == '~', "cut with ~");
+    TEST_ASSERT(v.l[v.txt_i].font >= MEMLCD_F_M12 && v.l[v.txt_i].font <= MEMLCD_F_M32, "never under the floor");
 }
 
-/* "Bytes -> pixels, pinned end to end" (plan Task 5, kept through Task 8):
- * the chest's own raw register/DMA bytes, through chest_proto_parse ->
- * chest_view_build -> the memlcd model (memlcd_model_set_coffre) ->
- * memlcd_vue_coffre, asserting the RENDERED lines. */
+/* "Bytes -> pixels, pinned end to end" (plan Task 5, kept through Task 8
+ * and the cave): the chest's own raw register/DMA bytes, through
+ * chest_proto_parse -> chest_view_build -> the memlcd model
+ * (memlcd_model_set_coffre) -> memlcd_cave_vue, asserting the drawn lines. */
 static void test_vue_coffre_end_to_end(void)
 {
     chest_status_t st;
     chest_view_t cv;
     memlcd_model_t m;
-    memlcd_vue_coffre_t v;
+    memlcd_cave_vue_t v;
     char txt[64];
 
     /* V16: RESET pending, label "12 COMPTES", 0x0F = 12. */
@@ -505,13 +561,13 @@ static void test_vue_coffre_end_to_end(void)
     chest_view_build(&cv, CHEST_BLOCK_OK, &st, st.active_mode, CHEST_MODE_ARRIVED, NULL, 0);
     memset(&m, 0, sizeof m); m.osl = MEMLCD_OSL_AUCUNE;
     memlcd_model_set_coffre(&m, &cv);
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_PROMPT, "V16: prompt");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_PROMPT, "V16: prompt");
     assert_vue_tient(&v, "V16 fits");
     TEST_ASSERT(strcmp(v.l[0].text, "RESET!") == 0, "V16: op 10 = RESET!");
     vue_texte(&v, txt, sizeof txt);
     TEST_ASSERT(strcmp(txt, "12 COMPTES") == 0, "V16: the label, whole");
-    TEST_ASSERT(vue_cherche(&v, "12 CPT") > 0, "V16: 12 CPT from op_count, not clamped");
+    TEST_ASSERT(vue_cherche(&v, "12 ACCTS") > 0, "V16: 12 ACCTS from op_count, not clamped");
 
     /* V1: the chest's label GITHUB even with the cursor on OVH:PRO. */
     chest_list_t l;
@@ -524,19 +580,19 @@ static void test_vue_coffre_end_to_end(void)
     chest_view_build(&cv, CHEST_BLOCK_OK, &st, st.active_mode, CHEST_MODE_ARRIVED, &o, 0);
     memset(&m, 0, sizeof m); m.osl = MEMLCD_OSL_AUCUNE;
     memlcd_model_set_coffre(&m, &cv);
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_PROMPT, "V1: prompt");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_PROMPT, "V1: prompt");
     vue_texte(&v, txt, sizeof txt);
     TEST_ASSERT(strcmp(txt, "GITHUB") == 0, "V1: the CHEST's label, not the cursor's OVH:PRO");
 
-    /* V9: nothing to show whatever the cursor. */
+    /* V9: nothing to show whatever the cursor: the normal screen. */
     TEST_ASSERT_EQ(chest_proto_parse(V9, 64, &st), CHEST_BLOCK_OK, "V9 parses");
     chest_view_build(&cv, CHEST_BLOCK_OK, &st, st.active_mode, CHEST_MODE_ARRIVED, &o, 0);
     memset(&m, 0, sizeof m); m.osl = MEMLCD_OSL_AUCUNE;
     memlcd_model_set_coffre(&m, &cv);
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_NONE, "V9: nothing");
-    TEST_ASSERT_EQ(v.n, 0, "V9: no line");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(v.kind == MEMLCD_CV_NORMAL || v.kind == MEMLCD_CV_BROWSE, "V9: no prompt, no code");
+    TEST_ASSERT(!v.eau && !v.rule, "V9: no countdown, no divider");
 
     /* V15: browsing, TIME clear -> NO TIME (its own op cleared, as the transport would). */
     TEST_ASSERT_EQ(chest_proto_parse(V15, 64, &st), CHEST_BLOCK_OK, "V15 parses");
@@ -544,16 +600,16 @@ static void test_vue_coffre_end_to_end(void)
     memset(&m, 0, sizeof m); m.osl = MEMLCD_OSL_AUCUNE;
     memlcd_model_set_coffre(&m, &cv);
     m.coffre_op = 0;
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_BROWSE, "V15: browsing");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_BROWSE, "V15: browsing");
     TEST_ASSERT(cv.browsing && cv.pos == 2 && cv.total > 2, "V15: the cursor moved by 2 on L1's page");
     {
         char pos[16];
         snprintf(pos, sizeof pos, "3/%u", (unsigned)cv.total);
-        TEST_ASSERT(strcmp(v.l[0].text, pos) == 0, "V15: 3/total, 1-based");
+        TEST_ASSERT(vue_cherche(&v, pos) >= 0, "V15: 3/total, 1-based");
     }
     vue_texte(&v, txt, sizeof txt);
-    TEST_ASSERT(strcmp(txt, "OVH:PRO") == 0, "V15: the cursor's name, whole, across its lines");
+    TEST_ASSERT(strcmp(txt, "OVH:PRO") == 0, "V15: the cursor's name, whole");
     TEST_ASSERT(vue_cherche(&v, "NO TIME") >= 0, "V15: NO TIME, bit 3 clear");
 
     /* A code after on_code, gone after its deadline. */
@@ -569,17 +625,33 @@ static void test_vue_coffre_end_to_end(void)
     memset(&m, 0, sizeof m); m.osl = MEMLCD_OSL_AUCUNE;
     memlcd_model_set_coffre(&m, &cv);
     m.coffre_op = 0;
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT_EQ(v.kind, MEMLCD_VC_CODE, "code shown");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_CODE, "code shown");
     TEST_ASSERT(vue_cherche(&v, "418") >= 0 && vue_cherche(&v, "902") >= 0 && vue_cherche(&v, "12 s") >= 0, "418 / 902 / 12 s");
-    TEST_ASSERT_EQ(v.bar_pct, 40, "bar at 40 %");
+    TEST_ASSERT_EQ(v.eau_pct, 40, "water at 40 %");
     chest_view_build(&cv, CHEST_BLOCK_OK, &st, st.active_mode, CHEST_MODE_ARRIVED, &o2, 13000);
     memset(&m, 0, sizeof m); m.osl = MEMLCD_OSL_AUCUNE;
     memlcd_model_set_coffre(&m, &cv);
     m.coffre_op = 0;
-    memlcd_vue_coffre(&m, &v);
-    TEST_ASSERT(v.kind != MEMLCD_VC_CODE, "the expired code is gone");
-    for (uint8_t i = 0; i < v.n; i++) TEST_ASSERT(strstr(v.l[i].text, "418") == NULL, "no digit left on screen");
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(v.kind != MEMLCD_CV_CODE, "the expired code is gone");
+    TEST_ASSERT(!vue_contient(&v, "418") && !v.eau, "no digit left on screen");
+}
+
+/* Sleep: the frozen image says it sleeps — the large logo and zZ, nothing
+ * that could pretend to be live (route, gauge, chest). */
+static void test_vue_veille(void)
+{
+    memlcd_cave_vue_t v;
+    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE, .nom = "BASE", .batt_local_dv = 40, .route_rf = 1, .dongle_vu = 1, .lien_5v = 1 };
+    m.coffre = MEMLCD_COFFRE_PRESENT; m.coffre_op = 7; strcpy(m.coffre_label, "GITHUB");
+    m.veille = 1;
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_SLEEP, "asleep");
+    TEST_ASSERT(v.logo == MEMLCD_CAVE_LOGO_L, "the large logo");
+    TEST_ASSERT(vue_cherche(&v, "zZ") >= 0, "zZ");
+    TEST_ASSERT(!v.goutte && !v.lien && !v.cadenas && !vue_contient(&v, "RADIO") && !vue_contient(&v, "GITHUB"), "nothing live on a frozen image");
+    assert_vue_tient(&v, "sleep fits");
 }
 
 static void test_model_diff(void)
@@ -688,16 +760,16 @@ void test_memlcd_model(void)
 {
     TEST_SUITE("Memory-LCD screen: pure logic");
     test_rev8();
-    test_couper_nom();
     test_couche_affichee();
     test_ligne_etat();
-    test_etat_coffre();
     test_text_width();
-    test_couper_px();
-    test_couper_px_bounded_scan_no_terminator();
+    test_nom_couche();
+    test_etat_coffre();
+    test_statut_haut();
     test_vue_prompt();
     test_vue_code();
     test_vue_browse();
+    test_vue_veille();
     test_vue_coffre_end_to_end();
     test_model_diff();
     test_fb_to_panel();

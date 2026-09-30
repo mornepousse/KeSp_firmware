@@ -97,7 +97,7 @@ static void test_view_prompt_uses_chest_label_not_cursor_name(void)
     chest_view_build(&v, blk, &st, st.active_mode, CHEST_MODE_ARRIVED, &o, 0);
 
     TEST_ASSERT(strcmp(v.label, "GITHUB") == 0, "the CHEST's own label, unaffected by the cursor");
-    TEST_ASSERT(strcmp(v.name, "OVH:PRO") == 0, "the browser's own cursor name is ALSO populated (priority is memlcd_vue_coffre's job, not this builder's)");
+    TEST_ASSERT(strcmp(v.name, "OVH:PRO") == 0, "the browser's own cursor name is ALSO populated (priority is memlcd_cave_vue's job, not this builder's)");
     TEST_ASSERT(v.browsing, "OATH active and a page cached: browsing true regardless of the pending op");
     TEST_ASSERT_EQ(v.op, 7, "the op is still there for the caller to prioritize");
 }

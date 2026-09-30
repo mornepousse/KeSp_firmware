@@ -75,6 +75,7 @@ extern void test_keymap_sync(void);
 extern void test_wake_grace(void);
 extern void test_batt_calc(void);
 extern void test_memlcd_model(void);
+extern void test_memlcd_safe_wrap(void);
 extern void test_niphar_left_pins(void);
 extern void test_niphar_right_pins(void);
 extern void test_board_contract_kase_v1(void);
@@ -162,6 +163,7 @@ int main(void) {
     test_wake_grace();
     test_batt_calc();
     test_memlcd_model();
+    test_memlcd_safe_wrap();
     test_niphar_left_pins();
     test_niphar_right_pins();
     test_board_contract_kase_v1();

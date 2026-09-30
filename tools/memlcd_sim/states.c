@@ -138,7 +138,7 @@ void security_scenarios_build(scenario_t out[N_SECURITY])
 
     s = &out[1];
     s->id = "sec2_prompt_banque_4021"; s->caption = "prompt . BANQUE:4021";
-    s->m = out[0].m;
+    s->m = out[0].m; s->batt_pct = out[0].batt_pct;
     strcpy(s->m.coffre_label, "BANQUE:4021");
 
     s = &out[2];
@@ -152,7 +152,7 @@ void security_scenarios_build(scenario_t out[N_SECURITY])
 
     s = &out[3];
     s->id = "sec4_browse_banque_4021"; s->caption = "browse . BANQUE:4021";
-    s->m = out[2].m;
+    s->m = out[2].m; s->batt_pct = out[2].batt_pct;
     s->m.coffre_pos = 1;
     strcpy(s->m.coffre_nom, "BANQUE:4021");
 }

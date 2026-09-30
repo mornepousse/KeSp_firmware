@@ -86,9 +86,18 @@ if(CONFIG_KASE_HAS_DISPLAY)
         list(APPEND srcs
             "display/memlcd/memlcd_panel.c"
             "display/memlcd/memlcd_backend.c"
-            "display/assets/img_niphargus_60.c"
-            "display/assets/img_niphargus_34.c"
         )
+        if(CONFIG_KASE_DEVICE_ROLE_KEYBOARD)
+            # The left: the cave (memlcd_cave.h, plan 2026-09-30-left-screen-cave)
+            list(APPEND srcs
+                "display/memlcd/memlcd_cave.c"
+                "display/memlcd/memlcd_assets_cave.c"
+                "display/assets/img_niphargus_28.c"
+                "display/assets/img_niphargus_56.c"
+            )
+        else()
+            list(APPEND srcs "display/assets/img_niphargus_60.c")
+        endif()
     elseif(DISPLAY_BACKEND STREQUAL "round")
         list(APPEND srcs
             "display/round/spi_round_display.c"

@@ -150,15 +150,22 @@ in the PR/release.
       pixel; typing during a refresh loses no keypress; in light sleep the
       image stays frozen and readable, the board still sleeps at 15 s; on
       wake the screen comes back to life
-- [ ] Memory-LCD screens UI: icon column on the right (route symbol, ▲,
-      horizontal gauge, voltage, ⇆), logo top-left on the left half and at
-      the bottom on the right; the layer NAME full width (e.g. "LAYER / 2"),
-      the base or locked layer only — holding a MO does NOT change it; TO /
+- [ ] Memory-LCD screens UI: RIGHT unchanged — icon column (route symbol,
+      ▲, horizontal gauge, voltage, ⇆), logo at the bottom. LEFT, the cave
+      (2026-09-30): dark, rock edges top and bottom with no text touching
+      them, the small logo top-left, `USB` / `RADIO` in words and `SEEN` on
+      its own line, the water drop with the percentage beside it (full at
+      100 %, a wavy surface part-way, a thick outline when LOW, `⇆` beside
+      the percentage while the TRRS 5 V is closed); readable in LOW light
+      (Mae's verdict on the dark palette is still open); the layer NAME as
+      large as fits (e.g. "BASE"; "NAVIGATION" as NAVIG / ATION), the base
+      or locked layer only — holding a MO does NOT change it; TO /
       Layer Lock does; on USB a change shows within ~0.1 s, on battery
       within ~1 s; Caps Word shows "CW", a one-shot Shift armed and left
       alone shows "S", a one-shot layer "L3"; Caps Lock shows "CAPS" over
-      USB only; when a half goes to sleep its last image carries "zZ" and an
-      up-to-date ⇆ / route, and "zZ" goes away at the first key; right served
+      USB only; when a half goes to sleep its last image carries "zZ" (the
+      right with an up-to-date ⇆ / route, the left ONLY its large logo and
+      "zZ"), and "zZ" goes away at the first key; right served
       at 1 s: no zone greys out in 2 min (VCOM ~1 Hz), the image comes back
       to life within the second following the first key after a sleep
 - [ ] First key after sleep: let the half sleep — 15 s for the short case
@@ -183,35 +190,35 @@ in the PR/release.
 - [ ] Power Phase 2: no key stuck/ghosted on wake; release handled
 - [ ] Power Phase 2: if wake doesn't trigger on a key, invert the column GPIO polarity (see half_scan_arm_key_wake BENCH-TUNE)
 - [ ] Power Phase 2: left + right independently
-- [ ] Chest link (left, chest flashed, USB-C plugged): under the logo a
-      BIG padlock (24 x 28, it must not touch the logo), then the USB mode
-      in plain words ("PGP" upper case once a mode is mounted, lower case
-      while the switch runs); with the SD card in, NO card line; with the
-      card out, "NO" / "CARD" under the mode, the "CARD" line clear of the
-      separator; `gpg --card-status`, then `echo t | gpg --sign` → the
-      prompt takes the WHOLE screen: "SIGN" large at the top, a rule, the
-      account's REAL label from the chest (not a placeholder), "OK ?" at the
-      bottom; a press on K_SEC_CONFIRM signs; no press → 6985 after 15 s and
-      the normal screen comes back (icon column, logo, padlock, layer);
+- [ ] Chest link (left, chest flashed, USB-C plugged): beside the logo a
+      BIG padlock (24 x 28, it must not touch the logo), under the battery
+      row the USB mode in plain words ("PGP" upper case once a mode is
+      mounted, lower case while the switch runs); with the SD card in, NO
+      card line; with the card out, "NO CARD" under the mode; `gpg
+      --card-status`, then `echo t | gpg --sign` → the prompt takes the
+      WHOLE screen: "SIGN" at the top, a wavy divider, the account's REAL
+      label from the chest (not a placeholder), "PRESS" at the bottom; a
+      press on K_SEC_CONFIRM signs; no press → 6985 after 15 s and the
+      normal screen comes back (logo, padlock, route, drop, layer);
       radio and screen keep working meanwhile; unplug USB → padlock gone; on
       battery the sleep current is unchanged (GPIO3 released).
 - [ ] Chest views, what only the physical screen shows (host tests pin the
-      STRINGS and their widths from the font tables, not the kerning nor the
-      glyphs on glass): with an account label near the chest's 34-character
-      maximum pending, the label spans its Montserrat 14 lines with nothing
-      clipped at either edge (a line is measured at <= 66 px — check a
-      kerning pair does not push a glyph off); with a label of wide letters
-      (e.g. a `WWW…` test account) the label switches to the small UNSCII 8
+      STRINGS, their widths — kerning included — and their positions;
+      tools/memlcd_sim renders them with the firmware's own engine; the
+      glass is the last judge): TOTP browse (`i/total`, the name, `NO TIME`
+      when the time is not set, the logo, route and drop still visible
+      above it, nothing running into the rock); a `K_OATH_CODE` prompt on
+      the `TEST:RFC6238` test account reads `TEST:` / `RFC6238` — NEVER a
+      line of digits alone; a label near the chest's 34-character maximum
+      spans its 12 px lines with nothing clipped at either edge; a label of
+      wide letters (a `WWW…` test account) switches to the small UNSCII 8
       type and still shows WHOLE (no `~` on a prompt); a RESET shows
-      `RESET!` in the smaller type, the label, `N CPT` and `OK ?` without
-      overlap; the code screen: the name on top, the 6 digits LARGE as two
-      rows of 3 (8 digits: two rows of 4), the countdown bar shrinking, `NN
-      s` under it — nothing of the normal screen shows through; the browser
-      stays in the bottom zone (`i/total`, the name, `NO TIME` when the time
-      is not set) with the icon column and logo still visible above it and
-      nothing running past the bottom edge; every character used renders
-      (no tofu box): digits, upper/lower case, space, `~`, `/`, `?`, `:`,
-      `!`, `@`, `.`.
+      `RESET!`, the label, `N ACCTS` and `PRESS` without overlap; the code
+      screen: the name on top, the 6 digits LARGE as two rows of 3, the
+      `Jetable:huit` 8-digit code as two rows of 4, the water bar draining,
+      `NN s` under it — nothing of the normal screen shows through; every
+      character used renders (no tofu box): digits, upper/lower case,
+      space, `~`, `/`, `?`, `:`, `!`, `@`, `.`.
 - [ ] Chest link protocol v3 (left flashed with the Task 6 transport, chest
       flashed with its v3 head, USB-C plugged; for the raw traces build the
       left with `CONFIG_KASE_CHEST_DIAG=y` and read the console detached,
@@ -232,7 +239,7 @@ in the PR/release.
          first LIST for the chest session, success or failure);
       4. `niphar-oath set-time` → TIME_VALID (the `NO TIME` hint goes);
       5. `K_OATH_CODE` → the prompt names the account under the cursor
-         (full screen: `TOTP` large, the CHEST's label, `OK ?`) →
+         (full screen: `TOTP` large, the CHEST's label, `PRESS`) →
          `K_SEC_CONFIRM` on the left → the code, full screen, large, with
          its countdown bar and seconds;
       6. no press after `K_OATH_CODE` → the prompt expires after 15 s and
@@ -246,7 +253,7 @@ in the PR/release.
          `NO TIME` in the browser, and `K_OATH_CODE` sends nothing (diag:
          no WRDMA CODE);
       9. a RESET armed from the host → the prompt shows `RESET!`, the
-         label, `N CPT` with the number of accounts and `OK ?`;
+         label, `N ACCTS` with the number of accounts and `PRESS`;
       10. `K_SEC_CONFIRM` placed on the right half does nothing: the prompt
           stays, the chest's counter does not move.
 

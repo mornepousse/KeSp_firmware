@@ -71,48 +71,6 @@ static inline uint8_t memlcd_batt_aff_step(memlcd_batt_aff_t *b, uint8_t dv, uin
     return b->aff;
 }
 
-/* Layer name, full width under the icon column (2026-09-26): Montserrat 14
- * on 68 px = 6 characters per line, 2 lines. A line is cut at the last space
- * that fits (skipped), else hard at 6; the last line ends in "…" when the
- * name does not fit, never after a space. (4 x 3 until 2026-09-25, 4 x 2 for
- * one day under the big layer number.) MEMLCD_NOM_BUF holds 6 characters +
- * NUL, or 5 + the UTF-8 ellipsis (3 bytes) + NUL. */
-#define MEMLCD_NOM_COLS   6
-#define MEMLCD_NOM_LIGNES 2
-#define MEMLCD_NOM_BUF    (MEMLCD_NOM_COLS + 3)
-
-static inline uint8_t memlcd_couper_nom(const char *nom,
-                                        char lignes[MEMLCD_NOM_LIGNES][MEMLCD_NOM_BUF])
-{
-    for (int i = 0; i < MEMLCD_NOM_LIGNES; i++) lignes[i][0] = '\0';
-    size_t n = nom ? strlen(nom) : 0;
-    if (n == 0) return 1;                       /* one empty line, never zero lines */
-    const char *p = nom;
-    uint8_t nl = 0;
-    while (*p && nl < MEMLCD_NOM_LIGNES) {
-        while (*p == ' ') p++;                  /* a line never starts with a space */
-        size_t reste = strlen(p);
-        if (reste == 0) break;
-        bool derniere = (nl == MEMLCD_NOM_LIGNES - 1);
-        if (reste <= MEMLCD_NOM_COLS) {         /* fits: take it all */
-            memcpy(lignes[nl], p, reste); lignes[nl][reste] = '\0';
-            nl++; break;
-        }
-        if (derniere) {                         /* overflow: 5 characters + … */
-            size_t len = MEMLCD_NOM_COLS - 1;
-            while (len > 0 && p[len - 1] == ' ') len--;
-            memcpy(lignes[nl], p, len);
-            memcpy(lignes[nl] + len, "\xE2\x80\xA6", 4);
-            nl++; break;
-        }
-        size_t len = MEMLCD_NOM_COLS;           /* cut at the last space that fits */
-        for (size_t i = MEMLCD_NOM_COLS; i > 0; i--) if (p[i] == ' ') { len = i; break; }
-        memcpy(lignes[nl], p, len); lignes[nl][len] = '\0';
-        p += len; nl++;
-    }
-    return nl ? nl : 1;
-}
-
 /* The layer the screen shows: the STABLE one — base, TO or Layer Lock — which
  * is the engine's last_layer; a held MO/LT/LM (current_layout differing) is
  * not shown. In RF the left does not hear the right, so it cannot know a MO
@@ -179,289 +137,105 @@ static inline void memlcd_model_set_coffre(memlcd_model_t *m, const chest_view_t
     m->coffre_code_secs = v->code_secs;
 }
 
-/* ── Geometry shared with memlcd_backend.c ───────────────────────────
- * Y_SEP is the separator between the top part (logo + icon column) and the
- * bottom zone (layer name / status lines, or the chest browser). The zone
- * left of the icon column is x 0..34 (COL_X - 1 = 35 px). */
+/* ── Geometry of the RIGHT half's screen (memlcd_backend.c) ─────────
+ * Y_SEP is the separator between its top part (icon column) and its 60 px
+ * logo. The left half draws the cave (memlcd_cave.h) and has no separator. */
 #define MEMLCD_Y_SEP          92
-#define MEMLCD_ZONE_BAS_Y     (MEMLCD_Y_SEP + 1)        /* 93 */
-#define MEMLCD_ZONE_BAS_H     (MEMLCD_H - MEMLCD_ZONE_BAS_Y)   /* 67 */
-#define MEMLCD_ETAT_COFFRE_W  35
 
-/* ── Chest status under the logo (plan chest-link-v3 Task 8) ─────────
- * "SD c'est confusant" (Mae, 2026-09-29): the old "P4" / "P4.." / "P4?" /
- * "SD" / mode lines become a PADLOCK pictogram (chest present), with ".."
- * under it while not READY and "?" on a protocol version mismatch; the mode
- * in plain words (chest_mode_label: DISK/PGP/OTP/FIDO/TOTP, lower case in
- * flight, ERR); the SD card only when it is MISSING — "NO" / "CARD" (the
- * zone is 35 px wide: NO CARD is 56 px in UNSCII 8, 69 in Montserrat 14).
- * Lines packed upwards, UNSCII 8 (a 4-letter mode word is 37 px in M14 —
- * FIDO — over the 35 px zone).
- * Geometry: the 34 px logo's ink ends at y 35 (image y 4..37, ink rows
- * 3..31); the padlock is 24 x 28 at (5, 37) — ink y 37..64 — and the three
- * lines at y 65, 74, 83. UNSCII 8 (line_height 9, base_line 0) inks rows
- * y+1..y+8 of its line: the first line's ink starts at 66, the third's ends
- * at 91, the separator is y 92. */
-#define MEMLCD_CADENAS_W        24
-#define MEMLCD_CADENAS_H        28
-#define MEMLCD_CADENAS_X        ((MEMLCD_ETAT_COFFRE_W - MEMLCD_CADENAS_W) / 2)   /* 5 */
-#define MEMLCD_CADENAS_Y        37
-#define MEMLCD_ETAT_COFFRE_Y0   65
-#define MEMLCD_ETAT_COFFRE_PAS  9
-typedef struct {
-    uint8_t cadenas;                         /* 1 = draw the padlock */
-    char    ligne[3][CHEST_MODE_LABEL_BUF];  /* up to 4 UNSCII characters each */
-} memlcd_etat_coffre_t;
-
-static inline void memlcd_etat_coffre(const memlcd_model_t *m, memlcd_etat_coffre_t *e)
-{
-    memset(e, 0, sizeof *e);
-    if (!(m->coffre & MEMLCD_COFFRE_PRESENT)) return;
-    e->cadenas = 1;
-    if (m->coffre & MEMLCD_COFFRE_BADVER) { strcpy(e->ligne[0], "?"); return; }
-    if (!(m->coffre & CHEST_STATE_READY)) { strcpy(e->ligne[0], ".."); return; }
-    int n = 0;
-    chest_mode_label((chest_mode_state_t)m->coffre_mode_state, m->coffre_mode_active,
-                     m->coffre_mode_wanted, e->ligne[0]);
-    if (e->ligne[0][0]) n = 1;
-    if (!(m->coffre & CHEST_STATE_SD)) { strcpy(e->ligne[n++], "NO"); strcpy(e->ligne[n], "CARD"); }
-}
-
-/* ── Chest views in readable type (plan chest-link-v3 Task 8) ────────
- * "c'est tout petit" (Mae, bench 2026-09-29): the prompt and the code take
- * the WHOLE screen, the browser keeps the bottom zone (the layer stays
- * visible while typing in TOTP mode); Montserrat wherever it fits, UNSCII 8
- * as the fallback that ALWAYS fits.
- *
- * Width oracle: memlcd_font_widths.h, generated from the LVGL font files by
- * scripts/gen_memlcd_font_widths.py (the font-widths tripwire brick fails if
- * it drifts). Budget 66 px of the 68: LVGL applies kerning, the table does
- * not — 2 px of margin for it. */
+/* ── Width oracle ──────────────────────────────────────────────────────
+ * The left screen is laid out by PURE code (memlcd_cave.h), tested on host
+ * where LVGL does not run: text is measured with memlcd_font_widths.h,
+ * generated from the LVGL font files by scripts/gen_memlcd_font_widths.py
+ * (the font-widths tripwire brick fails if it drifts), kerning included:
+ * the host measures what LVGL draws. A line still keeps 2 px of its box free
+ * (a glyph's ink may overhang its advance by a pixel).
+ * MEMLCD_F_* is the cave's Montserrat ladder, smallest first (Montserrat 12
+ * is the text floor: below it the panel's 1-bit threshold erases glyphs —
+ * tools/memlcd_sim/check_glyph_ink.c), then UNSCII 8, a bitmap font kept
+ * ONLY as the last resort that keeps a chest label whole on a prompt. */
 #include "memlcd_font_widths.h"
 
-typedef enum { MEMLCD_F_U8, MEMLCD_F_M14, MEMLCD_F_M24, MEMLCD_F_M28 } memlcd_font_t;
-typedef enum { MEMLCD_VC_NONE, MEMLCD_VC_PROMPT, MEMLCD_VC_CODE, MEMLCD_VC_BROWSE } memlcd_vc_kind_t;
-#define MEMLCD_W_BUDGET   66
+typedef enum {
+    MEMLCD_F_M12, MEMLCD_F_M14, MEMLCD_F_M16, MEMLCD_F_M18,
+    MEMLCD_F_M20, MEMLCD_F_M24, MEMLCD_F_M28, MEMLCD_F_M32,
+    MEMLCD_F_U8,
+    MEMLCD_F_N
+} memlcd_font_t;
+#define MEMLCD_W_BUDGET   66                      /* a full-width line: 68 - 2 px of air */
 #define MEMLCD_VC_TXT     (CHEST_LABEL_MAX + 1)   /* a line can never hold more than the whole text */
-#define MEMLCD_VC_LIGNES  10
-#define MEMLCD_BAR_H      8
-#define MEMLCD_CODE_FENETRE_S 30                  /* TOTP window: the bar's 100 % */
+#define MEMLCD_CODE_FENETRE_S 30                  /* TOTP window: the countdown's 100 % */
 
-typedef struct {
-    uint8_t font;                  /* memlcd_font_t */
-    uint8_t y;                     /* top, relative to the view's zone */
-    char    text[MEMLCD_VC_TXT];
-} memlcd_vc_line_t;
-
-typedef struct {
-    uint8_t kind;                  /* memlcd_vc_kind_t: PROMPT and CODE = full screen (160 px),
-                                    * BROWSE = the bottom zone (MEMLCD_ZONE_BAS_H) */
-    uint8_t n;                     /* lines used */
-    uint8_t txt_i, txt_n;          /* the lines holding the label (PROMPT) or the name (CODE, BROWSE) */
-    uint8_t rule_y;                /* PROMPT: the 1 px rule under the op (0 = none) */
-    uint8_t bar_y, bar_pct;        /* CODE: the countdown bar, seconds left / 30 */
-    memlcd_vc_line_t l[MEMLCD_VC_LIGNES];
-} memlcd_vue_coffre_t;
-
-/* Line pitch of each font: LVGL's line_height (M14 16, M24 27, M28 30);
- * UNSCII 8 is 9 high, set at 11 for air between the lines. */
+/* Line pitch of each font: LVGL's line_height; UNSCII 8 is 9 high, set at
+ * 11 for air between the lines. */
 static inline uint8_t memlcd_font_pas(uint8_t font)
 {
     switch (font) {
+    case MEMLCD_F_M12: return MEMLCD_FW_M12_LINE_H;
     case MEMLCD_F_M14: return MEMLCD_FW_M14_LINE_H;
+    case MEMLCD_F_M16: return MEMLCD_FW_M16_LINE_H;
+    case MEMLCD_F_M18: return MEMLCD_FW_M18_LINE_H;
+    case MEMLCD_F_M20: return MEMLCD_FW_M20_LINE_H;
     case MEMLCD_F_M24: return MEMLCD_FW_M24_LINE_H;
     case MEMLCD_F_M28: return MEMLCD_FW_M28_LINE_H;
+    case MEMLCD_F_M32: return MEMLCD_FW_M32_LINE_H;
     default:           return 11;
     }
 }
 
-static inline uint8_t memlcd_glyph_w(uint8_t font, char ch)
+/* Kerning of the pair (a, b) in 1/16 px — kern_scale is 16 for every size
+ * (checked by the generator), so the class value is used as is. */
+static inline int memlcd_kern(uint8_t font, char a, char b)
 {
-    if (font == MEMLCD_F_U8) return 8;
-    const uint16_t *t = font == MEMLCD_F_M28 ? memlcd_fw_m28 : font == MEMLCD_F_M24 ? memlcd_fw_m24 : memlcd_fw_m14;
-    unsigned c = (unsigned char)ch;
-    /* Outside 0x20..0x7E (never after chest_proto's sanitizing): count the
-     * widest glyph, so an unknown character can only make a line SHORTER. */
-    if (c < MEMLCD_FW_FIRST || c > MEMLCD_FW_LAST) c = 'W';
-    return (uint8_t)((t[c - MEMLCD_FW_FIRST] + 8) >> 4);   /* LVGL rounds each glyph */
+    static const int8_t *const kv[] = {
+        memlcd_fw_m12_kv, memlcd_fw_m14_kv, memlcd_fw_m16_kv, memlcd_fw_m18_kv,
+        memlcd_fw_m20_kv, memlcd_fw_m24_kv, memlcd_fw_m28_kv, memlcd_fw_m32_kv,
+    };
+    unsigned ca = (unsigned char)a, cb = (unsigned char)b;
+    if (font >= MEMLCD_F_U8) return 0;
+    if (ca < MEMLCD_FW_FIRST || ca > MEMLCD_FW_LAST || cb < MEMLCD_FW_FIRST || cb > MEMLCD_FW_LAST) return 0;
+    uint8_t l = memlcd_fw_kl[ca - MEMLCD_FW_FIRST], r = memlcd_fw_kr[cb - MEMLCD_FW_FIRST];
+    if (!l || !r) return 0;
+    return kv[font][(l - 1) * MEMLCD_FW_KERN_RC + (r - 1)];
 }
 
-/* Pixel width of s in font: the sum of the glyph advances (no kerning). */
-static inline uint16_t memlcd_text_width(uint8_t font, const char *s)
+/* Advance of ch followed by next ('\0' at the end of a line), as LVGL
+ * computes it: the pair's kerning added, then rounded glyph by glyph. */
+static inline uint8_t memlcd_glyph_w2(uint8_t font, char ch, char next)
+{
+    static const uint16_t *const tables[] = {
+        memlcd_fw_m12, memlcd_fw_m14, memlcd_fw_m16, memlcd_fw_m18,
+        memlcd_fw_m20, memlcd_fw_m24, memlcd_fw_m28, memlcd_fw_m32,
+    };
+    if (font >= MEMLCD_F_U8) return 8;
+    unsigned c = (unsigned char)ch;
+    /* Outside 0x20..0x7E (never after chest_proto's sanitizing): count the
+     * widest glyph, unkerned, so an unknown character can only make a line
+     * SHORTER. */
+    if (c < MEMLCD_FW_FIRST || c > MEMLCD_FW_LAST) return (uint8_t)((tables[font]['W' - MEMLCD_FW_FIRST] + 8) >> 4);
+    int adv = tables[font][c - MEMLCD_FW_FIRST] + memlcd_kern(font, ch, next);
+    return (uint8_t)((adv + 8) >> 4);
+}
+static inline uint8_t memlcd_glyph_w(uint8_t font, char ch) { return memlcd_glyph_w2(font, ch, '\0'); }
+
+/* Pixel width of the first n bytes of s in font, drawn as a line on its own
+ * (the last glyph has no kerning partner), stopping at a NUL — exactly what
+ * lv_txt_get_width gives for that line. */
+static inline uint16_t memlcd_text_width_n(uint8_t font, const char *s, size_t n)
 {
     uint16_t w = 0;
     if (!s) return 0;
-    for (size_t i = 0; i < MEMLCD_VC_TXT && s[i]; i++) w = (uint16_t)(w + memlcd_glyph_w(font, s[i]));
+    for (size_t i = 0; i < n && s[i]; i++) {
+        char next = (i + 1 < n) ? s[i + 1] : '\0';
+        w = (uint16_t)(w + memlcd_glyph_w2(font, s[i], next));
+    }
     return w;
 }
-
-/* Cuts s into lines of at most MEMLCD_W_BUDGET px in `font` — a HARD cut
- * (untrusted, sanitized text: no word awareness, spaces kept, so the lines
- * concatenated ARE the text). Writes at most nmax lines (font set, y left to
- * the caller) and returns the number of lines the WHOLE text needs, which
- * may exceed nmax: the caller decides between another font and a ~.
- * Empty or NULL: one empty line, never zero. The scan is bounded at
- * CHEST_LABEL_MAX (strnlen): untrusted text one hop removed from the wire. */
-static inline uint8_t memlcd_couper_px(uint8_t font, const char *s, uint8_t nmax, memlcd_vc_line_t *out)
+static inline uint16_t memlcd_text_width(uint8_t font, const char *s)
 {
-    size_t len = s ? strnlen(s, CHEST_LABEL_MAX) : 0;
-    for (uint8_t i = 0; i < nmax; i++) { out[i].font = font; out[i].y = 0; out[i].text[0] = '\0'; }
-    if (len == 0) return 1;
-    uint8_t nl = 0;
-    size_t pos = 0;
-    while (pos < len) {
-        size_t take = 0;
-        uint16_t w = 0;
-        while (pos + take < len) {
-            uint8_t g = memlcd_glyph_w(font, s[pos + take]);
-            if (take > 0 && w + g > MEMLCD_W_BUDGET) break;   /* take > 0: always progress */
-            w = (uint16_t)(w + g); take++;
-        }
-        if (nl < nmax) { memcpy(out[nl].text, s + pos, take); out[nl].text[take] = '\0'; }
-        pos += take;
-        nl++;
-    }
-    return nl;
+    return memlcd_text_width_n(font, s, MEMLCD_VC_TXT);
 }
 
-/* The same, for text that may be cut (the browser's copy of a name — never
- * a prompt): at most nmax lines; if the text needs more, the last line is
- * shortened until a '~' fits after it, so a cut is never silent. Returns the
- * lines written (1..nmax). */
-static inline uint8_t memlcd_couper_px_tilde(uint8_t font, const char *s, uint8_t nmax, memlcd_vc_line_t *out)
-{
-    uint8_t need = memlcd_couper_px(font, s, nmax, out);
-    if (need <= nmax) return need;
-    char *t = out[nmax - 1].text;
-    size_t n = strlen(t);
-    uint8_t wt = memlcd_glyph_w(font, '~');
-    while (n > 0 && memlcd_text_width(font, t) + wt > MEMLCD_W_BUDGET) t[--n] = '\0';
-    if (n > MEMLCD_VC_TXT - 2) n = MEMLCD_VC_TXT - 2;   /* never reached: a cut line is short */
-    t[n] = '~'; t[n + 1] = '\0';
-    return nmax;
-}
-
-static inline memlcd_vc_line_t *memlcd_vc_add(memlcd_vue_coffre_t *v, uint8_t font, uint8_t y, const char *s)
-{
-    memlcd_vc_line_t *l = &v->l[v->n++];
-    l->font = font; l->y = y;
-    snprintf(l->text, sizeof l->text, "%s", s);
-    return l;
-}
-
-/* PROMPT, full screen: the op (chest_op_label) in M24 when it fits 66 px,
- * else M14; a 1 px rule; the CHEST's label (coffre_label — never the
- * browser's coffre_nom) cut by pixel width in M14; "N CPT" when more than
- * one account is targeted; "OK ?" anchored at the bottom. The label is NEVER
- * cut (C1 of Task 5): when its M14 lines do not fit above N CPT / OK ?, it
- * falls back to UNSCII 8 — 8 characters a line, 5 lines for the chest's 34,
- * which always fits (_Static_assert below). */
-#define MEMLCD_VC_HAUT     2      /* top margin */
-#define MEMLCD_VC_OK_Y     (MEMLCD_H - 2 - MEMLCD_FW_M14_LINE_H)   /* 142: OK ? ends at 158 */
-_Static_assert(CHEST_LABEL_MAX <= 5 * 8, "CHEST_LABEL_MAX must fit 5 UNSCII lines of 8");
-_Static_assert(MEMLCD_VC_HAUT + MEMLCD_FW_M24_LINE_H + 4 + 5 * 11 + MEMLCD_FW_M14_LINE_H <= MEMLCD_VC_OK_Y,
-               "the UNSCII fallback (5 lines) + N CPT must always fit above OK ?");
-
-static inline void memlcd_vue_prompt(const memlcd_model_t *m, memlcd_vue_coffre_t *v)
-{
-    char op[CHEST_LABEL_BUF];
-    chest_op_label(m->coffre_op, op);
-    uint8_t fop = memlcd_text_width(MEMLCD_F_M24, op) <= MEMLCD_W_BUDGET ? MEMLCD_F_M24 : MEMLCD_F_M14;
-    uint8_t y = MEMLCD_VC_HAUT;
-    memlcd_vc_add(v, fop, y, op);
-    y = (uint8_t)(y + memlcd_font_pas(fop) + 1);
-    v->rule_y = y;
-    y = (uint8_t)(y + 3);
-
-    bool cpt = m->coffre_op_count > 1;
-    uint8_t bas = (uint8_t)(MEMLCD_VC_OK_Y - (cpt ? MEMLCD_FW_M14_LINE_H : 0));
-    uint8_t font = MEMLCD_F_M14;
-    uint8_t place = (uint8_t)((bas - y) / MEMLCD_FW_M14_LINE_H);
-    if (place > MEMLCD_VC_LIGNES - 3) place = MEMLCD_VC_LIGNES - 3;
-    uint8_t need = memlcd_couper_px(font, m->coffre_label, place, &v->l[v->n]);
-    if (need > place) {
-        font = MEMLCD_F_U8;
-        need = memlcd_couper_px(font, m->coffre_label, 5, &v->l[v->n]);   /* <= 5: CHEST_LABEL_MAX */
-    }
-    v->txt_i = v->n; v->txt_n = need;
-    for (uint8_t i = 0; i < need; i++) {
-        v->l[v->n].y = y;
-        y = (uint8_t)(y + memlcd_font_pas(font));
-        v->n++;
-    }
-    if (cpt) {
-        char c[MEMLCD_ETAT_BUF];
-        snprintf(c, sizeof c, "%u CPT", (unsigned)m->coffre_op_count);
-        memlcd_vc_add(v, MEMLCD_F_M14, y, c);
-    }
-    memlcd_vc_add(v, MEMLCD_F_M14, MEMLCD_VC_OK_Y, "OK ?");
-}
-
-/* CODE, full screen: the name in M14 on 2 lines at most (~ if cut: the
- * browser's copy, not a security text), the code as 3 + 3 in M28 (6 digits)
- * or 4 + 4 in M24 (8 digits), the countdown bar, "NN s" in M24. Only while
- * coffre_code_visible (the caller checks). */
-#define MEMLCD_VC_CODE_Y  40
-#define MEMLCD_VC_BAR_Y   108
-#define MEMLCD_VC_SECS_Y  124
-static inline void memlcd_vue_code(const memlcd_model_t *m, memlcd_vue_coffre_t *v)
-{
-    uint8_t nn = memlcd_couper_px_tilde(MEMLCD_F_M14, m->coffre_nom, 2, &v->l[0]);
-    v->txt_i = 0; v->txt_n = nn;
-    for (uint8_t i = 0; i < nn; i++) v->l[i].y = (uint8_t)(MEMLCD_VC_HAUT + i * MEMLCD_FW_M14_LINE_H);
-    v->n = nn;
-    /* digits is 6 or 8 only (chest_code_decode's contract): the length says which. */
-    size_t len = strnlen(m->coffre_code, sizeof m->coffre_code);
-    uint8_t moitie = len == 8 ? 4 : 3;
-    uint8_t f = len == 8 ? MEMLCD_F_M24 : MEMLCD_F_M28;
-    char h[5];
-    snprintf(h, sizeof h, "%.*s", (int)moitie, m->coffre_code);
-    memlcd_vc_add(v, f, MEMLCD_VC_CODE_Y, h);
-    snprintf(h, sizeof h, "%.4s", m->coffre_code + (len >= moitie ? moitie : len));
-    memlcd_vc_add(v, f, (uint8_t)(MEMLCD_VC_CODE_Y + memlcd_font_pas(f) + 2), h);
-    unsigned s = m->coffre_code_secs;
-    v->bar_y = MEMLCD_VC_BAR_Y;
-    v->bar_pct = (uint8_t)(s >= MEMLCD_CODE_FENETRE_S ? 100 : s * 100u / MEMLCD_CODE_FENETRE_S);
-    char t[MEMLCD_ETAT_BUF];
-    snprintf(t, sizeof t, "%u s", s > 99 ? 99u : s);
-    memlcd_vc_add(v, MEMLCD_F_M24, MEMLCD_VC_SECS_Y, t);
-}
-
-/* BROWSE, bottom zone (67 px): "i/total" in M14, the name in M14 on 2
- * lines, or in UNSCII 8 when it needs more (as many lines as fit, ~ if
- * still cut), "NO TIME" in M14 anchored at the bottom when TIME_VALID is
- * clear. */
-static inline void memlcd_vue_browse(const memlcd_model_t *m, memlcd_vue_coffre_t *v)
-{
-    char pos[MEMLCD_ETAT_BUF];
-    snprintf(pos, sizeof pos, "%u/%u", (unsigned)m->coffre_pos + 1, (unsigned)m->coffre_total);
-    memlcd_vc_add(v, MEMLCD_F_M14, 1, pos);
-    uint8_t y = 1 + MEMLCD_FW_M14_LINE_H;                           /* 17 */
-    bool no_time = !(m->coffre & CHEST_STATE_TIME);
-    uint8_t bas = (uint8_t)(MEMLCD_ZONE_BAS_H - (no_time ? MEMLCD_FW_M14_LINE_H : 0));
-    uint8_t font = MEMLCD_F_M14;
-    uint8_t nn = memlcd_couper_px(font, m->coffre_nom, 2, &v->l[1]);
-    if (nn > 2) {
-        font = MEMLCD_F_U8;
-        nn = memlcd_couper_px_tilde(font, m->coffre_nom, (uint8_t)((bas - y) / 11), &v->l[1]);
-    }
-    v->txt_i = 1; v->txt_n = nn;
-    for (uint8_t i = 0; i < nn; i++) { v->l[v->n].y = y; y = (uint8_t)(y + memlcd_font_pas(font)); v->n++; }
-    if (no_time) memlcd_vc_add(v, MEMLCD_F_M14, bas, "NO TIME");
-}
-
-/* The chest view, priority prompt > code > browser > nothing (the caller
- * keeps the normal screen). */
-static inline void memlcd_vue_coffre(const memlcd_model_t *m, memlcd_vue_coffre_t *v)
-{
-    memset(v, 0, sizeof *v);
-    if (m->coffre_op)               { v->kind = MEMLCD_VC_PROMPT; memlcd_vue_prompt(m, v); }
-    else if (m->coffre_code_visible) { v->kind = MEMLCD_VC_CODE;   memlcd_vue_code(m, v); }
-    else if (m->coffre_browsing)     { v->kind = MEMLCD_VC_BROWSE; memlcd_vue_browse(m, v); }
-}
-
-
-/* The two status lines under the layer name (see test_ligne_etat). */
+/* The status flags under the layer name (see test_ligne_etat). */
 static inline void memlcd_ligne_etat(const memlcd_model_t *m,
                                      char l1[MEMLCD_ETAT_BUF], char l2[MEMLCD_ETAT_BUF])
 {

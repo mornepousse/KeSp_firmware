@@ -3,12 +3,15 @@
 #
 # Compiles the REAL LVGL 8 sources the firmware uses (managed_components/
 # lvgl__lvgl, fetched by `idf.py reconfigure` or any build) with this
-# folder's lv_conf.h, then builds and runs, in order:
-#   1. check_glyph_ink  — GATE: every font the screen uses keeps its ink
+# folder's lv_conf.h, and the FIRMWARE's own left-screen engine
+# (main/display/memlcd/memlcd_cave.c + its assets) — no copy of it lives
+# here. Then builds and runs, in order:
+#   1. check_widths     — GATE: the layout's width oracle (memlcd_model.h,
+#                         kerning included) == lv_txt_get_width, every font
+#   2. check_glyph_ink  — GATE: every font the engine uses keeps its ink
 #                         through the panel's 1-bit threshold (12 px floor)
-#   2. test_safe_wrap   — GATE: no name line is ever digits without a letter
-#   3. render_cave_dark — the 10 reference states + proof sheets -> out/
-#   4. render_gauge_lab — the water-drop battery gauge sheet -> out/gauges/
+#   3. test_safe_wrap   — GATE: the firmware's safe wrap, re-measured by LVGL
+#   4. render_cave      — the 10 reference states and the proof sheets -> out/
 # Any gate failing stops the script with a non-zero status.
 #
 # Usage: tools/memlcd_sim/build.sh [--relib]   (--relib rebuilds liblvgl.a)
@@ -44,28 +47,28 @@ if [ ! -f "$BUILD/liblvgl.a" ] || [ "${1:-}" = "--relib" ] || [ "$SIM/lv_conf.h"
     ar rcs "$BUILD/liblvgl.a" "${objs[@]}"
 fi
 
-CFLAGS=(-O1 -w -I"$SIM" -I"$SIM/assets" -I"$LVGL"
-        -I"$REPO/main/display/memlcd" -I"$REPO/main/comm/chest" -I"$REPO/main/security")
+MEMLCD="$REPO/main/display/memlcd"
+CFLAGS=(-O1 -w -I"$SIM" -I"$LVGL" -I"$MEMLCD" -I"$REPO/main/comm/chest" -I"$REPO/main/security")
 PURE=("$REPO/main/comm/chest/chest_proto.c" "$REPO/main/security/cr_crc16.c")
+ENGINE=("$MEMLCD/memlcd_cave.c" "$MEMLCD/memlcd_assets_cave.c"
+        "$REPO/main/display/assets/img_niphargus_28.c" "$REPO/main/display/assets/img_niphargus_56.c")
 LIB=("$BUILD/liblvgl.a" -lm)
 
-echo "== 1. glyph ink (gate) =="
-"$CC" "${CFLAGS[@]}" "$SIM/check_glyph_ink.c" "${LIB[@]}" -o "$BUILD/check_glyph_ink"
+echo "== 1. width oracle == LVGL (gate) =="
+"$CC" "${CFLAGS[@]}" "$SIM/check_widths.c" "${LIB[@]}" -o "$BUILD/check_widths"
+"$BUILD/check_widths"
+
+echo "== 2. glyph ink of the engine's fonts (gate) =="
+"$CC" "${CFLAGS[@]}" "$SIM/check_glyph_ink.c" "${ENGINE[@]}" "${PURE[@]}" "${LIB[@]}" -o "$BUILD/check_glyph_ink"
 "$BUILD/check_glyph_ink"
 
-echo "== 2. safe wrap (gate) =="
+echo "== 3. safe wrap, measured by LVGL (gate) =="
 "$CC" "${CFLAGS[@]}" "$SIM/test_safe_wrap.c" "${LIB[@]}" -o "$BUILD/test_safe_wrap"
 "$BUILD/test_safe_wrap"
 
-cd "$SIM"   # the renderers write under out/, relative
-echo "== 3. cave dark: the 10 reference states =="
-"$CC" "${CFLAGS[@]}" main_cave_dark.c cave_ui.c dir_cave_dark.c common.c states.c "${PURE[@]}" \
-    assets/img_niphargus_28.c assets/img_niphargus_56.c assets/img_rock.c "${LIB[@]}" -o "$BUILD/render_cave_dark"
-"$BUILD/render_cave_dark"
-
-echo "== 4. water-drop gauge =="
-"$CC" "${CFLAGS[@]}" main_gauge_lab.c gauge_lab.c common.c assets/img_niphargus_28.c assets/img_rock.c \
-    "${LIB[@]}" -o "$BUILD/render_gauge_lab"
-"$BUILD/render_gauge_lab"
+cd "$SIM"   # the renderer writes under out/, relative
+echo "== 4. the firmware engine: reference states and proofs =="
+"$CC" "${CFLAGS[@]}" main_cave.c common.c states.c "${ENGINE[@]}" "${PURE[@]}" "${LIB[@]}" -o "$BUILD/render_cave"
+"$BUILD/render_cave"
 
 echo "memlcd_sim: done — images under $OUT"

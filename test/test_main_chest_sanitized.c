@@ -7,10 +7,10 @@
  * function can still return the expected value) — only a sanitizer reliably
  * turns the write itself red. This binary runs the chest test suites
  * (test_chest_proto.c, test_chest_dma.c, test_chest_oath.c, test_chest_view.c)
- *  plus test_memlcd_model.c (review M-f, 2026-09-29: memlcd_couper_px/
- * memlcd_vue_coffre index caller-sized arrays the same way the DMA
- * decoder does, and every dependency it needs was already a source of this
- * binary) — never openpgp, which has two pre-existing ASan findings out of
+ *  plus test_memlcd_model.c and test_memlcd_safe_wrap.c (review M-f,
+ * 2026-09-29; the cave, 2026-09-30: the safe wrap and the views index
+ * caller-sized arrays the same way the DMA decoder does, and every
+ * dependency they need was already a source of this binary) — never openpgp, which has two pre-existing ASan findings out of
  * scope for the chest link work — and is wired into test/CMakeLists.txt as
  * a POST_BUILD step on its own target, so `cmake --build test/build` (what
  * scripts/check.sh --fast runs) fails the build on a red run without
@@ -26,6 +26,7 @@ extern void test_chest_oath(void);
 extern void test_chest_view(void);
 extern void test_chest_round(void);
 extern void test_memlcd_model(void);
+extern void test_memlcd_safe_wrap(void);
 
 int main(void)
 {
@@ -38,6 +39,7 @@ int main(void)
     test_chest_view();
     test_chest_round();
     test_memlcd_model();
+    test_memlcd_safe_wrap();
 
     printf("\n========================================\n");
     printf("Results: %d passed, %d failed\n", _test_pass_count, _test_fail_count);

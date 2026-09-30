@@ -1,58 +1,56 @@
+/* Safe-wrap gate, measured by LVGL itself: the firmware's memlcd_safe_wrap
+ * (main/display/memlcd/memlcd_safe_wrap.h) decides with the width oracle;
+ * this program re-measures every line it produces with lv_txt_get_width in
+ * the real font and fails if one is wider than the budget, or holds digits
+ * without a letter (bench incident 2026-09-29: "TEST:RFC6238" pixel-cut to
+ * "TEST:RFC" / "6238" read as a code). The host tests pin the expected
+ * lines; this gate proves the panel draws them within their width. */
 #include "lvgl.h"
-#include "safe_wrap.h"
+#include "memlcd_safe_wrap.h"
 #include <stdio.h>
 
 LV_FONT_DECLARE(lv_font_montserrat_12);
 LV_FONT_DECLARE(lv_font_montserrat_14);
 
-static int g_fail = 0;
+static int g_fail;
 
-static void run(const char *label, const lv_font_t *font, const char *fname, lv_coord_t budget)
+static bool lines_ok(uint8_t font, uint16_t budget, char lines[][MEMLCD_SW_LINE_BUF], int n)
 {
-    char lines[SAFE_WRAP_MAX_LINES][SAFE_WRAP_LINE_BUF];
-    int n = safe_wrap_lines(label, font, budget, lines, SAFE_WRAP_MAX_LINES);
-    printf("\"%s\" @ %s budget=%dpx -> %d line(s):\n", label, fname, budget, n);
-    bool any_unsafe = false, any_overflow = false;
+    for (int i = 0; i < n; i++) if (memlcd_text_width(font, lines[i]) > budget) return false;
+    return true;
+}
+
+static void run(const char *label, uint8_t font, const lv_font_t *lf, const char *fname, uint16_t budget)
+{
+    char lines[MEMLCD_SW_MAX_LINES][MEMLCD_SW_LINE_BUF];
+    int n = memlcd_safe_wrap(label, font, budget, lines, MEMLCD_SW_MAX_LINES);
+    bool ok_all = lines_ok(font, budget, lines, n);
+    printf("\"%s\" @ %s budget=%upx -> %d line(s)%s:\n", label, fname, budget, n, ok_all ? "" : " (no safe split: rejoined)");
     for (int i = 0; i < n; i++) {
-        bool unsafe = safe_wrap_line_is_unsafe(lines[i], strlen(lines[i]));
-        if (unsafe) any_unsafe = true;
-        lv_coord_t w = lv_txt_get_width(lines[i], strlen(lines[i]), font, 0, LV_TEXT_FLAG_NONE);
-        bool overflow = w > budget;
-        if (overflow) any_overflow = true;
-        printf("  [%d] \"%s\" (%dpx)%s%s\n", i, lines[i], w,
-               unsafe ? "  <<< UNSAFE (digits/spaces only)" : "",
-               overflow ? "  <<< OVERFLOW (> budget)" : "");
+        bool unsafe = memlcd_sw_line_is_unsafe(lines[i], strlen(lines[i]));
+        lv_coord_t w = lv_txt_get_width(lines[i], (uint32_t)strlen(lines[i]), lf, 0, LV_TEXT_FLAG_NONE);
+        bool over = w > budget;
+        printf("  [%d] \"%s\" (%dpx)%s%s\n", i, lines[i], (int)w, unsafe ? "  <<< UNSAFE" : "", over ? "  <<< OVER" : "");
+        if (unsafe && n > 1) g_fail++;
+        if (over && ok_all) g_fail++;              /* the oracle said it fits: LVGL must agree */
     }
-    bool fail = any_unsafe;   /* overflow is reported but only fails if ALSO unsafe-caused (last-resort merge) */
-    if (fail) g_fail++;
-    printf("  %s%s\n\n", any_unsafe ? "FAIL: unsafe line present" : "OK: no digit-only line",
-           any_overflow ? " (note: last-resort over-budget merge — expected only when no safe split exists)" : "");
 }
 
 int main(void)
 {
     lv_init();
-    /* The real floor (see check_glyph_ink.c) is Montserrat 12px — every
-     * printable ASCII glyph keeps ink after the panel's 1-bit threshold,
-     * and ':' is distinguishable from '.'. The real UI budget at this size
-     * is 62px (label width MEMLCD_W-4=64, minus the 2px margin label_set
-     * subtracts — see cave_ui.c). Test at both the floor and the next rung
-     * (14px, budget shrinks accordingly isn't modeled here — same 62px
-     * budget, tighter fit) since cave_ui.c's label ladder is now {14, 12}. */
-    run("TEST:RFC6238", &lv_font_montserrat_12, "12px", 62);
-    run("BANQUE:4021", &lv_font_montserrat_12, "12px", 62);
-    run("TEST:RFC6238", &lv_font_montserrat_14, "14px", 62);
-    run("BANQUE:4021", &lv_font_montserrat_14, "14px", 62);
-    /* narrower stress tests (a label sharing its line with other content) */
-    run("TEST:RFC6238", &lv_font_montserrat_12, "12px", 50);
-    run("BANQUE:4021", &lv_font_montserrat_12, "12px", 50);
-    run("BANQUE:4021", &lv_font_montserrat_12, "12px", 30);   /* even narrower: still must not isolate "4021" */
-    /* known-good ones from the rest of the brief, must still behave sanely */
-    run("GITHUB", &lv_font_montserrat_12, "12px", 62);
-    run("OVH:PERSO", &lv_font_montserrat_12, "12px", 62);
-    run("GITHUB.COM:ALICE.MARTIN@WORK-2FA01", &lv_font_montserrat_12, "12px", 62);
-    run("NIPHAR_CHEST", &lv_font_montserrat_12, "12px", 62);
-
+    /* 62 px: the label box (64) minus 2 px of air, memlcd_cave.h */
+    run("TEST:RFC6238", MEMLCD_F_M12, &lv_font_montserrat_12, "12px", 62);
+    run("BANQUE:4021", MEMLCD_F_M12, &lv_font_montserrat_12, "12px", 62);
+    run("4021:BANQUE", MEMLCD_F_M12, &lv_font_montserrat_12, "12px", 62);
+    run("AB:123456789:CD", MEMLCD_F_M12, &lv_font_montserrat_12, "12px", 62);
+    run("TEST:RFC6238", MEMLCD_F_M14, &lv_font_montserrat_14, "14px", 62);
+    run("GITHUB", MEMLCD_F_M12, &lv_font_montserrat_12, "12px", 62);
+    run("OVH:PERSO", MEMLCD_F_M12, &lv_font_montserrat_12, "12px", 62);
+    run("GITHUB.COM:ALICE.MARTIN@WORK-2FA01", MEMLCD_F_M12, &lv_font_montserrat_12, "12px", 62);
+    run("github.com:alice.martin@work-2fa01", MEMLCD_F_M12, &lv_font_montserrat_12, "12px", 62);
+    run("NIPHAR_CHEST", MEMLCD_F_M12, &lv_font_montserrat_12, "12px", 62);
+    run("AWS:123456789012", MEMLCD_F_M12, &lv_font_montserrat_12, "12px", 62);
     printf("=================================================\n");
     printf(g_fail ? "TEST_SAFE_WRAP: %d FAILURE(S)\n" : "TEST_SAFE_WRAP: all OK\n", g_fail);
     return g_fail ? 1 : 0;

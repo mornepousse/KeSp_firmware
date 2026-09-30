@@ -15,7 +15,7 @@
  * contract and V16 said 12): the register/DMA vectors pin the PARSER, not
  * that the SCREEN shows what the block says. test_memlcd_model.c chains the
  * chest's own raw vector bytes through chest_proto_parse -> chest_view_build
- * -> the memlcd model -> memlcd_vue_coffre and asserts the rendered lines,
+ * -> the memlcd model -> memlcd_cave_vue and asserts the rendered lines,
  * so a regression anywhere in that chain shows up as a wrong string, not
  * just a wrong struct field. */
 

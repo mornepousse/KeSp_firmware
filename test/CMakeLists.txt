@@ -103,6 +103,7 @@ add_executable(test_runner
     test_wake_grace.c
     test_batt_calc.c
     test_memlcd_model.c
+    test_memlcd_safe_wrap.c
     test_oled_nav.c
     ../main/display/oled/oled_nav.c
     test_niphar_left_pins.c
@@ -185,13 +186,15 @@ add_executable(test_chest_sanitized
     test_chest_round.c
     ../main/comm/chest/chest_round.c
     ../main/security/cr_crc16.c
-    # test_memlcd_model.c (review M-f, 2026-09-29): pure header-only logic
-    # (memlcd_model.h — memlcd_couper_px/memlcd_vue_coffre index caller-sized
+    # test_memlcd_model.c + test_memlcd_safe_wrap.c (review M-f, 2026-09-29;
+    # the cave, 2026-09-30): pure header-only logic (memlcd_cave.h,
+    # memlcd_safe_wrap.h — the safe wrap and the views index caller-sized
     # stack arrays the same way chest_dma.c's LIST decoder does), and all of
     # its OWN dependencies (chest_op_label/chest_mode_label from
     # chest_proto.c, chest_view_build/chest_view_age from chest_view.c) are
     # already sources of this binary — no new ones needed.
     test_memlcd_model.c
+    test_memlcd_safe_wrap.c
     test_main_chest_sanitized.c
 )
 

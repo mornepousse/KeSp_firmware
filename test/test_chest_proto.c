@@ -343,7 +343,7 @@ static void test_chest_v3_states(void)
     TEST_ASSERT_EQ(s.op_count, 12, "V16 twelve accounts leave on ONE press");
     TEST_ASSERT_EQ(s.label_len, 10, "V16 label length");
     TEST_ASSERT_EQ(memcmp(s.label, "12 COMPTES", 10), 0, "V16 the label states the count in words");
-    TEST_ASSERT(s.op_count > 1, "V16 the keyboard shows N CPT");
+    TEST_ASSERT(s.op_count > 1, "V16 the keyboard shows N ACCTS");
 }
 
 /* Non-printable bytes in the label are shown as '?' — never interpreted —
