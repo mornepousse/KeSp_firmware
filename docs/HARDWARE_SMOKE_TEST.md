@@ -162,17 +162,25 @@ in the PR/release.
 - [ ] Memory-LCD screens UI: RIGHT unchanged — icon column (route symbol,
       ▲, horizontal gauge, voltage, ⇆), logo at the bottom. LEFT, the cave
       (2026-09-30): dark, rock edges top and bottom with no text touching
-      them, the small logo top-left, `USB` / `RADIO` in words and `SEEN` on
-      its own line, the water drop with the percentage beside it (full at
-      100 %, a wavy surface part-way, a thick outline when LOW, `⇆` beside
-      the percentage while the TRRS 5 V is closed); readable in LOW light
-      (Mae's verdict on the dark palette is still open); the layer NAME as
-      large as fits (e.g. "BASE"; "NAVIGATION" as NAVIG / ATION), the base
+      them, the small logo top-left, then ONE band under it (2026-09-30):
+      the large water drop (full at 100 %, a wavy surface part-way, NO
+      number above 15 %; at 15 / 10 / 5 % the digits INSIDE the drop, clear
+      of its outline and of the water; a thick outline when LOW, no
+      blinking), the route icon beside it (USB: a plug; radio with the
+      dongle seen: 3 waves over a filled dot; dongle unplugged: 2 waves over
+      a hollow dot), `⇆` beside that while the TRRS 5 V is closed; on USB a
+      `+` in the drop while charging (readable at any level), a full drop
+      with no mark once FULL, never a `+` or a full drop on battery; no
+      words `USB` / `RADIO` / `SEEN`; readable in LOW light
+      (Mae's verdict on the dark palette is still open); the layer NAME
+      small, one size (Montserrat 14: "BASE"; "NAVIGATION" as NAVIG /
+      ATION), the base
       or locked layer only — holding a MO does NOT change it; TO /
       Layer Lock does; on USB a change shows within ~0.1 s, on battery
-      within ~1 s; Caps Word shows "CW", a one-shot Shift armed and left
-      alone shows "S", a one-shot layer "L3"; Caps Lock shows "CAPS" over
-      USB only; when a half goes to sleep its last image carries "zZ" (the
+      within ~1 s; Caps Word shows the hollow up-arrow icon under the name,
+      Caps Lock the same arrow over a bar (over USB only), both side by side
+      when both, no "CAPS" / "CW" words; a one-shot Shift armed and left
+      alone shows "S", a one-shot layer "L3"; when a half goes to sleep its last image carries "zZ" (the
       right with an up-to-date ⇆ / route, the left ONLY its large logo and
       "zZ"), and "zZ" goes away at the first key; right served
       at 1 s: no zone greys out in 2 min (VCOM ~1 Hz), the image comes back
@@ -219,15 +227,16 @@ in the PR/release.
       WHOLE screen: "SIGN" at the top, a wavy divider, the account's REAL
       label from the chest (not a placeholder), "PRESS" at the bottom; a
       press on K_SEC_CONFIRM signs; no press → 6985 after 15 s and the
-      normal screen comes back (logo, padlock, route, drop, layer);
+      normal screen comes back (logo, padlock, the drop + route band, layer);
       radio and screen keep working meanwhile; unplug USB → padlock gone; on
       battery the sleep current is unchanged (GPIO3 released).
 - [ ] Chest views, what only the physical screen shows (host tests pin the
       STRINGS, their widths — kerning included — and their positions;
       tools/memlcd_sim renders them with the firmware's own engine; the
       glass is the last judge): TOTP browse (`i/total`, the name, `NO TIME`
-      when the time is not set, the logo, route and drop still visible
-      above it, nothing running into the rock); a `K_OATH_CODE` prompt on
+      when the time is not set, the logo and the drop + route band still
+      visible above it, a two-line name such as `OVH:PERSO` whole as
+      `OVH:` / `PERSO`, nothing running into the rock); a `K_OATH_CODE` prompt on
       the `TEST:RFC6238` test account reads `TEST:` / `RFC6238` — NEVER a
       line of digits alone; a prompt on an `AWS:123456789012` test
       account shows `AWS:` then two lines each starting with the `↳`

@@ -33,7 +33,7 @@ if [ ! -d "$LVGL/src" ]; then
     exit 2
 fi
 
-mkdir -p "$BUILD/obj" "$OUT/cave_dark" "$OUT/gauges"
+mkdir -p "$BUILD/obj" "$OUT/cave_dark"
 
 # ---- LVGL, incremental: an object is rebuilt when its source or lv_conf.h is newer ----
 RELIB=0; GATES_ONLY=0

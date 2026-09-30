@@ -103,6 +103,17 @@ le chiffre qu'à l'intérieur quand il est bas"); otherwise the drop's level
 alone. Route icon sized to balance the drop. The TOTP browser must keep the
 account name on two lines (the V2 mockup truncated `OVH:PERSO` to `OVH:~`).
 
+Implemented 2026-09-30 (`memlcd_cave.h`): drop 20 × 26, route and caps icons
+20 × 20 (drop x 2, route x 25, ⇆ x 48). "Low" = displayed % ≤ 15, not 20:
+"20" (15 px) does not fit the dry part at 20 % (12 px with 1 px air). Unknown
+= "?" in an empty drop; charging = a "+" in the drop (ink on the dry part or
+cut out of the water), no number; FULL = drop full to the tip, no mark.
+Addenda from Mae the same day: Caps Lock / Caps Word as icons (⇪ = hollow
+arrow over a bar, Caps Word = the arrow alone) under the layer name, the
+one-shots stay text; the layer name at one modest size, Montserrat 14 (two
+balanced lines when it does not fit; letter spacing −1 cannot rescue
+NAVIGATION: 78 − 9 = 69 px at 12 px, still over 66).
+
 ## Next
 
 A plan task

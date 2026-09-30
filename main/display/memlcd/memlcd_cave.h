@@ -48,9 +48,29 @@
 #define MEMLCD_CAVE_CADENAS_H    28
 #define MEMLCD_CAVE_LIEN_W       16      /* TRRS link pictogram ⇆ */
 #define MEMLCD_CAVE_LIEN_H       12
-#define MEMLCD_CAVE_GOUTTE_W     13      /* water-drop gauge (G3) */
-#define MEMLCD_CAVE_GOUTTE_H     16
-#define MEMLCD_CAVE_GOUTTE_STRIDE 2      /* ALPHA_1BIT: ceil(13 / 8) bytes a row */
+#define MEMLCD_CAVE_GOUTTE_W     20      /* water-drop gauge, the status band's (spec "Status icons") */
+#define MEMLCD_CAVE_GOUTTE_H     26
+#define MEMLCD_CAVE_GOUTTE_STRIDE 3      /* ALPHA_1BIT: ceil(20 / 8) bytes a row */
+#define MEMLCD_CAVE_ICONE_W      20      /* route and caps icons: sized to balance the drop */
+#define MEMLCD_CAVE_ICONE_H      20
+#define MEMLCD_CAVE_ICONE_STRIDE 3
+/* The status band: drop at x 2, the route icon 3 px after it, the TRRS ⇆
+ * 3 px after that — 2 + 20 + 3 + 20 + 3 + 16 = 64 <= 66. */
+#define MEMLCD_CAVE_ROUTE_X      (2 + MEMLCD_CAVE_GOUTTE_W + 3)
+#define MEMLCD_CAVE_LIEN_X       (MEMLCD_CAVE_ROUTE_X + MEMLCD_CAVE_ICONE_W + 3)
+_Static_assert(MEMLCD_CAVE_LIEN_X + MEMLCD_CAVE_LIEN_W <= MEMLCD_W - 2, "the status band fits the panel");
+/* The percentage is shown only when LOW, inside the drop: <= 15 %, the
+ * largest 5 % step whose digits fit the drop's dry part ("20" at 20 % is
+ * 15 px wide where the dry part leaves 12 — test_goutte_chiffres). */
+#define MEMLCD_CAVE_PCT_BAS      15
+/* The ink rows of Montserrat 12's digits, "+" and "?" in their line: [3, 12)
+ * (line 15, baseline 3, box 9 high at ofs_y 0), and inside their advance —
+ * checked on the font by tools/memlcd_sim/check_glyph_ink.c. */
+#define MEMLCD_CAVE_M12_ENCRE_HAUT 3
+#define MEMLCD_CAVE_M12_ENCRE_BAS  12
+/* The layer name: ONE modest size (Mae 2026-09-30, "big but not very
+ * important — it can be small as long as it stays readable"). */
+#define MEMLCD_CAVE_NOM_F        MEMLCD_F_M14
 #define MEMLCD_CAVE_EAU_W        44      /* TOTP countdown water bar */
 #define MEMLCD_CAVE_EAU_H        14
 #define MEMLCD_CAVE_OMBRE_H      4       /* its dither shadow, under it */
@@ -102,6 +122,8 @@ typedef struct {
     uint8_t left;                  /* 1 = left-aligned, else centred */
     uint8_t marque;                /* 1 = the continuation mark at (x - MARQUE_PAS, y + marque_dy):
                                     * left-aligned text after it (a prompt label's line > 0) */
+    uint8_t dedans;                /* 1 = the low percentage / "?" INSIDE the drop (its dry part,
+                                    * memlcd_goutte_texte_ok): not an overlap */
     char    text[MEMLCD_VC_TXT];
 } memlcd_cave_ligne_t;
 
@@ -111,8 +133,10 @@ typedef struct {
     uint8_t top, bottom;           /* the content box: [top, bottom) */
     uint8_t logo, logo_x, logo_y;  /* 0, MEMLCD_CAVE_LOGO_S or MEMLCD_CAVE_LOGO_L */
     uint8_t cadenas, cadenas_x, cadenas_y;
-    uint8_t goutte, goutte_x, goutte_y, goutte_pct, goutte_low;
+    uint8_t goutte, goutte_x, goutte_y, goutte_pct, goutte_low, goutte_plus;
+    uint8_t route, route_x, route_y;          /* memlcd_icone_t, 0 = none */
     uint8_t lien, lien_x, lien_y;
+    uint8_t caps_lock, caps_word, caps_lock_x, caps_word_x, caps_y;
     uint8_t rule, rule_y;          /* prompt: the wavy divider, ink on rule_y - 1 .. rule_y + 1 */
     uint8_t eau, eau_x, eau_y, eau_pct;   /* code: the countdown bar + its shadow */
     uint8_t n;                     /* lines used */
@@ -121,46 +145,204 @@ typedef struct {
     memlcd_cave_ligne_t l[MEMLCD_CAVE_LIGNES];
 } memlcd_cave_vue_t;
 
-/* ── The water drop (G3, settled 2026-09-30) ─────────────────────────
- * 13 x 16: a tip tapering linearly into a round bulb of radius 6 (half
- * widths below, from tools/memlcd_sim's round-4 formula), filled from the
- * bottom — the top wet row staggered 0/1 px column by column for a wavy
- * surface — outlined 1 px, 2 px when the battery is LOW. */
-static const uint8_t memlcd_goutte_demi[MEMLCD_CAVE_GOUTTE_H] = {
-    0, 1, 1, 2, 3, 3, 4, 5, 5, 6, 6, 6, 5, 4, 3, 0,
+/* ── The water drop (status band, settled 2026-09-30) ────────────────
+ * 20 x 26: variant V2 of the icon round — the G3 drop's profile (a tip
+ * tapering into a round bulb) resampled to 20 x 26, the left edge of each
+ * row below (the drop is symmetric: right edge = 19 - left), 0xFF = no ink
+ * on that row. Filled from the bottom — the top wet row staggered 0/1 px
+ * column by column for a wavy surface — outlined 1 px, 2 px when the
+ * battery is LOW; the outline is a closed contour (a pixel of the drop with
+ * a 4-neighbour outside, within the outline's width). */
+static const uint8_t memlcd_goutte_xl[MEMLCD_CAVE_GOUTTE_H] = {
+    9, 8, 7, 7, 7, 6, 5, 4, 4, 4, 3, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 6, 0xFF,
 };
+typedef enum { MEMLCD_GC_DEHORS, MEMLCD_GC_BORD, MEMLCD_GC_EAU, MEMLCD_GC_SEC } memlcd_goutte_classe_t;
 
-/* Wet rows for a percentage: 0 % -> 0, 100 % -> 16, rounded. */
+/* Wet rows for a percentage: 0 % -> 0, 100 % -> 26, rounded. */
 static inline uint8_t memlcd_goutte_rangs(uint8_t pct)
 {
     unsigned r = ((unsigned)(pct > 100 ? 100 : pct) * MEMLCD_CAVE_GOUTTE_H + 50) / 100;
     return (uint8_t)r;
 }
-
-/* 1 = ink at (x, y) of the drop. */
-static inline bool memlcd_goutte_px(uint8_t pct, bool low, int x, int y)
+static inline bool memlcd_goutte_dans(int x, int y)
 {
     if (x < 0 || y < 0 || x >= MEMLCD_CAVE_GOUTTE_W || y >= MEMLCD_CAVE_GOUTTE_H) return false;
-    const int cx = MEMLCD_CAVE_GOUTTE_W / 2;
-    int hw = memlcd_goutte_demi[y];
-    if (hw <= 0) return y == 0 && x == cx;         /* the tip */
-    int xl = cx - hw, xr = cx + hw;
-    if (x < xl || x > xr) return false;
-    int bord = low ? 2 : 1;
-    if (x - xl < bord || xr - x < bord) return true;   /* outline */
-    int seuil = MEMLCD_CAVE_GOUTTE_H - memlcd_goutte_rangs(pct) + (x % 2);
-    return y >= seuil;                             /* water, wavy surface */
+    const int xl = memlcd_goutte_xl[y];
+    return xl != 0xFF && x >= xl && x <= MEMLCD_CAVE_GOUTTE_W - 1 - xl;
+}
+/* What (x, y) of the drop is: outside, outline, water or dry inside. */
+static inline uint8_t memlcd_goutte_classe(uint8_t pct, bool low, int x, int y)
+{
+    if (!memlcd_goutte_dans(x, y)) return MEMLCD_GC_DEHORS;
+    for (int k = 1; k <= (low ? 2 : 1); k++)
+        if (!memlcd_goutte_dans(x - k, y) || !memlcd_goutte_dans(x + k, y) ||
+            !memlcd_goutte_dans(x, y - k) || !memlcd_goutte_dans(x, y + k)) return MEMLCD_GC_BORD;
+    const int seuil = MEMLCD_CAVE_GOUTTE_H - memlcd_goutte_rangs(pct) + (x % 2);
+    return y >= seuil ? MEMLCD_GC_EAU : MEMLCD_GC_SEC;
 }
 
+/* The charge mark "+" (USB power, charging): 8 x 8, strokes 2 px, on the
+ * drop's centre columns (6..13), its top row at py. 1 = the plus, 2 = its
+ * ring (a 4-neighbour of the plus), 0 = neither. */
+static inline int memlcd_goutte_plus_forme(int x, int y, int py)
+{
+    #define MEMLCD_PLUS_EN(xx, yy) ((((yy) - py) >= 0 && ((yy) - py) <= 7 && (xx) >= 9 && (xx) <= 10) || \
+                                    (((yy) - py) >= 3 && ((yy) - py) <= 4 && (xx) >= 6 && (xx) <= 13))
+    if (MEMLCD_PLUS_EN(x, y)) return 1;
+    if (MEMLCD_PLUS_EN(x - 1, y) || MEMLCD_PLUS_EN(x + 1, y) || MEMLCD_PLUS_EN(x, y - 1) || MEMLCD_PLUS_EN(x, y + 1)) return 2;
+    return 0;
+    #undef MEMLCD_PLUS_EN
+}
+/* Where the "+" goes so it READS: the lowest place where it sits whole in
+ * the dry part with a dry ring (ink, *creux = false), or whole in the water
+ * with an ink ring (cut out of it, *creux = true); never half and half. If
+ * no place holds, the belly, cut out with its ring forced to ink. */
+#define MEMLCD_GOUTTE_PLUS_VENTRE 13
+static inline uint8_t memlcd_goutte_plus_y(uint8_t pct, bool low, bool *creux)
+{
+    for (int py = MEMLCD_CAVE_GOUTTE_H - 9; py >= 1; py--) {
+        bool sec = true, eau = true;
+        for (int y = py - 1; y <= py + 8 && (sec || eau); y++)
+            for (int x = 5; x <= 14 && (sec || eau); x++) {
+                int f = memlcd_goutte_plus_forme(x, y, py);
+                if (!f) continue;
+                int c = memlcd_goutte_classe(pct, low, x, y);
+                if (c != MEMLCD_GC_SEC) sec = false;
+                if (f == 1 ? c != MEMLCD_GC_EAU : (c != MEMLCD_GC_EAU && c != MEMLCD_GC_BORD)) eau = false;
+            }
+        if (sec || eau) { *creux = !sec; return (uint8_t)py; }
+    }
+    *creux = true;
+    return MEMLCD_GOUTTE_PLUS_VENTRE;
+}
+static inline bool memlcd_goutte_px_a(uint8_t pct, bool low, int plus_y, bool creux, int x, int y)
+{
+    int c = memlcd_goutte_classe(pct, low, x, y);
+    if (c == MEMLCD_GC_DEHORS) return false;
+    bool encre = c == MEMLCD_GC_BORD || c == MEMLCD_GC_EAU;
+    if (plus_y >= 0) {
+        int f = memlcd_goutte_plus_forme(x, y, plus_y);
+        if (f == 1) encre = !creux;
+        else if (f == 2) encre = creux;
+    }
+    return encre;
+}
+/* 1 = ink at (x, y) of the drop; plus = the charge mark in it. */
+static inline bool memlcd_goutte_px(uint8_t pct, bool low, bool plus, int x, int y)
+{
+    bool creux = false;
+    int py = plus ? memlcd_goutte_plus_y(pct, low, &creux) : -1;
+    return memlcd_goutte_px_a(pct, low, py, creux, x, y);
+}
 /* The drop as an LV_IMG_CF_ALPHA_1BIT bitmap (MSB = leftmost pixel). */
-static inline void memlcd_goutte_bitmap(uint8_t pct, bool low,
+static inline void memlcd_goutte_bitmap(uint8_t pct, bool low, bool plus,
                                         uint8_t out[MEMLCD_CAVE_GOUTTE_H * MEMLCD_CAVE_GOUTTE_STRIDE])
 {
+    bool creux = false;
+    int py = plus ? memlcd_goutte_plus_y(pct, low, &creux) : -1;
     memset(out, 0, MEMLCD_CAVE_GOUTTE_H * MEMLCD_CAVE_GOUTTE_STRIDE);
     for (int y = 0; y < MEMLCD_CAVE_GOUTTE_H; y++)
         for (int x = 0; x < MEMLCD_CAVE_GOUTTE_W; x++)
-            if (memlcd_goutte_px(pct, low, x, y))
+            if (memlcd_goutte_px_a(pct, low, py, creux, x, y))
                 out[y * MEMLCD_CAVE_GOUTTE_STRIDE + (x >> 3)] |= (uint8_t)(0x80 >> (x & 7));
+}
+
+/* A Montserrat 12 reading of width w, its line's top at row yt of the drop,
+ * centred at x0: its ink box [x0, x0 + w) x [yt + 3, yt + 12) and every
+ * 4-neighbour of it in the DRY part — 1 px of air off the outline and the
+ * water. */
+static inline bool memlcd_goutte_texte_ok(uint8_t pct, bool low, int x0, int w, int yt)
+{
+    const int y0 = yt + MEMLCD_CAVE_M12_ENCRE_HAUT, y1 = yt + MEMLCD_CAVE_M12_ENCRE_BAS;   /* [y0, y1) */
+    for (int y = y0 - 1; y <= y1; y++)
+        for (int x = x0 - 1; x <= x0 + w; x++) {
+            if ((y == y0 - 1 || y == y1) && (x == x0 - 1 || x == x0 + w)) continue;   /* no corners */
+            if (memlcd_goutte_classe(pct, low, x, y) != MEMLCD_GC_SEC) return false;
+        }
+    return true;
+}
+/* The lowest line top (the bulb is widest low) where a reading of width w
+ * fits, its line box ending by the band's gap under the drop. */
+static inline bool memlcd_goutte_texte_y(uint8_t pct, bool low, uint8_t w, uint8_t *yt)
+{
+    const int x0 = (MEMLCD_CAVE_GOUTTE_W - w) / 2;
+    for (int y = MEMLCD_CAVE_GOUTTE_H + MEMLCD_CAVE_GAP - MEMLCD_FW_M12_LINE_H; y >= 0; y--)
+        if (memlcd_goutte_texte_ok(pct, low, x0, w, y)) { *yt = (uint8_t)y; return true; }
+    return false;
+}
+
+/* ── The icons (20 x 20, 1-bit) ──────────────────────────────────────
+ * The route beside the drop — the USB plug, or the radio waves: 3 arcs over
+ * a FILLED dot when the dongle has seen us, 2 arcs over a HOLLOW dot when not
+ * (no words: "USB", "RADIO", "SEEN" are gone) — and the caps flags under the
+ * layer name: Caps Lock = the classic ⇪ (a hollow arrow over a bar), Caps
+ * Word = the same arrow without the bar. */
+typedef enum {
+    MEMLCD_ICONE_AUCUNE, MEMLCD_ICONE_USB, MEMLCD_ICONE_RADIO_VU, MEMLCD_ICONE_RADIO_SEUL,
+    MEMLCD_ICONE_CAPS_LOCK, MEMLCD_ICONE_CAPS_WORD,
+} memlcd_icone_t;
+
+static inline uint8_t memlcd_cave_route_icone(const memlcd_model_t *m)
+{
+    if (!m->route_rf) return MEMLCD_ICONE_USB;
+    return m->dongle_vu ? MEMLCD_ICONE_RADIO_VU : MEMLCD_ICONE_RADIO_SEUL;
+}
+/* The radio: in half-pixels around (10, 18) — the dot r 2 (hollow: 1..2),
+ * arcs of radius 5.5 / 9 / 12.5, ~1.5 px thick, within 35..145 degrees. */
+static inline bool memlcd_icone_radio(int x, int y, bool vu)
+{
+    const int X = 2 * x + 1 - 20, Y = 36 - (2 * y + 1), d2 = X * X + Y * Y;
+    if (d2 <= 16) return vu || d2 >= 4;
+    if (Y <= 0 || 1000 * Y < 700 * (X < 0 ? -X : X)) return false;
+    static const int r2[3] = { 11, 18, 25 };
+    for (int i = 0; i < (vu ? 3 : 2); i++)
+        if (d2 >= (r2[i] - 2) * (r2[i] - 2) && d2 <= (r2[i] + 1) * (r2[i] + 1)) return true;
+    return false;
+}
+/* The plug: two prongs, a body outlined 2 px with rounded corners, the cable. */
+static inline bool memlcd_icone_usb(int x, int y)
+{
+    if (y >= 1 && y <= 5 && ((x >= 6 && x <= 7) || (x >= 12 && x <= 13))) return true;
+    if (y >= 6 && y <= 13 && x >= 3 && x <= 16) {
+        if ((x == 3 || x == 16) && (y == 6 || y == 13)) return false;
+        return x <= 4 || x >= 15 || y <= 7 || y >= 12;
+    }
+    return y >= 14 && y <= 18 && x >= 9 && x <= 10;
+}
+/* The caps arrow: a head (rows 1..9, 1 px wider a row) on a stem (x 6..13,
+ * rows 10..14), outlined 2 px across, 1 px down; Caps Lock adds its bar. */
+static inline bool memlcd_icone_fleche_dans(int x, int y)
+{
+    if (y >= 1 && y <= 9) return x >= 10 - y && x <= 9 + y;
+    return y >= 10 && y <= 14 && x >= 6 && x <= 13;
+}
+static inline bool memlcd_icone_caps(int x, int y, bool lock)
+{
+    if (lock && y >= 17 && y <= 18 && x >= 6 && x <= 13) return true;
+    if (!memlcd_icone_fleche_dans(x, y)) return false;
+    return !memlcd_icone_fleche_dans(x - 1, y) || !memlcd_icone_fleche_dans(x + 1, y) ||
+           !memlcd_icone_fleche_dans(x - 2, y) || !memlcd_icone_fleche_dans(x + 2, y) ||
+           !memlcd_icone_fleche_dans(x, y - 1) || !memlcd_icone_fleche_dans(x, y + 1);
+}
+static inline bool memlcd_icone_px(uint8_t icone, int x, int y)
+{
+    if (x < 0 || y < 0 || x >= MEMLCD_CAVE_ICONE_W || y >= MEMLCD_CAVE_ICONE_H) return false;
+    switch (icone) {
+    case MEMLCD_ICONE_USB:        return memlcd_icone_usb(x, y);
+    case MEMLCD_ICONE_RADIO_VU:   return memlcd_icone_radio(x, y, true);
+    case MEMLCD_ICONE_RADIO_SEUL: return memlcd_icone_radio(x, y, false);
+    case MEMLCD_ICONE_CAPS_LOCK:  return memlcd_icone_caps(x, y, true);
+    case MEMLCD_ICONE_CAPS_WORD:  return memlcd_icone_caps(x, y, false);
+    default:                      return false;
+    }
+}
+static inline void memlcd_icone_bitmap(uint8_t icone, uint8_t out[MEMLCD_CAVE_ICONE_H * MEMLCD_CAVE_ICONE_STRIDE])
+{
+    memset(out, 0, MEMLCD_CAVE_ICONE_H * MEMLCD_CAVE_ICONE_STRIDE);
+    for (int y = 0; y < MEMLCD_CAVE_ICONE_H; y++)
+        for (int x = 0; x < MEMLCD_CAVE_ICONE_W; x++)
+            if (memlcd_icone_px(icone, x, y))
+                out[y * MEMLCD_CAVE_ICONE_STRIDE + (x >> 3)] |= (uint8_t)(0x80 >> (x & 7));
 }
 
 /* ── Building blocks ─────────────────────────────────────────────────── */
@@ -169,7 +351,7 @@ static inline memlcd_cave_ligne_t *memlcd_cave_add(memlcd_cave_vue_t *v, uint8_t
 {
     if (v->n >= MEMLCD_CAVE_LIGNES) { v->tient = 0; return NULL; }
     memlcd_cave_ligne_t *l = &v->l[v->n++];
-    l->font = font; l->x = x; l->y = y; l->w = w; l->left = left ? 1 : 0; l->marque = 0;
+    l->font = font; l->x = x; l->y = y; l->w = w; l->left = left ? 1 : 0; l->marque = 0; l->dedans = 0;
     snprintf(l->text, sizeof l->text, "%s", s ? s : "");
     return l;
 }
@@ -214,23 +396,19 @@ static inline int memlcd_cave_tilde(uint8_t f, uint16_t budget, char lines[][MEM
     return 1;
 }
 
-/* Hero text (layer name, op title): the WIDEST ladder font, from `plafond`
- * down, holding the whole string on one line within MEMLCD_W_BUDGET and
- * max_h. Below that, at the floor: two balanced lines ("NAVIG" / "ATION",
- * never "NAVIGATIO" / "N"), else the safe wrap. A hero is never a name or a
- * code, but the safe wrap costs nothing. Returns the height used, 0 when
- * even the floor does not fit max_h (nothing added). */
-static inline uint8_t memlcd_cave_hero_c(memlcd_cave_vue_t *v, uint8_t y, uint8_t plafond, uint8_t max_h,
-                                         const char *s, bool coupe)
+/* A text in ONE font f (the layer name at its fixed size, a hero's last
+ * rung): the whole string on one line within MEMLCD_W_BUDGET and max_h,
+ * else two balanced lines ("NAVIG" / "ATION", never "NAVIGATIO" / "N"),
+ * else the safe wrap; `coupe` lets the last arrangement cut it with a '~'.
+ * Returns the height used, 0 when it does not fit max_h (nothing added). */
+static inline uint8_t memlcd_cave_texte_f(memlcd_cave_vue_t *v, uint8_t y, uint8_t f, uint8_t max_h,
+                                          const char *s, bool coupe)
 {
-    for (int i = MEMLCD_CAVE_RANG(plafond); i < MEMLCD_CAVE_LADDER_N; i++) {
-        uint8_t f = memlcd_cave_ladder[i];
-        if (memlcd_text_width(f, s) <= MEMLCD_W_BUDGET && memlcd_font_pas(f) <= max_h) {
-            memlcd_cave_row(v, f, y, s);
-            return memlcd_font_pas(f);
-        }
+    const uint8_t lh = memlcd_font_pas(f);
+    if (memlcd_text_width(f, s) <= MEMLCD_W_BUDGET && lh <= max_h) {
+        memlcd_cave_row(v, f, y, s);
+        return lh;
     }
-    const uint8_t f = MEMLCD_CAVE_FLOOR, lh = memlcd_font_pas(f);
     size_t len = strnlen(s, MEMLCD_VC_TXT - 1);
     size_t best = 0;
     uint16_t best_diff = 0xFFFF;
@@ -264,6 +442,22 @@ static inline uint8_t memlcd_cave_hero_c(memlcd_cave_vue_t *v, uint8_t y, uint8_
     }
     for (int i = 0; i < n; i++) memlcd_cave_row(v, f, (uint8_t)(y + i * lh), lines[i]);
     return (uint8_t)(n * lh);
+}
+/* Hero text (the op title): the WIDEST ladder font, from `plafond` down,
+ * holding the whole string on one line within MEMLCD_W_BUDGET and max_h;
+ * below that, the floor font through memlcd_cave_texte_f. A hero is never a
+ * name or a code, but the safe wrap costs nothing. */
+static inline uint8_t memlcd_cave_hero_c(memlcd_cave_vue_t *v, uint8_t y, uint8_t plafond, uint8_t max_h,
+                                         const char *s, bool coupe)
+{
+    for (int i = MEMLCD_CAVE_RANG(plafond); i < MEMLCD_CAVE_LADDER_N; i++) {
+        uint8_t f = memlcd_cave_ladder[i];
+        if (memlcd_text_width(f, s) <= MEMLCD_W_BUDGET && memlcd_font_pas(f) <= max_h) {
+            memlcd_cave_row(v, f, y, s);
+            return memlcd_font_pas(f);
+        }
+    }
+    return memlcd_cave_texte_f(v, y, MEMLCD_CAVE_FLOOR, max_h, s, coupe);
 }
 static inline uint8_t memlcd_cave_hero(memlcd_cave_vue_t *v, uint8_t y, uint8_t plafond, uint8_t max_h,
                                        const char *s)
@@ -356,7 +550,10 @@ static inline int memlcd_cave_boites(const memlcd_cave_vue_t *v, memlcd_cave_boi
     if (v->logo)    { b[n].x0 = v->logo_x; b[n].y0 = v->logo_y; b[n].x1 = v->logo_x + v->logo; b[n].y1 = v->logo_y + v->logo; n++; }
     if (v->cadenas) { b[n].x0 = v->cadenas_x; b[n].y0 = v->cadenas_y; b[n].x1 = v->cadenas_x + MEMLCD_CAVE_CADENAS_W; b[n].y1 = v->cadenas_y + MEMLCD_CAVE_CADENAS_H; n++; }
     if (v->goutte)  { b[n].x0 = v->goutte_x; b[n].y0 = v->goutte_y; b[n].x1 = v->goutte_x + MEMLCD_CAVE_GOUTTE_W; b[n].y1 = v->goutte_y + MEMLCD_CAVE_GOUTTE_H; n++; }
+    if (v->route)   { b[n].x0 = v->route_x; b[n].y0 = v->route_y; b[n].x1 = v->route_x + MEMLCD_CAVE_ICONE_W; b[n].y1 = v->route_y + MEMLCD_CAVE_ICONE_H; n++; }
     if (v->lien)    { b[n].x0 = v->lien_x; b[n].y0 = v->lien_y; b[n].x1 = v->lien_x + MEMLCD_CAVE_LIEN_W; b[n].y1 = v->lien_y + MEMLCD_CAVE_LIEN_H; n++; }
+    if (v->caps_lock) { b[n].x0 = v->caps_lock_x; b[n].y0 = v->caps_y; b[n].x1 = v->caps_lock_x + MEMLCD_CAVE_ICONE_W; b[n].y1 = v->caps_y + MEMLCD_CAVE_ICONE_H; n++; }
+    if (v->caps_word) { b[n].x0 = v->caps_word_x; b[n].y0 = v->caps_y; b[n].x1 = v->caps_word_x + MEMLCD_CAVE_ICONE_W; b[n].y1 = v->caps_y + MEMLCD_CAVE_ICONE_H; n++; }
     if (v->rule)    { b[n].x0 = 8; b[n].y0 = v->rule_y - 1; b[n].x1 = 61; b[n].y1 = v->rule_y + 2; n++; }
     if (v->eau)     { b[n].x0 = v->eau_x; b[n].y0 = v->eau_y; b[n].x1 = v->eau_x + MEMLCD_CAVE_EAU_W; b[n].y1 = v->eau_y + MEMLCD_CAVE_EAU_H + 1 + MEMLCD_CAVE_OMBRE_H; n++; }
     return n;
@@ -369,6 +566,10 @@ static inline bool memlcd_cave_tient(const memlcd_cave_vue_t *v)
         const memlcd_cave_ligne_t *l = &v->l[i];
         if (memlcd_text_width(l->font, l->text) + 2 > l->w) return false;
         if (l->x + l->w > MEMLCD_W) return false;
+        if (l->dedans) {       /* inside the drop: its dry part, checked where it was placed */
+            if (!v->goutte) return false;
+            continue;
+        }
         b[n++] = memlcd_cave_boite_ligne(l);
     }
     for (int i = 0; i < n; i++) {
@@ -389,16 +590,34 @@ static inline void memlcd_cave_debut(memlcd_cave_vue_t *v, uint8_t kind, bool th
     v->tient = 1;
 }
 
-/* The battery reading beside the drop: the percentage ("87%"), "+" while
- * charging, "FULL" once charged (words, not the old "#"), "?" when the
- * voltage is unknown. The TRRS link pictogram takes the charge marker's
- * place: the cable already says the half is fed. */
-static inline void memlcd_cave_batt_texte(const memlcd_model_t *m, uint8_t pct, char out[MEMLCD_ETAT_BUF])
+/* What the drop says (spec "Status icons", Mae 2026-09-30: "n'afficher le
+ * chiffre qu'à l'intérieur quand il est bas"):
+ *  - unknown voltage or percentage: an EMPTY drop with "?" inside — an empty
+ *    drop alone would read as a dead battery;
+ *  - FULL (USB power only, batt_chg_affiche): the drop filled to the tip, no
+ *    mark — on USB the only two states are charging and full, so a full drop
+ *    without "+" IS full; the word took the room Mae wanted back;
+ *  - charging (USB power only): the water at the percentage and a "+" in the
+ *    drop (memlcd_goutte_plus_y), no number even when low — plugged in and
+ *    charging, there is nothing to act on;
+ *  - otherwise the water level, and the percentage INSIDE the drop only at
+ *    <= MEMLCD_CAVE_PCT_BAS, digits alone ("15", no "%").
+ * The TRRS ⇆ no longer takes the charge mark's place: it has its own spot in
+ * the band. */
+typedef struct {
+    uint8_t remplie;               /* the water level, % */
+    uint8_t plus;                  /* the charge mark */
+    char    texte[4];              /* inside the drop: "" / "?" / "0".."15" */
+} memlcd_cave_jauge_t;
+static inline void memlcd_cave_jauge(const memlcd_model_t *m, uint8_t pct, memlcd_cave_jauge_t *j)
 {
-    uint8_t chg = m->lien_5v ? 0 : m->batt_local_chg;
-    if (m->batt_local_dv == 0xFF || pct == 0xFF) snprintf(out, MEMLCD_ETAT_BUF, "?");
-    else if (chg == 2)            snprintf(out, MEMLCD_ETAT_BUF, "FULL");
-    else                          snprintf(out, MEMLCD_ETAT_BUF, "%u%%%s", pct > 100 ? 100u : (unsigned)pct, chg == 1 ? "+" : "");
+    memset(j, 0, sizeof *j);
+    if (m->batt_local_dv == 0xFF || pct == 0xFF) { j->texte[0] = '?'; return; }
+    const uint8_t p = pct > 100 ? 100 : pct;
+    if (m->batt_local_chg == 2) { j->remplie = 100; return; }
+    j->remplie = p;
+    if (m->batt_local_chg == 1) { j->plus = 1; return; }
+    if (p <= MEMLCD_CAVE_PCT_BAS) snprintf(j->texte, sizeof j->texte, "%u", (unsigned)p);
 }
 
 /* The chest's status rows on the normal screen: ".." while not READY, "?"
@@ -419,11 +638,36 @@ static inline int memlcd_cave_coffre_lignes(const memlcd_model_t *m, char out[2]
 }
 
 /* Normal screen and browser (browse = the OATH browser in the lower part,
- * the top status kept): logo + padlock, route, SEEN, drop + reading, then
- * the chest's rows and the layer name with its flags (normal) or the layer
- * name capped at 16 px, "i/N", the name and NO TIME (browse). `etage`
- * picks the room: 0 normal rock + logo, 1 thin rock + logo, 2 thin rock,
- * no logo row. */
+ * the top status kept): logo + padlock, then the STATUS BAND — the drop,
+ * the route icon, the TRRS ⇆ — then the chest's rows, the layer name at its
+ * fixed size, the caps icons and the one-shot flags (normal) or the layer
+ * name, "i/N", the name and NO TIME (browse). `etage` picks the room: 0
+ * normal rock + logo, 1 thin rock + logo, 2 thin rock, no logo row. */
+static inline void memlcd_cave_bande(const memlcd_model_t *m, uint8_t pct, memlcd_cave_vue_t *v, uint8_t y)
+{
+    memlcd_cave_jauge_t j;
+    memlcd_cave_jauge(m, pct, &j);
+    v->goutte = 1; v->goutte_x = 2; v->goutte_y = y;
+    v->goutte_pct = j.remplie; v->goutte_plus = j.plus;
+    v->goutte_low = m->batt_niveau ? 1 : 0;
+    if (j.texte[0]) {
+        const uint8_t w = (uint8_t)memlcd_text_width(MEMLCD_F_M12, j.texte);
+        uint8_t yt;
+        if (memlcd_goutte_texte_y(v->goutte_pct, v->goutte_low, w, &yt)) {
+            memlcd_cave_ligne_t *l = memlcd_cave_add(v, MEMLCD_F_M12, v->goutte_x, (uint8_t)(y + yt),
+                                                     MEMLCD_CAVE_GOUTTE_W, false, j.texte);
+            if (l) l->dedans = 1;
+        }
+    }
+    v->route = memlcd_cave_route_icone(m);
+    v->route_x = MEMLCD_CAVE_ROUTE_X;
+    v->route_y = (uint8_t)(y + (MEMLCD_CAVE_GOUTTE_H - MEMLCD_CAVE_ICONE_H) / 2);
+    if (m->lien_5v) {
+        v->lien = 1; v->lien_x = MEMLCD_CAVE_LIEN_X;
+        v->lien_y = (uint8_t)(y + (MEMLCD_CAVE_GOUTTE_H - MEMLCD_CAVE_LIEN_H) / 2);
+    }
+}
+
 static inline void memlcd_cave_statut(const memlcd_model_t *m, uint8_t pct, bool browse, int etage,
                                       memlcd_cave_vue_t *v)
 {
@@ -437,23 +681,7 @@ static inline void memlcd_cave_statut(const memlcd_model_t *m, uint8_t pct, bool
         }
         y = (uint8_t)(y + MEMLCD_CAVE_LOGO_S + 1);
     }
-    memlcd_cave_row(v, MEMLCD_F_M12, y, m->route_rf ? "RADIO" : "USB");
-    y = (uint8_t)(y + lh);
-    if (m->dongle_vu) { memlcd_cave_row(v, MEMLCD_F_M12, y, "SEEN"); y = (uint8_t)(y + lh); }
-
-    /* drop + reading: one row as tall as the drop */
-    v->goutte = 1; v->goutte_x = 2; v->goutte_y = y;
-    v->goutte_pct = (m->batt_local_dv == 0xFF || pct == 0xFF) ? 0 : (pct > 100 ? 100 : pct);
-    v->goutte_low = m->batt_niveau ? 1 : 0;
-    char bt[MEMLCD_ETAT_BUF];
-    memlcd_cave_batt_texte(m, pct, bt);
-    const uint8_t tx = 2 + MEMLCD_CAVE_GOUTTE_W + MEMLCD_CAVE_GAP;
-    (void)memlcd_cave_add(v, MEMLCD_F_M12, tx, y, (uint8_t)(MEMLCD_W - tx), true, bt);
-    if (m->lien_5v) {
-        v->lien = 1;
-        v->lien_x = (uint8_t)(tx + memlcd_text_width(MEMLCD_F_M12, bt) + MEMLCD_CAVE_GAP);
-        v->lien_y = (uint8_t)(y + (MEMLCD_CAVE_GOUTTE_H - MEMLCD_CAVE_LIEN_H) / 2);
-    }
+    memlcd_cave_bande(m, pct, v, y);
     y = (uint8_t)(y + MEMLCD_CAVE_GOUTTE_H + MEMLCD_CAVE_GAP);
 
     if (!browse) {
@@ -461,24 +689,31 @@ static inline void memlcd_cave_statut(const memlcd_model_t *m, uint8_t pct, bool
         int nc = memlcd_cave_coffre_lignes(m, c);
         for (int i = 0; i < nc; i++) { memlcd_cave_row(v, MEMLCD_F_M12, y, c[i]); y = (uint8_t)(y + lh); }
 
-        /* flags: one line when "CAPS CW C S L2" fits, else two */
-        char e1[MEMLCD_ETAT_BUF], e2[MEMLCD_ETAT_BUF], j[2 * MEMLCD_ETAT_BUF];
-        memlcd_ligne_etat(m, e1, e2);
-        snprintf(j, sizeof j, "%s%s%s", e1, (e1[0] && e2[0]) ? " " : "", e2);
-        int nf = !j[0] ? 0 : (memlcd_text_width(MEMLCD_F_M12, j) <= MEMLCD_W_BUDGET ? 1 : 2);
-        uint8_t reserve = (uint8_t)(nf ? nf * lh + MEMLCD_CAVE_GAP : 0);
+        /* Caps Lock / Caps Word: icons under the name; the one-shots
+         * ("CSAG L3", at most 7 characters: one line) stay text under them. */
+        char e1[MEMLCD_ETAT_BUF], e2[MEMLCD_ETAT_BUF];
+        memlcd_ligne_etat(m, e1, e2);                  /* e1 = CAPS / CW: drawn as icons */
+        const int ncaps = (m->caps_lock ? 1 : 0) + (m->caps_word ? 1 : 0);
+        const uint8_t hcaps = ncaps ? MEMLCD_CAVE_ICONE_H : 0, hflags = e2[0] ? lh : 0;
+        uint8_t reserve = (uint8_t)(hcaps + hflags + (hcaps || hflags ? MEMLCD_CAVE_GAP : 0)
+                                    + (hcaps && hflags ? MEMLCD_CAVE_GAP : 0));
         uint8_t max_h = (uint8_t)(v->bottom > y + reserve ? v->bottom - y - reserve : 0);
-        uint8_t h = memlcd_cave_hero_c(v, y, MEMLCD_F_M32, max_h, m->nom, etage == 2);
+        uint8_t h = memlcd_cave_texte_f(v, y, MEMLCD_CAVE_NOM_F, max_h, m->nom, etage == 2);
         if (!h) { v->tient = 0; return; }
         y = (uint8_t)(y + h + MEMLCD_CAVE_GAP);
-        if (nf == 1) memlcd_cave_row(v, MEMLCD_F_M12, y, j);
-        else if (nf == 2) { memlcd_cave_row(v, MEMLCD_F_M12, y, e1); memlcd_cave_row(v, MEMLCD_F_M12, (uint8_t)(y + lh), e2); }
+        if (ncaps) {
+            uint8_t x = (uint8_t)((MEMLCD_W - (ncaps * MEMLCD_CAVE_ICONE_W + (ncaps - 1) * 3)) / 2);
+            v->caps_y = y;
+            if (m->caps_lock) { v->caps_lock = 1; v->caps_lock_x = x; x = (uint8_t)(x + MEMLCD_CAVE_ICONE_W + 3); }
+            if (m->caps_word) { v->caps_word = 1; v->caps_word_x = x; }
+            y = (uint8_t)(y + MEMLCD_CAVE_ICONE_H + MEMLCD_CAVE_GAP);
+        }
+        if (e2[0]) memlcd_cave_row(v, MEMLCD_F_M12, y, e2);
     } else {
         bool no_time = !(m->coffre & CHEST_STATE_TIME);
-        /* layer name capped at 16 px: the name being browsed is the point */
         uint8_t reserve = (uint8_t)(lh + lh + (no_time ? lh + 3 : 2));
         uint8_t max_h = (uint8_t)(v->bottom > y + reserve ? v->bottom - y - reserve : 0);
-        uint8_t h = memlcd_cave_hero_c(v, y, MEMLCD_F_M16, max_h, m->nom, etage == 2);
+        uint8_t h = memlcd_cave_texte_f(v, y, MEMLCD_CAVE_NOM_F, max_h, m->nom, etage == 2);
         if (!h) { v->tient = 0; return; }
         y = (uint8_t)(y + h + MEMLCD_CAVE_GAP);
         char pos[MEMLCD_ETAT_BUF];

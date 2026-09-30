@@ -1,6 +1,7 @@
 /* Renders the left screen with the FIRMWARE's engine (main/display/memlcd/
  * memlcd_cave.c, compiled as is): the 10 reference states of the design
- * brief, the water drop at four levels and low, the countdown draining, and
+ * brief, the status band (the drop at 100..5 %, LOW, charging, FULL, "?";
+ * the route and caps icons), the countdown draining, and
  * the security proof (the bench incident's labels on a prompt and in the
  * browser). Every frame goes through memlcd_cave_draw, exactly as
  * memlcd_backend.c's dessiner() calls it. */
@@ -40,33 +41,46 @@ int main(void)
     }
     sheet_end("out/cave_dark/contact_sheet_cave_dark.png");
 
-    /* The water drop, on the normal screen of state 1. */
-    sheet_begin(5, 1, 3, &lv_font_montserrat_12, "CAVE / DARK -- water drop");
-    static const uint8_t pcts[5] = { 100, 60, 30, 10, 10 };
-    for (int i = 0; i < 5; i++) {
-        memlcd_model_t m = sc[0].m;
-        m.batt_niveau = i == 4;
-        frame(&m, pcts[i]);
-        char cap[32]; snprintf(cap, sizeof cap, "%u%%%s", pcts[i], i == 4 ? " LOW" : "");
-        sheet_add(cap);
-    }
-    sheet_end("out/cave_dark/anim_battery_cave_dark.png");
-
-    /* The gauge sheet of round 4 (G3), from the firmware: the drop at four
-     * levels, then the three top-block states it was judged on. */
-    sheet_begin(4, 2, 3, &lv_font_montserrat_12, "GAUGE G3 water drop -- firmware");
-    for (int i = 0; i < 4; i++) {
+    /* The status band's drop (spec "Status icons", 2026-09-30), on the
+     * normal screen of state 1: the percentage inside only at <= 15 %. */
+    sheet_begin(7, 2, 3, &lv_font_montserrat_12, "CAVE / DARK -- status band: the drop");
+    static const uint8_t pcts[7] = { 100, 60, 30, 20, 15, 10, 5 };
+    for (int i = 0; i < 7; i++) {
         frame(&sc[0].m, pcts[i]);
         char cap[16]; snprintf(cap, sizeof cap, "%u%%", pcts[i]);
         sheet_add(cap);
     }
-    frame(&sc[0].m, 100);
-    sheet_add("state 1: USB . BASE . 100%");
-    { memlcd_model_t m = sc[1].m; m.caps_lock = 1; frame(&m, 40); }
-    sheet_add("state 2: RADIO . SEEN . NAVIGATION . CAPS . 40%");
-    { memlcd_model_t m = sc[2].m; m.lien_5v = 0; frame(&m, 15); }
-    sheet_add("LOW: RADIO . BASE . 15%");
-    sheet_end("out/gauges/gauge_G3.png");
+    { memlcd_model_t m = sc[0].m; m.batt_niveau = 1; frame(&m, 15); }
+    sheet_add("15% LOW");
+    { memlcd_model_t m = sc[0].m; m.batt_niveau = 2; frame(&m, 5); }
+    sheet_add("5% CRITICAL");
+    { memlcd_model_t m = sc[0].m; m.batt_local_chg = 1; frame(&m, 40); }
+    sheet_add("USB charging 40%");
+    { memlcd_model_t m = sc[0].m; m.batt_local_chg = 1; frame(&m, 90); }
+    sheet_add("USB charging 90%");
+    { memlcd_model_t m = sc[0].m; m.batt_local_chg = 2; frame(&m, 95); }
+    sheet_add("USB FULL");
+    { memlcd_model_t m = sc[0].m; m.batt_local_dv = 0xFF; frame(&m, 0xFF); }
+    sheet_add("unknown ?");
+    { memlcd_model_t m = sc[0].m; m.route_rf = 1; m.dongle_vu = 1; m.lien_5v = 1; frame(&m, 10); }
+    sheet_add("RF seen + TRRS 10%");
+    sheet_end("out/cave_dark/anim_battery_cave_dark.png");
+
+    /* The route icons and the caps icons. */
+    sheet_begin(6, 1, 3, &lv_font_montserrat_12, "CAVE / DARK -- route and caps icons");
+    frame(&sc[0].m, 80);
+    sheet_add("USB");
+    { memlcd_model_t m = sc[0].m; m.route_rf = 1; m.dongle_vu = 1; frame(&m, 80); }
+    sheet_add("RF, dongle seen");
+    { memlcd_model_t m = sc[0].m; m.route_rf = 1; m.dongle_vu = 0; frame(&m, 80); }
+    sheet_add("RF, not seen");
+    { memlcd_model_t m = sc[0].m; m.caps_lock = 1; frame(&m, 80); }
+    sheet_add("Caps Lock");
+    { memlcd_model_t m = sc[0].m; m.caps_word = 1; frame(&m, 80); }
+    sheet_add("Caps Word");
+    { memlcd_model_t m = sc[0].m; m.caps_lock = 1; m.caps_word = 1; m.osm = 0x02; m.osl = 3; frame(&m, 80); }
+    sheet_add("both + S L3");
+    sheet_end("out/cave_dark/icons_cave_dark.png");
 
     sheet_begin(4, 1, 3, &lv_font_montserrat_12, "CAVE / DARK -- TOTP countdown");
     static const uint8_t secs[4] = { 12, 9, 6, 3 };

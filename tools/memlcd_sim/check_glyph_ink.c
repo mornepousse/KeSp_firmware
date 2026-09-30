@@ -53,7 +53,13 @@ static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *px)
     lv_disp_flush_ready(drv);
 }
 
+static int text_ink(const lv_font_t *f, const char *s, uint8_t bits[GH][GW]);
 static int glyph_ink(const lv_font_t *f, char c, uint8_t bits[GH][GW])
+{
+    char s[2] = { c, 0 };
+    return text_ink(f, s, bits);
+}
+static int text_ink(const lv_font_t *f, const char *s, uint8_t bits[GH][GW])
 {
     memset(s_ink, 0, sizeof s_ink);
     lv_obj_t *scr = lv_disp_get_scr_act(s_disp);
@@ -63,7 +69,6 @@ static int glyph_ink(const lv_font_t *f, char c, uint8_t bits[GH][GW])
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_set_size(scr, GW, GH);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-    char s[2] = { c, 0 };
     lv_obj_t *l = lv_label_create(scr);
     lv_obj_set_style_text_font(l, f, 0);
     lv_obj_set_style_text_color(l, lv_color_black(), 0);
@@ -153,6 +158,33 @@ int main(void)
         bool pass = (zero_ink == 0) && !colon_eq_dot;
         printf("  VERDICT: %s\n", pass ? "PASS" : "FAIL (unfit for the panel)");
         if (fi < nused && !pass) gate_failures++;
+    }
+    /* The reading INSIDE the drop (memlcd_cave.h, memlcd_goutte_texte_ok)
+     * assumes Montserrat 12's digits, '+' and '?' ink only rows
+     * [MEMLCD_CAVE_M12_ENCRE_HAUT, MEMLCD_CAVE_M12_ENCRE_BAS) of their line
+     * and only columns inside the measured width: checked here, rendered,
+     * for every reading the drop can hold. */
+    {
+        static uint8_t bits[GH][GW];
+        int hors = 0;
+        char t[8];
+        for (int p = -2; p <= MEMLCD_CAVE_PCT_BAS; p++) {
+            if (p == -2) snprintf(t, sizeof t, "?");
+            else if (p == -1) snprintf(t, sizeof t, "+");
+            else snprintf(t, sizeof t, "%d", p);
+            text_ink(memlcd_cave_fonts[MEMLCD_F_M12], t, bits);
+            int w = memlcd_text_width(MEMLCD_F_M12, t);
+            for (int y = 0; y < GH; y++)
+                for (int x = 0; x < GW; x++)
+                    if (bits[y][x] && (y < 2 + MEMLCD_CAVE_M12_ENCRE_HAUT || y >= 2 + MEMLCD_CAVE_M12_ENCRE_BAS
+                                       || x < 2 || x >= 2 + w)) {
+                        if (hors < 5) printf("  drop reading \"%s\": ink at (%d, %d) outside rows [3, 12) x [0, %d)\n", t, x - 2, y - 2, w);
+                        hors++;
+                    }
+        }
+        printf("\n-- drop readings (Montserrat 12: 0..%d, '+', '?') --\n  ink outside the assumed box: %d -- %s\n",
+               MEMLCD_CAVE_PCT_BAS, hors, hors ? "FAIL" : "OK");
+        if (hors) gate_failures++;
     }
     printf("\n%s\n", gate_failures ? "GLYPH INK: a font the screen uses loses ink -- FAIL" : "GLYPH INK: every font the screen uses keeps its ink -- OK");
     return gate_failures ? 1 : 0;

@@ -42,7 +42,7 @@ _Static_assert(MEMLCD_F_U8 + 1 == MEMLCD_F_N, "memlcd_cave_fonts covers every me
 
 static struct {
     lv_obj_t *rock_top, *rock_bottom;
-    lv_obj_t *logo_s, *logo_l, *cadenas, *lien, *goutte;
+    lv_obj_t *logo_s, *logo_l, *cadenas, *lien, *goutte, *route, *caps_lock, *caps_word;
     lv_obj_t *rule;
     lv_obj_t *eau_box, *eau_fill, *eau_wave, *eau_ombre;
     lv_obj_t *l[MEMLCD_CAVE_LIGNES];
@@ -55,6 +55,16 @@ static lv_img_dsc_t s_goutte_img = {
     .header.w = MEMLCD_CAVE_GOUTTE_W, .header.h = MEMLCD_CAVE_GOUTTE_H,
     .data_size = sizeof s_goutte_map, .data = s_goutte_map,
 };
+/* The 20 x 20 icons (memlcd_icone_px): the route one redrawn when it
+ * changes, Caps Lock / Caps Word drawn once at the build. */
+#define ICONE_OCTETS (MEMLCD_CAVE_ICONE_H * MEMLCD_CAVE_ICONE_STRIDE)
+static uint8_t s_route_map[ICONE_OCTETS], s_caps_lock_map[ICONE_OCTETS], s_caps_word_map[ICONE_OCTETS];
+#define ICONE_DSC(map) { .header.cf = LV_IMG_CF_ALPHA_1BIT, .header.always_zero = 0, \
+                         .header.w = MEMLCD_CAVE_ICONE_W, .header.h = MEMLCD_CAVE_ICONE_H, \
+                         .data_size = ICONE_OCTETS, .data = (map) }
+static lv_img_dsc_t s_route_img = ICONE_DSC(s_route_map);
+static const lv_img_dsc_t s_caps_lock_img = ICONE_DSC(s_caps_lock_map), s_caps_word_img = ICONE_DSC(s_caps_word_map);
+static uint8_t s_route_dessinee;               /* the memlcd_icone_t in s_route_map, 0 = none yet */
 /* The continuation mark "↳": one 1-bit bitmap (memlcd_cave.h) for every
  * mark object — the fonts have no such glyph. */
 static const lv_img_dsc_t s_marque_img = {
@@ -115,6 +125,12 @@ void memlcd_cave_build(lv_obj_t *scr)
     s.cadenas = image(scr, &memlcd_img_cadenas);
     s.lien = image(scr, &memlcd_img_lien);
     s.goutte = image(scr, &s_goutte_img);
+    memlcd_icone_bitmap(MEMLCD_ICONE_CAPS_LOCK, s_caps_lock_map);
+    memlcd_icone_bitmap(MEMLCD_ICONE_CAPS_WORD, s_caps_word_map);
+    s_route_dessinee = 0;
+    s.route = image(scr, &s_route_img);
+    s.caps_lock = image(scr, &s_caps_lock_img);
+    s.caps_word = image(scr, &s_caps_word_img);
     s.rule = trait(scr, 1);
     /* the countdown: a vessel (outline), its water (fill), a wavy surface,
      * and a dithered shadow cast on the rock under it */
@@ -182,12 +198,22 @@ void memlcd_cave_draw(const memlcd_model_t *m, uint8_t batt_pct)
     montre(s.cadenas, v->cadenas, v->cadenas_x, v->cadenas_y);
     montre(s.lien, v->lien, v->lien_x, v->lien_y);
     if (v->goutte) {
-        memlcd_goutte_bitmap(v->goutte_pct, v->goutte_low, s_goutte_map);
+        memlcd_goutte_bitmap(v->goutte_pct, v->goutte_low, v->goutte_plus, s_goutte_map);
         lv_img_cache_invalidate_src(&s_goutte_img);   /* same descriptor, new pixels */
         lv_img_set_src(s.goutte, &s_goutte_img);
         lv_obj_invalidate(s.goutte);
     }
     montre(s.goutte, v->goutte, v->goutte_x, v->goutte_y);
+    if (v->route && v->route != s_route_dessinee) {
+        memlcd_icone_bitmap(v->route, s_route_map);
+        s_route_dessinee = v->route;
+        lv_img_cache_invalidate_src(&s_route_img);    /* same descriptor, new pixels */
+        lv_img_set_src(s.route, &s_route_img);
+        lv_obj_invalidate(s.route);
+    }
+    montre(s.route, v->route != 0, v->route_x, v->route_y);
+    montre(s.caps_lock, v->caps_lock, v->caps_lock_x, v->caps_y);
+    montre(s.caps_word, v->caps_word, v->caps_word_x, v->caps_y);
     if (v->rule) {
         const lv_coord_t y = v->rule_y;
         s_rule_pts[0].x = 8;  s_rule_pts[0].y = y;

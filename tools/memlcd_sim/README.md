@@ -41,7 +41,10 @@ tripwire brick `scripts/tripwire.d/memlcd-sim-gates.sh` calls it from every
 2. **Glyph ink** (`check_glyph_ink.c`): every printable ASCII glyph of every
    font in the engine's own table (`memlcd_cave_fonts`, `memlcd_cave.c`) keeps
    at least one ink pixel through the threshold, and `:` stays distinguishable
-   from `.`. Montserrat 8 and 10 are printed as references and fail (8 loses
+   from `.`. It also renders every reading the water drop can hold
+   (Montserrat 12 `0`..`15`, `+`, `?`) and fails if any ink falls outside the
+   box `memlcd_goutte_texte_ok` assumes (rows 3..11 of the line, within the
+   measured width). Montserrat 8 and 10 are printed as references and fail (8 loses
    `' , . : ; _ \``, 10 the apostrophe): that is why the text floor is
    Montserrat 12. A font added to the engine is gated here.
 3. **Safe wrap, measured by LVGL** (`test_safe_wrap.c`): the firmware's
@@ -58,13 +61,14 @@ With `memlcd_cave_build` / `memlcd_cave_draw`, exactly as `memlcd_backend.c`
 calls them:
 
 - `out/cave_dark/`: the 10 reference states of the design brief (`states.c`),
-  one PNG each (×4) and a contact sheet; the water drop at 100/60/30/10 % and
-  LOW; the countdown draining; the security proof sheet (the three
+  one PNG each (×4) and a contact sheet; the status band's drop at
+  100/60/30/20/15/10/5 %, LOW, CRITICAL, charging, FULL, unknown and with
+  radio + TRRS (`anim_battery_cave_dark.png`); the route and caps icons
+  (`icons_cave_dark.png`); the countdown draining; the security proof sheet (the three
   adversarial labels — `TEST:RFC6238`, `BANQUE:4021`, `AWS:123456789012` —
   on a prompt and in the browser); bench extras (an 8-digit code, a 34-`W`
   label on the UNSCII last resort, a 34-character digit-heavy label behind
   its continuation marks, everything shown at once).
-- `out/gauges/gauge_G3.png`: the round-4 gauge sheet, from the firmware.
 
 ## Files
 

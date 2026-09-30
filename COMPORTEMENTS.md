@@ -439,9 +439,10 @@ means a test, or a line.
   not a wake source either (TRM table 10.4-3): plug the cable, press a key on
   each half, the bolt appears on both screens.
 - [test:test_memlcd_model] The screens SAY whether the link is up: a 16x12
-  two-arrow pictogram (⇆) in place of the charge marker while the 5 V is
-  closed on our side (`link_uart_active()`) — the right beside its voltage,
-  the left beside its battery percentage (`test_statut_haut`) — displayed on
+  two-arrow pictogram (⇆) while the 5 V is closed on our side
+  (`link_uart_active()`) — the right beside its voltage in place of the
+  charge marker, the left in its status band beside the route icon, the
+  charge "+" kept in the drop (`test_statut_haut`) — displayed on
   both halves, part of the redraw diff. It replaced a bolt (2026-09-25) that overlapped the " +"
   marker exactly while the link was charging the half. Without it the
   handshake had no witness but the console — which you do not have while
@@ -775,19 +776,35 @@ means a test, or a line.
   is the "cave" since 2026-09-30 (plan 2026-09-30-left-screen-cave, spec
   2026-09-29-left-screen-redesign): dark (pale ink on black), a rocky edge
   top and bottom that no text ever enters, the 28 px Niphargus logo in the
-  corner and the chest padlock beside it, then in words `USB` / `RADIO` and
-  `SEEN` on its own line, the WATER-DROP gauge (13 x 16, filled from the
-  bottom with a wavy surface, outlined 2 px when LOW) with the PERCENTAGE
-  beside it — not volts: "85%" (batt_sense_pct: 5 % steps, filtered, never
-  up on battery), "+" charging and `FULL` charged (USB power only), "?"
-  unknown —
-  the chest's rows, the layer name and its flags (Caps Lock only on the USB
-  route, the host LED being unknown in RF and stale from the last USB
-  session). Every layout decision is pure (`memlcd_cave_vue`,
+  corner and the chest padlock beside it, then ONE STATUS BAND (spec
+  "Status icons", 2026-09-30; no words — `USB`, `RADIO`, `SEEN` are gone):
+  the WATER-DROP gauge (20 x 26, filled from the bottom with a wavy surface,
+  a closed outline 2 px when LOW or CRITICAL — no blinking), the ROUTE icon
+  beside it (20 x 20: the USB plug; radio waves, 3 arcs over a FILLED dot
+  when the dongle has seen us, 2 arcs over a HOLLOW dot when not —
+  `memlcd_cave_route_icone`) and the TRRS ⇆ beside that. The PERCENTAGE is
+  shown only when low — displayed % (batt_sense_pct: 5 % steps, filtered,
+  never up on battery) <= 15, `MEMLCD_CAVE_PCT_BAS` — and INSIDE the drop,
+  digits alone, in its dry part with 1 px of air off the outline and the
+  water (`memlcd_goutte_texte_ok`); otherwise the water level alone. 15 and
+  not 20: "20" at 20 % is 15 px where the dry part leaves 12
+  [test:test_memlcd_safe_wrap]. Charging (USB power only) = a "+" in the
+  drop, ink on the dry part or cut out of the water, never half and half
+  (`memlcd_goutte_plus_y`), no number even when low; FULL (USB power only) =
+  the drop filled to the tip, no mark, no word; unknown = "?" inside an
+  empty drop —
+  the chest's rows, the layer name at ONE modest size (Montserrat 14,
+  `MEMLCD_CAVE_NOM_F`, Mae 2026-09-30: "big but not very important"; two
+  balanced lines when it does not fit one — NAVIGATION is 78 px even at 12),
+  Caps Lock and Caps Word as ICONS under it (⇪ the hollow arrow over a bar,
+  and the same arrow alone; Caps Lock only on the USB route, the host LED
+  being unknown in RF and stale from the last USB session), the one-shot
+  mods and layer as text under them ("CSAG L3"), no flags line when nothing
+  is armed [test:test_memlcd_model]. Every layout decision is pure (`memlcd_cave_vue`,
   `memlcd_cave.h`) and host-tested [test:test_memlcd_model]
   [test:test_memlcd_safe_wrap]: every line inside the panel and its box,
-  nothing overlapping, whatever combination of route, SEEN, link, chest rows,
-  flags and names — the view trades the full rock for a thin one, then drops
+  nothing overlapping, whatever combination of route, SEEN, link, battery
+  level, chest rows, flags and names — the view trades the full rock for a thin one, then drops
   the corner logo, before it ever lets a line out; one font family, no text
   under Montserrat 12 (below it the panel's 1-bit threshold erases `:` `.`
   `,` `'` — tools/memlcd_sim's glyph-ink gate). Widths are measured with the
@@ -796,7 +813,10 @@ means a test, or a line.
   scripts/gen_logo_memlcd.sh with NO palette (ALPHA_1BIT has none: the 8
   bytes it used to prepend shifted the 60 px logo by one row, and would
   shear the small ones); the rock, the padlock and the link by
-  scripts/gen_memlcd_cave_assets.py.
+  scripts/gen_memlcd_cave_assets.py; the drop, the route and caps icons are
+  pure 1-bit pixel functions in memlcd_cave.h (host-tested, bitmap == pixel
+  function), and the glyph-ink gate checks the drop readings' ink box on the
+  font.
 - [smoke:Memory-LCD screens UI] A sleeping half's image is honest: the
   screen's `avant` sleep hook (veille_task.h, run before ANY `dormir`, while
   the radio has not yet taken the SPI bus lock for the sleep) re-reads the
@@ -837,7 +857,9 @@ means a test, or a line.
   since plan Task 8 ("c'est tout petit", bench 2026-09-29): the PROMPT and
   the CODE take the WHOLE screen (nothing of the normal screen — logo,
   padlock, route, drop, layer name, flags — is drawn with them),
-  the BROWSER keeps the top status (logo, route, drop) and the layer name.
+  the BROWSER keeps the top status (logo, the status band) and the layer
+  name, and a name of two lines stays whole with the logo, padlock, band and
+  NO TIME kept (`OVH:PERSO` -> `OVH:` / `PERSO`, `test_vue_browse`).
   The cave (2026-09-30) keeps every rule of Task 8 and adds the spec's text
   security (`memlcd_cave_vue`, `memlcd_safe_wrap.h`, host-tested; widths from
   the width oracle, kerning included, `scripts/gen_memlcd_font_widths.py`,

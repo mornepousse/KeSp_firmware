@@ -5,7 +5,8 @@
  *    a line with digits and no letter — bench incident 2026-09-29, Mae read
  *    "TEST:RFC6238" pixel-cut to "TEST:RFC" / "6238" as a truncated code;
  *  - the water-drop gauge (memlcd_cave.h): percent -> wet rows, outline 2 px
- *    when LOW;
+ *    when LOW, the charge "+" readable at every level, the low percentage's
+ *    digits inside its dry part; the route and caps icons;
  *  - the layout budget (memlcd_cave.h): the 34-character label whole inside
  *    the prompt's band at >= 12 px, and no name line that reads like a code
  *    on any view, across a fuzz of issuer:account strings. */
@@ -244,44 +245,204 @@ static void test_sw_marque(void)
     TEST_ASSERT_EQ(vides, 0, "fuzz: UNSCII 8 over the full width always wraps in 5 lines");
 }
 
-/* The water drop: wet rows from the percentage, rounded — 0/10/30/60/100 %
- * give 0/2/5/10/16 of its 16 rows; the outline doubles when LOW. */
+/* The water drop (status band, settled 2026-09-30): 20 x 26, wet rows from
+ * the percentage, rounded — 0/5/10/15/20/30/60/100 % give 0/1/3/4/5/8/16/26
+ * of its 26 rows; a closed 1 px outline, 2 px when LOW; a wavy surface. */
+static bool g_encre(uint8_t pct, bool low, bool plus, int x, int y) { return memlcd_goutte_px(pct, low, plus, x, y); }
 static void test_goutte(void)
 {
+    TEST_ASSERT(MEMLCD_CAVE_GOUTTE_W == 20 && MEMLCD_CAVE_GOUTTE_H == 26, "the large drop: 20 x 26");
     TEST_ASSERT_EQ(memlcd_goutte_rangs(0), 0, "0 %: dry");
-    TEST_ASSERT_EQ(memlcd_goutte_rangs(10), 2, "10 %: 2 rows");
-    TEST_ASSERT_EQ(memlcd_goutte_rangs(30), 5, "30 %: 5 rows");
-    TEST_ASSERT_EQ(memlcd_goutte_rangs(60), 10, "60 %: 10 rows");
-    TEST_ASSERT_EQ(memlcd_goutte_rangs(100), 16, "100 %: full");
-    TEST_ASSERT_EQ(memlcd_goutte_rangs(250), 16, "never above full");
+    TEST_ASSERT_EQ(memlcd_goutte_rangs(5), 1, "5 %: 1 row");
+    TEST_ASSERT_EQ(memlcd_goutte_rangs(10), 3, "10 %: 3 rows");
+    TEST_ASSERT_EQ(memlcd_goutte_rangs(15), 4, "15 %: 4 rows");
+    TEST_ASSERT_EQ(memlcd_goutte_rangs(20), 5, "20 %: 5 rows");
+    TEST_ASSERT_EQ(memlcd_goutte_rangs(30), 8, "30 %: 8 rows");
+    TEST_ASSERT_EQ(memlcd_goutte_rangs(60), 16, "60 %: 16 rows");
+    TEST_ASSERT_EQ(memlcd_goutte_rangs(100), 26, "100 %: full");
+    TEST_ASSERT_EQ(memlcd_goutte_rangs(250), 26, "never above full");
     for (int p = 0; p < 100; p++) TEST_ASSERT(memlcd_goutte_rangs((uint8_t)p) <= memlcd_goutte_rangs((uint8_t)(p + 1)), "monotonic");
 
-    /* Row 12 (the bulb, half-width 5 around x 6): outline at x 1 and 11. */
-    TEST_ASSERT(memlcd_goutte_px(0, false, 1, 12) && memlcd_goutte_px(0, false, 11, 12), "outline 1 px");
-    TEST_ASSERT(!memlcd_goutte_px(0, false, 2, 12) && !memlcd_goutte_px(0, false, 6, 12), "0 %: empty inside");
-    TEST_ASSERT(memlcd_goutte_px(0, true, 2, 12) && memlcd_goutte_px(0, true, 10, 12), "LOW: outline 2 px");
-    TEST_ASSERT(!memlcd_goutte_px(0, true, 6, 12), "LOW, 0 %: still empty inside");
-    TEST_ASSERT(memlcd_goutte_px(100, false, 6, 12) && memlcd_goutte_px(100, false, 6, 3), "100 %: water to the tip");
-    TEST_ASSERT(memlcd_goutte_px(0, false, 6, 0), "the tip");
-    TEST_ASSERT(!memlcd_goutte_px(100, false, 0, 12) && !memlcd_goutte_px(100, false, 12, 12), "nothing outside the drop");
-    /* 50 %: row 8 from the bottom is the surface — staggered 0/1 px by column. */
-    TEST_ASSERT(memlcd_goutte_px(50, false, 6, 8) != memlcd_goutte_px(50, false, 7, 8), "a wavy surface, not a flat cut");
-    TEST_ASSERT(memlcd_goutte_px(50, false, 6, 14) && !memlcd_goutte_px(50, false, 6, 4), "wet under, dry over");
+    /* Row 16 is the bulb's widest (x 0..19), row 12 starts at x 1. */
+    TEST_ASSERT_EQ(memlcd_goutte_classe(0, false, 0, 16), MEMLCD_GC_BORD, "outline 1 px");
+    TEST_ASSERT_EQ(memlcd_goutte_classe(0, false, 19, 16), MEMLCD_GC_BORD, "outline 1 px, both sides");
+    TEST_ASSERT_EQ(memlcd_goutte_classe(0, false, 1, 16), MEMLCD_GC_SEC, "0 %: dry inside");
+    TEST_ASSERT_EQ(memlcd_goutte_classe(0, true, 1, 16), MEMLCD_GC_BORD, "LOW: outline 2 px");
+    TEST_ASSERT_EQ(memlcd_goutte_classe(0, true, 2, 16), MEMLCD_GC_SEC, "LOW, 0 %: still dry inside");
+    TEST_ASSERT_EQ(memlcd_goutte_classe(0, false, 0, 12), MEMLCD_GC_DEHORS, "nothing outside the drop");
+    TEST_ASSERT(g_encre(0, false, false, 9, 0) && g_encre(0, false, false, 10, 0), "the tip");
+    TEST_ASSERT_EQ(memlcd_goutte_classe(0, false, 9, 24), MEMLCD_GC_BORD, "the bottom is closed: an outline, not an open cup");
+    TEST_ASSERT_EQ(memlcd_goutte_classe(100, false, 9, 5), MEMLCD_GC_EAU, "100 %: water to the tip");
+    /* 50 %: 13 wet rows, the surface on row 13 staggered 0/1 px by column. */
+    TEST_ASSERT(memlcd_goutte_classe(50, false, 8, 13) != memlcd_goutte_classe(50, false, 9, 13), "a wavy surface, not a flat cut");
+    TEST_ASSERT(memlcd_goutte_classe(50, false, 9, 20) == MEMLCD_GC_EAU && memlcd_goutte_classe(50, false, 9, 8) == MEMLCD_GC_SEC,
+                "wet under, dry over");
 
     /* The bitmap IS the pixel function (ALPHA_1BIT, MSB = leftmost). */
     uint8_t bm[MEMLCD_CAVE_GOUTTE_H * MEMLCD_CAVE_GOUTTE_STRIDE];
     static const uint8_t pcts[] = { 0, 10, 30, 60, 100 };
     for (size_t k = 0; k < sizeof pcts; k++)
+        for (int low = 0; low < 2; low++)
+            for (int plus = 0; plus < 2; plus++) {
+                memlcd_goutte_bitmap(pcts[k], low, plus, bm);
+                int bad = 0;
+                for (int y = 0; y < MEMLCD_CAVE_GOUTTE_H; y++)
+                    for (int x = 0; x < 8 * MEMLCD_CAVE_GOUTTE_STRIDE; x++) {
+                        bool bit = bm[y * MEMLCD_CAVE_GOUTTE_STRIDE + (x >> 3)] & (0x80 >> (x & 7));
+                        if (bit != g_encre(pcts[k], low, plus, x, y)) bad++;
+                    }
+                TEST_ASSERT_EQ(bad, 0, "bitmap == pixel function");
+            }
+}
+
+/* The charge mark "+" inside the drop (USB power, charging): it must READ at
+ * every level — ink on the dry part, cut out of the water, never half and
+ * half. Every pixel of the plus inside the drop's inside (not the outline),
+ * and of the other colour than every pixel of its 4-neighbour ring. */
+static void test_goutte_plus(void)
+{
+    int mauvais = 0, dehors = 0;
+    for (int p = 0; p <= 100; p++)
         for (int low = 0; low < 2; low++) {
-            memlcd_goutte_bitmap(pcts[k], low, bm);
-            int bad = 0;
+            bool creux;
+            uint8_t py = memlcd_goutte_plus_y((uint8_t)p, low, &creux);
+            int n_plus = 0, encre_plus = -1, encre_anneau = -1;
             for (int y = 0; y < MEMLCD_CAVE_GOUTTE_H; y++)
-                for (int x = 0; x < 16; x++) {
-                    bool bit = bm[y * 2 + (x >> 3)] & (0x80 >> (x & 7));
-                    if (bit != memlcd_goutte_px(pcts[k], low, x, y)) bad++;
+                for (int x = 0; x < MEMLCD_CAVE_GOUTTE_W; x++) {
+                    int f = memlcd_goutte_plus_forme(x, y, py);
+                    if (!f) continue;
+                    int e = g_encre((uint8_t)p, low, true, x, y);
+                    if (f == 1) {
+                        n_plus++;
+                        int c = memlcd_goutte_classe((uint8_t)p, low, x, y);
+                        if (c != MEMLCD_GC_EAU && c != MEMLCD_GC_SEC) dehors++;
+                        if (encre_plus < 0) encre_plus = e; else if (e != encre_plus) mauvais++;
+                    } else {
+                        if (encre_anneau < 0) encre_anneau = e; else if (e != encre_anneau) mauvais++;
+                    }
                 }
-            TEST_ASSERT_EQ(bad, 0, "bitmap == pixel function");
+            if (n_plus == 0 || encre_plus == encre_anneau) mauvais++;
+            if (creux != (encre_plus == 0)) mauvais++;
         }
+    TEST_ASSERT_EQ(dehors, 0, "the plus always inside the drop, never on its outline");
+    TEST_ASSERT_EQ(mauvais, 0, "the plus reads at every level: one colour, its ring the other");
+    /* 90 %: cut out of the water; 5 %: ink in the dry part. */
+    bool creux;
+    (void)memlcd_goutte_plus_y(90, false, &creux);
+    TEST_ASSERT(creux, "high water: the plus cut out of it");
+    (void)memlcd_goutte_plus_y(5, false, &creux);
+    TEST_ASSERT(!creux, "almost dry: the plus in ink");
+}
+
+/* The percentage INSIDE the drop, only when low (Mae 2026-09-30): the
+ * digits of Montserrat 12 (ink on rows [3, 12) of the line, inside their
+ * advance — tools/memlcd_sim's glyph-ink gate checks it on the font) must
+ * sit in the DRY part with 1 px of air around them (4-neighbours): no
+ * pixel on the outline, none on the water. Up to MEMLCD_CAVE_PCT_BAS, at
+ * both outlines; "20" at 20 % does not fit — that is why the threshold is
+ * 15 and not 20. The test checks the classes itself, not texte_ok. */
+static bool chiffres_au_sec(uint8_t pct, bool low, int x0, int w, int yt)
+{
+    for (int y = yt + MEMLCD_CAVE_M12_ENCRE_HAUT - 1; y <= yt + MEMLCD_CAVE_M12_ENCRE_BAS; y++)
+        for (int x = x0 - 1; x <= x0 + w; x++) {
+            bool coin = (y == yt + MEMLCD_CAVE_M12_ENCRE_HAUT - 1 || y == yt + MEMLCD_CAVE_M12_ENCRE_BAS)
+                        && (x == x0 - 1 || x == x0 + w);
+            if (coin) continue;                           /* 4-neighbours: no corners */
+            if (memlcd_goutte_classe(pct, low, x, y) != MEMLCD_GC_SEC) return false;
+        }
+    return true;
+}
+static void test_goutte_chiffres(void)
+{
+    TEST_ASSERT_EQ(MEMLCD_CAVE_PCT_BAS, 15, "the low threshold: 15 % (the largest 5 % step whose digits fit)");
+    for (int p = 0; p <= MEMLCD_CAVE_PCT_BAS; p++)
+        for (int low = 0; low < 2; low++) {
+            char t[4]; snprintf(t, sizeof t, "%d", p);
+            int w = memlcd_text_width(MEMLCD_F_M12, t);
+            uint8_t yt;
+            bool ok = memlcd_goutte_texte_y((uint8_t)p, low, (uint8_t)w, &yt);
+            TEST_ASSERT(ok, "a low percentage finds room inside the drop");
+            TEST_ASSERT(ok && chiffres_au_sec((uint8_t)p, low, (MEMLCD_CAVE_GOUTTE_W - w) / 2, w, yt),
+                        "... in the dry part, 1 px of air, off the outline and the water");
+        }
+    for (int low = 0; low < 2; low++) {
+        uint8_t yt;
+        TEST_ASSERT(!memlcd_goutte_texte_y(20, low, (uint8_t)memlcd_text_width(MEMLCD_F_M12, "20"), &yt),
+                    "\"20\" at 20 % does not fit: the threshold cannot be 20");
+        TEST_ASSERT(memlcd_goutte_texte_y(0, low, (uint8_t)memlcd_text_width(MEMLCD_F_M12, "?"), &yt)
+                    && chiffres_au_sec(0, low, (MEMLCD_CAVE_GOUTTE_W - memlcd_text_width(MEMLCD_F_M12, "?")) / 2,
+                                       memlcd_text_width(MEMLCD_F_M12, "?"), yt),
+                    "unknown: \"?\" fits the empty drop");
+    }
+}
+
+/* The route icons (20 x 20): the USB plug, or the radio waves — 3 arcs over
+ * a FILLED dot when the dongle has seen us, 2 arcs over a HOLLOW dot when
+ * not; and the Caps Lock / Caps Word icons: the same hollow arrow, Caps
+ * Lock with its bar under it. Counted on the icon's vertical centre line. */
+static int passages(int icone, int x)                 /* over the dot: rows 0..14 */
+{
+    int n = 0; bool avant = false;
+    for (int y = 0; y < 15; y++) {
+        bool e = memlcd_icone_px(icone, x, y);
+        if (e && !avant) n++;
+        avant = e;
+    }
+    return n;
+}
+static void test_icones(void)
+{
+    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE };
+    TEST_ASSERT_EQ(memlcd_cave_route_icone(&m), MEMLCD_ICONE_USB, "USB route: the plug");
+    m.dongle_vu = 1;
+    TEST_ASSERT_EQ(memlcd_cave_route_icone(&m), MEMLCD_ICONE_USB, "USB route: the plug, seen or not");
+    m.route_rf = 1;
+    TEST_ASSERT_EQ(memlcd_cave_route_icone(&m), MEMLCD_ICONE_RADIO_VU, "radio, dongle seen: 3 waves, filled dot");
+    m.dongle_vu = 0;
+    TEST_ASSERT_EQ(memlcd_cave_route_icone(&m), MEMLCD_ICONE_RADIO_SEUL, "radio, not seen: 2 waves, hollow dot");
+
+    const int cx = MEMLCD_CAVE_ICONE_W / 2;             /* the dot and the arcs' crowns on columns 9-10 */
+    TEST_ASSERT_EQ(passages(MEMLCD_ICONE_RADIO_VU, cx), 3, "seen: 3 arcs over the dot");
+    TEST_ASSERT_EQ(passages(MEMLCD_ICONE_RADIO_SEUL, cx), 2, "not seen: 2 arcs over the dot");
+    bool plein = true, creux = false;
+    /* the dot's centre (pixels 9..10 x 17..18): ink when seen, paper when not */
+    for (int y = 17; y <= 18; y++)
+        for (int x = 9; x <= 10; x++) {
+            plein = plein && memlcd_icone_px(MEMLCD_ICONE_RADIO_VU, x, y);
+            creux = creux || memlcd_icone_px(MEMLCD_ICONE_RADIO_SEUL, x, y);
+        }
+    TEST_ASSERT(plein, "seen: a filled dot");
+    TEST_ASSERT(!creux, "not seen: a hollow dot");
+    int diff_usb = 0;
+    for (int y = 0; y < MEMLCD_CAVE_ICONE_H; y++)
+        for (int x = 0; x < MEMLCD_CAVE_ICONE_W; x++)
+            diff_usb += memlcd_icone_px(MEMLCD_ICONE_USB, x, y) != memlcd_icone_px(MEMLCD_ICONE_RADIO_VU, x, y);
+    TEST_ASSERT(diff_usb > 40, "the plug is not the waves");
+
+    /* Caps Lock = Caps Word + a bar under the arrow, nothing else differs. */
+    int bar = 0, autre = 0, arrow = 0;
+    for (int y = 0; y < MEMLCD_CAVE_ICONE_H; y++)
+        for (int x = 0; x < MEMLCD_CAVE_ICONE_W; x++) {
+            bool l = memlcd_icone_px(MEMLCD_ICONE_CAPS_LOCK, x, y), w = memlcd_icone_px(MEMLCD_ICONE_CAPS_WORD, x, y);
+            if (w) arrow++;
+            if (l && !w) { if (y >= 15) bar++; else autre++; }
+            if (w && !l) autre++;
+        }
+    TEST_ASSERT(arrow > 30, "caps word: an arrow");
+    TEST_ASSERT(bar >= 12 && autre == 0, "caps lock: the same arrow, plus its bar under it");
+    for (int x = 0; x < MEMLCD_CAVE_ICONE_W; x++)
+        TEST_ASSERT(!memlcd_icone_px(0, x, 10), "no icon: nothing");
+
+    /* bitmaps == pixel functions */
+    uint8_t bm[MEMLCD_CAVE_ICONE_H * MEMLCD_CAVE_ICONE_STRIDE];
+    for (int i = MEMLCD_ICONE_USB; i <= MEMLCD_ICONE_CAPS_WORD; i++) {
+        memlcd_icone_bitmap((uint8_t)i, bm);
+        int bad = 0;
+        for (int y = 0; y < MEMLCD_CAVE_ICONE_H; y++)
+            for (int x = 0; x < 8 * MEMLCD_CAVE_ICONE_STRIDE; x++)
+                bad += !!(bm[y * MEMLCD_CAVE_ICONE_STRIDE + (x >> 3)] & (0x80 >> (x & 7))) != memlcd_icone_px((uint8_t)i, x, y);
+        TEST_ASSERT_EQ(bad, 0, "icon bitmap == pixel function");
+    }
 }
 
 /* The test's own minimal frame check (independent of memlcd_cave_tient):
@@ -456,15 +617,17 @@ static void test_budget_marque(void)
 
 /* The normal screen under every combination of what it can show at once:
  * route, SEEN, link, the chest's two rows, every flag, short and long layer
- * names — nothing ever leaves the panel or overlaps. */
+ * names, full or low battery — nothing ever leaves the panel or overlaps. */
 static void test_budget_normal(void)
 {
     static const char *const noms[] = { "BASE", "NAVIGATION", "", "WWWWWWWWWWWWWWW", "LAYER 2", "sym" };
     memlcd_cave_vue_t v;
     int debordes = 0, total = 0;
     for (size_t k = 0; k < sizeof noms / sizeof noms[0]; k++)
-        for (unsigned bits = 0; bits < 256; bits++) {
+        for (unsigned bits = 0; bits < 512; bits++) {
             memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE, .batt_local_dv = 37 };
+            const bool bas = (bits >> 8) & 1;              /* low: the digits inside a thick-outlined drop */
+            m.batt_niveau = bas ? 1 : 0;
             strcpy(m.nom, noms[k]);
             m.route_rf = bits & 1; m.dongle_vu = (bits >> 1) & 1; m.lien_5v = (bits >> 2) & 1;
             m.caps_lock = (bits >> 3) & 1; m.caps_word = (bits >> 4) & 1;
@@ -473,12 +636,12 @@ static void test_budget_normal(void)
                 m.coffre = MEMLCD_COFFRE_PRESENT | CHEST_STATE_READY;   /* no SD: mode + NO CARD */
                 m.coffre_mode_state = CHEST_MODE_PENDING; m.coffre_mode_wanted = CHEST_MODE_OATH;
             }
-            memlcd_cave_vue(&m, 100, &v);
+            memlcd_cave_vue(&m, bas ? 10 : 100, &v);
             total++;
             if (!v.tient || !dans_le_cadre(&v) || v.kind != MEMLCD_CV_NORMAL) debordes++;
         }
     TEST_ASSERT_EQ(debordes, 0, "every combination of the normal screen holds");
-    TEST_ASSERT_EQ(total, 6 * 256, "all combinations tried");
+    TEST_ASSERT_EQ(total, 6 * 512, "all combinations tried");
 }
 
 void test_memlcd_safe_wrap(void)
@@ -490,6 +653,9 @@ void test_memlcd_safe_wrap(void)
     test_sw_bounded_scan();
     test_sw_marque();
     test_goutte();
+    test_goutte_plus();
+    test_goutte_chiffres();
+    test_icones();
     test_budget_prompt();
     test_budget_fuzz();
     test_budget_marque();

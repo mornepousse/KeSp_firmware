@@ -104,12 +104,16 @@ static bool croise(int a0, int a1, int b0, int b1) { return a0 < b1 && b0 < a1; 
 static void assert_vue_tient(const memlcd_cave_vue_t *v, const char *quoi)
 {
     TEST_ASSERT(v->n <= MEMLCD_CAVE_LIGNES, quoi);
-    struct { int x0, y0, x1, y1; } p[8];
+    struct { int x0, y0, x1, y1; } p[10];
     int np = 0;
     if (v->logo)    { p[np].x0 = v->logo_x; p[np].y0 = v->logo_y; p[np].x1 = v->logo_x + v->logo; p[np].y1 = v->logo_y + v->logo; np++; }
     if (v->cadenas) { p[np].x0 = v->cadenas_x; p[np].y0 = v->cadenas_y; p[np].x1 = v->cadenas_x + 24; p[np].y1 = v->cadenas_y + 28; np++; }
-    if (v->goutte)  { p[np].x0 = v->goutte_x; p[np].y0 = v->goutte_y; p[np].x1 = v->goutte_x + 13; p[np].y1 = v->goutte_y + 16; np++; }
+    int goutte_i = -1;
+    if (v->goutte)  { goutte_i = np; p[np].x0 = v->goutte_x; p[np].y0 = v->goutte_y; p[np].x1 = v->goutte_x + 20; p[np].y1 = v->goutte_y + 26; np++; }
+    if (v->route)   { p[np].x0 = v->route_x; p[np].y0 = v->route_y; p[np].x1 = v->route_x + 20; p[np].y1 = v->route_y + 20; np++; }
     if (v->lien)    { p[np].x0 = v->lien_x; p[np].y0 = v->lien_y; p[np].x1 = v->lien_x + 16; p[np].y1 = v->lien_y + 12; np++; }
+    if (v->caps_lock) { p[np].x0 = v->caps_lock_x; p[np].y0 = v->caps_y; p[np].x1 = v->caps_lock_x + 20; p[np].y1 = v->caps_y + 20; np++; }
+    if (v->caps_word) { p[np].x0 = v->caps_word_x; p[np].y0 = v->caps_y; p[np].x1 = v->caps_word_x + 20; p[np].y1 = v->caps_y + 20; np++; }
     if (v->rule)    { p[np].x0 = 8; p[np].y0 = v->rule_y - 1; p[np].x1 = 61; p[np].y1 = v->rule_y + 2; np++; }
     if (v->eau)     { p[np].x0 = v->eau_x; p[np].y0 = v->eau_y; p[np].x1 = v->eau_x + 44; p[np].y1 = v->eau_y + 14 + 5; np++; }
     for (int i = 0; i < np; i++) {
@@ -132,9 +136,17 @@ static void assert_vue_tient(const memlcd_cave_vue_t *v, const char *quoi)
             if (w && kw && croise(x0, x0 + w, kx0, kx0 + kw) && croise(l->y, l->y + h, k->y, k->y + memlcd_font_pas(k->font)))
                 TEST_ASSERT(0, "two lines overlap");
         }
-        for (int j = 0; j < np; j++)
+        for (int j = 0; j < np; j++) {
+            if (j == goutte_i && l->dedans) {
+                /* the percentage INSIDE the drop: its ink box within the drop */
+                TEST_ASSERT(x0 >= p[j].x0 && x0 + w <= p[j].x1 && l->y + MEMLCD_CAVE_M12_ENCRE_HAUT >= p[j].y0
+                            && l->y + MEMLCD_CAVE_M12_ENCRE_BAS <= p[j].y1, "the reading inside the drop, within it");
+                continue;
+            }
             if (w && croise(x0, x0 + w, p[j].x0, p[j].x1) && croise(l->y, l->y + h, p[j].y0, p[j].y1))
                 TEST_ASSERT(0, "a line overlaps a pictogram");
+        }
+        if (l->dedans) TEST_ASSERT(goutte_i >= 0 && l->font == MEMLCD_F_M12, "a reading inside the drop: M12, with a drop");
     }
     /* A continuation mark (prompt label): left-aligned text after it, the
      * mark inside the box, clear of every line's ink and every pictogram. */
@@ -175,11 +187,12 @@ static bool vue_contient(const memlcd_cave_vue_t *v, const char *s)
     return false;
 }
 
-/* The layer name is the normal screen's hero (plan 2026-09-30, cave): the
- * WIDEST Montserrat of the ladder (32 down to the 12 px floor) that holds
- * the whole name on one line; past the floor, two BALANCED lines
- * ("NAVIG" / "ATION", never "NAVIGATIO" / "N"), never a font under 12 px.
- * (2 lines of 6 UNSCII-width characters with "…" until 2026-09-30.) */
+/* The layer name (Mae 2026-09-30: "big but not very important — it can be
+ * SMALL as long as it stays readable"): ONE modest fixed size,
+ * MEMLCD_CAVE_NOM_F (Montserrat 14), on one line when it fits, else two
+ * BALANCED lines at that same size ("NAVIG" / "ATION", never "NAVIGATIO" /
+ * "N" — NAVIGATION is 78 px even at the 12 px floor, 66 available), never a
+ * font under 12 px. (The widest of a 32..12 ladder until 2026-09-30.) */
 static void test_nom_couche(void)
 {
     memlcd_cave_vue_t v;
@@ -190,20 +203,21 @@ static void test_nom_couche(void)
     assert_vue_tient(&v, "BASE fits");
     int i = vue_cherche(&v, "BASE");
     TEST_ASSERT(i >= 0, "BASE on screen, whole, on one line");
-    /* the widest that fits 66 px: M24 is 67 px (kerned), M20 55 */
-    TEST_ASSERT(i >= 0 && v.l[i].font == MEMLCD_F_M20, "BASE in Montserrat 20, the widest that fits");
+    TEST_ASSERT_EQ(MEMLCD_CAVE_NOM_F, MEMLCD_F_M14, "the layer name's one size: Montserrat 14");
+    TEST_ASSERT(i >= 0 && v.l[i].font == MEMLCD_CAVE_NOM_F, "BASE at the fixed size, not the widest that fits");
 
     strcpy(m.nom, "NAVIGATION");
     memlcd_cave_vue(&m, 80, &v);
     assert_vue_tient(&v, "NAVIGATION fits");
     int a = vue_cherche(&v, "NAVIG"), b = vue_cherche(&v, "ATION");
     TEST_ASSERT(a >= 0 && b == a + 1, "NAVIGATION: NAVIG / ATION, balanced");
-    TEST_ASSERT(a >= 0 && v.l[a].font == MEMLCD_F_M12 && v.l[b].font == MEMLCD_F_M12, "... at the 12 px floor, never under");
+    TEST_ASSERT(a >= 0 && v.l[a].font == MEMLCD_CAVE_NOM_F && v.l[b].font == MEMLCD_CAVE_NOM_F, "... at the same fixed size");
     TEST_ASSERT(vue_cherche(&v, "N") < 0, "never a stranded letter");
 
     strcpy(m.nom, "NAV");
     memlcd_cave_vue(&m, 80, &v);
-    TEST_ASSERT(vue_cherche(&v, "NAV") >= 0, "a short name, whole");
+    int c = vue_cherche(&v, "NAV");
+    TEST_ASSERT(c >= 0 && v.l[c].font == MEMLCD_CAVE_NOM_F, "a short name, whole, at the fixed size (not larger)");
     m.nom[0] = '\0';
     memlcd_cave_vue(&m, 80, &v);
     assert_vue_tient(&v, "empty name: still a valid screen");
@@ -270,52 +284,158 @@ static void test_etat_coffre(void)
         m.coffre_mode_state = CHEST_MODE_ARRIVED; m.coffre_mode_active = modes[i]; m.coffre_mode_wanted = modes[i];
         memlcd_cave_vue(&m, 80, &v);
         assert_vue_tient(&v, "every mode + NO CARD + every flag fits");
-        TEST_ASSERT(vue_cherche(&v, "NO CARD") >= 0 && vue_contient(&v, "CAPS") && vue_contient(&v, "L3"), "nothing dropped");
+        TEST_ASSERT(vue_cherche(&v, "NO CARD") >= 0 && v.caps_lock && v.caps_word && vue_contient(&v, "L3"), "nothing dropped");
     }
     TEST_ASSERT(MEMLCD_CAVE_CADENAS_W >= 24 && MEMLCD_CAVE_CADENAS_H >= 28, "a BIG padlock (Mae: 24 x 28 or more)");
 }
 
-/* The top status of the normal screen: route in words ("USB" / "RADIO"),
- * "SEEN" on its own line when the dongle acks, the water drop with the
- * percentage beside it (not volts), "+" charging, "FULL" charged, "?" when
- * unknown, the TRRS link pictogram in place of the charge marker, the drop
- * outlined 2 px when the battery is LOW. */
+/* The status band (settled 2026-09-30, spec "Status icons"): ONE row under
+ * the logo — the large water drop (20 x 26), the route ICON beside it (the
+ * USB plug; radio waves: 3 + a filled dot when the dongle has seen us, 2 + a
+ * hollow dot when not) and the TRRS ⇆ beside that while the 5 V is closed.
+ * No words ("USB", "RADIO", "SEEN" are gone). The percentage only when LOW
+ * (<= MEMLCD_CAVE_PCT_BAS) and INSIDE the drop — otherwise the water level
+ * alone; "?" inside an empty drop when unknown; charging (USB) = a "+" in the
+ * drop instead of any number; FULL (USB) = the drop filled to the tip, no
+ * mark; the outline 2 px when the battery is LOW. */
+static bool que_des_chiffres(const char *t)
+{
+    if (!*t) return false;
+    for (; *t; t++) if (*t < '0' || *t > '9') return false;
+    return true;
+}
+static int vue_chiffres(const memlcd_cave_vue_t *v)   /* the line holding digits alone, -1 if none */
+{
+    for (uint8_t i = 0; i < v->n; i++) if (que_des_chiffres(v->l[i].text)) return i;
+    return -1;
+}
 static void test_statut_haut(void)
 {
     memlcd_cave_vue_t v;
     memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE, .batt_local_dv = 40, .nom = "BASE" };
     memlcd_cave_vue(&m, 87, &v);
-    TEST_ASSERT(vue_cherche(&v, "USB") >= 0 && vue_cherche(&v, "RADIO") < 0 && vue_cherche(&v, "SEEN") < 0, "USB, no SEEN");
+    TEST_ASSERT(!vue_contient(&v, "USB") && !vue_contient(&v, "RADIO") && !vue_contient(&v, "SEEN"), "no route words");
+    TEST_ASSERT_EQ(v.route, MEMLCD_ICONE_USB, "USB: the plug icon");
     TEST_ASSERT(v.logo == MEMLCD_CAVE_LOGO_S, "the 28 px corner logo");
-    int p = vue_cherche(&v, "87%");
-    TEST_ASSERT(p >= 0 && v.goutte && v.goutte_pct == 87 && !v.goutte_low, "the drop at 87 %, the percentage beside it");
-    TEST_ASSERT(p >= 0 && v.l[p].left && v.l[p].x >= v.goutte_x + MEMLCD_CAVE_GOUTTE_W, "... to the right of the drop");
+    TEST_ASSERT(v.goutte && v.goutte_pct == 87 && !v.goutte_low && !v.goutte_plus, "the drop at 87 %");
+    TEST_ASSERT(vue_chiffres(&v) < 0 && !vue_contient(&v, "%"), "87 %: NO number, the water level alone");
     TEST_ASSERT(!vue_contient(&v, "V"), "no volts anywhere");
-    assert_vue_tient(&v, "USB top fits");
+    /* one band: the route beside the drop, within its height, under the logo */
+    TEST_ASSERT(v.goutte_y >= v.logo_y + v.logo, "the band under the logo");
+    TEST_ASSERT(v.route_x >= v.goutte_x + MEMLCD_CAVE_GOUTTE_W + 2, "the route icon beside the drop, >= 2 px apart");
+    TEST_ASSERT(v.route_y >= v.goutte_y && v.route_y + MEMLCD_CAVE_ICONE_H <= v.goutte_y + MEMLCD_CAVE_GOUTTE_H,
+                "... on the drop's row");
+    assert_vue_tient(&v, "USB band fits");
 
-    m.route_rf = 1; m.dongle_vu = 1; m.batt_niveau = 1;
-    memlcd_cave_vue(&m, 12, &v);
-    int r = vue_cherche(&v, "RADIO"), s = vue_cherche(&v, "SEEN");
-    TEST_ASSERT(r >= 0 && s >= 0 && v.l[s].y > v.l[r].y, "RADIO, then SEEN on its own line");
-    TEST_ASSERT(v.goutte_low && v.goutte_pct == 12, "LOW: the thick outline");
+    m.route_rf = 1; m.dongle_vu = 1;
+    memlcd_cave_vue(&m, 87, &v);
+    TEST_ASSERT_EQ(v.route, MEMLCD_ICONE_RADIO_VU, "radio, dongle seen: 3 waves + filled dot");
+    m.dongle_vu = 0;
+    memlcd_cave_vue(&m, 87, &v);
+    TEST_ASSERT_EQ(v.route, MEMLCD_ICONE_RADIO_SEUL, "radio, not seen: 2 waves + hollow dot");
 
-    m.batt_local_chg = 1;
+    /* Low: the digits inside the drop, in its dry part — both outlines. */
+    static const uint8_t bas[] = { 15, 10, 5, 0 };
+    for (size_t k = 0; k < sizeof bas; k++)
+        for (int low = 0; low < 2; low++) {
+            m.batt_niveau = (uint8_t)low;
+            memlcd_cave_vue(&m, bas[k], &v);
+            char t[4]; snprintf(t, sizeof t, "%u", bas[k]);
+            int i = vue_cherche(&v, t);
+            TEST_ASSERT(i >= 0 && v.l[i].dedans, "low: the percentage, inside the drop");
+            if (i >= 0) {
+                int w = memlcd_text_width(v.l[i].font, t);
+                TEST_ASSERT(memlcd_goutte_texte_ok(v.goutte_pct, v.goutte_low, (int)(ink_x0(&v.l[i]) - v.goutte_x), w,
+                                                   (int)(v.l[i].y - v.goutte_y)), "... in its dry part");
+            }
+            TEST_ASSERT(!vue_contient(&v, "%"), "... no % sign");
+            TEST_ASSERT(v.goutte_low == low, "LOW: the thick outline, the number too");
+            assert_vue_tient(&v, "low band fits");
+        }
+    m.batt_niveau = 0;
+    /* The rule itself, apart from the drop's room (which alone would hide
+     * most numbers above 15 %): a number for 0..15, none from 16 up. */
+    for (int p = 0; p <= 100; p++) {
+        memlcd_cave_jauge_t j;
+        memlcd_cave_jauge(&m, (uint8_t)p, &j);
+        TEST_ASSERT((j.texte[0] != 0) == (p <= MEMLCD_CAVE_PCT_BAS) && j.remplie == p && !j.plus,
+                    "the percentage inside only at <= 15 %, the water at the percentage");
+    }
+    static const uint8_t hauts[] = { 20, 30, 60, 95, 100 };
+    for (size_t k = 0; k < sizeof hauts; k++) {
+        memlcd_cave_vue(&m, hauts[k], &v);
+        TEST_ASSERT(vue_chiffres(&v) < 0, "above the threshold: no number at all");
+    }
+
+    /* Charging (USB power only, batt_sense's rule): a "+" in the drop, the
+     * level shown by the water, no number even when low. */
+    m.route_rf = 0; m.batt_local_chg = 1;
     memlcd_cave_vue(&m, 50, &v);
-    TEST_ASSERT(vue_cherche(&v, "50%+") >= 0, "charging: +");
+    TEST_ASSERT(v.goutte_plus && v.goutte_pct == 50 && !vue_contient(&v, "+") && vue_chiffres(&v) < 0, "charging: + in the drop");
+    memlcd_cave_vue(&m, 10, &v);
+    TEST_ASSERT(v.goutte_plus && vue_chiffres(&v) < 0, "charging and low: the +, not the number");
+    /* FULL: the drop full to the tip, no mark, no word. */
     m.batt_local_chg = 2;
+    memlcd_cave_vue(&m, 95, &v);
+    TEST_ASSERT(v.goutte_pct == 100 && !v.goutte_plus && !vue_contient(&v, "FULL") && vue_chiffres(&v) < 0,
+                "charged: a full drop, nothing else");
+    /* The TRRS link: its ⇆ beside the route icon, the charge mark kept. */
+    m.batt_local_chg = 1; m.lien_5v = 1;
+    memlcd_cave_vue(&m, 60, &v);
+    TEST_ASSERT(v.lien && v.goutte_plus, "TRRS 5 V: the link icon, and the + stays in the drop");
+    TEST_ASSERT(v.lien_x >= v.route_x + MEMLCD_CAVE_ICONE_W + 2 && v.lien_y >= v.goutte_y
+                && v.lien_y + MEMLCD_CAVE_LIEN_H <= v.goutte_y + MEMLCD_CAVE_GOUTTE_H, "... beside the route, on the band");
+    assert_vue_tient(&v, "drop + route + link fits");
+    /* Unknown: "?" inside an empty drop, never a number. */
+    m.lien_5v = 0; m.batt_local_chg = 0; m.batt_local_dv = 0xFF;
     memlcd_cave_vue(&m, 100, &v);
-    TEST_ASSERT(vue_cherche(&v, "FULL") >= 0, "charged: FULL, a word");
-    m.lien_5v = 1;
-    memlcd_cave_vue(&m, 100, &v);
-    TEST_ASSERT(v.lien && vue_cherche(&v, "100%") >= 0, "TRRS 5 V: the link pictogram in place of the charge marker");
-    assert_vue_tient(&v, "100% + link fits");
-    m.lien_5v = 0; m.batt_local_dv = 0xFF;
-    memlcd_cave_vue(&m, 100, &v);
-    TEST_ASSERT(vue_cherche(&v, "?") >= 0 && v.goutte_pct == 0, "unknown voltage: ?, an empty drop, never 0 V");
-    m.batt_local_dv = 40;
+    int q = vue_cherche(&v, "?");
+    TEST_ASSERT(q >= 0 && v.l[q].dedans && v.goutte_pct == 0 && !v.goutte_plus, "unknown voltage: ? inside an empty drop, never 0 V");
+    m.batt_local_dv = 40; m.batt_local_chg = 1;
     memlcd_cave_vue(&m, 0xFF, &v);
-    TEST_ASSERT(vue_cherche(&v, "?") >= 0 && v.goutte_pct == 0 && vue_cherche(&v, "255%") < 0,
-                "unknown DISPLAYED percentage (batt_sense_pct 0xFF): ?, never 255%");
+    q = vue_cherche(&v, "?");
+    TEST_ASSERT(q >= 0 && v.l[q].dedans && v.goutte_pct == 0 && !vue_contient(&v, "255"),
+                "unknown DISPLAYED percentage (batt_sense_pct 0xFF): ?, never 255, even charging");
+}
+
+/* Caps Lock and Caps Word are ICONS (Mae 2026-09-30), not "CAPS" / "CW":
+ * the hollow arrow over a bar for Caps Lock, the same arrow alone for Caps
+ * Word, side by side under the layer name; the one-shot flags stay text on
+ * their own line, and with neither armed there is no flags line at all. */
+static void test_caps_icones(void)
+{
+    memlcd_cave_vue_t v;
+    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE, .batt_local_dv = 40, .nom = "BASE" };
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(!v.caps_lock && !v.caps_word, "neither: no icon");
+    int h = vue_cherche(&v, "BASE");
+    TEST_ASSERT(h == (int)v.n - 1, "neither and nothing armed: no flags line, the name is the last line");
+
+    m.caps_lock = 1;
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(v.caps_lock && !v.caps_word, "Caps Lock: its icon alone");
+    TEST_ASSERT(!vue_contient(&v, "CAPS") && !vue_contient(&v, "CW"), "... not the word");
+    h = vue_cherche(&v, "BASE");
+    TEST_ASSERT(h >= 0 && v.caps_y >= v.l[h].y + memlcd_font_pas(v.l[h].font) + 2, "... under the layer name, >= 2 px");
+    TEST_ASSERT(h == (int)v.n - 1, "... and no flags line");
+    assert_vue_tient(&v, "caps lock fits");
+
+    m.caps_lock = 0; m.caps_word = 1;
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(!v.caps_lock && v.caps_word, "Caps Word: its icon alone");
+    TEST_ASSERT(!vue_contient(&v, "CW"), "... not the word");
+
+    m.caps_lock = 1;
+    memlcd_cave_vue(&m, 80, &v);
+    TEST_ASSERT(v.caps_lock && v.caps_word && v.caps_word_x >= v.caps_lock_x + MEMLCD_CAVE_ICONE_W + 2, "both: side by side");
+    assert_vue_tient(&v, "both caps fit");
+
+    m.osm = 0x02; m.osl = 3;
+    memlcd_cave_vue(&m, 80, &v);
+    int s = vue_cherche(&v, "S L3");
+    TEST_ASSERT(s >= 0 && v.l[s].y >= v.caps_y + MEMLCD_CAVE_ICONE_H, "one-shots stay text, under the icons");
+    TEST_ASSERT(!vue_contient(&v, "CAPS"), "never the words with them");
+    assert_vue_tient(&v, "caps icons + one-shots fit");
 }
 
 /* 34 characters, CHEST_LABEL_MAX — the alphabet (26) plus "ABCDEFGH" (8). */
@@ -549,15 +669,32 @@ static void test_vue_browse(void)
     TEST_ASSERT(vue_cherche(&v, "3/12") >= 0, "3/12, 1-based");
     vue_texte(&v, txt, sizeof txt);
     TEST_ASSERT(strcmp(txt, "OVH:PRO") == 0, "the name, whole");
-    TEST_ASSERT(vue_cherche(&v, "USB") >= 0 && v.goutte, "the top status stays");
+    TEST_ASSERT(v.route && v.goutte, "the status band stays");
     int h = vue_cherche(&v, "BASE");
-    TEST_ASSERT(h >= 0 && v.l[h].font <= MEMLCD_F_M16, "the layer name, capped at 16 px");
+    TEST_ASSERT(h >= 0 && v.l[h].font == MEMLCD_CAVE_NOM_F, "the layer name, at its fixed size");
     TEST_ASSERT(!vue_contient(&v, "NO TIME"), "time set: no NO TIME");
 
     m.coffre &= (uint8_t)~CHEST_STATE_TIME;
     memlcd_cave_vue(&m, 80, &v);
     assert_vue_tient(&v, "browse + NO TIME fits");
     TEST_ASSERT(vue_cherche(&v, "NO TIME") >= 0, "TIME clear: NO TIME");
+
+    /* A name on TWO lines stays whole, the logo kept, whatever the band
+     * shows: OVH:PERSO is 74 px at 12 px (the V2 mockup had cut it to
+     * "OVH:~"). With NO TIME, radio + link, the padlock, low battery. */
+    m.route_rf = 1; m.dongle_vu = 1; m.lien_5v = 1; m.batt_niveau = 1;
+    static const char *const deux[] = { "OVH:PERSO", "GITHUB:ALICE.M", "Google:mae@x.fr" };
+    for (size_t k = 0; k < sizeof deux / sizeof deux[0]; k++)
+        for (int pct = 0; pct <= 100; pct += 5) {
+            strcpy(m.coffre_nom, deux[k]);
+            memlcd_cave_vue(&m, (uint8_t)pct, &v);
+            assert_vue_tient(&v, "two-line name + NO TIME fits");
+            vue_texte(&v, txt, sizeof txt);
+            TEST_ASSERT(strcmp(txt, deux[k]) == 0 && v.txt_n == 2, "the browsed name on two lines, whole");
+            TEST_ASSERT(v.logo && v.cadenas && v.goutte && v.route && v.lien, "... with the logo, padlock and band kept");
+            TEST_ASSERT(vue_cherche(&v, "NO TIME") >= 0, "... and NO TIME");
+        }
+    m.route_rf = 0; m.dongle_vu = 0; m.lien_5v = 0; m.batt_niveau = 0;
 
     /* A name too long for the room: cut with ~, still inside, NO TIME kept. */
     strcpy(m.coffre_nom, LABEL34);
@@ -792,6 +929,7 @@ void test_memlcd_model(void)
     test_nom_couche();
     test_etat_coffre();
     test_statut_haut();
+    test_caps_icones();
     test_vue_prompt();
     test_vue_code();
     test_vue_browse();
