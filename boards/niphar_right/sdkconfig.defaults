@@ -101,5 +101,7 @@ CONFIG_ESP_SLEEP_POWER_DOWN_FLASH=y
 # the half to sleep key down. The CRITICAL battery level already used 5 s.
 CONFIG_KASE_VEILLE_LEGERE_S=5
 
-# Icon column of the memory-LCD (2026-09-26): route symbol ~30 px wide, the 28 overflows the 32 px column
-CONFIG_LV_FONT_MONTSERRAT_24=y
+# The memory-LCD is the cave since 2026-09-30 (memlcd_cave.h, the right's view):
+# Montserrat 12 for the low reading inside the drop (the 12 px text floor),
+# 14 for zZ (root defaults). The icon column's Montserrat 24 is gone.
+CONFIG_LV_FONT_MONTSERRAT_12=y

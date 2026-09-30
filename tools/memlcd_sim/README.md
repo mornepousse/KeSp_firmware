@@ -1,4 +1,4 @@
-# memlcd_sim — host renderer of the left half's screen
+# memlcd_sim — host renderer of the halves' screens
 
 The Niphargus halves carry a Sharp LS011B7DH03 memory LCD: 68 × 160 in
 portrait, 1 bit, reflective. This tool renders the left half's screen on the
@@ -70,6 +70,12 @@ calls them:
   label on the UNSCII last resort, a 34-character digit-heavy label behind
   its continuation marks, everything shown at once).
 
+- `out/cave_right/`: the RIGHT half (2026-09-30), the same engine compiled
+  with `-DMEMLCD_CAVE_DROITE=1` exactly as `main/CMakeLists.txt` compiles it
+  for `niphar_right` (`main_right.c`): USB 100 %, radio seen 60 %, radio
+  unseen 30 %, LOW 10 % + TRRS, charging, FULL, unknown, CRITICAL 5 %, sleep,
+  one PNG each and a contact sheet.
+
 ## Files
 
 | file | role |
@@ -78,13 +84,15 @@ calls them:
 | `common.c/.h` | the thresholded 68 × 160 panel display, PNG and contact-sheet output |
 | `states.c/.h` | the 10 reference states + 4 security states, as `memlcd_model_t` values |
 | `main_cave.c` | the renderer (firmware engine) |
+| `main_right.c` | the right half's renderer (the same engine, `MEMLCD_CAVE_DROITE`) |
 | `check_widths.c`, `check_glyph_ink.c`, `test_safe_wrap.c` | the three gates |
 | `stb_image_write.h` | PNG writer (public domain, Sean Barrett) |
 
 The engine, its pure view and its assets live in the firmware:
 `main/display/memlcd/memlcd_cave.{c,h}`, `memlcd_safe_wrap.h`,
 `memlcd_assets_cave.c` (`scripts/gen_memlcd_cave_assets.py`), the logos
-`main/display/assets/img_niphargus_{28,56}.c` (`scripts/gen_logo_memlcd.sh`).
+`main/display/assets/img_niphargus_{28,56}.c` (`scripts/gen_logo_memlcd.sh`; the
+right shows the 56).
 The design rounds (light palette, the other gauges and directions) stayed in
 the session that produced them; the chosen design is what the firmware draws.
 

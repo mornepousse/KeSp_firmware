@@ -11,12 +11,23 @@
  * Dark: pale ink on black paper. memlcd_backend.c's flush thresholds at
  * lv_color_brightness < 128 = ink (a black panel pixel): the black paper IS
  * the panel's ink, the white text is the reflective background showing
- * through — the image reads as pale lines in a dark cave. */
+ * through — the image reads as pale lines in a dark cave.
+ *
+ * The RIGHT half draws the same cave (2026-09-30): compiled with
+ * MEMLCD_CAVE_DROITE=1 (main/CMakeLists.txt, tools/memlcd_sim), this file
+ * builds only what the right shows — rock, large logo, drop, route icon,
+ * ⇆, two fonts — and draws memlcd_cave_vue_droite: no chest, no prompt, no
+ * code path. Every right-only difference is under #if MEMLCD_CAVE_DROITE, so
+ * the left's object is unchanged by it. */
 #include "memlcd_cave.h"
 #include "lvgl.h"
+#ifndef MEMLCD_CAVE_DROITE
+#define MEMLCD_CAVE_DROITE 0
+#endif
 
 LV_FONT_DECLARE(lv_font_montserrat_12);
 LV_FONT_DECLARE(lv_font_montserrat_14);
+#if !MEMLCD_CAVE_DROITE
 LV_FONT_DECLARE(lv_font_montserrat_16);
 LV_FONT_DECLARE(lv_font_montserrat_18);
 LV_FONT_DECLARE(lv_font_montserrat_20);
@@ -24,13 +35,26 @@ LV_FONT_DECLARE(lv_font_montserrat_24);
 LV_FONT_DECLARE(lv_font_montserrat_28);
 LV_FONT_DECLARE(lv_font_montserrat_32);
 LV_FONT_DECLARE(lv_font_unscii_8);
+#endif
 
+#if MEMLCD_CAVE_DROITE
+extern const lv_img_dsc_t img_niphargus_56;
+extern const lv_img_dsc_t memlcd_img_rock_top, memlcd_img_rock_bottom, memlcd_img_lien;
+#else
 extern const lv_img_dsc_t img_niphargus_28, img_niphargus_56;
 extern const lv_img_dsc_t memlcd_img_rock_top, memlcd_img_rock_bottom, memlcd_img_dither_wide;
 extern const lv_img_dsc_t memlcd_img_cadenas, memlcd_img_lien;
+#endif
 
 /* memlcd_font_t -> the LVGL font. Exported: tools/memlcd_sim's glyph-ink
- * gate checks every font of THIS table through the panel's threshold. */
+ * gate checks every font of THIS table through the panel's threshold. The
+ * right's view only ever asks for 12 (the drop's reading) and 14 (zZ): its
+ * table holds those two, and draw falls back to 12 for any other. */
+#if MEMLCD_CAVE_DROITE
+const lv_font_t *const memlcd_cave_fonts[MEMLCD_F_N] = {
+    [MEMLCD_F_M12] = &lv_font_montserrat_12, [MEMLCD_F_M14] = &lv_font_montserrat_14,
+};
+#else
 const lv_font_t *const memlcd_cave_fonts[MEMLCD_F_N] = {
     [MEMLCD_F_M12] = &lv_font_montserrat_12, [MEMLCD_F_M14] = &lv_font_montserrat_14,
     [MEMLCD_F_M16] = &lv_font_montserrat_16, [MEMLCD_F_M18] = &lv_font_montserrat_18,
@@ -38,8 +62,19 @@ const lv_font_t *const memlcd_cave_fonts[MEMLCD_F_N] = {
     [MEMLCD_F_M28] = &lv_font_montserrat_28, [MEMLCD_F_M32] = &lv_font_montserrat_32,
     [MEMLCD_F_U8]  = &lv_font_unscii_8,
 };
+#endif
 _Static_assert(MEMLCD_F_U8 + 1 == MEMLCD_F_N, "memlcd_cave_fonts covers every memlcd_font_t");
 
+#if MEMLCD_CAVE_DROITE
+/* The right: the drop's reading and zZ are its only lines. */
+#define CAVE_LIGNES 2
+static struct {
+    lv_obj_t *rock_top, *rock_bottom;
+    lv_obj_t *logo_l, *lien, *goutte, *route;
+    lv_obj_t *l[CAVE_LIGNES];
+} s;
+#else
+#define CAVE_LIGNES MEMLCD_CAVE_LIGNES
 static struct {
     lv_obj_t *rock_top, *rock_bottom;
     lv_obj_t *logo_s, *logo_l, *cadenas, *lien, *goutte, *route, *caps_lock, *caps_word;
@@ -48,6 +83,7 @@ static struct {
     lv_obj_t *l[MEMLCD_CAVE_LIGNES];
     lv_obj_t *marque[MEMLCD_CAVE_MARQUES];     /* continuation marks, used in line order */
 } s;
+#endif
 
 static uint8_t s_goutte_map[MEMLCD_CAVE_GOUTTE_H * MEMLCD_CAVE_GOUTTE_STRIDE];
 static lv_img_dsc_t s_goutte_img = {
@@ -58,13 +94,20 @@ static lv_img_dsc_t s_goutte_img = {
 /* The 20 x 20 icons (memlcd_icone_px): the route one redrawn when it
  * changes, Caps Lock / Caps Word drawn once at the build. */
 #define ICONE_OCTETS (MEMLCD_CAVE_ICONE_H * MEMLCD_CAVE_ICONE_STRIDE)
+#if MEMLCD_CAVE_DROITE
+static uint8_t s_route_map[ICONE_OCTETS];
+#else
 static uint8_t s_route_map[ICONE_OCTETS], s_caps_lock_map[ICONE_OCTETS], s_caps_word_map[ICONE_OCTETS];
+#endif
 #define ICONE_DSC(map) { .header.cf = LV_IMG_CF_ALPHA_1BIT, .header.always_zero = 0, \
                          .header.w = MEMLCD_CAVE_ICONE_W, .header.h = MEMLCD_CAVE_ICONE_H, \
                          .data_size = ICONE_OCTETS, .data = (map) }
 static lv_img_dsc_t s_route_img = ICONE_DSC(s_route_map);
+#if !MEMLCD_CAVE_DROITE
 static const lv_img_dsc_t s_caps_lock_img = ICONE_DSC(s_caps_lock_map), s_caps_word_img = ICONE_DSC(s_caps_word_map);
+#endif
 static uint8_t s_route_dessinee;               /* the memlcd_icone_t in s_route_map, 0 = none yet */
+#if !MEMLCD_CAVE_DROITE
 /* The continuation mark "↳": one 1-bit bitmap (memlcd_cave.h) for every
  * mark object — the fonts have no such glyph. */
 static const lv_img_dsc_t s_marque_img = {
@@ -73,8 +116,11 @@ static const lv_img_dsc_t s_marque_img = {
     .data_size = sizeof memlcd_cave_marque_bits, .data = memlcd_cave_marque_bits,
 };
 _Static_assert(MEMLCD_CAVE_MARQUE_W <= 8, "the mark's bitmap is one byte a row");
+#endif
 static memlcd_cave_vue_t s_vue;                 /* ~600 bytes: static, not on the LVGL task's stack */
+#if !MEMLCD_CAVE_DROITE
 static lv_point_t s_rule_pts[4], s_wave_pts[7];
+#endif
 
 #define INK   lv_color_white()
 #define PAPER lv_color_black()
@@ -88,6 +134,7 @@ static lv_obj_t *image(lv_obj_t *scr, const lv_img_dsc_t *src)
     lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
     return img;
 }
+#if !MEMLCD_CAVE_DROITE
 static lv_obj_t *boite(lv_obj_t *scr, bool plein)
 {
     lv_obj_t *o = lv_obj_create(scr);
@@ -108,6 +155,7 @@ static lv_obj_t *trait(lv_obj_t *scr, lv_coord_t epaisseur)
     lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
     return l;
 }
+#endif
 
 void memlcd_cave_build(lv_obj_t *scr)
 {
@@ -120,6 +168,13 @@ void memlcd_cave_build(lv_obj_t *scr)
 
     s.rock_top = image(scr, &memlcd_img_rock_top);
     s.rock_bottom = image(scr, &memlcd_img_rock_bottom);
+#if MEMLCD_CAVE_DROITE
+    s.logo_l = image(scr, &img_niphargus_56);
+    s.lien = image(scr, &memlcd_img_lien);
+    s.goutte = image(scr, &s_goutte_img);
+    s_route_dessinee = 0;
+    s.route = image(scr, &s_route_img);
+#else
     s.logo_s = image(scr, &img_niphargus_28);
     s.logo_l = image(scr, &img_niphargus_56);
     s.cadenas = image(scr, &memlcd_img_cadenas);
@@ -140,7 +195,8 @@ void memlcd_cave_build(lv_obj_t *scr)
     lv_obj_set_style_radius(s.eau_fill, MEMLCD_CAVE_EAU_H / 3, 0);
     s.eau_wave = trait(scr, 2);
     s.eau_ombre = image(scr, &memlcd_img_dither_wide);
-    for (int i = 0; i < MEMLCD_CAVE_LIGNES; i++) {
+#endif
+    for (int i = 0; i < CAVE_LIGNES; i++) {
         lv_obj_t *l = lv_label_create(scr);
         lv_obj_set_style_text_color(l, INK, 0);
         lv_label_set_long_mode(l, LV_LABEL_LONG_CLIP);
@@ -148,7 +204,9 @@ void memlcd_cave_build(lv_obj_t *scr)
         lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
         s.l[i] = l;
     }
+#if !MEMLCD_CAVE_DROITE
     for (int i = 0; i < MEMLCD_CAVE_MARQUES; i++) s.marque[i] = image(scr, &s_marque_img);
+#endif
 }
 
 static void montre(lv_obj_t *o, bool oui, lv_coord_t x, lv_coord_t y)
@@ -158,6 +216,7 @@ static void montre(lv_obj_t *o, bool oui, lv_coord_t x, lv_coord_t y)
     lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
 }
 
+#if !MEMLCD_CAVE_DROITE
 /* The countdown's water, draining from the right: fill from the left over
  * pct % of the vessel, a 7-point wavy surface at the water's edge. */
 static void eau(const memlcd_cave_vue_t *v)
@@ -183,19 +242,30 @@ static void eau(const memlcd_cave_vue_t *v)
     lv_obj_set_pos(s.eau_wave, 0, 0);
     lv_obj_clear_flag(s.eau_wave, LV_OBJ_FLAG_HIDDEN);
 }
+#endif
 
 void memlcd_cave_draw(const memlcd_model_t *m, uint8_t batt_pct)
 {
     /* built, and not cleaned since (show_dfu cleans the screen) */
+#if MEMLCD_CAVE_DROITE
+    if (!s.l[0] || !lv_obj_is_valid(s.l[0]) || !lv_obj_is_valid(s.route)) return;
+    memlcd_cave_vue_t *v = &s_vue;
+    memlcd_cave_vue_droite(m, batt_pct, v);
+#else
     if (!s.l[0] || !lv_obj_is_valid(s.l[0]) || !lv_obj_is_valid(s.eau_wave)) return;
     memlcd_cave_vue_t *v = &s_vue;
     memlcd_cave_vue(m, batt_pct, v);
+#endif
 
     montre(s.rock_top, true, 0, v->rock_thin ? MEMLCD_CAVE_ROCK_TOP_THIN_Y : 0);
     montre(s.rock_bottom, true, 0, v->rock_thin ? MEMLCD_CAVE_ROCK_BOT_THIN_Y : MEMLCD_H - MEMLCD_CAVE_ROCK_BOT_H);
+#if !MEMLCD_CAVE_DROITE
     montre(s.logo_s, v->logo == MEMLCD_CAVE_LOGO_S, v->logo_x, v->logo_y);
+#endif
     montre(s.logo_l, v->logo == MEMLCD_CAVE_LOGO_L, v->logo_x, v->logo_y);
+#if !MEMLCD_CAVE_DROITE
     montre(s.cadenas, v->cadenas, v->cadenas_x, v->cadenas_y);
+#endif
     montre(s.lien, v->lien, v->lien_x, v->lien_y);
     if (v->goutte) {
         memlcd_goutte_bitmap(v->goutte_pct, v->goutte_low, v->goutte_plus, s_goutte_map);
@@ -212,6 +282,19 @@ void memlcd_cave_draw(const memlcd_model_t *m, uint8_t batt_pct)
         lv_obj_invalidate(s.route);
     }
     montre(s.route, v->route != 0, v->route_x, v->route_y);
+#if MEMLCD_CAVE_DROITE
+    for (int i = 0; i < CAVE_LIGNES; i++) {
+        lv_obj_t *l = s.l[i];
+        if (i >= v->n) { lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN); continue; }
+        const memlcd_cave_ligne_t *li = &v->l[i];
+        const lv_font_t *f = li->font < MEMLCD_F_N ? memlcd_cave_fonts[li->font] : NULL;
+        lv_obj_set_style_text_font(l, f ? f : &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_width(l, li->w);
+        lv_label_set_text(l, li->text);
+        montre(l, true, li->x, li->y);
+    }
+#else
     montre(s.caps_lock, v->caps_lock, v->caps_lock_x, v->caps_y);
     montre(s.caps_word, v->caps_word, v->caps_word_x, v->caps_y);
     if (v->rule) {
@@ -243,4 +326,5 @@ void memlcd_cave_draw(const memlcd_model_t *m, uint8_t batt_pct)
             montre(s.marque[nm++], true, li->x - MEMLCD_CAVE_MARQUE_PAS, li->y + memlcd_cave_marque_dy(li->font));
     }
     while (nm < MEMLCD_CAVE_MARQUES) montre(s.marque[nm++], false, 0, 0);
+#endif
 }

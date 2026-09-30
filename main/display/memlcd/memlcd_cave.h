@@ -908,6 +908,40 @@ static inline void memlcd_cave_vue(const memlcd_model_t *m, uint8_t batt_pct, me
     }
 }
 
+/* ── The RIGHT half (2026-09-30, Mae: "the same style as the left") ────
+ * A scanner: no keymap, no chest, no layer name. Its screen is the cave's
+ * rock edges, the SAME status band as the left (memlcd_cave_bande: the drop,
+ * the route icon, the ⇆) at the top of the content box, and the LARGE logo
+ * — the half's identity — centred in the room left under it. Asleep, the
+ * left's image (memlcd_cave_veille). The chest's fields are never read here:
+ * no prompt, code or browser can reach the right's screen (compiled with
+ * MEMLCD_CAVE_DROITE, memlcd_cave.c).
+ *
+ * The route from the right's own inputs: its USB up (usb_presence_cable —
+ * the host or charger it is plugged into; its keys still travel by radio) ->
+ * the plug; otherwise the radio waves, FILLED when the dongle acknowledges its
+ * frames (half_link_tx_dongle_vu: sticky, drops after 3 unacknowledged sends,
+ * false once fallen back to the left half), HOLLOW when not. On USB the
+ * dongle flag is zeroed: it is not drawn, it must not cost a redraw. */
+static inline void memlcd_droite_route(memlcd_model_t *m, bool usb, bool dongle_vu)
+{
+    m->route_rf = usb ? 0 : 1;
+    m->dongle_vu = (!usb && dongle_vu) ? 1 : 0;
+}
+static inline void memlcd_cave_vue_droite(const memlcd_model_t *m, uint8_t pct, memlcd_cave_vue_t *v)
+{
+    if (m->veille) { memlcd_cave_veille(v); return; }
+    memlcd_cave_debut(v, MEMLCD_CV_NORMAL, false);
+    memlcd_cave_bande(m, pct, v, v->top);
+    const uint8_t y = (uint8_t)(v->top + MEMLCD_CAVE_GOUTTE_H + MEMLCD_CAVE_GAP);
+    v->logo = MEMLCD_CAVE_LOGO_L;
+    v->logo_x = (MEMLCD_W - MEMLCD_CAVE_LOGO_L) / 2;
+    v->logo_y = (uint8_t)(y + (v->bottom - y - MEMLCD_CAVE_LOGO_L) / 2);
+    v->tient = memlcd_cave_tient(v) ? 1 : 0;
+}
+_Static_assert(MEMLCD_CAVE_TOP + MEMLCD_CAVE_GOUTTE_H + MEMLCD_CAVE_GAP + MEMLCD_CAVE_LOGO_L <= MEMLCD_CAVE_BOTTOM,
+               "the right's band and large logo fit the cave");
+
 /* ── The engine (memlcd_cave.c, LVGL) ────────────────────────────────── */
 struct _lv_obj_t;
 void memlcd_cave_build(struct _lv_obj_t *scr);

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Generates main/display/assets/img_niphargus_<SIZE>.c from the Niphargus repo's SVG.
 # Reproducible: Inkscape -> SIZE px PNG (white background) -> threshold 128 -> LV_IMG_CF_ALPHA_1BIT.
-# Usage: gen_logo_memlcd.sh [svg] [size]   (60 = the right half's logo; 28 and
-# 56 = the left's cave, corner and sleep, 2026-09-30; 34 = the left's icon-column
-# layout of 2026-09-26, retired with it)
+# Usage: gen_logo_memlcd.sh [svg] [size]   (28 and 56 = the cave, 2026-09-30:
+# the left's corner logo, and the large logo of the right half and of both
+# sleep screens; 60 = the right's logo until the right became the cave the
+# same day, and 34 = the left's icon-column layout of 2026-09-26, both retired)
 set -euo pipefail
 SVG="${1:-$HOME/Documents/GitHub/Niphargus/images/niphargus_logo.svg}"
-SIZE="${2:-60}"
+SIZE="${2:-56}"
 OUT="$(dirname "$0")/../main/display/assets/img_niphargus_${SIZE}.c"
 TMP="$(mktemp -d)"
 inkscape "$SVG" --export-type=png --export-width="$SIZE" --export-background=white \

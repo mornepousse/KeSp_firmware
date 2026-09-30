@@ -1,6 +1,8 @@
 # Left-half screen redesign — "cave" (design record)
 
-Status: implemented and validated on the panel by Mae (2026-09-30, 8f797a10). Supersedes the layout of chest v3 Task 8
+Status: implemented and validated on the panel by Mae (2026-09-30, 8f797a10); the
+right half in the same style implemented the same day, still to be judged on its
+panel ("Right half" below). Supersedes the layout of chest v3 Task 8
 (commits d9de081b, 0616260b — their mode names and width oracle stay).
 
 ## Why
@@ -8,7 +10,8 @@ Status: implemented and validated on the panel by Mae (2026-09-30, 8f797a10). Su
 Mae, after flashing 0616260b: "pas très beau, il faut revoir complètement
 l'interface". All four complaints: too cluttered, mixed fonts, layout (icon
 column, separators, imbalance), ugly icons. Scope: the whole LEFT screen
-(normal screen + every chest state). The right half is out of scope.
+(normal screen + every chest state). The right half was out of scope at
+first; since 2026-09-30 it is IN scope (see "Right half" below).
 
 ## Panel and tooling
 
@@ -113,6 +116,41 @@ arrow over a bar, Caps Word = the arrow alone) under the layer name, the
 one-shots stay text; the layer name at one modest size, Montserrat 14 (two
 balanced lines when it does not fit; letter spacing −1 cannot rescue
 NAVIGATION: 78 − 9 = 69 px at 12 px, still over 66).
+
+## Right half (2026-09-30)
+
+Mae, once the left was validated on the panel: the right in the same style.
+The right is a scanner — no keymap, no layer name, no chest — so its screen
+is the cave with only what it knows:
+
+- the rock edges (full, never thin: nothing needs the room), the SAME status
+  band as the left at the top of the content box (`memlcd_cave_bande`: the
+  drop with every rule above — percent inside only at <= 15, `+` / FULL
+  only on USB, `?` unknown, thick outline when LOW — the route icon, the
+  TRRS ⇆), and the LARGE 56 px logo centred in the room under it: the logo
+  IS the right's identity (the 60 px asset of the old right screen is
+  retired, the cave's 56 is shared with both sleep screens);
+- the route icon from the right's own inputs (`memlcd_droite_route`): the
+  USB plug while its USB is up (`usb_presence_cable` — the host or charger
+  it is plugged into; its keys still go by radio, the plug says the cable,
+  as on the left); otherwise the waves, FILLED (3 arcs) while the dongle
+  acknowledges its frames — `half_link_tx_dongle_vu`, what the old right
+  screen drew as "▲ dongle seen": sticky, drops after 3 unacknowledged
+  sends, false once fallen back to the left half — HOLLOW (2 arcs) when not;
+- asleep: the left's image, large logo + zZ (`memlcd_cave_veille`): the
+  same backend hook (`memlcd_before_sleep`) drives both halves, so it fits
+  as is.
+
+Implementation: a pure view `memlcd_cave_vue_droite` (`memlcd_cave.h`,
+host-tested `test_vue_droite`: band + logo fit 68 × 160 with >= 2 px gaps
+and the rock edges for every battery / charge / link / route combination,
+the route choice, chest fields ignored); the left's engine `memlcd_cave.c`
+compiled for the right with `MEMLCD_CAVE_DROITE=1` (a per-file definition in
+`main/CMakeLists.txt`) builds only the rock, the large logo, the drop, the
+route, the ⇆ and two labels, with Montserrat 12 and 14 only — no chest,
+prompt, code or browser path is compiled into the right. The left's objects
+(`memlcd_cave.c.obj`, `memlcd_backend.c.obj`) disassemble identically before
+and after. Rendered by `tools/memlcd_sim` (`main_right.c`, `out/cave_right/`).
 
 ## Next
 

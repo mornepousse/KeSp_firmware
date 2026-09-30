@@ -5,8 +5,10 @@
  *           the layer name and its flags; the chest's prompt and code take
  *           the whole screen, its browser the lower part. Every layout
  *           decision is pure and host-tested; this file only calls the engine.
- *   RIGHT : its own screen, unchanged — an icon column (route symbol, ▲ if the
- *           dongle ACKs, gauge + local voltage, ⇆), the 60 px logo, zZ.
+ *   RIGHT : the same cave since 2026-09-30 (memlcd_cave_vue_droite, the engine
+ *           compiled with MEMLCD_CAVE_DROITE): rock edges, the left's status
+ *           band (drop, route icon from its USB and the dongle's ACK, ⇆) and
+ *           the large 56 px logo; asleep, the left's logo + zZ.
  * (No "other half's battery": the user does not want it, and the
  * ACK channel that would have carried it was removed along with it — 2026-09-14.)
  * LVGL renders in 16 bits into a full-screen buffer (full_refresh); the flush
@@ -39,8 +41,8 @@
 #if CONFIG_KASE_BATT_SENSE
 #include "batt_sense.h"
 #endif
+#include "memlcd_cave.h"       /* the cave: both halves */
 #if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-#include "memlcd_cave.h"       /* the left screen */
 #include "keyboard_config.h"   /* current_layout, default_layout_names */
 #include "matrix_scan.h"       /* last_layer */
 #include "key_features.h"      /* caps_word_is_active, osm_peek, osl_get_layer */
@@ -58,6 +60,9 @@
 #if CONFIG_KASE_HALF_LINK_TX
 #include "half_link.h"         /* half_link_tx_dongle_vu */
 #endif
+#if !CONFIG_KASE_DEVICE_ROLE_KEYBOARD
+#include "usb_presence.h"      /* usb_presence_cable: the right's route icon */
+#endif
 #if CONFIG_KASE_CHEST_LINK
 #include "chest_link.h"        /* chest_link_view, CHEST_VIEW_* */
 /* The chest_link.h bits and the memlcd model's MEMLCD_COFFRE_* (memlcd_model.h)
@@ -69,11 +74,6 @@ _Static_assert(CHEST_VIEW_BADVER == MEMLCD_COFFRE_BADVER, "chest_link.h CHEST_VI
 
 static const char *TAG = "memlcd_be";
 LV_FONT_DECLARE(lv_font_montserrat_14);   /* both: DFU */
-#if !CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-LV_FONT_DECLARE(lv_font_montserrat_24);
-LV_FONT_DECLARE(lv_font_unscii_8);
-extern const lv_img_dsc_t img_niphargus_60;
-#endif
 
 /* ── State ────────────────────────────────────────────────────────── */
 static bool s_attached;                 /* panel on the bus */
@@ -100,57 +100,6 @@ static memlcd_model_t s_shown;          /* last drawn model */
 _Static_assert(STATUS_DISP_PERIODE_MS == 1000u, "memory-LCD halves: status display at 1 s");
 _Static_assert(LVGL_REFR_MS == 1000u, "memory-LCD halves: LVGL refresh at 1 s");
 
-#if !CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-/* ── The RIGHT half's screen (unchanged by the left's cave) ────────── */
-static lv_obj_t *s_l_route, *s_l_dongle, *s_bar, *s_l_volt, *s_img_lien, *s_l_zz;
-/* Every widget is a child of s_normal (a transparent full-screen group). */
-static lv_obj_t *s_normal;
-
-/* TRRS link pictogram, 16x12, one arrow each way: the cable carries the 5 V
- * from one half to the other. LV_IMG_CF_ALPHA_1BIT has NO palette and a
- * stride of ceil(w/8) = 2 bytes per row (lv_img_decoder_built_in_line_alpha),
- * bit 7 of the first byte is the leftmost pixel; the ink colour comes from
- * img_recolor. 8x8 until 2026-09-26 (Mae: icons too small). The left's copy
- * is memlcd_img_lien (scripts/gen_memlcd_cave_assets.py, the same picture). */
-static const uint8_t s_lien_map[24] = {
-    0x00, 0x10,   /* ...........#....   upper arrow, pointing right */
-    0x00, 0x18,   /* ...........##... */
-    0xFF, 0xFC,   /* ##############.. */
-    0xFF, 0xFC,   /* ##############.. */
-    0x00, 0x18,   /* ...........##... */
-    0x00, 0x10,   /* ...........#.... */
-    0x08, 0x00,   /* ....#...........   lower arrow, pointing left */
-    0x18, 0x00,   /* ...##........... */
-    0x3F, 0xFF,   /* ..############## */
-    0x3F, 0xFF,   /* ..############## */
-    0x18, 0x00,   /* ...##........... */
-    0x08, 0x00,   /* ....#........... */
-};
-static const lv_img_dsc_t s_lien_img = {
-    .header.cf = LV_IMG_CF_ALPHA_1BIT, .header.always_zero = 0,
-    .header.w = 16, .header.h = 12,
-    .data_size = sizeof s_lien_map, .data = s_lien_map,
-};
-
-/* Layout (2026-09-26, Mae's pick "icons in a column on the right"):
- *   x 36..67 : icon column, 32 px — route (Montserrat 24 symbol), ▲ dongle
- *              seen, horizontal battery, voltage, ⇆ link
- *   y > Y_SEP: the 60 px logo; zZ top-left on the last image before sleep */
-#define COL_X   36
-#define COL_W   (MEMLCD_W - COL_X)
-#define Y_SEP   MEMLCD_Y_SEP
-
-static lv_obj_t *rect(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_coord_t w, lv_coord_t h)
-{
-    lv_obj_t *o = lv_obj_create(parent);
-    lv_obj_remove_style_all(o);
-    lv_obj_set_pos(o, x, y); lv_obj_set_size(o, w, h);
-    lv_obj_set_style_bg_color(o, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-    return o;
-}
-#endif
-
 static lv_obj_t *texte(lv_obj_t *parent, const lv_font_t *f, lv_coord_t x, lv_coord_t y)
 {
     lv_obj_t *l = lv_label_create(parent);
@@ -161,81 +110,11 @@ static lv_obj_t *texte(lv_obj_t *parent, const lv_font_t *f, lv_coord_t x, lv_co
     return l;
 }
 
-#if !CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-/* A label centred in a box of width w starting at x, clipped rather than wrapped. */
-static lv_obj_t *texte_centre(lv_obj_t *parent, const lv_font_t *f, lv_coord_t x, lv_coord_t y, lv_coord_t w)
-{
-    lv_obj_t *l = texte(parent, f, x, y);
-    lv_obj_set_width(l, w);
-    lv_label_set_long_mode(l, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-    return l;
-}
-static lv_obj_t *image(lv_obj_t *parent, const lv_img_dsc_t *src, lv_coord_t x, lv_coord_t y)
-{
-    lv_obj_t *img = lv_img_create(parent);
-    lv_img_set_src(img, src);
-    lv_obj_set_style_img_recolor(img, lv_color_black(), 0);
-    lv_obj_set_style_img_recolor_opa(img, LV_OPA_COVER, 0);
-    lv_obj_set_pos(img, x, y);
-    return img;
-}
-/* A transparent full-screen group: hiding it hides all its children. */
-static lv_obj_t *groupe(lv_obj_t *parent)
-{
-    lv_obj_t *o = lv_obj_create(parent);
-    lv_obj_remove_style_all(o);
-    lv_obj_set_pos(o, 0, 0); lv_obj_set_size(o, MEMLCD_W, MEMLCD_H);
-    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    return o;
-}
-#endif
-
 static void construire(void)
 {
     lv_obj_t *scr = lv_scr_act();
     lv_obj_clean(scr);
-#if CONFIG_KASE_DEVICE_ROLE_KEYBOARD
     memlcd_cave_build(scr);
-#else
-    lv_obj_remove_style_all(scr);
-    lv_obj_set_style_bg_color(scr, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-    s_normal = groupe(scr);
-    lv_obj_t *nrm = s_normal;
-
-    /* Icon column */
-    s_l_route  = texte_centre(nrm, &lv_font_montserrat_24, COL_X, 2, COL_W);
-    s_l_dongle = texte_centre(nrm, &lv_font_montserrat_14, COL_X, 28, COL_W);
-    /* Horizontal battery: 24x12 body + 3x6 nub, filled from the left. */
-    s_bar = lv_bar_create(nrm);
-    lv_obj_remove_style_all(s_bar);
-    lv_obj_set_size(s_bar, 24, 12); lv_obj_set_pos(s_bar, COL_X + 2, 46);
-    lv_bar_set_range(s_bar, 0, 100);
-    lv_obj_set_style_border_color(s_bar, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s_bar, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(s_bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(s_bar, 2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s_bar, lv_color_black(), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(s_bar, LV_OPA_COVER, LV_PART_INDICATOR);
-    (void)rect(nrm, COL_X + 26, 49, 3, 6);
-    s_l_volt   = texte_centre(nrm, &lv_font_unscii_8, COL_X, 62, COL_W);
-    /* TRRS link: the ONLY witness of the handshake away from the console.
-     * Hidden unless the 5 V is closed. */
-    s_img_lien = image(nrm, &s_lien_img, COL_X + (COL_W - 16) / 2, 75);
-    lv_obj_add_flag(s_img_lien, LV_OBJ_FLAG_HIDDEN);
-    (void)rect(nrm, COL_X - 1, 0, 1, Y_SEP);                 /* column separator */
-    (void)rect(nrm, 0, Y_SEP, MEMLCD_W, 1);                  /* section separator */
-    (void)image(nrm, &img_niphargus_60, (MEMLCD_W - 60) / 2, Y_SEP + 1 + (MEMLCD_H - Y_SEP - 1 - 60) / 2);
-    /* zZ: the image a sleeping half leaves behind is frozen (no flush, no
-     * VCOM); this says so, rather than a stale ⇆ or route pretending to be
-     * live (2026-09-25). Top-left zone, under the logo's place. */
-    s_l_zz = texte_centre(nrm, &lv_font_montserrat_24, 0, 50, COL_X - 1);
-    lv_label_set_text(s_l_zz, "zZ");
-    lv_obj_add_flag(s_l_zz, LV_OBJ_FLAG_HIDDEN);
-#endif
     s_built = true;
 }
 
@@ -288,51 +167,25 @@ static void lire_modele(memlcd_model_t *m)
 #endif
 #else
     m->is_left   = 0;
-    m->route_rf  = 1;
     m->osl       = MEMLCD_OSL_AUCUNE;
+    /* The route icon: the plug while its USB is up (its keys still go by
+     * radio), else the waves, filled while the dongle acknowledges. */
+    {   bool vu = false;
 #if CONFIG_KASE_HALF_LINK_TX
-    m->dongle_vu = half_link_tx_dongle_vu();
+        vu = half_link_tx_dongle_vu();
 #endif
+        memlcd_droite_route(m, usb_presence_cable(), vu); }
 #endif
 }
 
-#if !CONFIG_KASE_DEVICE_ROLE_KEYBOARD
-/* Four UNSCII 8 characters = the 32 px column: "4.1V", or the charge marker
- * in place of the V — "4.1+" charging, "4.1#" charged. */
-static void tension(char *out, size_t n, uint8_t dv, uint8_t chg)
-{
-    if (dv == 0xFF) snprintf(out, n, "?");
-    else snprintf(out, n, "%u.%u%s", dv / 10, dv % 10, chg == 2 ? "#" : (chg == 1 ? "+" : "V"));
-}
-
-static void dessiner(const memlcd_model_t *m)
-{
-    char buf[24];
-    lv_label_set_text(s_l_route, m->route_rf ? LV_SYMBOL_WIFI : LV_SYMBOL_USB);
-    lv_label_set_text(s_l_dongle, m->dongle_vu ? LV_SYMBOL_UP : "");
-    if (m->veille) lv_obj_clear_flag(s_l_zz, LV_OBJ_FLAG_HIDDEN);
-    else           lv_obj_add_flag(s_l_zz, LV_OBJ_FLAG_HIDDEN);
-    /* Link up: the pictogram takes the charge marker's place — the cable
-     * already says the half is being fed. */
-    tension(buf, sizeof buf, m->batt_local_dv, m->lien_5v ? 0 : m->batt_local_chg);
-    lv_label_set_text(s_l_volt, buf);
-    if (m->lien_5v) lv_obj_clear_flag(s_img_lien, LV_OBJ_FLAG_HIDDEN);
-    else            lv_obj_add_flag(s_img_lien, LV_OBJ_FLAG_HIDDEN);
-    uint8_t pct = (m->batt_pct == 0xFF) ? 0 : m->batt_pct;   /* batt_sense_pct: filtered, 5 % steps */
-    lv_bar_set_value(s_bar, pct, LV_ANIM_OFF);
-    /* Low battery: gauge border thickened (a background/level inversion
-     * made a full bar unreadable — bench 2026-09-19). */
-    lv_obj_set_style_border_width(s_bar, m->batt_niveau ? 2 : 1, LV_PART_MAIN);
-}
-#else
-/* The left: the cave draws everything, the percentage being batt_sense's
- * DISPLAYED one (batt_sense_pct: mV curve, EMA, 5 % steps, never up on
- * battery) — the same value as the right's bar. 0xFF reads "?". */
+/* The cave draws everything (the left's memlcd_cave_vue, the right's
+ * memlcd_cave_vue_droite — MEMLCD_CAVE_DROITE picks it at compile time), the
+ * percentage being batt_sense's DISPLAYED one (batt_sense_pct: mV curve, EMA,
+ * 5 % steps, never up on battery), the same on both halves. 0xFF reads "?". */
 static void dessiner(const memlcd_model_t *m)
 {
     memlcd_cave_draw(m, m->batt_pct);
 }
-#endif
 
 /* ── LVGL → panel ─────────────────────────────────────────────────── */
 static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *px)

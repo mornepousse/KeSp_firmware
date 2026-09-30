@@ -138,11 +138,6 @@ static inline void memlcd_model_set_coffre(memlcd_model_t *m, const chest_view_t
     m->coffre_code_secs = v->code_secs;
 }
 
-/* ── Geometry of the RIGHT half's screen (memlcd_backend.c) ─────────
- * Y_SEP is the separator between its top part (icon column) and its 60 px
- * logo. The left half draws the cave (memlcd_cave.h) and has no separator. */
-#define MEMLCD_Y_SEP          92
-
 /* ── Width oracle ──────────────────────────────────────────────────────
  * The left screen is laid out by PURE code (memlcd_cave.h), tested on host
  * where LVGL does not run: text is measured with memlcd_font_widths.h,

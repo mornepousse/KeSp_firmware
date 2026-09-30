@@ -159,8 +159,17 @@ in the PR/release.
       pixel; typing during a refresh loses no keypress; in light sleep the
       image stays frozen and readable, the board still sleeps at 15 s; on
       wake the screen comes back to life
-- [ ] Memory-LCD screens UI: RIGHT unchanged — icon column (route symbol,
-      ▲, horizontal gauge, voltage, ⇆), logo at the bottom. LEFT, the cave
+- [ ] Memory-LCD screens UI: RIGHT, the same cave since 2026-09-30 — dark,
+      the rock edges, the SAME band as the left at the top (the drop with
+      the same rules, the route icon beside it, `⇆` while its TRRS 5 V is
+      closed) and the large Niphargus logo centred under it, no text at all
+      above 15 % and no voltage; the right's route icon: the plug while ITS
+      USB is up (plug the cable into the right: plug; its keys still reach
+      the host by radio), otherwise 3 waves over a filled dot while the
+      dongle acknowledges it, 2 waves over a hollow dot once it has fallen
+      back to the left (dongle unplugged, left on USB: type a few keys on
+      the right) — the icon may take a key or two to change, it follows the
+      ACKs. LEFT, the cave
       (2026-09-30): dark, rock edges top and bottom with no text touching
       them, the small logo top-left, then ONE band under it (2026-09-30):
       the large water drop (full at 100 %, a wavy surface part-way, NO
@@ -180,9 +189,8 @@ in the PR/release.
       within ~1 s; Caps Word shows the hollow up-arrow icon under the name,
       Caps Lock the same arrow over a bar (over USB only), both side by side
       when both, no "CAPS" / "CW" words; a one-shot Shift armed and left
-      alone shows "S", a one-shot layer "L3"; when a half goes to sleep its last image carries "zZ" (the
-      right with an up-to-date ⇆ / route, the left ONLY its large logo and
-      "zZ"), and "zZ" goes away at the first key; right served
+      alone shows "S", a one-shot layer "L3"; when a half goes to sleep its last image carries "zZ" (on
+      BOTH halves since 2026-09-30 ONLY the large logo and "zZ"), and "zZ" goes away at the first key; right served
       at 1 s: no zone greys out in 2 min (VCOM ~1 Hz), the image comes back
       to life within the second following the first key after a sleep
 - [ ] First key after sleep: let the half sleep — 15 s for the short case

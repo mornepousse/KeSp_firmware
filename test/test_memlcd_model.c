@@ -816,6 +816,95 @@ static void test_vue_veille(void)
     assert_vue_tient(&v, "sleep fits");
 }
 
+/* The RIGHT half (2026-09-30, Mae: "the same style as the left"): the same
+ * cave — rock edges, the status band (drop, route icon, ⇆) — and the LARGE
+ * logo as its identity (no layer name on a scanner). Its own view,
+ * memlcd_cave_vue_droite: no chest, no prompt, no code, whatever the model
+ * holds. */
+static void test_vue_droite(void)
+{
+    memlcd_cave_vue_t v;
+    /* The route from the right's own inputs: USB up -> the plug; on radio the
+     * waves, filled when the dongle acknowledges (half_link_tx_dongle_vu),
+     * hollow when not (fallen back to the left, or no ACK). */
+    memlcd_model_t m = { .osl = MEMLCD_OSL_AUCUNE, .batt_local_dv = 40 };
+    memlcd_droite_route(&m, true, true);
+    TEST_ASSERT_EQ(memlcd_cave_route_icone(&m), MEMLCD_ICONE_USB, "right, USB up: the plug");
+    memlcd_droite_route(&m, false, true);
+    TEST_ASSERT_EQ(memlcd_cave_route_icone(&m), MEMLCD_ICONE_RADIO_VU, "right on radio, dongle acks: 3 waves, filled dot");
+    memlcd_droite_route(&m, false, false);
+    TEST_ASSERT_EQ(memlcd_cave_route_icone(&m), MEMLCD_ICONE_RADIO_SEUL, "right on radio, not seen: 2 waves, hollow dot");
+    {   /* on USB the dongle state is not drawn: it must not cost a redraw */
+        memlcd_model_t a = m, b = m;
+        memlcd_droite_route(&a, true, true);
+        memlcd_droite_route(&b, true, false);
+        TEST_ASSERT(!memlcd_model_diff(&a, &b), "right on USB: the dongle flag changing redraws nothing");
+        memlcd_droite_route(&b, false, false);
+        TEST_ASSERT(memlcd_model_diff(&a, &b), "USB -> radio redraws");
+    }
+
+    memlcd_droite_route(&m, false, true);
+    memlcd_cave_vue_droite(&m, 60, &v);
+    TEST_ASSERT_EQ(v.kind, MEMLCD_CV_NORMAL, "right: its normal screen");
+    TEST_ASSERT(!v.rock_thin && v.top == MEMLCD_CAVE_TOP && v.bottom == MEMLCD_CAVE_BOTTOM, "the full rock edges");
+    TEST_ASSERT(v.logo == MEMLCD_CAVE_LOGO_L && v.logo_x == (MEMLCD_W - MEMLCD_CAVE_LOGO_L) / 2, "the LARGE logo, centred");
+    TEST_ASSERT(v.goutte && v.goutte_pct == 60 && v.route == MEMLCD_ICONE_RADIO_VU, "the band: drop + route");
+    TEST_ASSERT(v.goutte_y >= MEMLCD_CAVE_ROCK_TOP_H + 2, "the band >= 2 px under the stalactites");
+    TEST_ASSERT(v.logo_y >= v.goutte_y + MEMLCD_CAVE_GOUTTE_H + 2, "the logo >= 2 px under the band");
+    TEST_ASSERT(v.logo_y + MEMLCD_CAVE_LOGO_L + 2 <= MEMLCD_H - MEMLCD_CAVE_ROCK_BOT_H, "the logo >= 2 px above the rock floor");
+    TEST_ASSERT(v.n == 0, "60 %: not a single text line (no layer name on the right)");
+    assert_vue_tient(&v, "right fits");
+    TEST_ASSERT(v.tient, "... and the view says so");
+
+    /* Every combination the right can show fits, nothing chest-ish ever. */
+    static const uint8_t pcts[] = { 0, 5, 10, 15, 20, 30, 60, 100, 0xFF };
+    for (size_t k = 0; k < sizeof pcts; k++)
+        for (int niv = 0; niv < 3; niv++)
+            for (int chg = 0; chg < 3; chg++)
+                for (int lien = 0; lien < 2; lien++)
+                    for (int r = 0; r < 3; r++) {
+                        memlcd_model_t c = { .osl = MEMLCD_OSL_AUCUNE, .batt_local_dv = 38,
+                                             .batt_niveau = (uint8_t)niv, .batt_local_chg = (uint8_t)chg,
+                                             .lien_5v = (uint8_t)lien };
+                        memlcd_droite_route(&c, r == 0, r == 1);
+                        memlcd_cave_vue_droite(&c, pcts[k], &v);
+                        assert_vue_tient(&v, "every right combination fits");
+                        TEST_ASSERT(v.tient && v.logo == MEMLCD_CAVE_LOGO_L && v.goutte, "... logo and band always");
+                        TEST_ASSERT(v.lien == lien, "the ⇆ exactly when the TRRS 5 V is closed");
+                        TEST_ASSERT(!v.cadenas && !v.caps_lock && !v.caps_word && !v.rule && !v.eau, "no left-only pictogram");
+                        for (uint8_t i = 0; i < v.n; i++) TEST_ASSERT(v.l[i].dedans, "the only text: the reading inside the drop");
+                    }
+
+    /* The low reading inside the drop, as on the left; LOW = thick outline. */
+    m.batt_niveau = 1;
+    memlcd_cave_vue_droite(&m, 10, &v);
+    int i10 = vue_cherche(&v, "10");
+    TEST_ASSERT(i10 >= 0 && v.l[i10].dedans && v.goutte_low, "LOW 10 %: 10 inside a thick-outlined drop");
+    m.batt_niveau = 0; m.lien_5v = 1; m.batt_local_chg = 1;
+    memlcd_droite_route(&m, true, false);
+    memlcd_cave_vue_droite(&m, 40, &v);
+    TEST_ASSERT(v.goutte_plus && v.lien && v.route == MEMLCD_ICONE_USB && v.n == 0, "charging on USB + TRRS: +, plug, ⇆");
+    m.batt_local_dv = 0xFF;
+    memlcd_cave_vue_droite(&m, 0xFF, &v);
+    TEST_ASSERT(vue_cherche(&v, "?") >= 0, "unknown: ? in the drop");
+
+    /* A model carrying chest fields (never filled on the right, but whatever
+     * it holds): still the right's screen — no prompt, no code, no browser. */
+    memlcd_model_t c = { .osl = MEMLCD_OSL_AUCUNE, .batt_local_dv = 40, .nom = "BASE" };
+    c.coffre = MEMLCD_COFFRE_PRESENT | CHEST_STATE_READY; c.coffre_op = 7; strcpy(c.coffre_label, "GITHUB");
+    c.coffre_code_visible = 1; strcpy(c.coffre_code, "418902"); c.coffre_browsing = 1;
+    memlcd_cave_vue_droite(&c, 80, &v);
+    TEST_ASSERT(v.kind == MEMLCD_CV_NORMAL && !v.cadenas && v.n == 0, "chest fields ignored: no prompt, code, name");
+
+    /* Sleep: the left's image — the large logo and zZ, nothing live. */
+    m.batt_local_dv = 40; m.veille = 1;
+    memlcd_cave_vue_droite(&m, 80, &v);
+    TEST_ASSERT(v.kind == MEMLCD_CV_SLEEP && v.logo == MEMLCD_CAVE_LOGO_L && vue_cherche(&v, "zZ") >= 0,
+                "right asleep: large logo + zZ");
+    TEST_ASSERT(!v.goutte && !v.route && !v.lien, "... no band on a frozen image");
+    assert_vue_tient(&v, "right sleep fits");
+}
+
 static void test_model_diff(void)
 {
     memlcd_model_t a = { .route_rf = 1, .dongle_vu = 1, .batt_local_dv = 40,
@@ -934,6 +1023,7 @@ void test_memlcd_model(void)
     test_vue_code();
     test_vue_browse();
     test_vue_veille();
+    test_vue_droite();
     test_vue_coffre_end_to_end();
     test_model_diff();
     test_fb_to_panel();

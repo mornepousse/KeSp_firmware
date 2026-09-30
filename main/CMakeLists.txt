@@ -87,8 +87,12 @@ if(CONFIG_KASE_HAS_DISPLAY)
             "display/memlcd/memlcd_panel.c"
             "display/memlcd/memlcd_backend.c"
         )
+        # The cave (memlcd_cave.h): the left since 2026-09-30 (plan
+        # 2026-09-30-left-screen-cave), the right too the same day — its
+        # engine compiled with MEMLCD_CAVE_DROITE (set below, after the
+        # component is registered): rock, drop, route, large logo, no chest.
+        # The left's list keeps its order (link order = the left's image).
         if(CONFIG_KASE_DEVICE_ROLE_KEYBOARD)
-            # The left: the cave (memlcd_cave.h, plan 2026-09-30-left-screen-cave)
             list(APPEND srcs
                 "display/memlcd/memlcd_cave.c"
                 "display/memlcd/memlcd_assets_cave.c"
@@ -96,7 +100,11 @@ if(CONFIG_KASE_HAS_DISPLAY)
                 "display/assets/img_niphargus_56.c"
             )
         else()
-            list(APPEND srcs "display/assets/img_niphargus_60.c")
+            list(APPEND srcs
+                "display/memlcd/memlcd_cave.c"
+                "display/memlcd/memlcd_assets_cave.c"
+                "display/assets/img_niphargus_56.c"
+            )
         endif()
     elseif(DISPLAY_BACKEND STREQUAL "round")
         list(APPEND srcs
@@ -403,6 +411,14 @@ idf_component_register(
         "${BOARD_DIR}"
     PRIV_REQUIRES ${priv_requires}
 )
+
+# The right half's screen: the same cave engine, its own view and objects
+# (memlcd_cave.c, #if MEMLCD_CAVE_DROITE). A per-file definition, so the
+# left's compile line — and its object — stay what they were.
+if(CONFIG_KASE_HAS_DISPLAY AND DISPLAY_BACKEND STREQUAL "memlcd" AND NOT CONFIG_KASE_DEVICE_ROLE_KEYBOARD)
+    set_source_files_properties("display/memlcd/memlcd_cave.c"
+        PROPERTIES COMPILE_DEFINITIONS "MEMLCD_CAVE_DROITE=1")
+endif()
 
 if(CONFIG_KASE_HAS_DISPLAY)
     littlefs_create_partition_image(storage ../flash_data FLASH_IN_PROJECT)

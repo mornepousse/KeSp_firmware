@@ -12,6 +12,8 @@
 #                         through the panel's 1-bit threshold (12 px floor)
 #   3. test_safe_wrap   — GATE: the firmware's safe wrap, re-measured by LVGL
 #   4. render_cave      — the 10 reference states and the proof sheets -> out/
+#   5. render_right     — the RIGHT half's states, the same engine compiled
+#                         with MEMLCD_CAVE_DROITE=1 as for niphar_right -> out/cave_right/
 # Any gate failing stops the script with a non-zero status.
 #
 # Usage: tools/memlcd_sim/build.sh [--relib] [--gates]
@@ -33,7 +35,7 @@ if [ ! -d "$LVGL/src" ]; then
     exit 2
 fi
 
-mkdir -p "$BUILD/obj" "$OUT/cave_dark"
+mkdir -p "$BUILD/obj" "$OUT/cave_dark" "$OUT/cave_right"
 
 # ---- LVGL, incremental: an object is rebuilt when its source or lv_conf.h is newer ----
 RELIB=0; GATES_ONLY=0
@@ -85,6 +87,16 @@ fi
 cd "$SIM"   # the renderer writes under out/, relative
 echo "== 4. the firmware engine: reference states and proofs =="
 "$CC" "${CFLAGS[@]}" main_cave.c common.c states.c "${ENGINE[@]}" "${PURE[@]}" "${LIB[@]}" -o "$BUILD/render_cave"
+
+echo "== 5. the right half: the same engine, MEMLCD_CAVE_DROITE =="
+ENGINE_RIGHT=("$MEMLCD/memlcd_cave.c" "$MEMLCD/memlcd_assets_cave.c" "$REPO/main/display/assets/img_niphargus_56.c")
+"$CC" "${CFLAGS[@]}" -DMEMLCD_CAVE_DROITE=1 main_right.c common.c "${ENGINE_RIGHT[@]}" "${PURE[@]}" "${LIB[@]}" -o "$BUILD/render_right"
+"$BUILD/render_right"
 "$BUILD/render_cave"
+
+echo "== 5. the right half: the same engine, MEMLCD_CAVE_DROITE =="
+ENGINE_RIGHT=("$MEMLCD/memlcd_cave.c" "$MEMLCD/memlcd_assets_cave.c" "$REPO/main/display/assets/img_niphargus_56.c")
+"$CC" "${CFLAGS[@]}" -DMEMLCD_CAVE_DROITE=1 main_right.c common.c "${ENGINE_RIGHT[@]}" "${PURE[@]}" "${LIB[@]}" -o "$BUILD/render_right"
+"$BUILD/render_right"
 
 echo "memlcd_sim: done — images under $OUT"

@@ -440,8 +440,8 @@ means a test, or a line.
   each half, the bolt appears on both screens.
 - [test:test_memlcd_model] The screens SAY whether the link is up: a 16x12
   two-arrow pictogram (⇆) while the 5 V is closed on our side
-  (`link_uart_active()`) — the right beside its voltage in place of the
-  charge marker, the left in its status band beside the route icon, the
+  (`link_uart_active()`) — on both halves in the status band beside the
+  route icon (the right's band since 2026-09-30, `test_vue_droite`), the
   charge "+" kept in the drop (`test_statut_haut`) — displayed on
   both halves, part of the redraw diff. It replaced a bolt (2026-09-25) that overlapped the " +"
   marker exactly while the link was charging the half. Without it the
@@ -762,17 +762,32 @@ means a test, or a line.
   screen hook only sets flags (the SPI bus still belongs to the radio),
   the image is pushed to the next tick of the screen task.
 - [smoke:Memory-LCD screens UI] Both halves display in portrait. The RIGHT
-  keeps its icon column (2026-09-26, Mae: icons were too small) — route
-  (Montserrat 24 USB or radio symbol), ▲ "dongle seen" STICKY — a half is silent at rest, a
-  time-stamped indicator would blink on every STATUS — which only drops
-  after 3 consecutive transmissions with no ACK, never on a single
-  isolated ESB refusal, and never lit before the first ACK; horizontal
-  gauge, voltage in 4 characters ("4.1V", "4.1+" charging), 16×12 ⇆ when the
-  TRRS 5 V is closed — the voltage STABILIZED over 30 s — [test:test_memlcd_model]
+  is the same "cave" since 2026-09-30 (Mae: "the same style as the left";
+  its icon column of 2026-09-26 is gone) [test:test_memlcd_model]: its own
+  pure view `memlcd_cave_vue_droite` (`memlcd_cave.h`) drawn by the left's
+  engine compiled with `MEMLCD_CAVE_DROITE` (`memlcd_cave.c`, a per-file
+  definition in `main/CMakeLists.txt`) — the rock edges, the left's status
+  band at the top of the content box (`memlcd_cave_bande`: the drop with
+  the same rules, the route icon, the ⇆) and the LARGE 56 px logo centred
+  under it, the half's identity (a scanner has no layer name), >= 2 px from
+  the band and from the rock; no voltage, no text above 15 %. It never
+  reads the chest's fields: no prompt, code or browser path is compiled
+  into the right (`test_vue_droite`: a model carrying chest fields still
+  gives the right's screen). Its ROUTE icon comes from its own inputs
+  (`memlcd_droite_route`): the plug while ITS USB is up
+  (`usb_presence_cable`, the same presence rule as the link and the sleep
+  veto — its keys still travel by radio), else the radio waves, 3 over a
+  FILLED dot while the dongle acknowledges it (`half_link_tx_dongle_vu`,
+  STICKY — a half is silent at rest, a time-stamped indicator would blink
+  on every STATUS — which only drops after 3 consecutive transmissions with
+  no ACK, never on a single isolated ESB refusal, never lit before the
+  first ACK, and false once fallen back to the left half), 2 over a HOLLOW
+  dot when not; on USB the dongle flag is zeroed so it costs no redraw.
+  The voltage the model carries is STABILIZED over 30 s [test:test_memlcd_model]:
   a value different from the displayed one is shown once it has held for
   30 s: ADC oscillation never holds, a slow drift always eventually holds
   (a hysteresis around the displayed value had frozen it at 4.2 V for a
-  whole night, 2026-09-15)) and its 60 px logo under the column. The LEFT
+  whole night, 2026-09-15). The LEFT
   is the "cave" since 2026-09-30 (plan 2026-09-30-left-screen-cave, spec
   2026-09-29-left-screen-redesign): dark (pale ink on black), a rocky edge
   top and bottom that no text ever enters, the 28 px Niphargus logo in the
@@ -822,9 +837,9 @@ means a test, or a line.
   the radio has not yet taken the SPI bus lock for the sleep) re-reads the
   model and renders it NOW (lv_refr_now, on the sleep task's stack, 6144)
   with "zZ"; the frozen image says it is frozen (a ⇆ used to stay on after
-  the cable was pulled, 2026-09-25): the right keeps its state under the zZ,
-  the left shows ONLY the large 56 px logo and "zZ" — nothing that could
-  pretend to be live [test:test_memlcd_model]. The wake re-read has no zZ: the diff redraws. NO battery reading for the other half: a
+  the cable was pulled, 2026-09-25): both halves show ONLY the large 56 px
+  logo and "zZ" (the right kept its state under the zZ until 2026-09-30) —
+  nothing that could pretend to be live [test:test_memlcd_model]. The wake re-read has no zZ: the diff redraws. NO battery reading for the other half: a
   user decision from 2026-09-14, and the ACK channel that would have
   carried it (DISPLAY frame) was removed along with it — the ACK stays
   bare outside sync. The screen only rewrites if a displayed field
