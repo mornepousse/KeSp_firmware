@@ -2,8 +2,8 @@
 
 Open-source firmware framework for ESP32-S3 custom mechanical keyboards —
 unibody boards plus a **USB receiver dongle**, with display, USB/Bluetooth HID,
-advanced QMK-like keycodes, and an optional **security co-processor** on the
-dongle.
+advanced QMK-like keycodes, and a link to an external **security vault**
+(Niphar_chest) that the keyboard confirms and displays for.
 
 > KeSp provides the framework. Your board definition provides the hardware specifics.
 
@@ -30,6 +30,11 @@ The split keyboard is being redesigned as
 an Azoteq TPS43 trackpad on the left, a Sharp Memory LCD on **each** half.
 Configuration and updates go over USB; there is no WiFi and no BLE on either
 half — the power budget forbids it.
+
+**Status — 2026-09-30.** On top of what follows: the left half now talks to
+**Niphar_chest**, an ESP32-P4 security vault, over SPI (below); the left screen
+was redesigned (the right follows); the sleep and battery figures below were replaced by
+multimeter measurements.
 
 **Hardware status — 2026-09-21.** The keyboard works in its nominal mode: both
 halves on battery, no cable anywhere, typing together through the dongle. Pin
@@ -61,33 +66,52 @@ trap — about 1 % of frames are refused outright; a change frame that is sent
 exactly once has exactly one chance, so every change is now re-emitted a
 bounded number of times.
 
-**Screens (2026-09-14).** Both halves drive a Sharp LS011B7DH03 (nice!view
-module) mounted upright, 68 × 160, on the SPI bus they share with the radio —
-the radio owner lends the bus under a lock, so a refresh never lands in the
-middle of a frame. The left shows the current layer name split in four-letter
-lines; the right shows the Niphargus logo, generated from the project SVG by
-`scripts/gen_logo_memlcd.sh`. Both show route, dongle-seen and their own
-battery. The protocol was settled from the datasheet, not by trial: the panel is
+**Screens (2026-09-14, redesigned 2026-09-30).** Both halves drive a Sharp
+LS011B7DH03 (nice!view module) mounted upright, 68 × 160, on the SPI bus they
+share with the radio — the radio owner lends the bus under a lock, so a refresh
+never lands in the middle of a frame. The keyboard lives in a transparent case
+and is named after a blind cave shrimp, so the left screen became a **cave** (the right is being brought to the same
+style): pale
+ink on black, stalactites and a rock floor in ordered dithering, the real
+Niphargus logo (`scripts/gen_logo_memlcd.sh`), and one status band — a water
+drop whose level is the battery (the number appears inside it only at 15 % and
+below; `+` and FULL only on USB), a route icon (USB plug, or radio waves filled
+when the dongle is seen), the TRRS link, Caps Lock / Caps Word icons, the layer
+name in small type. No text is ever drawn below Montserrat 12: under that the
+1-bit threshold erases `:` and `.` outright. The whole screen is pure layout
+logic, host-tested, and a host simulator (`tools/memlcd_sim`) renders the
+firmware's own module to PNG with the panel's exact threshold — what the
+mockups show is what the panel shows. The protocol was settled from the datasheet, not by trial: the panel is
 **68 lines of 160 pixels** (Sharp's "160 × 68" lists the data direction first),
 the command byte goes out raw in MSB-first SPI (M0 is the first clocked bit)
 and only the line address is bit-reversed. A write-only panel answers a wrong
 guess with silence, never with an error.
 
-**Battery gauge (2026-09-14).** Each half reads its cell on ADC2 (1 M / 1 M
-divider, calibrated, plausibility window 2.5–4.5 V); the right reports every
-30 s inside its STATUS frame, the dongle caches both halves per side
-(`KS_CMD_BATTERY`). The displayed voltage settles for 30 s before changing, so
-ADC jitter does not redraw the panel and a slow overnight drift still shows.
+**Battery gauge (2026-09-14, reworked 2026-09-30).** Each half reads its cell
+on ADC2 (1 M / 1 M divider, calibrated, plausibility window 2.5–4.5 V); the
+right reports every 30 s inside its STATUS frame, the dongle caches both halves
+per side (`KS_CMD_BATTERY`). The displayed percentage comes from millivolts
+through a 12-point LiPo curve, filtered over about 80 s, shown in 5 % steps,
+and never rises while on battery (a radio burst's voltage sag cannot move it);
+"charging" and "full" require USB power — a voltage-trend guess used to show
+FULL on battery.
 Since 2026-09-19 the gauge has two thresholds with hysteresis: **low** (< 3.5 V)
 thickens the gauge border and stops the half from offering 5 V over the TRRS
 link; **critical** (< 3.3 V) also pulls light sleep down to 5 s. No blinking,
 no forced shutdown — the DW01A does that at 2.5 V.
 
-**Sleep** is a hybrid: light sleep after 15 s (~244 µA, state kept, ~1 ms
-wake — it was a minute until 2026-09-15, but an idle ESP32-S3 at 160 MHz draws
-~28 mA, a hundred times its sleep current, and a day of typing with pauses lost
-0.2 V that way), deep sleep beyond four hours (~12 µA, EXT1 wake, a full reboot before
-the matrix is scanned again). Deep sleep was **unreachable until 2026-09-15**:
+**Sleep** is a hybrid: light sleep after 5 s (state kept, ~1 ms wake), deep
+sleep beyond four hours (EXT1 wake, a full reboot before the matrix is scanned
+again). The figures this paragraph used to quote (244 µA, 12 µA) were datasheet
+lines, never ours; the multimeter on the left half (2026-09-25) found 7.5 mA in
+light sleep and brought it to **0.67 mA** (the N16R8's unused in-package PSRAM,
+the TRRS UART keeping the main crystal alive, a USB disconnect that only ran
+after a USB session), deep sleep at the board's 0.2–0.33 mA floor, awake between
+keystrokes 6–12 mA (six rest pollers interleaved used to keep core 0 from ever
+napping), a held key 23 mA. A held key vetoes sleep — and on battery that veto
+was never updated until 2026-09-30 (it sat after an early return taken on every
+scan off USB): the half either slept key-down and flashed its sleep image every
+5 s, or kept a stale veto and never slept. Deep sleep was **unreachable until 2026-09-15**:
 inactivity was only measured while awake, and a light-sleeping half sits in
 `esp_light_sleep_start()` until a key — which resets the counter. A timer wake
 at the deep threshold now performs the switch. Every wake logs how long the
@@ -154,6 +178,26 @@ state (eight deep) and plays them in order — the same minute of fast
 two-handed typing afterwards: 699 frames, zero overwrites. That was the last
 behaviour in the contract still marked unguarded.
 
+**The security vault (2026-09-29/30).** The left half is the SPI master of
+[Niphar_chest](https://github.com/mornepousse/Niphar_chest), an ESP32-P4 that
+holds OpenPGP, FIDO, OTP and TOTP secrets and shows up to the host as a USB
+key. The vault never trusts the host for consent: an operation waits for a
+**physical press on the keyboard** (`K_SEC_CONFIRM`, left half only — the right
+half's key travels over an unauthenticated radio), bound to the instance the
+vault armed. The link (protocol v3) carries a 64-byte register block — state,
+pending operation, the vault's own **label** for it, active USB mode — and a DMA
+channel for the TOTP account list and codes. So the keyboard shows *what* it is
+about to confirm, in the vault's words, never its own copy; `K_CHEST_NEXT`
+cycles the vault's USB mode; `K_OATH_PREV/NEXT` browse the TOTP accounts and
+`K_OATH_CODE` asks for a code that appears on the screen, large, with its
+countdown, **only after a press**. Proven end to end on the bench on
+2026-09-30, codes checked against `oathtool`. A bench incident became a rule:
+a label cut by pixel width (`TEST:RFC` / `6238`) was read as a truncated code —
+account names now break at `:` first, and a continuation line is marked `↳`,
+so a line of digits can never pass for a code. Pending: a way to cancel a
+prompt without waiting for the vault's 15 s timeout (needs a contract change on
+the vault side).
+
 **The trackpad still has no hardware driver.** Its pure logic — the IQS5xx
 frame parser, the gesture→HID mapping, the accel config — exists and is
 host-tested; what is missing is the I2C + RDY bring-up on the left half and
@@ -181,7 +225,9 @@ preceded fusion.
 | [`dongle-fusion-deux-moteurs-design.md`](docs/superpowers/specs/2026-09-12-dongle-fusion-deux-moteurs-design.md) | fusion: two engines, one active by route |
 | [`keymap-sync-ack-payload-design.md`](docs/superpowers/specs/2026-09-13-keymap-sync-ack-payload-design.md) | keymap sync over the ACK payloads |
 | [`batterie-jauge-design.md`](docs/superpowers/specs/2026-09-14-batterie-jauge-design.md) | the battery gauge |
-| [`ecrans-memlcd-design.md`](docs/superpowers/specs/2026-09-14-ecrans-memlcd-design.md) | the screens |
+| [`ecrans-memlcd-design.md`](docs/superpowers/specs/2026-09-14-ecrans-memlcd-design.md) | the screens (first version) |
+| [`left-screen-redesign.md`](docs/superpowers/specs/2026-09-29-left-screen-redesign.md) | the cave redesign and its text security rules |
+| [`chest-link-v3-design.md`](docs/superpowers/specs/2026-09-29-chest-link-v3-design.md) | the keyboard ↔ vault link |
 | [`docs/NIPHARGUS_V2_HARDWARE.md`](docs/NIPHARGUS_V2_HARDWARE.md) | pinout, verified against the netlist |
 | [`COMPORTEMENTS.md`](COMPORTEMENTS.md) | the behaviour contract: what the firmware must do, and what guards each line |
 
@@ -231,6 +277,10 @@ preceded fusion.
 - **Wireless relay mode** — a full keyboard (e.g. V2D) can process locally and
   relay its final HID report to the dongle over RF
 
+### Security vault (Niphargus left ↔ Niphar_chest)
+- SPI master link to an ESP32-P4 vault: confirmation by a physical key press,
+  the vault's own label on screen, TOTP browse + on-screen codes (see above)
+
 ### Security co-processor (dongle, optional)
 - **Compile-time personality** (Kconfig): `NONE` / OTP-HID (YubiKey-style CR-HMAC)
   / **OpenPGP smartcard** over USB CCID (gpg sign / decrypt / SSH-auth, touch-gated)
@@ -260,7 +310,7 @@ boards/
   kase_v2_debug/        # V2 + debug/wireless GPIO overrides (V2D)
   kase_dongle/          # USB receiver — no matrix, no keymap, no engine
   niphar_left/          # Niphargus master: engine, relay, sleep (trackpad HW driver TODO)
-  niphar_right/         # Niphargus scanner: matrix + Sharp LCD (LCD driver TODO)
+  niphar_right/         # Niphargus scanner: matrix + Sharp LCD
 main/
   input/                # Matrix scan, key processing, HID reports
     keyboard_task.c     # Main coordinator (ISR → process → send)
@@ -284,6 +334,7 @@ main/
     usb/                # USB HID (TinyUSB)
     rf/                 # NRF24 driver, dongle RX / keyboard TX, slots, pairing
     link/               # Niphargus inter-half wire link (frames + 5 V handshake)
+    chest/              # Niphar_chest link: protocol v3, gate, OATH browser, transport
   security/             # Dongle co-processor: SEC slots, OTP-HID, OpenPGP/CCID
   periph/               # Trackpad gesture/acceleration mapping
   display/
@@ -291,7 +342,7 @@ main/
     display_backend.h   # Backend interface (vtable)
     oled/               # I2C OLED backend
     round/              # SPI round display backend
-    memlcd/             # Sharp memory-LCD backend (Niphargus halves, 68×160 portrait)
+    memlcd/             # Sharp memory-LCD backend (Niphargus halves, 68×160 portrait, cave UI)
     assets/             # LVGL images (Niphargus logo generated by scripts/gen_logo_memlcd.sh)
   power/                # Sleep tiers (veille.c) and battery gauge (batt_sense.c)
   led/                  # WS2812 LED strip animations
@@ -299,6 +350,7 @@ main/
 test/                   # Host-side unit tests (CMake, link real modules)
 docs/                   # Protocol documentation
 scripts/                # Build automation, sprite conversion
+tools/memlcd_sim/       # Host renderer of the memory-LCD screens (real LVGL, panel threshold)
 ```
 
 ---
@@ -430,6 +482,7 @@ own repository.
 |---|---|
 | [KaSe PCB](https://github.com/mornepousse/KaSe_PCB) | Hardware for the unibody boards — the KiCad project behind `kase_v1` / `kase_v2` / `kase_v2_debug` |
 | [Niphargus](https://github.com/mornepousse/Niphargus) | Hardware for the split keyboard — the boards `niphar_left` / `niphar_right` are written for |
+| [Niphar_chest](https://github.com/mornepousse/Niphar_chest) | The ESP32-P4 security vault the left half confirms for |
 | [Conchodytes](https://github.com/mornepousse/Conchodytes) | The wireless mouse that shares this dongle — slot 2 of the RF link |
 | [KeSp Controller](https://github.com/mornepousse/KeSp_controller) | Desktop remapping software, speaking the CDC binary protocol |
 
