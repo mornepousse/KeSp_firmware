@@ -67,14 +67,18 @@ column, separators, imbalance), ugly icons. Scope: the whole LEFT screen
   countdown frame). No code without a press; it vanishes at the end of its
   window or on navigation (unchanged engagements).
 
-## Open points after round 3
+## Battery gauge (settled 2026-09-30)
 
-Top block crowded (battery vessel touching the layer name, voltage touching
-`TOTP`); `NAVIGATION` split `NAVIG` / `ATION` at the floor; the battery gauge's
-shape is not understood by Mae (options being rendered).
+Rounds 3-4 rendered six shapes (vessel, horizontal/vertical battery, drop,
+segments, full-width water table, enlarged battery). Mae was convinced by none
+("pas ouf") and took **G3, the water drop** (13 × 16 px, teardrop rasterised on
+an lv_canvas, filled from the bottom with a staggered wavy edge, outline 2 px
+when low), simulator `gauge_lab.c`. Percent, not volts. To be judged again on
+the real panel — a better idea may come from seeing it lit, not from more
+mockups. Open: `NAVIGATION` still splits `NAVIG` / `ATION` at the 12 px floor.
 
 ## Next
 
-Gauge shape settled → a plan task
+A plan task
 ports the chosen module into `main/display/memlcd/`, moves the simulator into
 `tools/`, and keeps the host tests (safe wrap, label fit, width oracle).
