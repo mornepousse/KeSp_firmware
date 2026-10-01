@@ -337,6 +337,30 @@ means a test, or a line.
   writers — key_processor.c accumulates, the link task's take clears — and
   is a CAS loop, not a plain store, so a take racing an accumulate never
   drops or duplicates a step [test:test_chest_gate_oath_nav_cas_survives_a_concurrent_take].
+  During a chest PROMPT (the published pending op is non-zero, any op —
+  TOTP, PGP sign, RESET…), K_OATH_PREV/K_OATH_NEXT CANCEL it instead of
+  browsing (Niphar_chest contract §5 "Cancelling a prompt", 3da17cc): the
+  press stores the prompt's tag (op, instance) AT PRESS TIME and queues NO
+  cursor move, once per new press, from either half — a cancel can only
+  refuse [test:test_kp_oath_nav_cancels_a_prompt_without_moving]
+  [test:test_kp_oath_nav_cancel_from_the_right_half]. The link task arms it
+  only if the tag's op AND instance are the CURRENT block's (a key seen on an
+  older prompt never cancels a newer one, the V18 case)
+  [test:test_chest_cancel_request_needs_the_armed_instance], then writes
+  {0xC5, armed instance} at 0x38-0x39 — V17's master word byte for byte —
+  once, one retry after 200 ms while the same prompt is still up, never a
+  third, disarmed as soon as the op or the instance moves
+  [test:test_chest_cancel_vectors][test:test_chest_cancel_step]. 0xC5 and
+  0x5A are the only cancel and grant values and six bits apart
+  [test:test_chest_cancel_and_confirm_magics_distinct]. A cancel taken in
+  the same round as a K_SEC_CONFIRM press of the same prompt wins (refusing
+  is the safe side); a LATER real press re-arms the confirm. The prompt goes
+  only when the chest clears the op (V19: op 0, label gone, instance and
+  0x11 unchanged) — never optimistically: the view is built from the block
+  [test:test_view_prompt_stays_until_the_chest_clears_it], and a CODE
+  request it cancels is retracted by the existing "op 0 without 0x11
+  moving" rule [test:test_armed_then_op_gone_without_segment_is_cancelled].
+  The host gets 6985, as on a timeout [smoke:Chest link].
   K_OATH_CODE requests a code for the account under the cursor, once per
   physical press and touching no other channel
   [test:test_kp_oath_code_requests_once]

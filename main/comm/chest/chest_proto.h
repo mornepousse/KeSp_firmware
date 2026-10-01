@@ -112,6 +112,29 @@ bool chest_confirm_request(chest_confirm_t *c, const chest_status_t *st, uint32_
 /* One task round. True = write CHEST_CONFIRM_MAGIC now. */
 bool chest_confirm_step(chest_confirm_t *c, const chest_status_t *st, uint32_t now_ms);
 
+/* Cancelling a prompt (contract §5 "Cancelling a prompt", Niphar_chest 3da17cc,
+ * vectors V17-V19): {0xC5, armed instance} at 0x38-0x39, the same word as the
+ * confirm. It can only REFUSE — no value of 0x38 but 0x5A grants anything — so
+ * it is accepted from either half. The chest drops the op like a timeout:
+ * pending_op 0, label cleared, NO segment, 0x11 unchanged (V19); the host gets
+ * 6985. The prompt goes when the chest clears the op, never before: nothing
+ * here touches the view. Echo != armed instance: ignored by the chest (V18). */
+#define CHEST_CANCEL_MAGIC 0xC5
+/* The two bytes written at 0x38-0x39 for a cancel of `instance`. */
+void chest_cancel_pack(uint8_t out[2], uint8_t instance);
+typedef struct { bool armed; uint8_t writes; uint16_t op; uint8_t instance; uint32_t t_ms; } chest_cancel_t;
+/* A cancel key reached the link task with `tag` = CHEST_TAG(op, instance) of
+ * the prompt on screen at press time. Arms only when the block is OK and the
+ * tag's op AND instance equal the block's pending op and instance (a press on
+ * an older prompt never cancels a newer one); false = dropped. */
+bool chest_cancel_request(chest_cancel_t *c, uint32_t tag, chest_block_t block,
+                          const chest_status_t *st, uint32_t now_ms);
+/* One task round. True = write the cancel for c->instance now. One write, one
+ * retry after CHEST_CONFIRM_RETRY_MS while the same op AND instance are still
+ * pending, never a third; disarmed as soon as the op or the instance moves
+ * (served, expired, or replaced by another arming). */
+bool chest_cancel_step(chest_cancel_t *c, const chest_status_t *st, uint32_t now_ms);
+
 /* Mode selection (contract §6). */
 uint8_t chest_mode_next(uint8_t mode);                                  /* 0->1->..->5->0; unknown -> 0 */
 bool    chest_mode_needs_write(const uint8_t *regs, uint8_t wanted);    /* regs[0x12] != wanted */

@@ -135,3 +135,32 @@ void chest_mode_label(chest_mode_state_t s, uint8_t active, uint8_t wanted, char
     else txt = (wanted < CHEST_MODE_COUNT) ? lo[wanted] : "";
     snprintf(out, CHEST_MODE_LABEL_BUF, "%s", txt);
 }
+
+/* Cancelling a prompt — contract §5 (Niphar_chest 3da17cc). Same shape as
+ * the confirm (tag at press, one write, one retry), but nothing counts a
+ * cancel: delivery is read from the op/instance moving. */
+void chest_cancel_pack(uint8_t out[2], uint8_t instance)
+{
+    out[0] = CHEST_CANCEL_MAGIC;
+    out[1] = instance;
+}
+
+bool chest_cancel_request(chest_cancel_t *c, uint32_t tag, chest_block_t block,
+                          const chest_status_t *st, uint32_t now_ms)
+{
+    if (!c || !st || block != CHEST_BLOCK_OK || tag == 0 || st->pending_op == 0) return false;
+    if (CHEST_TAG_OP(tag) != st->pending_op || CHEST_TAG_INST(tag) != st->instance) return false;
+    c->armed = true; c->writes = 0; c->op = st->pending_op; c->instance = st->instance; c->t_ms = now_ms;
+    return true;
+}
+
+bool chest_cancel_step(chest_cancel_t *c, const chest_status_t *st, uint32_t now_ms)
+{
+    if (!c || !c->armed || !st) return false;
+    if (st->pending_op != c->op || st->instance != c->instance) { c->armed = false; return false; }
+    if (c->writes == 0) { c->writes = 1; c->t_ms = now_ms; return true; }
+    if ((uint32_t)(now_ms - c->t_ms) < CHEST_CONFIRM_RETRY_MS) return false;
+    if (c->writes == 1) { c->writes = 2; c->t_ms = now_ms; return true; }
+    c->armed = false;
+    return false;
+}

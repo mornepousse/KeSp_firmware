@@ -14,6 +14,7 @@ void CHEST_GATE_TEST_SEAM(void);   /* defined by the host test only */
 
 static uint32_t s_pending_tag;   /* CHEST_TAG(op, instance), written by the link task */
 static uint32_t s_press_tag;     /* tag stored at press time; 0 = none */
+static uint32_t s_cancel_tag;    /* prompt tag seen by a cancel key at press time; 0 = none */
 static bool     s_mode_next;
 static int8_t   s_oath_nav;      /* accumulated cursor delta, saturating at +-16 */
 static uint32_t s_oath_code;     /* press record: CHEST_GATE_CODE_PRESS | epoch at press; 0 = none */
@@ -64,6 +65,17 @@ void chest_gate_oath_nav(int8_t delta)
                                           __ATOMIC_ACQ_REL, __ATOMIC_RELAXED));
     notify();
 }
+void chest_gate_oath_key(int8_t delta)
+{
+    uint32_t tag = __atomic_load_n(&s_pending_tag, __ATOMIC_ACQUIRE);
+    if (CHEST_TAG_OP(tag) == 0) { chest_gate_oath_nav(delta); return; }
+    /* A prompt is on screen: this press cancels THAT prompt, and moves
+     * nothing (contract §5 — the cancel is the chest's to serve). */
+    __atomic_store_n(&s_cancel_tag, tag, __ATOMIC_RELEASE);
+    notify();
+}
+uint32_t chest_gate_take_cancel(void) { return __atomic_exchange_n(&s_cancel_tag, 0u, __ATOMIC_ACQ_REL); }
+
 int8_t chest_gate_take_oath_nav(void) { return __atomic_exchange_n(&s_oath_nav, (int8_t)0, __ATOMIC_ACQ_REL); }
 
 void chest_gate_publish_code(uint16_t epoch) { __atomic_store_n(&s_code_epoch, epoch, __ATOMIC_RELEASE); }

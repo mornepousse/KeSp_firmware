@@ -30,8 +30,8 @@ All hex values in CDC commands use **hex format** (e.g. `29` = 0x29 = ESC).
 | `0x3D00-0x3DFF` | Key Override | Trigger key override slot | `K_OVERRIDE(n)` |
 | `0x3E00` | Security Confirm | Physical confirmation of a pending security operation (CR-HMAC gate; Niphar_chest OpenPGP/FIDO/OTP/OATH op on the Niphargus left). A new press only — a held key confirms once | `K_SEC_CONFIRM` |
 | `0x3E01` | Chest Next | Cycle the Niphar_chest USB mode: none → storage → pgp → otp → fido → oath → none (Niphargus left) | `K_CHEST_NEXT` |
-| `0x3E02` | OATH Prev | Move the OATH account cursor back one step. Not left-only, not security-bound | `K_OATH_PREV` |
-| `0x3E03` | OATH Next | Move the OATH account cursor forward one step. Not left-only, not security-bound | `K_OATH_NEXT` |
+| `0x3E02` | OATH Prev | Move the OATH account cursor back one step. During a chest prompt (any pending op) it CANCELS that prompt instead (0xC5, the chest clears it; the cursor does not move). Not left-only, not security-bound | `K_OATH_PREV` |
+| `0x3E03` | OATH Next | Move the OATH account cursor forward one step. During a chest prompt (any pending op) it CANCELS that prompt instead (0xC5, the chest clears it; the cursor does not move). Not left-only, not security-bound | `K_OATH_NEXT` |
 | `0x3E04` | OATH Code | Request a TOTP code for the account under the cursor (still needs `K_SEC_CONFIRM` to be shown). A SECOND press while that code is visible TYPES its 6 / 8 digits to the host (US/QWERTY top row, no Enter, left on USB only) and hides it; a press after the code's window ended does nothing. Not left-only, not security-bound | `K_OATH_CODE` |
 | `0x3E00-0x3EFF` | Security actions | Block reserved for security keys (`K_IS_SEC`); `0x3E00`..`0x3E04` are defined | `K_SEC_BASE` |
 | `0x3F00` | Display Next | Cycle the idle OLED screen (HOME → STATS → TAMA) | `K_DISP_NEXT` |

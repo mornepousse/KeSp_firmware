@@ -86,6 +86,7 @@ static chest_view_t         s_view;
 static chest_oath_t         s_oath;          /* ~1.2 KB: static, never on a stack (chest_oath.h) */
 static chest_round_t        s_round;
 static chest_confirm_t      s_confirm;
+static chest_cancel_t       s_cancel;        /* a prompt cancel being delivered (contract §5) */
 static uint8_t              s_mode_wanted;   /* CHEST_MODE_*; none at every presence session */
 static chest_mode_track_t   s_mode_track;
 static uint8_t              s_mode_state = CHEST_MODE_ARRIVED;
@@ -164,6 +165,17 @@ static void write_confirm(uint8_t instance)
     spi_transaction_t t = { .cmd = CHEST_CMD_WRBUF, .addr = CHEST_REG_USER_CONFIRM,
                             .length = 16, .tx_buffer = s_tx };
     if (!xfer_seq(&t, 1)) ESP_LOGW(TAG, "confirmation not written (bus busy) — retried by the rule");
+}
+
+/* Contract §5 "Cancelling a prompt": {0xC5, armed instance} in ONE write at
+ * 0x38, the confirm's own word. It can only refuse. */
+static void write_cancel(uint8_t instance)
+{
+    chest_cancel_pack(s_tx, instance);
+    spi_transaction_t t = { .cmd = CHEST_CMD_WRBUF, .addr = CHEST_REG_USER_CONFIRM,
+                            .length = 16, .tx_buffer = s_tx };
+    if (xfer_seq(&t, 1)) ESP_LOGI(TAG, "prompt cancel written (instance %u)", instance);
+    else ESP_LOGW(TAG, "prompt cancel not written (bus busy) — retried by the rule");
 }
 
 /* Contract §6.4: one byte at 0x3A, never in the same write as 0x38. */
@@ -260,7 +272,7 @@ static void consume_segment(const chest_status_t *st, uint32_t now)
     memset(s_dma, 0, st->dma_len);   /* a code does not linger in the DMA buffer */
 }
 
-static void round_ok(const chest_status_t *st, uint32_t pressed, bool mode_next,
+static void round_ok(const chest_status_t *st, uint32_t pressed, uint32_t cancel, bool mode_next,
                      bool nav, bool code_key, uint32_t now)
 {
     chest_gate_publish(st->pending_op, st->instance);
@@ -291,8 +303,21 @@ static void round_ok(const chest_status_t *st, uint32_t pressed, bool mode_next,
     }
 
     /* Confirm (contract §5): the press must match THIS block's op AND instance. */
-    if (chest_press_matches(pressed, CHEST_BLOCK_OK, st)) chest_confirm_request(&s_confirm, st, now);
-    if (chest_confirm_step(&s_confirm, st, now)) write_confirm(s_confirm.instance);
+    /* Cancel (contract §5): only for the prompt the key saw (op AND instance).
+     * It shares 0x38 with the confirm: a cancel taken this round wins over a
+     * confirm press of the same round (refusing is the safe side of a double
+     * press), and the prompt goes only when the chest clears the op — the
+     * view is built from the block, never from this request. */
+    if (chest_cancel_request(&s_cancel, cancel, CHEST_BLOCK_OK, st, now)) {
+        s_confirm.armed = false;
+        pressed = 0;
+    }
+    if (chest_press_matches(pressed, CHEST_BLOCK_OK, st)) {
+        chest_confirm_request(&s_confirm, st, now);
+        s_cancel.armed = false;          /* a LATER real press on the same prompt wins */
+    }
+    if (chest_cancel_step(&s_cancel, st, now)) write_cancel(s_cancel.instance);
+    else if (chest_confirm_step(&s_confirm, st, now)) write_confirm(s_confirm.instance);
 
     if (p.read_segment) {
         bool ok = read_segment(st->dma_len);
@@ -340,6 +365,7 @@ static void chest_vanished(void)
     chest_round_reset(&s_round);
     chest_oath_reset(&s_oath);
     s_confirm.armed = false;
+    s_cancel.armed = false;
     s_mode_track.differ_reads = 0;
 }
 
@@ -386,6 +412,7 @@ static void chest_task(void *arg)
          * other keys are taken every round too, so none waits for a later
          * chest to act on it. */
         uint32_t pressed   = chest_gate_take_press();
+        uint32_t cancel    = chest_gate_take_cancel();   /* dropped on a non-OK round, like a press */
         bool     mode_next = chest_gate_take_mode_next();
         int8_t   nav       = chest_gate_take_oath_nav();
         uint32_t code_rec  = chest_gate_take_oath_code();
@@ -424,7 +451,7 @@ static void chest_task(void *arg)
             chest_block_t blk = chest_proto_parse(s_rx, CHEST_REG_SIZE, &st);
             switch (blk) {
             case CHEST_BLOCK_OK:
-                round_ok(&st, pressed, mode_next, s_nav_pending, code_key, now);
+                round_ok(&st, pressed, cancel, mode_next, s_nav_pending, code_key, now);
                 s_nav_pending = false;
                 s_st = st;
                 break;

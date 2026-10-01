@@ -208,6 +208,7 @@ static void reset_kp_state(void)
     (void)chest_gate_take_mode_next();
     (void)chest_gate_take_oath_nav();
     (void)chest_gate_take_oath_code();
+    (void)chest_gate_take_cancel();
 
     /* Two idle cycles to flush prev_press_row/col and prev_shift_pressed */
     build_keycode_report();
@@ -650,8 +651,11 @@ static void test_kp_lt_relatch_does_not_double_fire_an_already_absorbed_key(void
     press_key(2, 0, 2);       /* Q: new press, same cycle, resolves the LT */
     build_keycode_report();
     TEST_ASSERT_EQ(tap_hold_get_active_layer(), 1, "Q's plain press resolves the LT as a hold");
-    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 1,
-                   "P's own base-layer K_OATH_NEXT fires once, in the first pass");
+    /* op 1 is pending, so P's K_OATH_NEXT is a prompt CANCEL (contract §5,
+     * 2026-10-01), not a cursor step — still exactly one action. */
+    TEST_ASSERT_EQ(chest_gate_take_cancel(), CHEST_TAG(1, 0),
+                   "P's own base-layer K_OATH_NEXT fires once, in the first pass (a cancel: op pending)");
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 0, "a cancel moves no cursor");
     TEST_ASSERT_EQ(chest_gate_take_press(), 0,
                    "P's LT-target-layer K_SEC_CONFIRM must NOT also fire: one press, one action");
     chest_gate_publish(0, 0);
@@ -1011,6 +1015,58 @@ static void test_kp_oath_code_records_the_code_on_screen_at_press(void)
     chest_gate_publish_code(0);
 }
 
+/* Cancelling a prompt (contract §5, 0xC5): during a prompt (pending op
+ * published), K_OATH_PREV/NEXT store the prompt's tag AT PRESS TIME as a
+ * cancel and move NO cursor; once per new press; from either half. Outside a
+ * prompt they browse as before and cancel nothing. */
+static void test_kp_oath_nav_cancels_a_prompt_without_moving(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_K_OATH_NEXT;
+    chest_gate_publish(7, 3);
+    press_key(0, 0, 0);
+    build_keycode_report();
+    chest_gate_publish(7, 4);               /* re-armed after the press: the tag keeps 3 */
+    TEST_ASSERT_EQ(chest_gate_take_cancel(), CHEST_TAG(7, 3), "NEXT during a prompt: cancel of the prompt seen at press");
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 0, "and NO cursor move");
+    TEST_ASSERT_EQ(chest_gate_take_press(), 0, "never a confirm");
+    TEST_ASSERT(!chest_gate_take_oath_code(), "never a code request");
+    press_key(0, 0, 0);
+    build_keycode_report();                 /* held */
+    TEST_ASSERT_EQ(chest_gate_take_cancel(), 0, "a held key does not cancel again");
+    TEST_ASSERT_EQ(keycodes[0], 0, "absorbed, not typed");
+    release_all_keys();
+    build_keycode_report();
+
+    keymaps[0][0][0] = T_K_OATH_PREV;
+    chest_gate_publish(2, 9);
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT_EQ(chest_gate_take_cancel(), CHEST_TAG(2, 9), "PREV during any prompt (here a PGP sign): cancel");
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 0, "no cursor move");
+    release_all_keys();
+    build_keycode_report();
+
+    chest_gate_publish(0, 0);
+    press_key(0, 0, 0);
+    build_keycode_report();
+    TEST_ASSERT_EQ(chest_gate_take_cancel(), 0, "no prompt: nothing to cancel");
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), -1, "no prompt: PREV browses as before");
+}
+
+static void test_kp_oath_nav_cancel_from_the_right_half(void)
+{
+    reset_kp_state();
+    keymaps[0][0][5] = T_K_OATH_NEXT;       /* remote column (>= SEC_CONFIRM_LOCAL_COLS) */
+    chest_gate_publish(7, 3);
+    press_key(0, 0, 5);
+    build_keycode_report();
+    TEST_ASSERT_EQ(chest_gate_take_cancel(), CHEST_TAG(7, 3), "a cancel can only refuse: accepted from the right half");
+    TEST_ASSERT_EQ(chest_gate_take_oath_nav(), 0, "no cursor move");
+    keymaps[0][0][5] = 0;
+    chest_gate_publish(0, 0);
+}
+
 /* Race oracle for the CAS loop in chest_gate_oath_nav (I1, review
  * 2026-09-29): a concurrent chest_gate_take_oath_nav() landing between the
  * loop's load and its store must never lose or duplicate a step. Seeds the
@@ -1323,6 +1379,8 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_oath_nav_saturates_negative);
     TEST_RUN(test_kp_oath_code_twice_before_take_yields_one);
     TEST_RUN(test_kp_oath_code_records_the_code_on_screen_at_press);
+    TEST_RUN(test_kp_oath_nav_cancels_a_prompt_without_moving);
+    TEST_RUN(test_kp_oath_nav_cancel_from_the_right_half);
     TEST_RUN(test_chest_gate_oath_nav_cas_survives_a_concurrent_take);
     TEST_RUN(test_chest_gate_notify_wakes_the_link_task);
     TEST_RUN(test_sec_confirm_from_local);

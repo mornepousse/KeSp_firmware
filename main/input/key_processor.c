@@ -295,9 +295,10 @@ static uint8_t process_advanced_key(uint16_t kc, uint8_t row, uint8_t col)
     if (kc == K_CHEST_NEXT) { if (is_new_press(row, col)) chest_gate_mode_next(); return 0; }
     /* Not left-only: browsing the accounts and asking for a code carry no
      * authority by themselves (only K_SEC_CONFIRM arms/authorizes) — Mae,
-     * 2026-09-29. */
-    if (kc == K_OATH_PREV) { if (is_new_press(row, col)) chest_gate_oath_nav(-1); return 0; }
-    if (kc == K_OATH_NEXT) { if (is_new_press(row, col)) chest_gate_oath_nav(1); return 0; }
+     * 2026-09-29. During a prompt PREV/NEXT cancel it instead (a cancel can
+     * only refuse, contract §5) — chest_gate_oath_key decides. */
+    if (kc == K_OATH_PREV) { if (is_new_press(row, col)) chest_gate_oath_key(-1); return 0; }
+    if (kc == K_OATH_NEXT) { if (is_new_press(row, col)) chest_gate_oath_key(1); return 0; }
     if (kc == K_OATH_CODE) { if (is_new_press(row, col)) chest_gate_oath_code(); return 0; }
     if (kc == K_LAYER_LOCK){ layer_lock_toggle(); return 0; }
     if (kc == K_DISP_NEXT) { if (is_new_press(row, col)) km_post_display_next(); return 0; }

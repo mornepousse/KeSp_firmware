@@ -312,7 +312,15 @@ in the PR/release.
       12. let a code run out (countdown to the end, panel back to the
           browser), then `K_OATH_CODE` → nothing is typed (the editor stays
           as it was); after `K_OATH_NEXT` hid a code, `K_OATH_CODE` is a
-          request, never a type.
+          request, never a type;
+      13. cancelling a prompt (chest at 3da17cc or later): note the cursor
+          position, `K_OATH_CODE` → the prompt → `K_OATH_NEXT` → the prompt
+          is gone within ~1 s, back to the browser at the SAME cursor
+          position, no code ever shows; the console shows `prompt cancel
+          written (instance N)`; then a host request (`echo t | gpg --sign`,
+          or an OATH calculate from the host) → prompt → `K_OATH_PREV` from
+          the RIGHT half → prompt gone, the host gets 6985 (gpg: card
+          error / operation cancelled) at once instead of after 15 s.
 
 ## BLE (relevant boards)
 - [ ] Host pairing OK, types with no drop for 1 min
