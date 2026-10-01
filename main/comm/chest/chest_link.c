@@ -303,21 +303,15 @@ static void round_ok(const chest_status_t *st, uint32_t pressed, uint32_t cancel
     }
 
     /* Confirm (contract §5): the press must match THIS block's op AND instance. */
-    /* Cancel (contract §5): only for the prompt the key saw (op AND instance).
-     * It shares 0x38 with the confirm: a cancel taken this round wins over a
-     * confirm press of the same round (refusing is the safe side of a double
-     * press), and the prompt goes only when the chest clears the op — the
-     * view is built from the block, never from this request. */
-    if (chest_cancel_request(&s_cancel, cancel, CHEST_BLOCK_OK, st, now)) {
-        s_confirm.armed = false;
-        pressed = 0;
+    /* Confirm / cancel (contract §5): they share 0x38; who writes this round
+     * is chest_arbitrate's (pure, test_chest_arbitrate_cancel_vs_confirm).
+     * The prompt goes only when the chest clears the op — the view is built
+     * from the block, never from these requests. */
+    switch (chest_arbitrate(&s_confirm, &s_cancel, pressed, cancel, st, now)) {
+    case CHEST_WRITE_CANCEL:  write_cancel(s_cancel.instance);   break;
+    case CHEST_WRITE_CONFIRM: write_confirm(s_confirm.instance); break;
+    default: break;
     }
-    if (chest_press_matches(pressed, CHEST_BLOCK_OK, st)) {
-        chest_confirm_request(&s_confirm, st, now);
-        s_cancel.armed = false;          /* a LATER real press on the same prompt wins */
-    }
-    if (chest_cancel_step(&s_cancel, st, now)) write_cancel(s_cancel.instance);
-    else if (chest_confirm_step(&s_confirm, st, now)) write_confirm(s_confirm.instance);
 
     if (p.read_segment) {
         bool ok = read_segment(st->dma_len);

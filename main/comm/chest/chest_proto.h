@@ -135,6 +135,17 @@ bool chest_cancel_request(chest_cancel_t *c, uint32_t tag, chest_block_t block,
  * (served, expired, or replaced by another arming). */
 bool chest_cancel_step(chest_cancel_t *c, const chest_status_t *st, uint32_t now_ms);
 
+/* One OK round's write at 0x38 — the cancel and the confirm share the word.
+ * `pressed` / `cancel` = the tags taken this round (0 = none). A cancel that
+ * matches the current prompt WINS over a confirm press of the same round
+ * (refusing is the safe side) and disarms the confirm; a matching press
+ * (re-)arms the confirm and drops an in-flight cancel — a LATER real press
+ * on the same prompt is the owner's last word. Stale tags arm nothing.
+ * Returns what to write now; the caller writes c->instance of that side. */
+typedef enum { CHEST_WRITE_NONE = 0, CHEST_WRITE_CONFIRM, CHEST_WRITE_CANCEL } chest_write_t;
+chest_write_t chest_arbitrate(chest_confirm_t *cf, chest_cancel_t *cn, uint32_t pressed,
+                              uint32_t cancel, const chest_status_t *st, uint32_t now_ms);
+
 /* Mode selection (contract §6). */
 uint8_t chest_mode_next(uint8_t mode);                                  /* 0->1->..->5->0; unknown -> 0 */
 bool    chest_mode_needs_write(const uint8_t *regs, uint8_t wanted);    /* regs[0x12] != wanted */

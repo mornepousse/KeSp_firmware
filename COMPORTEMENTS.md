@@ -354,7 +354,10 @@ means a test, or a line.
   0x5A are the only cancel and grant values and six bits apart
   [test:test_chest_cancel_and_confirm_magics_distinct]. A cancel taken in
   the same round as a K_SEC_CONFIRM press of the same prompt wins (refusing
-  is the safe side); a LATER real press re-arms the confirm. The prompt goes
+  is the safe side); a LATER real press re-arms the confirm and drops an
+  in-flight cancel; a stale tag on either side blocks nothing — one pure
+  decision, `chest_arbitrate` [test:test_chest_arbitrate_cancel_vs_confirm].
+  The prompt goes
   only when the chest clears the op (V19: op 0, label gone, instance and
   0x11 unchanged) — never optimistically: the view is built from the block
   [test:test_view_prompt_stays_until_the_chest_clears_it], and a CODE

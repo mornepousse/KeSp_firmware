@@ -164,3 +164,23 @@ bool chest_cancel_step(chest_cancel_t *c, const chest_status_t *st, uint32_t now
     c->armed = false;
     return false;
 }
+
+chest_write_t chest_arbitrate(chest_confirm_t *cf, chest_cancel_t *cn, uint32_t pressed,
+                              uint32_t cancel, const chest_status_t *st, uint32_t now_ms)
+{
+    if (!cf || !cn || !st) return CHEST_WRITE_NONE;
+    /* A cancel of THIS prompt wins over a confirm press of the same round. */
+    if (chest_cancel_request(cn, cancel, CHEST_BLOCK_OK, st, now_ms)) {
+        cf->armed = false;
+        pressed = 0;
+    }
+    /* A matching press (a later one, once a cancel is in flight) re-arms the
+     * confirm and drops the cancel: the owner's last real press decides. */
+    if (chest_press_matches(pressed, CHEST_BLOCK_OK, st)) {
+        chest_confirm_request(cf, st, now_ms);
+        cn->armed = false;
+    }
+    if (chest_cancel_step(cn, st, now_ms)) return CHEST_WRITE_CANCEL;
+    if (chest_confirm_step(cf, st, now_ms)) return CHEST_WRITE_CONFIRM;
+    return CHEST_WRITE_NONE;
+}

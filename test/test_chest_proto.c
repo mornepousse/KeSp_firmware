@@ -842,6 +842,56 @@ static void test_chest_cancel_step(void)
     TEST_ASSERT(!c.armed, "disarmed");
 }
 
+/* Security review 2026-10-01: the cancel/confirm arbitration of one round
+ * (they share 0x38) is pure and pinned here, not left in the transport glue.
+ * Semantics: a cancel taken in the same round as a confirm press of the same
+ * prompt WINS (refusing is the safe side) and disarms the confirm; a LATER
+ * real press on the same prompt re-arms the confirm and disarms an in-flight
+ * cancel; a stale tag (older instance) on either side blocks nothing. */
+static void test_chest_arbitrate_cancel_vs_confirm(void)
+{
+    chest_status_t s;
+    chest_proto_parse(V1, 64, &s);                                    /* op 7, instance 3 */
+    chest_confirm_t cf; chest_cancel_t cn;
+
+    /* Both in the same round: the cancel is written, the confirm disarmed —
+     * and stays so on the retry round. */
+    memset(&cf, 0, sizeof cf); memset(&cn, 0, sizeof cn);
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, CHEST_TAG(7, 3), CHEST_TAG(7, 3), &s, 1000), CHEST_WRITE_CANCEL,
+                   "confirm press + cancel in one round: the CANCEL is written");
+    TEST_ASSERT(!cf.armed, "the confirm is disarmed");
+    TEST_ASSERT(cn.armed, "the cancel is armed");
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, 0, 0, &s, 1200), CHEST_WRITE_CANCEL, "its one retry, still a cancel");
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, 0, 0, &s, 1400), CHEST_WRITE_NONE, "never a confirm afterwards");
+
+    /* A cancel in flight, then a NEW real press on the same prompt: the
+     * confirm re-arms and is written, the cancel is dropped. */
+    memset(&cf, 0, sizeof cf); memset(&cn, 0, sizeof cn);
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, 0, CHEST_TAG(7, 3), &s, 2000), CHEST_WRITE_CANCEL, "cancel written");
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, CHEST_TAG(7, 3), 0, &s, 2100), CHEST_WRITE_CONFIRM,
+                   "a later press on the same prompt: the confirm is written");
+    TEST_ASSERT(!cn.armed, "the in-flight cancel is dropped");
+    TEST_ASSERT(cf.armed, "the confirm is armed (its retry rule applies)");
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, 0, 0, &s, 2300), CHEST_WRITE_CONFIRM, "the confirm's one retry");
+
+    /* Stale cancel (older instance) + a valid press: the press is served. */
+    memset(&cf, 0, sizeof cf); memset(&cn, 0, sizeof cn);
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, CHEST_TAG(7, 3), CHEST_TAG(7, 2), &s, 3000), CHEST_WRITE_CONFIRM,
+                   "a stale cancel blocks no current confirm");
+    TEST_ASSERT(!cn.armed, "the stale cancel is not armed");
+
+    /* Stale press + a valid cancel: the cancel is served, no confirm. */
+    memset(&cf, 0, sizeof cf); memset(&cn, 0, sizeof cn);
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, CHEST_TAG(7, 2), CHEST_TAG(7, 3), &s, 4000), CHEST_WRITE_CANCEL,
+                   "a stale press confirms nothing; the cancel goes");
+    TEST_ASSERT(!cf.armed, "no confirm armed");
+
+    /* Both stale, or nothing at all: no write. */
+    memset(&cf, 0, sizeof cf); memset(&cn, 0, sizeof cn);
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, CHEST_TAG(7, 2), CHEST_TAG(7, 2), &s, 5000), CHEST_WRITE_NONE, "both stale: nothing");
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, 0, 0, &s, 5100), CHEST_WRITE_NONE, "nothing pressed: nothing");
+}
+
 void test_chest_proto(void)
 {
     TEST_SUITE("chest link protocol (S3 master, v3)");
@@ -859,6 +909,7 @@ void test_chest_proto(void)
     TEST_RUN(test_chest_cancel_and_confirm_magics_distinct);
     TEST_RUN(test_chest_cancel_request_needs_the_armed_instance);
     TEST_RUN(test_chest_cancel_step);
+    TEST_RUN(test_chest_arbitrate_cancel_vs_confirm);
     TEST_RUN(test_chest_label_sanitize_bounds);
     TEST_RUN(test_chest_dma_segment_ok);
     TEST_RUN(test_chest_mounted_without_mode_is_corrupt);
