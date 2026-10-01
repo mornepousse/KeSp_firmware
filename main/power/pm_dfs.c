@@ -26,6 +26,7 @@
 #include "esp_pm.h"
 #include "esp_log.h"
 #include "tinyusb.h"
+#include "usb_wake_guard.h"   /* releases the enumeration light-sleep hold on mount */
 #if CONFIG_KASE_VEILLE && CONFIG_KASE_DEVICE_ROLE_KEYBOARD
 #include "veille_task.h"   /* veto USB : un hôte attend un clavier */
 #endif
@@ -48,6 +49,7 @@ static void usb_hote(bool monte)
 void pm_dfs_usb_event(bool monte)
 {
     usb_hote(monte);
+    if (monte) usb_wake_guard_on_mount();   /* enumeration done: release the D+ hold */
 #if CONFIG_KASE_VEILLE && CONFIG_KASE_DEVICE_ROLE_KEYBOARD
     /* The LEFT does not sleep while plugged in (HID keyboard, a host is waiting). The
      * right has no USB veto: its port is just a CDC nobody opens, it

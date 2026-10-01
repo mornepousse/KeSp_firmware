@@ -438,6 +438,35 @@ means a test, or a line.
   needed that clock and was removed — Mae chose the 3.4 mA over it. USB is
   not a wake source either (TRM table 10.4-3): plug the cable, press a key on
   each half, the bolt appears on both screens.
+- [test:test_usb_wake_guard] USB enumeration vs automatic light sleep
+  (2026-10-01): plugging a half's USB-C into the PC while typing on battery
+  took ~30 s to enumerate — the ESP32-S3's USB-OTG controller is NOT in the
+  documented list of light-sleep wakeup sources (ESP-IDF "Sleep Modes": only
+  EXT0/EXT1/GPIO/UART/timer/ULP/touch), and `pm_dfs.c`'s APB lock only
+  engages on `tud_mount_cb` — by definition after enumeration, too late to
+  let enumeration happen. With tickless automatic light sleep and the at-rest
+  cadences around 1 s (`cadence.h`), a half idle between keystrokes can be
+  asleep up to ~1 s at a time; the host's bus reset / SETUP packets land
+  mid-sleep more often than not, and the host needs many retries before the
+  timing lines up by luck. `usb_wake_guard.h`'s activity/mount/timeout state
+  machine (hold a lock from the first sign of bus activity until mount or a
+  2 s timeout, never acquire twice for one burst, never release twice)
+  is pure and host-tested here — the one-shot-per-burst and the
+  uint32 wraparound-safe deadline are the two properties that would be
+  easy to get wrong and hard to notice on the bench (a leaked/double lock
+  just looks like "battery life got a bit worse").
+- [smoke:USB enumeration while typing] The hardware side of the behaviour
+  above: `usb_wake_guard.c` watches D+ (GPIO20, idles HIGH via the device
+  pull-up, LOW during a bus reset's SE0 and ordinary K-state bits) as a GPIO
+  wakeup source (the one wakeup path documented to work on any pin, RTC or
+  not) plus a plain awake-time NEGEDGE interrupt that drives the state
+  machine above and holds a dedicated `ESP_PM_NO_LIGHT_SLEEP` lock. NOT
+  host-testable: the GPIO ISR, the PM lock itself, and — the real open
+  question — whether the D+ pad stays readable as a plain GPIO input while
+  the OTG PHY is actively driving it (deliberately NOT reconfigured via
+  `gpio_config()`, which would disconnect a live USB session; if the pad
+  turns out to bypass the GPIO matrix for input too, this is a silent
+  no-op, not a regression — the bench log line is how you'd tell).
 - [test:test_memlcd_model] The screens SAY whether the link is up: a 16x12
   two-arrow pictogram (⇆) while the 5 V is closed on our side
   (`link_uart_active()`) — on both halves in the status band beside the

@@ -61,6 +61,7 @@ extern void test_matrix_bitmap(void);
 extern void test_veille(void);
 extern void test_keyboard_cadence(void);
 extern void test_cadence(void);
+extern void test_usb_wake_guard(void);
 extern void test_veille_veto(void);
 extern void test_radio_owner(void);
 extern void test_fusion_file(void);
@@ -149,6 +150,7 @@ int main(void) {
     test_veille();
     test_keyboard_cadence();
     test_cadence();
+    test_usb_wake_guard();
     test_veille_veto();
     test_radio_owner();
     test_fusion_file();

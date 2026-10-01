@@ -1,5 +1,6 @@
 #include "tinyusb.h"
 #include "pm_dfs.h"   /* pm_dfs_usb_event */
+#include "usb_wake_guard.h"   /* D+ activity vs automatic light sleep during enumeration */
 #include "tinyusb_cdc_acm.h"
 #include "tinyusb_default_config.h"
 #include "usb_hid.h"
@@ -374,6 +375,7 @@ void tinyusb_hid_init(void)
 #endif
 
     ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
+    usb_wake_guard_init();   /* arm D+ before the first bus reset can race an automatic sleep */
     ESP_LOGI(TAG_UD, "USB initialization DONE");
 }
 

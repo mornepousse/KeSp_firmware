@@ -20,6 +20,7 @@
 #include "usb_presence.h"   /* both halves: USB veto (left) and DFS lock catch-up */
 #if CONFIG_PM_ENABLE
 #include "pm_dfs.h"         /* pm_dfs_usb_rattrapage */
+#include "usb_wake_guard.h" /* enumeration-vs-automatic-light-sleep safety-net tick */
 #endif
 #if CONFIG_KASE_BATT_SENSE
 #include "batt_sense.h"     /* critical battery: sleep sooner */
@@ -132,6 +133,9 @@ static void veille_task(void *arg)
                                                          : (uint32_t)CONFIG_KASE_VEILLE_LEGERE_S * 1000u);
 #endif
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+#if CONFIG_PM_ENABLE
+        usb_wake_guard_tick(now);   /* safety net: release the D+ hold if mount never came */
+#endif
         uint32_t inactif = now - get_last_activity_time_ms();
         veille_vetos_t v = vetos_lire();
         if ((uint32_t)(now - dernier_hb) >= HB_PERIODE_MS) {

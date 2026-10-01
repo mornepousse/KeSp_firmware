@@ -212,6 +212,25 @@ in the PR/release.
       once on the held row (cause=0/7), and looped every ~5 s. On USB the
       bug did not show (the early return isn't taken), which is why an
       earlier capture over USB looked fine
+- [ ] **USB enumeration while typing** (2026-10-01): type continuously on
+      battery (keeps automatic light sleep short between keystrokes), then
+      plug the USB-C into the PC mid-typing → the host's USB icon /
+      `lsusb`/`dmesg` shows the device enumerated within ~2 s, not ~30 s;
+      console: "usb: bus activity, holding light sleep off until mount"
+      shortly before "USB host mounted: APB held at 80 MHz" (`pm_dfs.c`).
+      Root cause: the ESP32-S3's USB-OTG controller is not a documented
+      light-sleep wakeup source, and pm_dfs.c's own APB lock only engages
+      AFTER mount — before that, a half asleep between keystrokes (cadences
+      at rest ~1 s) misses the host's bus reset / SETUP packets outright,
+      and the host needs many retries to land one in an awake window
+      (`usb_wake_guard.c`, D+/GPIO20 watched as a GPIO wakeup + interrupt
+      source). On battery with the cable never plugged: HB `slept=` and the
+      light-sleep current must be unchanged from before this fix — nothing
+      should wake or hold a lock with no host present (watch for a D+ line
+      floating/noisy without a cable: if `usb_wake_guard_tick` ever logs a
+      hold with nothing plugged in, that pin needs a different wakeup level
+      or a debounce — not expected, since D+ is pulled HIGH locally by the
+      device-side full-speed pull-up, but not bench-proven).
 - [ ] e-ink displays the 'PAIRED' splash at pairing
 - [ ] e-ink dashboard: L/R/USB + battery, without corruption
 - [ ] Trackpad (if present): cursor, L/R/M click, scroll

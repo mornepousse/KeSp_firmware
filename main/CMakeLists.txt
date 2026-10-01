@@ -8,6 +8,11 @@ set(srcs
 
     # USB (always present : HID + CDC)
     "comm/usb/usb_hid.c"
+    # D+ GPIO activity guard vs automatic light sleep during enumeration —
+    # the real logic is internally gated to CONFIG_PM_ENABLE &&
+    # CONFIG_FREERTOS_USE_TICKLESS_IDLE (Niphargus halves only); no-op stubs
+    # elsewhere, so it is safe to always compile.
+    "comm/usb/usb_wake_guard.c"
     "comm/hid_transport.c"
     "comm/cdc/cdc_acm_com.c"
     "comm/cdc/cdc_ota.c"

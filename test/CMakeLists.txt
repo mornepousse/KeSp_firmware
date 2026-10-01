@@ -88,6 +88,7 @@ add_executable(test_runner
     test_veille.c
     test_keyboard_cadence.c
     test_cadence.c
+    test_usb_wake_guard.c
     test_veille_veto.c
     test_radio_owner.c
     test_fusion_file.c
