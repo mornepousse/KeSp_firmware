@@ -15,7 +15,12 @@
  * enumeration — gated the same way pm_dfs.c's own USB lock is. The dongle
  * (CONFIG_PM_ENABLE=n, mains-powered, no battery budget to protect) compiles
  * this out entirely. */
-#if CONFIG_PM_ENABLE && CONFIG_FREERTOS_USE_TICKLESS_IDLE
+/* DISABLED 2026-10-01 (bench): gpio_wakeup_enable(D+, LOW_LEVEL) also turns
+ * the pin's CPU interrupt into a LOW-level one; with dp_isr installed and D+
+ * low at boot, the interrupt never cleared → interrupt WDT on CPU0, boot loop
+ * (backtrace: dp_isr ← gpio_isr_loop ← gpio_wakeup_enable ← usb_wake_guard_init).
+ * The stubs below are compiled until the guard is redesigned. */
+#if 0 && CONFIG_PM_ENABLE && CONFIG_FREERTOS_USE_TICKLESS_IDLE
 
 static const char *TAG = "usb_wake";
 
