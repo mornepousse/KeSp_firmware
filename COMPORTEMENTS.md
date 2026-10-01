@@ -398,14 +398,19 @@ means a test, or a line.
   (`hid_report_type_usages`, all or nothing on queue room) from the chest
   task — never from the scan or HID sender task; the digits are never
   logged and the chest task's buffer is wiped once queued
-  [smoke:Chest link]. Like the request, typing is accepted from a
-  right-half column (K_OATH_CODE is not left-only): the code was authorized
-  on the left by K_SEC_CONFIRM, typing it only moves it to the host.
+  [smoke:Chest link]. Typing is LEFT-ONLY (Mae, 2026-10-01), like
+  K_SEC_CONFIRM — a right-half key travels over an unauthenticated radio:
+  the press record carries the half, by the SAME predicate
+  (`sec_confirm_from_local`, `SEC_CONFIRM_LOCAL_COLS`)
+  [test:test_kp_oath_code_records_the_half]; a right-half press on a visible
+  code does nothing (no type, no request, the code stays), while with no
+  code on screen it is still a request
+  [test:test_chest_oath_code_key_typing_is_left_only].
   None of the three
   keys is left-only or security-bound: browsing the list and asking for a
   code carry no authority by themselves — only K_SEC_CONFIRM arms or
   authorizes; a press on any of them from a remote (right-half) column is
-  accepted the same as from the left
+  accepted the same as from the left (except TYPING a visible code, left-only, above)
   [test:test_kp_oath_keys_accepted_from_the_right_half]. A right-half key
   held through more than `HALF_LINK_TIMEOUT_MS` (400 ms) of radio silence is
   released by the left and then re-affirmed once the link resumes, which

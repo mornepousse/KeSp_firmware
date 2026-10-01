@@ -338,12 +338,12 @@ static void round_ok(const chest_status_t *st, uint32_t pressed, uint32_t cancel
  * USB: on the radio route the dongle types and hid_transport drops the
  * left's reports (fusion), so the code would vanish unseen. The chest only
  * exists while a host is there anyway; the guard makes it explicit. */
-static bool type_or_request(uint16_t press_epoch, uint32_t now)
+static bool type_or_request(uint16_t press_epoch, bool local, uint32_t now)
 {
     uint8_t u[CHEST_OATH_TYPE_MAX];
     uint8_t n = 0;
     bool route_usb = kbd_active_route() == KBD_OUT_USB && keyboard_get_usb_bl_state() == 0;
-    chest_oath_key_t k = chest_oath_code_key(&s_oath, press_epoch, now, route_usb, u, &n);
+    chest_oath_key_t k = chest_oath_code_key(&s_oath, press_epoch, local, now, route_usb, u, &n);
     if (k == CHEST_OATH_KEY_TYPE) {
         bool ok = hid_report_type_usages(u, n);
         memset(u, 0, sizeof u);          /* the digits do not outlive the queueing */
@@ -443,7 +443,7 @@ static void chest_task(void *arg)
          * before this round's read, so a code arriving later in the round is
          * never typed by a press that did not see it (the record's epoch). */
         if (CHEST_GATE_CODE_PRESSED(code_rec)) {
-            if (type_or_request(CHEST_GATE_CODE_EPOCH(code_rec), now)) code_key = true;
+            if (type_or_request(CHEST_GATE_CODE_EPOCH(code_rec), CHEST_GATE_CODE_LOCAL(code_rec), now)) code_key = true;
         }
 
         if (read_block()) {

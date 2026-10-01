@@ -80,10 +80,11 @@ int8_t chest_gate_take_oath_nav(void) { return __atomic_exchange_n(&s_oath_nav, 
 
 void chest_gate_publish_code(uint16_t epoch) { __atomic_store_n(&s_code_epoch, epoch, __ATOMIC_RELEASE); }
 
-void chest_gate_oath_code(void)
+void chest_gate_oath_code(bool local)
 {
     uint16_t epoch = __atomic_load_n(&s_code_epoch, __ATOMIC_ACQUIRE);
-    __atomic_store_n(&s_oath_code, CHEST_GATE_CODE_PRESS | epoch, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_oath_code, CHEST_GATE_CODE_PRESS | (local ? CHEST_GATE_CODE_LOCAL_BIT : 0u) | epoch,
+                     __ATOMIC_RELEASE);
     notify();
 }
 uint32_t chest_gate_take_oath_code(void) { return __atomic_exchange_n(&s_oath_code, 0u, __ATOMIC_ACQ_REL); }

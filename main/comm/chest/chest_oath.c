@@ -213,13 +213,16 @@ uint16_t chest_oath_visible_epoch(chest_oath_t *o, uint32_t now_ms)
     return o->code_epoch;
 }
 
-chest_oath_key_t chest_oath_code_key(chest_oath_t *o, uint16_t press_epoch, uint32_t now_ms,
+chest_oath_key_t chest_oath_code_key(chest_oath_t *o, uint16_t press_epoch, bool local, uint32_t now_ms,
                                      bool route_usb, uint8_t usages[CHEST_OATH_TYPE_MAX],
                                      uint8_t *n)
 {
     if (n) *n = 0;
     if (!o || !usages || !n) return CHEST_OATH_KEY_IGNORE;
     if (press_epoch == 0) return CHEST_OATH_KEY_REQUEST;     /* no code on screen at press */
+    /* Typing is left-only (Mae, 2026-10-01), like K_SEC_CONFIRM: a right-half
+     * key travels over an unauthenticated radio. On a code it does nothing. */
+    if (!local) return CHEST_OATH_KEY_IGNORE;
 
     /* The press was made on a code: it types THAT code, now, or nothing. */
     if (o->code_epoch != press_epoch || !chest_oath_code_visible(o, now_ms, NULL))

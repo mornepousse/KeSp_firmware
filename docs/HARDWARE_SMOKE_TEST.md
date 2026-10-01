@@ -308,7 +308,11 @@ in the PR/release.
           digits) into the editor, NO Enter, and the code disappears from
           the screen at once (back to the browser); a third press is a new
           request (the prompt again), it types nothing; the console shows
-          `TOTP code typed (6 digits)` and never the digits;
+          `TOTP code typed (6 digits)` and never the digits; with
+          `K_OATH_CODE` ALSO mapped on the right half: a right-half press
+          while the code shows types NOTHING and the code stays (then the
+          left key types it), and a right-half press with no code shows the
+          prompt as usual;
       12. let a code run out (countdown to the end, panel back to the
           browser), then `K_OATH_CODE` → nothing is typed (the editor stays
           as it was); after `K_OATH_NEXT` hid a code, `K_OATH_CODE` is a

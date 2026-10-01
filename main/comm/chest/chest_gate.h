@@ -64,10 +64,12 @@ void     chest_gate_publish_code(uint16_t epoch);
  * if it is still the one visible (chest_oath_code_key, Mae 2026-10-01). A
  * second press before the take overwrites the record (one press, not a
  * counter). */
-void     chest_gate_oath_code(void);
+void     chest_gate_oath_code(bool local);
 /* link task: consume the press record (0 = no press) and clear it. */
 uint32_t chest_gate_take_oath_code(void);
 #define CHEST_GATE_CODE_PRESS        0x10000u
+#define CHEST_GATE_CODE_LOCAL_BIT    0x20000u
+#define CHEST_GATE_CODE_LOCAL(r)     (((r) & CHEST_GATE_CODE_LOCAL_BIT) != 0u)
 #define CHEST_GATE_CODE_PRESSED(r)   (((r) & CHEST_GATE_CODE_PRESS) != 0u)
 #define CHEST_GATE_CODE_EPOCH(r)     ((uint16_t)((r) & 0xFFFFu))
 /* Wake-up hook: chest_link.c registers a function that wakes its task

@@ -1067,6 +1067,33 @@ static void test_kp_oath_nav_cancel_from_the_right_half(void)
     chest_gate_publish(0, 0);
 }
 
+/* Mae, 2026-10-01: typing is left-only — the press record says which half
+ * the key came from, by the SAME predicate as K_SEC_CONFIRM
+ * (sec_confirm_from_local, SEC_CONFIRM_LOCAL_COLS). */
+static void test_kp_oath_code_records_the_half(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_K_OATH_CODE;       /* local column */
+    keymaps[0][0][5] = T_K_OATH_CODE;       /* remote column (>= SEC_CONFIRM_LOCAL_COLS) */
+    chest_gate_publish_code(7);
+    press_key(0, 0, 0);
+    build_keycode_report();
+    uint32_t r = chest_gate_take_oath_code();
+    TEST_ASSERT(CHEST_GATE_CODE_PRESSED(r), "left: a press");
+    TEST_ASSERT(CHEST_GATE_CODE_LOCAL(r), "left: local");
+    TEST_ASSERT_EQ(CHEST_GATE_CODE_EPOCH(r), 7, "left: epoch at press");
+    release_all_keys();
+    build_keycode_report();
+    press_key(0, 0, 5);
+    build_keycode_report();
+    r = chest_gate_take_oath_code();
+    TEST_ASSERT(CHEST_GATE_CODE_PRESSED(r), "right: still a press (a request when no code)");
+    TEST_ASSERT(!CHEST_GATE_CODE_LOCAL(r), "right: NOT local — may never type");
+    TEST_ASSERT_EQ(CHEST_GATE_CODE_EPOCH(r), 7, "right: epoch at press");
+    keymaps[0][0][5] = 0;
+    chest_gate_publish_code(0);
+}
+
 /* Race oracle for the CAS loop in chest_gate_oath_nav (I1, review
  * 2026-09-29): a concurrent chest_gate_take_oath_nav() landing between the
  * loop's load and its store must never lose or duplicate a step. Seeds the
@@ -1308,7 +1335,7 @@ static void test_chest_gate_notify_wakes_the_link_task(void)
     chest_gate_oath_nav(1);
     chest_gate_oath_nav(-1);
     TEST_ASSERT_EQ(s_gate_notify_count, 3, "each K_OATH_PREV/NEXT wakes it");
-    chest_gate_oath_code();
+    chest_gate_oath_code(true);
     TEST_ASSERT_EQ(s_gate_notify_count, 4, "K_OATH_CODE wakes it");
     chest_gate_publish(0, 0);
     (void)chest_gate_press();
@@ -1379,6 +1406,7 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_oath_nav_saturates_negative);
     TEST_RUN(test_kp_oath_code_twice_before_take_yields_one);
     TEST_RUN(test_kp_oath_code_records_the_code_on_screen_at_press);
+    TEST_RUN(test_kp_oath_code_records_the_half);
     TEST_RUN(test_kp_oath_nav_cancels_a_prompt_without_moving);
     TEST_RUN(test_kp_oath_nav_cancel_from_the_right_half);
     TEST_RUN(test_chest_gate_oath_nav_cas_survives_a_concurrent_take);

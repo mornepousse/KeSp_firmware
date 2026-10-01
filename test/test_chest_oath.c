@@ -894,7 +894,7 @@ static void test_chest_oath_code_key_no_code_at_press_requests(void)
     uint8_t u[CHEST_OATH_TYPE_MAX];
     uint8_t n = 0xEE;
     chest_oath_reset(&o);
-    TEST_ASSERT_EQ(chest_oath_code_key(&o, 0, 1000, true, u, &n), CHEST_OATH_KEY_REQUEST,
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, 0, true, 1000, true, u, &n), CHEST_OATH_KEY_REQUEST,
                    "no code on screen at press: a request, as before");
     TEST_ASSERT_EQ(n, 0, "nothing to type");
 
@@ -903,7 +903,7 @@ static void test_chest_oath_code_key_no_code_at_press_requests(void)
      * what the screen showed when it was pressed. */
     uint8_t secs;
     show_c1(&o, 1000);
-    TEST_ASSERT_EQ(chest_oath_code_key(&o, 0, 1100, true, u, &n), CHEST_OATH_KEY_REQUEST,
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, 0, true, 1100, true, u, &n), CHEST_OATH_KEY_REQUEST,
                    "press epoch 0: a request, never a type");
     TEST_ASSERT_EQ(n, 0, "nothing typed");
     TEST_ASSERT(chest_oath_code_visible(&o, 1100, &secs), "the code is not touched by a request");
@@ -917,7 +917,7 @@ static void test_chest_oath_code_key_types_6_digits_and_hides(void)
     chest_oath_reset(&o);
     uint16_t e = show_c1(&o, 1000);   /* "418902" */
     memset(u, 0xEE, sizeof u);
-    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, 2000, true, u, &n), CHEST_OATH_KEY_TYPE,
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, true, 2000, true, u, &n), CHEST_OATH_KEY_TYPE,
                    "a visible code, pressed while visible: typed");
     TEST_ASSERT_EQ(n, 6, "6 digits");
     const uint8_t want[6] = { 0x21, 0x1E, 0x25, 0x26, 0x27, 0x1F };   /* 4 1 8 9 0 2 */
@@ -940,7 +940,7 @@ static void test_chest_oath_code_key_types_8_digits(void)
     chest_oath_on_code(&o, &c, 5000);
     uint16_t e = chest_oath_visible_epoch(&o, 5000);
     TEST_ASSERT(e != 0, "8-digit code visible (setup)");
-    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, 24999, true, u, &n), CHEST_OATH_KEY_TYPE,
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, true, 24999, true, u, &n), CHEST_OATH_KEY_TYPE,
                    "typed in the last millisecond of its window");
     TEST_ASSERT_EQ(n, 8, "8 digits");
     for (int i = 0; i < 8; i++) TEST_ASSERT_EQ(u[i], 0x1E + i, "12345678 -> 0x1E..0x25");
@@ -953,8 +953,8 @@ static void test_chest_oath_code_key_never_twice(void)
     uint8_t n = 0;
     chest_oath_reset(&o);
     uint16_t e = show_c1(&o, 1000);
-    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, 2000, true, u, &n), CHEST_OATH_KEY_TYPE, "first: typed");
-    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, 2010, true, u, &n), CHEST_OATH_KEY_IGNORE,
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, true, 2000, true, u, &n), CHEST_OATH_KEY_TYPE, "first: typed");
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, true, 2010, true, u, &n), CHEST_OATH_KEY_IGNORE,
                    "the same press record again: nothing (neither typed nor a request)");
     TEST_ASSERT_EQ(n, 0, "nothing typed the second time");
 }
@@ -967,7 +967,7 @@ static void test_chest_oath_code_key_after_window_does_nothing(void)
     chest_oath_reset(&o);
     uint16_t e = show_c1(&o, 1000);   /* deadline 13000 */
     memset(u, 0, sizeof u);
-    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, 13000, true, u, &n), CHEST_OATH_KEY_IGNORE,
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, true, 13000, true, u, &n), CHEST_OATH_KEY_IGNORE,
                    "pressed on a code whose window ended before the decision: nothing");
     TEST_ASSERT_EQ(n, 0, "nothing typed");
     for (size_t i = 0; i < sizeof u; i++) TEST_ASSERT_EQ(u[i], 0, "no digit written");
@@ -983,7 +983,7 @@ static void test_chest_oath_code_key_stale_epoch_does_nothing(void)
     chest_oath_nav(&o, 0);                       /* hidden by a navigation key */
     uint16_t e2 = show_c1(&o, 2000);             /* a NEW code, another request + confirm */
     TEST_ASSERT(e2 != 0 && e2 != e1, "a new code gets a new epoch");
-    TEST_ASSERT_EQ(chest_oath_code_key(&o, e1, 2100, true, u, &n), CHEST_OATH_KEY_IGNORE,
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, e1, true, 2100, true, u, &n), CHEST_OATH_KEY_IGNORE,
                    "a press seen on the OLD code never types the new one");
     TEST_ASSERT_EQ(n, 0, "nothing typed");
     TEST_ASSERT(chest_oath_code_visible(&o, 2100, &secs), "the new code stays on screen");
@@ -999,7 +999,7 @@ static void test_chest_oath_code_key_epoch_survives_reset(void)
     chest_oath_reset(&o);                        /* chest gone / OATH left */
     uint16_t e2 = show_c1(&o, 2000);
     TEST_ASSERT(e2 != 0 && e2 != e1, "reset does not restart the epoch counter");
-    TEST_ASSERT_EQ(chest_oath_code_key(&o, e1, 2100, true, u, &n), CHEST_OATH_KEY_IGNORE,
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, e1, true, 2100, true, u, &n), CHEST_OATH_KEY_IGNORE,
                    "a press from before the reset never types the next session's code");
 }
 
@@ -1010,7 +1010,7 @@ static void test_chest_oath_code_key_refused_off_usb(void)
     uint8_t n = 0xEE, secs;
     chest_oath_reset(&o);
     uint16_t e = show_c1(&o, 1000);
-    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, 2000, false, u, &n), CHEST_OATH_KEY_IGNORE,
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, true, 2000, false, u, &n), CHEST_OATH_KEY_IGNORE,
                    "the left's HID route is not USB: never typed");
     TEST_ASSERT_EQ(n, 0, "nothing typed");
     TEST_ASSERT(chest_oath_code_visible(&o, 2000, &secs), "refusing to type leaves the code on screen");
@@ -1025,12 +1025,37 @@ static void test_chest_oath_code_key_refuses_a_non_digit(void)
     uint16_t e = show_c1(&o, 1000);
     o.code.code[3] = 'x';                        /* cannot come from chest_code_decode: defence */
     memset(u, 0, sizeof u);
-    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, 2000, true, u, &n), CHEST_OATH_KEY_IGNORE,
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, true, 2000, true, u, &n), CHEST_OATH_KEY_IGNORE,
                    "a non-digit in the code: nothing typed, not even a prefix");
     TEST_ASSERT_EQ(n, 0, "nothing typed");
     for (size_t i = 0; i < sizeof u; i++) TEST_ASSERT_EQ(u[i], 0, "the partial digits are wiped");
     TEST_ASSERT(!chest_oath_code_visible(&o, 2000, &secs), "a corrupt code is hidden");
     TEST_ASSERT(code_bytes_zero(&o), "and wiped");
+}
+
+
+/* Mae, 2026-10-01: TYPING is left-only, like K_SEC_CONFIRM — a right-half
+ * key travels over an unauthenticated radio. A right-half press on a visible
+ * code does nothing (no type, no request; the code stays); with no code on
+ * screen it is still a request. */
+static void test_chest_oath_code_key_typing_is_left_only(void)
+{
+    chest_oath_t o;
+    uint8_t u[CHEST_OATH_TYPE_MAX];
+    uint8_t n = 0xEE, secs;
+    chest_oath_reset(&o);
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, 0, false, 900, true, u, &n), CHEST_OATH_KEY_REQUEST,
+                   "right half, no code on screen: still a request");
+    uint16_t e = show_c1(&o, 1000);
+    memset(u, 0, sizeof u);
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, false, 2000, true, u, &n), CHEST_OATH_KEY_IGNORE,
+                   "right half on a visible code: nothing — neither typed nor a request");
+    TEST_ASSERT_EQ(n, 0, "nothing typed");
+    for (size_t i = 0; i < sizeof u; i++) TEST_ASSERT_EQ(u[i], 0, "no digit written");
+    TEST_ASSERT(chest_oath_code_visible(&o, 2000, &secs), "the code stays on screen");
+    TEST_ASSERT_EQ(chest_oath_code_key(&o, e, true, 2100, true, u, &n), CHEST_OATH_KEY_TYPE,
+                   "the left half then types it");
+    TEST_ASSERT_EQ(n, 6, "6 digits");
 }
 
 void test_chest_oath(void)
@@ -1079,4 +1104,5 @@ void test_chest_oath(void)
     TEST_RUN(test_chest_oath_code_key_epoch_survives_reset);
     TEST_RUN(test_chest_oath_code_key_refused_off_usb);
     TEST_RUN(test_chest_oath_code_key_refuses_a_non_digit);
+    TEST_RUN(test_chest_oath_code_key_typing_is_left_only);
 }

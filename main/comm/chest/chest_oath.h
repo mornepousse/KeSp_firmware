@@ -211,6 +211,6 @@ typedef enum {
  *     non-digit (the code is hidden and wiped, usages[] zeroed — not even a
  *     prefix is typed).
  * The caller wipes usages[] once the keystrokes are queued. */
-chest_oath_key_t chest_oath_code_key(chest_oath_t *o, uint16_t press_epoch, uint32_t now_ms,
+chest_oath_key_t chest_oath_code_key(chest_oath_t *o, uint16_t press_epoch, bool local, uint32_t now_ms,
                                      bool route_usb, uint8_t usages[CHEST_OATH_TYPE_MAX],
                                      uint8_t *n);
