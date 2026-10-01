@@ -16,7 +16,8 @@ static uint32_t s_pending_tag;   /* CHEST_TAG(op, instance), written by the link
 static uint32_t s_press_tag;     /* tag stored at press time; 0 = none */
 static bool     s_mode_next;
 static int8_t   s_oath_nav;      /* accumulated cursor delta, saturating at +-16 */
-static bool     s_oath_code;
+static uint32_t s_oath_code;     /* press record: CHEST_GATE_CODE_PRESS | epoch at press; 0 = none */
+static uint16_t s_code_epoch;    /* epoch of the code on screen, written by the link task; 0 = none */
 static chest_gate_notify_fn s_notify;   /* chest_link.c's task wake-up; NULL = none */
 
 void chest_gate_set_notify(chest_gate_notify_fn fn) { __atomic_store_n(&s_notify, fn, __ATOMIC_RELEASE); }
@@ -65,8 +66,15 @@ void chest_gate_oath_nav(int8_t delta)
 }
 int8_t chest_gate_take_oath_nav(void) { return __atomic_exchange_n(&s_oath_nav, (int8_t)0, __ATOMIC_ACQ_REL); }
 
-void chest_gate_oath_code(void) { __atomic_store_n(&s_oath_code, true, __ATOMIC_RELEASE); notify(); }
-bool chest_gate_take_oath_code(void) { return __atomic_exchange_n(&s_oath_code, false, __ATOMIC_ACQ_REL); }
+void chest_gate_publish_code(uint16_t epoch) { __atomic_store_n(&s_code_epoch, epoch, __ATOMIC_RELEASE); }
+
+void chest_gate_oath_code(void)
+{
+    uint16_t epoch = __atomic_load_n(&s_code_epoch, __ATOMIC_ACQUIRE);
+    __atomic_store_n(&s_oath_code, CHEST_GATE_CODE_PRESS | epoch, __ATOMIC_RELEASE);
+    notify();
+}
+uint32_t chest_gate_take_oath_code(void) { return __atomic_exchange_n(&s_oath_code, 0u, __ATOMIC_ACQ_REL); }
 
 bool sec_confirm_from_local(uint8_t col, uint8_t local_cols, uint8_t keymap_cols)
 { return keymap_cols <= local_cols || col < local_cols; }

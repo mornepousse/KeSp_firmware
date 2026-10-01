@@ -203,6 +203,7 @@ static void reset_kp_state(void)
 
     /* Chest gate: nothing pending, no stray press left over from a prior test. */
     chest_gate_publish(0, 0);
+    chest_gate_publish_code(0);
     (void)chest_gate_take_press();
     (void)chest_gate_take_mode_next();
     (void)chest_gate_take_oath_nav();
@@ -973,6 +974,43 @@ static void test_kp_oath_code_twice_before_take_yields_one(void)
     TEST_ASSERT(!chest_gate_take_oath_code(), "second take: false (cleared)");
 }
 
+/* Typing a visible code (Mae, 2026-10-01): a K_OATH_CODE press records the
+ * epoch of the code the screen showed AT PRESS TIME (published by the link
+ * task), like K_SEC_CONFIRM's tag — the link task then types only if that
+ * same code is still visible. Epoch 0 (no code on screen) = a request. */
+static void test_kp_oath_code_records_the_code_on_screen_at_press(void)
+{
+    reset_kp_state();
+    keymaps[0][0][0] = T_K_OATH_CODE;
+
+    press_key(0, 0, 0);
+    build_keycode_report();
+    uint32_t r = chest_gate_take_oath_code();
+    TEST_ASSERT(CHEST_GATE_CODE_PRESSED(r), "no code on screen: still a press");
+    TEST_ASSERT_EQ(CHEST_GATE_CODE_EPOCH(r), 0, "no code on screen: epoch 0 (a request)");
+    release_all_keys();
+    build_keycode_report();
+
+    chest_gate_publish_code(7);
+    press_key(0, 0, 0);
+    build_keycode_report();
+    chest_gate_publish_code(0);            /* hidden right after the press: the record keeps 7 */
+    r = chest_gate_take_oath_code();
+    TEST_ASSERT(CHEST_GATE_CODE_PRESSED(r), "a press");
+    TEST_ASSERT_EQ(CHEST_GATE_CODE_EPOCH(r), 7, "the epoch on screen AT PRESS TIME");
+    TEST_ASSERT_EQ(chest_gate_take_oath_code(), 0, "consumed");
+    TEST_ASSERT_EQ(keycodes[0], 0, "absorbed, not typed by the engine itself");
+
+    chest_gate_publish_code(0xFFFF);
+    release_all_keys();
+    build_keycode_report();
+    press_key(0, 0, 0);
+    build_keycode_report();
+    r = chest_gate_take_oath_code();
+    TEST_ASSERT_EQ(CHEST_GATE_CODE_EPOCH(r), 0xFFFF, "the whole 16-bit epoch is carried");
+    chest_gate_publish_code(0);
+}
+
 /* Race oracle for the CAS loop in chest_gate_oath_nav (I1, review
  * 2026-09-29): a concurrent chest_gate_take_oath_nav() landing between the
  * loop's load and its store must never lose or duplicate a step. Seeds the
@@ -1284,6 +1322,7 @@ void test_keycode_report(void)
     TEST_RUN(test_kp_oath_nav_saturates_positive);
     TEST_RUN(test_kp_oath_nav_saturates_negative);
     TEST_RUN(test_kp_oath_code_twice_before_take_yields_one);
+    TEST_RUN(test_kp_oath_code_records_the_code_on_screen_at_press);
     TEST_RUN(test_chest_gate_oath_nav_cas_survives_a_concurrent_take);
     TEST_RUN(test_chest_gate_notify_wakes_the_link_task);
     TEST_RUN(test_sec_confirm_from_local);

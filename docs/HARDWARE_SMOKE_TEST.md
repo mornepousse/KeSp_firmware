@@ -301,7 +301,18 @@ in the PR/release.
       9. a RESET armed from the host → the prompt shows `RESET!`, the
          label, `N ACCTS` with the number of accounts and `PRESS`;
       10. `K_SEC_CONFIRM` placed on the right half does nothing: the prompt
-          stays, the chest's counter does not move.
+          stays, the chest's counter does not move;
+      11. typing the code (left on USB, a text editor focused on the host):
+          `K_OATH_CODE` → `K_SEC_CONFIRM` → the code shows → a SECOND
+          `K_OATH_CODE` types its 6 digits (then an 8-digit account: its 8
+          digits) into the editor, NO Enter, and the code disappears from
+          the screen at once (back to the browser); a third press is a new
+          request (the prompt again), it types nothing; the console shows
+          `TOTP code typed (6 digits)` and never the digits;
+      12. let a code run out (countdown to the end, panel back to the
+          browser), then `K_OATH_CODE` → nothing is typed (the editor stays
+          as it was); after `K_OATH_NEXT` hid a code, `K_OATH_CODE` is a
+          request, never a type.
 
 ## BLE (relevant boards)
 - [ ] Host pairing OK, types with no drop for 1 min

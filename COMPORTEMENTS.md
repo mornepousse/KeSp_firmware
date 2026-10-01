@@ -340,7 +340,44 @@ means a test, or a line.
   K_OATH_CODE requests a code for the account under the cursor, once per
   physical press and touching no other channel
   [test:test_kp_oath_code_requests_once]
-  [test:test_kp_oath_code_twice_before_take_yields_one]. None of the three
+  [test:test_kp_oath_code_twice_before_take_yields_one].
+  A SECOND K_OATH_CODE press while a code is VISIBLE types it (Mae,
+  2026-10-01): the digits go to the host as top-row usages, `1`..`9` ->
+  0x1E..0x26 and `0` -> 0x27, no modifier, NO Enter, any other byte refused
+  [test:test_chest_oath_digit_usage]; 6 or 8 digits taken from the decoded
+  CODE segment (`chest_code_t`), never from screen text
+  [test:test_chest_oath_code_key_types_6_digits_and_hides]
+  [test:test_chest_oath_code_key_types_8_digits], and typing HIDES the code
+  and wipes its digits, so it is typed at most once
+  [test:test_chest_oath_code_key_never_twice]. The press is stamped with
+  the epoch of the code the screen showed AT PRESS TIME (published by the
+  link task every round, `chest_gate_publish_code`, like K_SEC_CONFIRM's
+  tag) [test:test_kp_oath_code_records_the_code_on_screen_at_press]
+  [test:test_chest_oath_visible_epoch]: epoch 0 (no code on screen) is a
+  request as before, even if a code surfaced since
+  [test:test_chest_oath_code_key_no_code_at_press_requests]; a press made
+  on a code is typed only if THAT code is still visible at the decision
+  (same predicate as the screen, `chest_oath_code_visible`), otherwise
+  nothing at all — not a request: a press after the window ended
+  [test:test_chest_oath_code_key_after_window_does_nothing], a press seen
+  on a code a navigation key since replaced
+  [test:test_chest_oath_code_key_stale_epoch_does_nothing], a press from
+  before a chest reset (the epoch counter survives `chest_oath_reset`)
+  [test:test_chest_oath_code_key_epoch_survives_reset]. Typing needs the
+  left's own HID route to be USB (`kbd_active_route() == KBD_OUT_USB`, no
+  BLE): on the radio route the dongle types and the left's reports are
+  dropped, so the code is not typed and stays on screen
+  [test:test_chest_oath_code_key_refused_off_usb]; a non-digit types
+  nothing, not even a prefix, and hides the code
+  [test:test_chest_oath_code_key_refuses_a_non_digit]. The keystrokes are
+  8 (or 6) press + release pairs appended to the engine's own HID queue
+  (`hid_report_type_usages`, all or nothing on queue room) from the chest
+  task — never from the scan or HID sender task; the digits are never
+  logged and the chest task's buffer is wiped once queued
+  [smoke:Chest link]. Like the request, typing is accepted from a
+  right-half column (K_OATH_CODE is not left-only): the code was authorized
+  on the left by K_SEC_CONFIRM, typing it only moves it to the host.
+  None of the three
   keys is left-only or security-bound: browsing the list and asking for a
   code carry no authority by themselves — only K_SEC_CONFIRM arms or
   authorizes; a press on any of them from a remote (right-half) column is

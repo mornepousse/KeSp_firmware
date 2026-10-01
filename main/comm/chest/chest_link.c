@@ -41,6 +41,8 @@
 #include "chest_gate.h"
 #include "veille_task.h"
 #include "rf_bus.h"
+#include "hid_report.h"     /* hid_report_type_usages, keyboard_get_usb_bl_state */
+#include "usb_presence.h"   /* kbd_active_route: typing only on the USB route */
 #include "board.h"
 #include <string.h>
 #include "driver/gpio.h"
@@ -305,6 +307,31 @@ static void round_ok(const chest_status_t *st, uint32_t pressed, bool mode_next,
     }
 }
 
+/* A K_OATH_CODE press (chest_oath_code_key decides, pure and tested): true
+ * when it is a code REQUEST for the round planner. TYPE goes through the
+ * engine's own HID queue (hid_report_type_usages) — the left's route must be
+ * USB: on the radio route the dongle types and hid_transport drops the
+ * left's reports (fusion), so the code would vanish unseen. The chest only
+ * exists while a host is there anyway; the guard makes it explicit. */
+static bool type_or_request(uint16_t press_epoch, uint32_t now)
+{
+    uint8_t u[CHEST_OATH_TYPE_MAX];
+    uint8_t n = 0;
+    bool route_usb = kbd_active_route() == KBD_OUT_USB && keyboard_get_usb_bl_state() == 0;
+    chest_oath_key_t k = chest_oath_code_key(&s_oath, press_epoch, now, route_usb, u, &n);
+    if (k == CHEST_OATH_KEY_TYPE) {
+        bool ok = hid_report_type_usages(u, n);
+        memset(u, 0, sizeof u);          /* the digits do not outlive the queueing */
+        if (ok) ESP_LOGI(TAG, "TOTP code typed (%u digits)", n);
+        else    ESP_LOGW(TAG, "TOTP code not typed: HID queue full (code hidden)");
+    } else if (k == CHEST_OATH_KEY_IGNORE) {
+        DIAG("K_OATH_CODE on a code no longer typeable (expired, changed, or route %s)",
+             route_usb ? "USB" : "not USB");
+    }
+    memset(u, 0, sizeof u);
+    return k == CHEST_OATH_KEY_REQUEST;
+}
+
 /* The chest vanished while the host is still there (reboot, unpowered):
  * the next one is a new chest — its 0x11, doorbell and instances restart.
  * The WANTED mode stays: the self-heal re-requests it once it is back. */
@@ -326,6 +353,7 @@ static void go_absent(void)
     }
     cs_release();
     chest_gate_publish(0, 0);
+    chest_gate_publish_code(0);
     chest_vanished();
     s_mode_wanted = CHEST_MODE_NONE;               /* v2 spec §3: presence lost -> none */
     s_mode_state = CHEST_MODE_ARRIVED;
@@ -360,7 +388,8 @@ static void chest_task(void *arg)
         uint32_t pressed   = chest_gate_take_press();
         bool     mode_next = chest_gate_take_mode_next();
         int8_t   nav       = chest_gate_take_oath_nav();
-        bool     code_key  = chest_gate_take_oath_code() || s_code_pending;
+        uint32_t code_rec  = chest_gate_take_oath_code();
+        bool     code_key  = s_code_pending;
         s_code_pending = false;
 
         if (s_want && !s_dev) {
@@ -382,6 +411,13 @@ static void chest_task(void *arg)
          * navigation key, whatever the wire does. The LIST decision it
          * implies waits for the next OK round. */
         if (nav) { chest_oath_nav(&s_oath, nav); s_nav_pending = true; }
+        /* K_OATH_CODE (Mae, 2026-10-01): typed if the press was made on the
+         * code still visible now, a request if no code was on screen. Decided
+         * before this round's read, so a code arriving later in the round is
+         * never typed by a press that did not see it (the record's epoch). */
+        if (CHEST_GATE_CODE_PRESSED(code_rec)) {
+            if (type_or_request(CHEST_GATE_CODE_EPOCH(code_rec), now)) code_key = true;
+        }
 
         if (read_block()) {
             chest_status_t st = {0};   /* chest_proto_parse writes it only on OK (its own contract) */
@@ -415,6 +451,8 @@ static void chest_task(void *arg)
         chest_view_t v;
         chest_view_build(&v, s_blk, &s_st, s_mode_wanted, s_mode_state, &s_oath, now);
         taskENTER_CRITICAL(&s_view_mux); s_view = v; taskEXIT_CRITICAL(&s_view_mux);
+        /* The code on screen, for the engine to stamp a K_OATH_CODE press with. */
+        chest_gate_publish_code(chest_oath_visible_epoch(&s_oath, now));
         /* Mae, 2026-09-29: no sleep while a code is on the screen (bounded
          * by its window, <= 30 s — chest_oath_code_visible hides it then). */
         if (v.code_visible != s_veto_code) {

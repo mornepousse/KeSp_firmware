@@ -27,6 +27,9 @@ typedef struct {
     chest_code_t code;              /* zeroed whenever the code is hidden (nav, expiry, LIST moving
                                      * the cursor): the digits never outlive their display */
     uint32_t     code_deadline_ms;
+    uint16_t     code_epoch;        /* bumped on every accepted code (never 0 once shown); NOT
+                                     * cleared by chest_oath_reset: a press recorded against a
+                                     * code of a previous session can never match the next one */
 } chest_oath_t;
 
 void chest_oath_reset(chest_oath_t *o);
@@ -167,3 +170,47 @@ bool chest_oath_code_visible(chest_oath_t *o, uint32_t now_ms, uint8_t *secs_lef
  * itself arm chest_oath_code_requested — the owner calls that separately,
  * once it actually sends the request built from this index. */
 bool chest_oath_may_request_code(const chest_oath_t *o, uint8_t chest_state, uint8_t *index);
+
+/* ── Typing a visible code (Mae, 2026-10-01) ─────────────────────────────
+ * While a code is VISIBLE, a second K_OATH_CODE press types its digits to
+ * the host — US/QWERTY top row, no modifier, NO Enter — and hides it.
+ * Otherwise the key keeps its meaning: a request (then the chest's prompt,
+ * then K_SEC_CONFIRM). */
+
+#define CHEST_OATH_TYPE_MAX 8   /* digits: 6 or 8 (chest_code_decode) */
+
+/* HID usage of a decimal digit on the top row (US/QWERTY, no modifier):
+ * '1'..'9' -> 0x1E..0x26, '0' -> 0x27. Anything else -> 0 (refused). */
+uint8_t chest_oath_digit_usage(char c);
+
+/* The epoch of the code visible at now_ms (chest_oath_code_visible, so it
+ * expires the code exactly like the screen does), 0 when none is. The link
+ * task publishes it (chest_gate_publish_code) for the keyboard engine to
+ * stamp a K_OATH_CODE press with. */
+uint16_t chest_oath_visible_epoch(chest_oath_t *o, uint32_t now_ms);
+
+typedef enum {
+    CHEST_OATH_KEY_REQUEST = 0,   /* no code on screen at press: ask the chest for one */
+    CHEST_OATH_KEY_TYPE,          /* type usages[0..n-1] (press + release each), code hidden */
+    CHEST_OATH_KEY_IGNORE,        /* a press made on a code that cannot be typed now: nothing */
+} chest_oath_key_t;
+
+/* The K_OATH_CODE decision. `press_epoch` = the epoch on screen when the
+ * key was pressed (CHEST_GATE_CODE_EPOCH of the gate's record):
+ *   - 0: REQUEST — even if a code surfaced since (the press did not see it);
+ *   - otherwise TYPE only when ALL hold: that code is still the one shown
+ *     (o->code_epoch == press_epoch) AND visible at now_ms (same predicate
+ *     as the screen), `route_usb` (the left's own HID route is USB — on the
+ *     radio route the dongle types, and the left's reports are dropped), and
+ *     every digit maps (chest_oath_digit_usage). TYPE fills usages[] from the
+ *     decoded CODE segment (o->code, never screen text), sets *n to 6 or 8,
+ *     and HIDES the code (digits wiped) — so it is typed at most once;
+ *   - IGNORE otherwise, *n = 0: the window ended or the code changed since
+ *     the press (nothing at all — a press meant to type never turns into a
+ *     surprise prompt), or the route is not USB (the code stays shown), or a
+ *     non-digit (the code is hidden and wiped, usages[] zeroed — not even a
+ *     prefix is typed).
+ * The caller wipes usages[] once the keystrokes are queued. */
+chest_oath_key_t chest_oath_code_key(chest_oath_t *o, uint16_t press_epoch, uint32_t now_ms,
+                                     bool route_usb, uint8_t usages[CHEST_OATH_TYPE_MAX],
+                                     uint8_t *n);
