@@ -7,6 +7,9 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
+#if CONFIG_KASE_VEILLE
+#include "veille_task.h"   /* the sleep hook that disarms D+ before tud_disconnect(), VEILLE_VETO_USB_ENUM */
+#endif
 
 /* Only matters where automatic light sleep can actually race with
  * enumeration — gated the same way pm_dfs.c's own USB lock is. The dongle
@@ -58,6 +61,30 @@ static void IRAM_ATTR dp_isr(void *arg)
     }
 }
 
+#if CONFIG_KASE_VEILLE
+/* veille_task sleep hook (`dormir`): called by veille_hooks_dormir(), which
+ * ALWAYS finishes before veille_legere_entrer() calls tud_disconnect() —
+ * see usb_wake_guard_init() below for why this must happen before D+ gets
+ * pulled low by the firmware itself, not by a host. gpio_wakeup_disable()
+ * and gpio_intr_disable() are per-pin: matrix_arm_key_wake()'s own
+ * esp_sleep_enable_gpio_wakeup() (shared with the matrix rows) is untouched. */
+static void usb_wake_guard_sleep_hook(void)
+{
+    gpio_wakeup_disable(USB_DP_GPIO);
+    gpio_intr_disable(USB_DP_GPIO);
+}
+
+/* veille_task wake hook (`reveiller`): called by veille_hooks_reveiller(),
+ * which ALWAYS runs after veille_legere_entrer() calls tud_connect() — D+'s
+ * pull-up is the device's own again by the time this re-arms it. */
+static void usb_wake_guard_wake_hook(void)
+{
+    gpio_intr_enable(USB_DP_GPIO);
+    gpio_wakeup_enable(USB_DP_GPIO, GPIO_INTR_LOW_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+}
+#endif
+
 void usb_wake_guard_init(void)
 {
     esp_err_t e = esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "usb_wake", &s_lock);
@@ -80,6 +107,28 @@ void usb_wake_guard_init(void)
     gpio_wakeup_enable(USB_DP_GPIO, GPIO_INTR_LOW_LEVEL);
     esp_sleep_enable_gpio_wakeup();
 
+#if CONFIG_KASE_VEILLE
+    /* EXPLICIT sleep (veille.c) is a different hazard than automatic light
+     * sleep: veille_legere_entrer() calls tud_disconnect() before every
+     * explicit sleep, which ACTIVELY PULLS D+ LOW (dcd_disconnect() in
+     * TinyUSB's S3 DWC2 port: USB_WRAP.otg_conf.dp_pulldown=1) — not a float,
+     * a driven low. Left armed, the LOW-level wakeup condition this file just
+     * set up would already be true the instant esp_light_sleep_start() runs,
+     * so it would return almost immediately and the half would flicker off
+     * and back onto the bus roughly once a second for as long as nobody
+     * types, never completing enumeration (and burning the sleep/wake churn
+     * this project spent a week removing — see usb_wake_guard.h).
+     * veille_hooks_dormir() always finishes before tud_disconnect() is
+     * called, and tud_connect() always finishes before
+     * veille_hooks_reveiller() runs (both true by construction in
+     * veille_legere_entrer(), independent of this hook's registration order
+     * relative to radio/screen/link/gauge) — so disarming in `dormir` and
+     * re-arming in `reveiller` brackets exactly the window where D+ is
+     * forced low, regardless of which half or which other hooks exist. */
+    static const veille_hook_t hook = { "usb_dp", usb_wake_guard_sleep_hook, usb_wake_guard_wake_hook, NULL };
+    veille_hook_enregistrer(&hook);
+#endif
+
     ESP_LOGI(TAG, "usb wake guard armed on D+ (GPIO%d)", (int)USB_DP_GPIO);
 }
 
@@ -87,6 +136,9 @@ void usb_wake_guard_on_mount(void)
 {
     if (usb_wake_guard_mounted(&s_guard)) {
         if (s_lock) esp_pm_lock_release(s_lock);
+#if CONFIG_KASE_VEILLE
+        veille_veto(VEILLE_VETO_USB_ENUM, false);   /* task context: safe to call directly, no need to wait for the tick */
+#endif
         ESP_LOGI(TAG, "usb: mounted, releasing the enumeration light-sleep hold");
     }
 }
@@ -95,14 +147,26 @@ void usb_wake_guard_on_mount(void)
  * is enough here (this is a safety net, not the reaction path: the ISR
  * already acquired the lock synchronously). Also carries the bench log line
  * for the reaction path itself, at this same cheap cadence rather than from
- * the ISR (ESP_LOGx is not ISR-safe). */
+ * the ISR (ESP_LOGx is not ISR-safe), and drives VEILLE_VETO_USB_ENUM —
+ * ISR context cannot call veille_veto() (it takes a critical section not
+ * meant to be entered from an ISR), but the 5 s explicit-sleep threshold
+ * cannot be reached until several ticks after the guard started holding, so
+ * setting the veto here, every tick, is ample margin (test_usb_wake_guard.c,
+ * test_veto_follows_the_guard_state). */
 void usb_wake_guard_tick(uint32_t now_ms)
 {
     if (s_log_pending) {
         s_log_pending = false;
         ESP_LOGI(TAG, "usb: bus activity, holding light sleep off until mount");
     }
-    if (usb_wake_guard_timeout(&s_guard, now_ms)) {
+    /* Timeout first, THEN the veto: usb_wake_guard_timeout() may clear
+     * `holding` on this very call — updating the veto afterwards means it
+     * never lags a tick behind a just-released hold. */
+    bool timed_out = usb_wake_guard_timeout(&s_guard, now_ms);
+#if CONFIG_KASE_VEILLE
+    veille_veto(VEILLE_VETO_USB_ENUM, usb_wake_guard_veto_active(&s_guard));
+#endif
+    if (timed_out) {
         if (s_lock) esp_pm_lock_release(s_lock);
         ESP_LOGW(TAG, "usb: no mount within %u ms of bus activity, releasing the hold",
                  (unsigned)USB_WAKE_GUARD_TIMEOUT_MS);

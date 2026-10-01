@@ -113,6 +113,34 @@ static void test_code_visible_est_un_veto(void)
                                      | VEILLE_VETO_PAIR | VEILLE_VETO_TOUCHE)) == 0, "its own bit");
 }
 
+/* A host bus reset seen but not yet mounted holds the half awake
+ * (usb_wake_guard.c, 2026-10-01): the explicit 5 s inactivity sleep calls
+ * tud_disconnect() regardless of what the USB bus is doing (a plugged-in,
+ * still-enumerating host is not "activity"), which would flicker the device
+ * off the bus roughly once a second for as long as nobody types, never
+ * completing enumeration. Bounded by usb_wake_guard's own 2 s timeout or by
+ * mount — see usb_wake_guard.h's usb_wake_guard_activity/_mounted/_timeout. */
+static void test_usb_enum_est_un_veto(void)
+{
+    veille_vetos_t v = {0};
+    char buf[VEILLE_VETOS_STR_MAX];
+    veille_veto_poser(&v, VEILLE_VETO_USB_ENUM, true);
+    TEST_ASSERT(veille_bloquee(&v), "a pending enumeration alone blocks sleep");
+    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "enum") == 0, "named enum in the HB");
+    veille_veto_poser(&v, VEILLE_VETO_USB, true);  veille_veto_poser(&v, VEILLE_VETO_LIEN, true);
+    veille_veto_poser(&v, VEILLE_VETO_SYNC, true); veille_veto_poser(&v, VEILLE_VETO_TEST, true);
+    veille_veto_poser(&v, VEILLE_VETO_PAIR, true); veille_veto_poser(&v, VEILLE_VETO_TOUCHE, true);
+    veille_veto_poser(&v, VEILLE_VETO_CODE, true);
+    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "usb+link+sync+test+pair+key+code+enum") == 0,
+                "all eight fit in VEILLE_VETOS_STR_MAX");
+    veille_veto_poser(&v, VEILLE_VETO_USB_ENUM, false);
+    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "usb+link+sync+test+pair+key+code") == 0,
+                "mounted (or timed out): its veto goes, the others stay");
+    TEST_ASSERT((VEILLE_VETO_USB_ENUM & (VEILLE_VETO_USB | VEILLE_VETO_LIEN | VEILLE_VETO_SYNC | VEILLE_VETO_TEST
+                                         | VEILLE_VETO_PAIR | VEILLE_VETO_TOUCHE | VEILLE_VETO_CODE)) == 0,
+                "its own bit");
+}
+
 void test_veille_veto(void)
 {
     TEST_SUITE("sleep vetos");
@@ -123,4 +151,5 @@ void test_veille_veto(void)
     TEST_RUN(test_touche_tenue_est_un_veto);
     TEST_RUN(test_detection_touche_tenue);
     TEST_RUN(test_code_visible_est_un_veto);
+    TEST_RUN(test_usb_enum_est_un_veto);
 }

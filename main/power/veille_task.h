@@ -27,7 +27,7 @@ typedef struct {
      * sleep, so the screen draws its last image (zZ) here (2026-09-25). */
     void (*avant)(void);
 } veille_hook_t;
-#define VEILLE_HOOKS_MAX 6   /* left: radio, relay, gauge, screen, link (2026-09-25) + 1 spare */
+#define VEILLE_HOOKS_MAX 6   /* left: radio, relay, gauge, screen, link, usb_dp (2026-10-01) — exactly 6, no spare left */
 
 void veille_hook_enregistrer(const veille_hook_t *h);   /* before veille_task_start */
 void veille_veto(veille_veto_t quoi, bool on);           /* from any task */

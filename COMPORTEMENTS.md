@@ -455,13 +455,51 @@ means a test, or a line.
   uint32 wraparound-safe deadline are the two properties that would be
   easy to get wrong and hard to notice on the bench (a leaked/double lock
   just looks like "battery life got a bit worse").
-- [smoke:USB enumeration while typing] The hardware side of the behaviour
-  above: `usb_wake_guard.c` watches D+ (GPIO20, idles HIGH via the device
-  pull-up, LOW during a bus reset's SE0 and ordinary K-state bits) as a GPIO
-  wakeup source (the one wakeup path documented to work on any pin, RTC or
-  not) plus a plain awake-time NEGEDGE interrupt that drives the state
-  machine above and holds a dedicated `ESP_PM_NO_LIGHT_SLEEP` lock. NOT
-  host-testable: the GPIO ISR, the PM lock itself, and — the real open
+- [test:test_usb_wake_guard] [test:test_veille_veto] Explicit sleep is a
+  SEPARATE, worse hazard than the automatic-sleep one above (Mae, bench,
+  2026-10-01: a half already asleep with the cable plugged in but never
+  mounted does not always come back after a wake key). `veille_legere_entrer()`
+  (`veille.c`) calls `tud_disconnect()` before every explicit light sleep,
+  regardless of USB bus state (a plugged-in, still-enumerating host is not
+  "activity" to the 5 s inactivity clock). `tud_disconnect()` is
+  `dcd_disconnect()` in TinyUSB's S3 DWC2 port
+  (`managed_components/espressif__tinyusb/src/portable/synopsys/dwc2/dcd_dwc2.c`):
+  it does not float D+, it ACTIVELY PULLS IT LOW
+  (`USB_WRAP.otg_conf.pad_pull_override=1, dp_pulldown=1, dm_pulldown=1`).
+  Left armed through that window, the GPIO wakeup from the entry above would
+  already be true the instant `esp_light_sleep_start()` runs, so it returns
+  almost immediately (`ESP_SLEEP_WAKEUP_GPIO`) and `tud_connect()`
+  (`dcd_connect()`: `pad_pull_override=0`, `DCTL_SDIS` cleared) runs right
+  back — the half would flicker off and back onto the bus roughly once a
+  second for as long as nobody types, never completing a handshake. Fixed by
+  a `veille_hook_enregistrer()` sleep/wake hook (same mechanism as
+  radio/relay/gauge/screen/link, `VEILLE_HOOKS_MAX` now exactly used up,
+  6/6) that disarms D+'s GPIO wakeup and its awake-time interrupt in
+  `dormir` — called by `veille_hooks_dormir()`, which ALWAYS finishes before
+  `tud_disconnect()` in `veille_legere_entrer()` — and re-arms both in
+  `reveiller`, called after `tud_connect()`; verified by reading
+  `veille_legere_entrer()` line by line, not assumed. `gpio_wakeup_disable()`
+  is per-pin, so `matrix_arm_key_wake()`'s own `esp_sleep_enable_gpio_wakeup()`
+  (shared GPIO-wakeup-source enable, used by the matrix rows) is untouched.
+  Belt and suspenders: `VEILLE_VETO_USB_ENUM` (`veille_veto.h`, 8th veto,
+  `vetos=` string "enum") blocks the explicit sleep outright while the guard
+  is holding (bus activity seen, not yet mounted), set/cleared from task
+  context only (veille_task's ~1 Hz tick and the mount callback — never the
+  ISR, which cannot safely call `veille_veto()`); ample margin since the 5 s
+  threshold cannot be reached for several ticks after the guard starts
+  holding. The guard-state-to-veto mapping is itself a tested pure function
+  (`usb_wake_guard_veto_active`, `test_veto_follows_the_guard_state`) across
+  the whole activity/mount/timeout lifecycle, not just the endpoints.
+- [smoke:USB enumeration after a sleeping plug-in] [smoke:USB enumeration while typing]
+  The hardware side of both behaviours above: `usb_wake_guard.c` watches D+
+  (GPIO20, idles HIGH via the device pull-up, LOW during a bus reset's SE0
+  and ordinary K-state bits) as a GPIO wakeup source (the one wakeup path
+  documented to work on any pin, RTC or not) plus a plain awake-time NEGEDGE
+  interrupt that drives the state machine above and holds a dedicated
+  `ESP_PM_NO_LIGHT_SLEEP` lock. NOT host-testable: the GPIO ISR, the PM lock
+  itself, the sleep/wake hook's ordering against the real
+  `veille_legere_entrer()` execution (verified by reading the source, not
+  by a host test — it has no hardware to disconnect), and — the real open
   question — whether the D+ pad stays readable as a plain GPIO input while
   the OTG PHY is actively driving it (deliberately NOT reconfigured via
   `gpio_config()`, which would disconnect a live USB session; if the pad

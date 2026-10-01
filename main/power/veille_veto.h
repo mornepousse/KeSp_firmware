@@ -31,11 +31,19 @@ typedef enum {
                                    * after 5 s < a 30 s window, and the memory LCD keeps its image
                                    * asleep — the code would outlive its window on the panel. Bounded
                                    * by the code's deadline, <= 30 s (Mae, 2026-09-29) */
+    VEILLE_VETO_USB_ENUM = 1u << 7, /* usb_wake_guard: a host bus reset was seen, not yet mounted.
+                                   * Without this, the EXPLICIT sleep (5 s inactivity — a plugged-in
+                                   * host does not by itself count as activity) could fire mid-handshake
+                                   * and tud_disconnect() the device while the host is still enumerating
+                                   * it — the device would flicker off the bus roughly once a second for
+                                   * as long as nobody types, never completing enumeration (2026-10-01).
+                                   * Bounded by the guard's own timeout (2 s) or by mount, whichever
+                                   * comes first — see usb_wake_guard.h. */
 } veille_veto_t;
 
 /* Room for every veto name joined by '+' in the heartbeat, NUL included:
- * "usb+link+sync+test+pair+key+code" = 32 characters. Sized once, here — the
- * HB and its "sleep REFUSED" line use it, the test checks all seven fit. */
+ * "usb+link+sync+test+pair+key+code+enum" = 38 characters. Sized once, here
+ * — the HB and its "sleep REFUSED" line use it, the test checks all eight fit. */
 #define VEILLE_VETOS_STR_MAX 40
 
 typedef struct { uint32_t actifs; } veille_vetos_t;
@@ -66,7 +74,7 @@ static inline const char *veille_vetos_str(const veille_vetos_t *v, char *out, s
         { VEILLE_VETO_USB, "usb" }, { VEILLE_VETO_LIEN, "link" },
         { VEILLE_VETO_SYNC, "sync" }, { VEILLE_VETO_TEST, "test" },
         { VEILLE_VETO_PAIR, "pair" }, { VEILLE_VETO_TOUCHE, "key" },
-        { VEILLE_VETO_CODE, "code" },
+        { VEILLE_VETO_CODE, "code" }, { VEILLE_VETO_USB_ENUM, "enum" },
     };
     if (n == 0) return "";
     out[0] = '\0';

@@ -212,25 +212,47 @@ in the PR/release.
       once on the held row (cause=0/7), and looped every ~5 s. On USB the
       bug did not show (the early return isn't taken), which is why an
       earlier capture over USB looked fine
-- [ ] **USB enumeration while typing** (2026-10-01): type continuously on
-      battery (keeps automatic light sleep short between keystrokes), then
-      plug the USB-C into the PC mid-typing → the host's USB icon /
-      `lsusb`/`dmesg` shows the device enumerated within ~2 s, not ~30 s;
-      console: "usb: bus activity, holding light sleep off until mount"
-      shortly before "USB host mounted: APB held at 80 MHz" (`pm_dfs.c`).
-      Root cause: the ESP32-S3's USB-OTG controller is not a documented
-      light-sleep wakeup source, and pm_dfs.c's own APB lock only engages
-      AFTER mount — before that, a half asleep between keystrokes (cadences
-      at rest ~1 s) misses the host's bus reset / SETUP packets outright,
-      and the host needs many retries to land one in an awake window
-      (`usb_wake_guard.c`, D+/GPIO20 watched as a GPIO wakeup + interrupt
-      source). On battery with the cable never plugged: HB `slept=` and the
-      light-sleep current must be unchanged from before this fix — nothing
-      should wake or hold a lock with no host present (watch for a D+ line
-      floating/noisy without a cable: if `usb_wake_guard_tick` ever logs a
-      hold with nothing plugged in, that pin needs a different wakeup level
-      or a debounce — not expected, since D+ is pulled HIGH locally by the
-      device-side full-speed pull-up, but not bench-proven).
+- [ ] **USB enumeration after a sleeping plug-in** (2026-10-01, the real-world
+      case Mae hit): USB-C plugged into the PC but the host never mounted
+      (e.g. it was slow, or a previous explicit sleep aborted it) → the half
+      goes to explicit light sleep at 5 s (no `VEILLE_VETO_USB`, since
+      `tud_ready()` is false pre-mount). Press ONE key to wake it → within
+      ~2 s the host's USB icon / `lsusb`/`dmesg` shows the device enumerated.
+      Repeat 10× in a row (sleep ≥ 10 s each time, one wake key) — must
+      succeed every time, not "usually". Console around the wake: "wake"
+      (veille.c) then "usb: bus activity, holding light sleep off until
+      mount" then "USB host mounted: APB held at 80 MHz" (`pm_dfs.c`) —
+      and critically NOT a repeating "light sleep" / "wake" pair once a
+      second while waiting (that flicker is the regression this guards
+      against: `VEILLE_VETO_USB_ENUM` in the HB `vetos=` string while
+      holding, e.g. `vetos=enum`, gone once mounted or after 2 s if the host
+      gave up). Root cause chain: (1) the ESP32-S3's USB-OTG controller is
+      not a documented light-sleep wakeup source, so a half idle between
+      keystrokes (automatic light sleep, cadences at rest ~1 s) misses the
+      host's bus reset/SETUP outright — fixed by watching D+/GPIO20 as a
+      GPIO wakeup + interrupt source (`usb_wake_guard.c`); (2) EXPLICIT sleep
+      is worse: `veille_legere_entrer()` calls `tud_disconnect()` before
+      every explicit sleep, which actively pulls D+ LOW
+      (`dcd_disconnect()`/`USB_WRAP.otg_conf.dp_pulldown=1` in TinyUSB's S3
+      DWC2 port) — left armed, that would make `esp_light_sleep_start()`
+      return instantly every time, producing the once-a-second flicker just
+      described; fixed by a veille sleep/wake hook that disarms D+'s GPIO
+      wakeup before `tud_disconnect()` and re-arms it after `tud_connect()`,
+      plus `VEILLE_VETO_USB_ENUM` blocking the explicit sleep outright while
+      a handshake may be in progress.
+- [ ] **USB enumeration while typing**: type continuously on battery (keeps
+      automatic light sleep short between keystrokes), then plug the USB-C
+      into the PC mid-typing → enumerates within ~2 s, not ~30 s; same
+      console lines as above.
+- [ ] **No battery regression, no cable**: on battery with the USB-C never
+      plugged in, HB `slept=` keeps growing normally and `light sleep` lines
+      are never immediately followed by a wake with `cause=GPIO` (that would
+      mean D+ is triggering spuriously) — nothing should wake or hold a lock
+      or post `enum` in `vetos=` with no host present. D+ is pulled HIGH
+      locally by the device-side full-speed pull-up when no cable is
+      attached (not bench-proven — if `usb_wake_guard_tick` ever logs a hold
+      with nothing plugged in, that pin needs a different wakeup level or a
+      debounce).
 - [ ] e-ink displays the 'PAIRED' splash at pairing
 - [ ] e-ink dashboard: L/R/USB + battery, without corruption
 - [ ] Trackpad (if present): cursor, L/R/M click, scroll

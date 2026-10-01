@@ -27,9 +27,55 @@
  * enough for the rest of the handshake to complete without being
  * re-swallowed by the next automatic sleep.
  *
+ * EXPLICIT sleep is a separate, worse problem (Mae, bench, 2026-10-01: a
+ * half already asleep with the cable plugged in — never mounted, so no
+ * VEILLE_VETO_USB — does not always come back after a wake key). veille.c's
+ * veille_legere_entrer() calls tud_disconnect() before every explicit light
+ * sleep, regardless of what the USB bus is doing (a plugged-in, still-
+ * enumerating host is not "activity", so 5 s of silence reaches the
+ * threshold anyway). tud_disconnect() is dcd_disconnect() in TinyUSB's S3
+ * DWC2 port (managed_components/espressif__tinyusb/src/portable/synopsys/
+ * dwc2/dcd_dwc2.c): it does not float D+, it ACTIVELY PULLS IT LOW
+ * (USB_WRAP.otg_conf: pad_pull_override=1, dp_pulldown=1, dm_pulldown=1).
+ * With the GPIO wakeup source from this file left armed through that
+ * window, the LOW-level condition is already true the instant
+ * esp_light_sleep_start() is called, so it returns almost immediately
+ * (ESP_SLEEP_WAKEUP_GPIO) — veille_legere_entrer() then calls
+ * tud_connect() (dcd_connect(): pad_pull_override=0, DCTL_SDIS cleared)
+ * and loops. Once idle, the half flickers off and back onto the bus
+ * roughly once a second (bounded by veille_task's own 1 Hz tick) for as
+ * long as nobody types — power-wise close to the sleep/wake churn this
+ * project measured and fixed down to 0.67 mA, and USB-wise a bus reset
+ * aborted before SET_CONFIGURATION, repeating forever instead of once.
+ *
+ * Fix: a veille_task sleep hook (see veille_hook_enregistrer, the same
+ * mechanism radio_owner.c/link_uart.c/batt_sense.c/memlcd_backend.c use)
+ * disarms BOTH the GPIO wakeup and the awake-time interrupt on D+ before
+ * tud_disconnect() runs (veille_hooks_dormir() is called before
+ * tud_disconnect() in veille_legere_entrer(), so every hook's `dormir`
+ * always finishes first) and re-arms both after tud_connect() (which runs
+ * before veille_hooks_reveiller()) — so D+ is only ever watched while its
+ * pull-up is actually the device's own, never during the window where the
+ * firmware itself forces it low. matrix_arm_key_wake()'s own
+ * esp_sleep_enable_gpio_wakeup() call (shared, not per-pin) is untouched:
+ * gpio_wakeup_disable()/_enable() only ever touch D+'s own bit, never the
+ * matrix rows'.
+ *
+ * Second half of the fix: while this guard is holding (activity seen, not
+ * yet mounted), VEILLE_VETO_USB_ENUM (veille_veto.h) blocks the EXPLICIT
+ * sleep outright — belt and suspenders with the hook above, and it also
+ * stops the half from physically leaving the bus mid-handshake even once
+ * (the hook alone would stop the flicker LOOP, but the first
+ * tud_disconnect() of a cycle would still have happened). The veto is set
+ * and cleared from task context only (veille_task's ~1 Hz tick and the
+ * mount callback), never from the ISR — ample margin, since the explicit
+ * sleep's own 5 s inactivity threshold cannot be reached until several
+ * ticks after the guard started holding.
+ *
  * This header is the pure, host-tested transition logic: activity seen,
- * mount seen, periodic timeout check. The hardware glue (GPIO ISR, the PM
- * lock itself) lives in usb_wake_guard.c and is not testable on the host.
+ * mount seen, periodic timeout check, and the veto/lock accessor. The
+ * hardware glue (GPIO ISR, the PM lock, the veille hook) lives in
+ * usb_wake_guard.c and is not testable on the host.
  */
 #pragma once
 #include <stdint.h>
@@ -82,6 +128,15 @@ static inline bool usb_wake_guard_timeout(usb_wake_guard_t *g, uint32_t now_ms)
     if ((int32_t)(now_ms - g->deadline_ms) < 0) return false;
     g->holding = false;
     return true;
+}
+
+/* Whether VEILLE_VETO_USB_ENUM should be posted right now — exactly
+ * "holding", named and exposed so the mapping from guard state to veto is a
+ * documented, tested decision rather than a reader-inferred coincidence
+ * between two uses of the same field. */
+static inline bool usb_wake_guard_veto_active(const usb_wake_guard_t *g)
+{
+    return g->holding;
 }
 
 #ifndef TEST_HOST

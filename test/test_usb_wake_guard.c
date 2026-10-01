@@ -86,6 +86,33 @@ static void test_timeout_survives_uint32_wraparound(void)
     TEST_ASSERT(usb_wake_guard_timeout(&g, at_wrap_deadline) == true, "at the wrapped deadline: release owed");
 }
 
+/* VEILLE_VETO_USB_ENUM (veille_veto.h) must track the guard exactly: posted
+ * the moment activity is seen, cleared the moment mount or timeout releases
+ * the hold — across the whole lifecycle, not just at the endpoints, since
+ * usb_wake_guard_tick() calls usb_wake_guard_veto_active() every ~1 Hz and a
+ * single missed transition would leave the explicit sleep either unblocked
+ * mid-handshake or permanently vetoed after a timeout. */
+static void test_veto_follows_the_guard_state(void)
+{
+    usb_wake_guard_t g = {0};
+    TEST_ASSERT(!usb_wake_guard_veto_active(&g), "idle: no veto");
+
+    usb_wake_guard_activity(&g, 1000);
+    TEST_ASSERT(usb_wake_guard_veto_active(&g), "activity: veto posted");
+
+    usb_wake_guard_activity(&g, 1500);   /* mid-burst, still well before timeout */
+    TEST_ASSERT(usb_wake_guard_veto_active(&g), "still mid-handshake: veto stays");
+
+    TEST_ASSERT(usb_wake_guard_mounted(&g), "mounted: release owed");
+    TEST_ASSERT(!usb_wake_guard_veto_active(&g), "mounted: veto cleared");
+
+    usb_wake_guard_activity(&g, 2000);
+    TEST_ASSERT(usb_wake_guard_veto_active(&g), "a later attempt: veto posted again");
+    uint32_t deadline = 2000 + USB_WAKE_GUARD_TIMEOUT_MS;
+    TEST_ASSERT(usb_wake_guard_timeout(&g, deadline), "host went away: timeout fires");
+    TEST_ASSERT(!usb_wake_guard_veto_active(&g), "timed out: veto cleared, explicit sleep allowed again");
+}
+
 void test_usb_wake_guard(void)
 {
     printf("\n-- usb_wake_guard --\n");
@@ -98,4 +125,5 @@ void test_usb_wake_guard(void)
     test_timeout_at_deadline_releases_and_rearms();
     test_timeout_when_not_holding_is_a_noop();
     test_timeout_survives_uint32_wraparound();
+    test_veto_follows_the_guard_state();
 }
