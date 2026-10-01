@@ -10,7 +10,9 @@
 void chest_oath_reset(chest_oath_t *o)
 {
     if (!o) return;
+    uint16_t epoch = o->code_epoch;   /* survives: a press on an old session's code never matches */
     memset(o, 0, sizeof *o);
+    o->code_epoch = epoch;
 }
 
 /* Hides the code AND wipes its digits (Task 6 review m3): a code that is no
@@ -154,6 +156,7 @@ void chest_oath_on_code(chest_oath_t *o, const chest_code_t *c, uint32_t now_ms)
 
     o->code = *c;
     o->code_shown = true;
+    if (++o->code_epoch == 0) o->code_epoch = 1;   /* 0 means "no code on screen" */
     o->code_deadline_ms = now_ms + (uint32_t)c->seconds * 1000u;
     o->code_requested = false;
 }
@@ -194,4 +197,49 @@ bool chest_oath_may_request_code(const chest_oath_t *o, uint8_t chest_state, uin
 
     if (index) *index = e->index;
     return true;
+}
+
+/* Typing a visible code (Mae, 2026-10-01) — see chest_oath.h. */
+uint8_t chest_oath_digit_usage(char c)
+{
+    if (c == '0') return 0x27;                               /* HID Keyboard 0 and ) */
+    if (c >= '1' && c <= '9') return (uint8_t)(0x1E + (c - '1'));   /* 1 and ! .. 9 and ( */
+    return 0;
+}
+
+uint16_t chest_oath_visible_epoch(chest_oath_t *o, uint32_t now_ms)
+{
+    if (!o || !chest_oath_code_visible(o, now_ms, NULL)) return 0;
+    return o->code_epoch;
+}
+
+chest_oath_key_t chest_oath_code_key(chest_oath_t *o, uint16_t press_epoch, bool local, uint32_t now_ms,
+                                     bool route_usb, uint8_t usages[CHEST_OATH_TYPE_MAX],
+                                     uint8_t *n)
+{
+    if (n) *n = 0;
+    if (!o || !usages || !n) return CHEST_OATH_KEY_IGNORE;
+    if (press_epoch == 0) return CHEST_OATH_KEY_REQUEST;     /* no code on screen at press */
+    /* Typing is left-only (Mae, 2026-10-01), like K_SEC_CONFIRM: a right-half
+     * key travels over an unauthenticated radio. On a code it does nothing. */
+    if (!local) return CHEST_OATH_KEY_IGNORE;
+
+    /* The press was made on a code: it types THAT code, now, or nothing. */
+    if (o->code_epoch != press_epoch || !chest_oath_code_visible(o, now_ms, NULL))
+        return CHEST_OATH_KEY_IGNORE;
+    if (!route_usb) return CHEST_OATH_KEY_IGNORE;            /* the dongle types on the radio route */
+
+    uint8_t d = o->code.digits;
+    bool ok = (d == 6 || d == 8);
+    for (uint8_t i = 0; ok && i < d; i++) {
+        usages[i] = chest_oath_digit_usage(o->code.code[i]);
+        ok = usages[i] != 0;
+    }
+    hide_code(o);                     /* typed or refused: never typed twice, digits wiped */
+    if (!ok) {
+        memset(usages, 0, CHEST_OATH_TYPE_MAX);
+        return CHEST_OATH_KEY_IGNORE;
+    }
+    *n = d;
+    return CHEST_OATH_KEY_TYPE;
 }

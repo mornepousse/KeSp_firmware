@@ -231,6 +231,44 @@ static const uint8_t V16[64] = {
 };
 
 /* Contract §1: compare check values, not names (the chest's header calls it X-25; it is MCRF4XX). */
+/* Niphar_chest test/test_link_proto.c, commit 3da17cc (k_vec_v17..v19, the
+ * prompt cancel, contract §5 "Cancelling a prompt") — copied verbatim by
+ * script, never edited. */
+/* V17 — V1 plus a well-formed CANCEL: 0xC5 at 0x38 echoing the ARMED instance (3) at
+ * 0x39. Block identical to V1, CRC included (the master range is outside the
+ * covered span); the chest drops the op. */
+static const uint8_t V17[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x07, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xF3, 0x21, 0xC5, 0x03, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V18 — the same cancel echoing the PREVIOUS instance (2): ignored by the chest — a
+ * late cancel never kills a newer prompt (the cancel's V11). */
+static const uint8_t V18[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x07, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x47, 0x49, 0x54, 0x48, 0x55, 0x42, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xF3, 0x21, 0xC5, 0x02, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+/* V19 — what the chest publishes AFTER serving V17: pending_op 0, no label, op_count
+ * 0 — instance (3) and 0x11 (0) UNCHANGED: a cancel arms nothing, queues nothing. */
+static const uint8_t V19[64] = {
+    0x4E, 0x49, 0x50, 0x48, 0x03, 0x0F, 0x00, 0x00, 0x2A, 0x00,
+    0x00, 0x00, 0x03, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x85, 0xF4, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
+
 static void test_chest_crc_check_value(void)
 {
     TEST_ASSERT_EQ(cr_crc16((const uint8_t *)"123456789", 9), 0x6F91, "CRC-16/MCRF4XX check value (X-25 would be 0x906E)");
@@ -706,6 +744,154 @@ static void test_chest_mode_label(void)
     }
 }
 
+/* Cancelling a prompt (contract §5, Niphar_chest 3da17cc): V17/V18/V19
+ * through the real parser, the master word against V17's own bytes. */
+static void test_chest_cancel_vectors(void)
+{
+    chest_status_t a, b, c;
+    memset(&a, 0, sizeof a); memset(&b, 0, sizeof b); memset(&c, 0, sizeof c);
+    TEST_ASSERT_EQ(chest_proto_parse(V17, 64, &a), CHEST_BLOCK_OK, "V17 (cancel written): the block stays OK");
+    TEST_ASSERT_EQ(chest_proto_parse(V1, 64, &b), CHEST_BLOCK_OK, "V1 OK");
+    TEST_ASSERT(memcmp(&a, &b, sizeof a) == 0,
+                "V17 decodes exactly as V1: the cancel byte is outside the block, the prompt is still pending");
+    TEST_ASSERT_EQ(chest_proto_parse(V18, 64, &a), CHEST_BLOCK_OK, "V18 (stale echo) OK");
+    TEST_ASSERT_EQ(a.pending_op, 7, "V18: the prompt survives a stale cancel");
+    TEST_ASSERT_EQ(chest_proto_parse(V19, 64, &c), CHEST_BLOCK_OK, "V19 (after the cancel) OK");
+    TEST_ASSERT_EQ(c.pending_op, 0, "V19: no op pending");
+    TEST_ASSERT_EQ(c.label_len, 0, "V19: label cleared");
+    TEST_ASSERT(c.label[0] == '\0', "V19: no label text");
+    TEST_ASSERT_EQ(c.op_count, 0, "V19: no account targeted");
+    TEST_ASSERT_EQ(c.instance, b.instance, "V19: instance unchanged (a cancel arms nothing)");
+    TEST_ASSERT_EQ(c.dma_seq, b.dma_seq, "V19: 0x11 unchanged (a cancel queues nothing)");
+    TEST_ASSERT_EQ(c.confirm_count, b.confirm_count, "V19: the confirm counter does not move on a cancel");
+
+    uint8_t w[2] = { 0xEE, 0xEE };
+    chest_cancel_pack(w, b.instance);
+    TEST_ASSERT(memcmp(w, &V17[CHEST_REG_USER_CONFIRM], 2) == 0,
+                "the cancel of the ARMED instance is V17's master word, byte for byte");
+    TEST_ASSERT(memcmp(w, &V18[CHEST_REG_USER_CONFIRM], 2) != 0, "and not V18's stale one");
+    chest_cancel_pack(w, 2);
+    TEST_ASSERT(memcmp(w, &V18[CHEST_REG_USER_CONFIRM], 2) == 0, "instance 2 -> V18's word");
+    TEST_ASSERT(V17[CHEST_REG_USER_CONFIRM] != CHEST_CONFIRM_MAGIC, "V17 grants nothing");
+}
+
+/* Mirror of the chest's 256-value sweep: exactly one value grants, exactly one
+ * cancels, never the same, and six bits apart (0xA5, the complement, was
+ * rejected for that reason). */
+static void test_chest_cancel_and_confirm_magics_distinct(void)
+{
+    int grants = 0, cancels = 0, both = 0;
+    for (int v = 0; v < 256; v++) {
+        bool g = v == CHEST_CONFIRM_MAGIC, k = v == CHEST_CANCEL_MAGIC;
+        grants += g; cancels += k; both += g && k;
+    }
+    TEST_ASSERT_EQ(grants, 1, "one grant value");
+    TEST_ASSERT_EQ(cancels, 1, "one cancel value");
+    TEST_ASSERT_EQ(both, 0, "no value both grants and cancels");
+    TEST_ASSERT_EQ(__builtin_popcount(CHEST_CONFIRM_MAGIC ^ CHEST_CANCEL_MAGIC), 6, "0x5A and 0xC5 six bits apart");
+    TEST_ASSERT_EQ(CHEST_CANCEL_MAGIC, 0xC5, "the frozen value");
+}
+
+static void test_chest_cancel_request_needs_the_armed_instance(void)
+{
+    chest_status_t s, after;
+    chest_proto_parse(V1, 64, &s);                                    /* op 7, instance 3 */
+    chest_proto_parse(V19, 64, &after);                               /* nothing pending */
+    chest_cancel_t c;
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(chest_cancel_request(&c, CHEST_TAG(7, 3), CHEST_BLOCK_OK, &s, 1000), "the prompt on screen: armed");
+    TEST_ASSERT(c.armed, "armed");
+    TEST_ASSERT_EQ(c.instance, 3, "the ARMED instance is the one echoed");
+    TEST_ASSERT_EQ(c.op, 7, "op recorded");
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(!chest_cancel_request(&c, CHEST_TAG(7, 2), CHEST_BLOCK_OK, &s, 1000),
+                "a press seen on the PREVIOUS prompt (V18's echo): dropped, never kills the newer one");
+    TEST_ASSERT(!c.armed, "not armed");
+    TEST_ASSERT(!chest_cancel_request(&c, CHEST_TAG(2, 3), CHEST_BLOCK_OK, &s, 1000), "another op: dropped");
+    TEST_ASSERT(!chest_cancel_request(&c, 0, CHEST_BLOCK_OK, &s, 1000), "no press: nothing");
+    TEST_ASSERT(!chest_cancel_request(&c, CHEST_TAG(7, 3), CHEST_BLOCK_CORRUPT, &s, 1000), "non-OK block: dropped");
+    TEST_ASSERT(!chest_cancel_request(&c, CHEST_TAG(7, 3), CHEST_BLOCK_OK, &after, 1000),
+                "the prompt already gone (V19): nothing to cancel");
+    TEST_ASSERT(!c.armed, "still not armed");
+}
+
+static void test_chest_cancel_step(void)
+{
+    chest_status_t s, after, other;
+    chest_proto_parse(V1, 64, &s);
+    chest_proto_parse(V19, 64, &after);
+    chest_cancel_t c;
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(!chest_cancel_step(&c, &s, 1000), "not armed: no write");
+    chest_cancel_request(&c, CHEST_TAG(7, 3), CHEST_BLOCK_OK, &s, 1000);
+    TEST_ASSERT(chest_cancel_step(&c, &s, 1000), "first write");
+    TEST_ASSERT(!chest_cancel_step(&c, &s, 1199), "no retry at 199 ms");
+    TEST_ASSERT(chest_cancel_step(&c, &s, 1200), "one retry at 200 ms, the prompt still there");
+    TEST_ASSERT(!chest_cancel_step(&c, &s, 1400), "never a third");
+    TEST_ASSERT(!c.armed, "given up");
+
+    chest_cancel_request(&c, CHEST_TAG(7, 3), CHEST_BLOCK_OK, &s, 2000);
+    TEST_ASSERT(chest_cancel_step(&c, &s, 2000), "write");
+    TEST_ASSERT(!chest_cancel_step(&c, &after, 2020), "V19: served, no retry");
+    TEST_ASSERT(!c.armed, "disarmed once the chest cleared the op");
+
+    chest_cancel_request(&c, CHEST_TAG(7, 3), CHEST_BLOCK_OK, &s, 3000);
+    chest_cancel_step(&c, &s, 3000);
+    other = s; other.instance = 4;
+    TEST_ASSERT(!chest_cancel_step(&c, &other, 3250), "another arming replaced ours: never cancel it");
+    TEST_ASSERT(!c.armed, "disarmed");
+}
+
+/* Security review 2026-10-01: the cancel/confirm arbitration of one round
+ * (they share 0x38) is pure and pinned here, not left in the transport glue.
+ * Semantics: a cancel taken in the same round as a confirm press of the same
+ * prompt WINS (refusing is the safe side) and disarms the confirm; a LATER
+ * real press on the same prompt re-arms the confirm and disarms an in-flight
+ * cancel; a stale tag (older instance) on either side blocks nothing. */
+static void test_chest_arbitrate_cancel_vs_confirm(void)
+{
+    chest_status_t s;
+    chest_proto_parse(V1, 64, &s);                                    /* op 7, instance 3 */
+    chest_confirm_t cf; chest_cancel_t cn;
+
+    /* Both in the same round: the cancel is written, the confirm disarmed —
+     * and stays so on the retry round. */
+    memset(&cf, 0, sizeof cf); memset(&cn, 0, sizeof cn);
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, CHEST_TAG(7, 3), CHEST_TAG(7, 3), &s, 1000), CHEST_WRITE_CANCEL,
+                   "confirm press + cancel in one round: the CANCEL is written");
+    TEST_ASSERT(!cf.armed, "the confirm is disarmed");
+    TEST_ASSERT(cn.armed, "the cancel is armed");
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, 0, 0, &s, 1200), CHEST_WRITE_CANCEL, "its one retry, still a cancel");
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, 0, 0, &s, 1400), CHEST_WRITE_NONE, "never a confirm afterwards");
+
+    /* A cancel in flight, then a NEW real press on the same prompt: the
+     * confirm re-arms and is written, the cancel is dropped. */
+    memset(&cf, 0, sizeof cf); memset(&cn, 0, sizeof cn);
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, 0, CHEST_TAG(7, 3), &s, 2000), CHEST_WRITE_CANCEL, "cancel written");
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, CHEST_TAG(7, 3), 0, &s, 2100), CHEST_WRITE_CONFIRM,
+                   "a later press on the same prompt: the confirm is written");
+    TEST_ASSERT(!cn.armed, "the in-flight cancel is dropped");
+    TEST_ASSERT(cf.armed, "the confirm is armed (its retry rule applies)");
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, 0, 0, &s, 2300), CHEST_WRITE_CONFIRM, "the confirm's one retry");
+
+    /* Stale cancel (older instance) + a valid press: the press is served. */
+    memset(&cf, 0, sizeof cf); memset(&cn, 0, sizeof cn);
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, CHEST_TAG(7, 3), CHEST_TAG(7, 2), &s, 3000), CHEST_WRITE_CONFIRM,
+                   "a stale cancel blocks no current confirm");
+    TEST_ASSERT(!cn.armed, "the stale cancel is not armed");
+
+    /* Stale press + a valid cancel: the cancel is served, no confirm. */
+    memset(&cf, 0, sizeof cf); memset(&cn, 0, sizeof cn);
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, CHEST_TAG(7, 2), CHEST_TAG(7, 3), &s, 4000), CHEST_WRITE_CANCEL,
+                   "a stale press confirms nothing; the cancel goes");
+    TEST_ASSERT(!cf.armed, "no confirm armed");
+
+    /* Both stale, or nothing at all: no write. */
+    memset(&cf, 0, sizeof cf); memset(&cn, 0, sizeof cn);
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, CHEST_TAG(7, 2), CHEST_TAG(7, 2), &s, 5000), CHEST_WRITE_NONE, "both stale: nothing");
+    TEST_ASSERT_EQ(chest_arbitrate(&cf, &cn, 0, 0, &s, 5100), CHEST_WRITE_NONE, "nothing pressed: nothing");
+}
+
 void test_chest_proto(void)
 {
     TEST_SUITE("chest link protocol (S3 master, v3)");
@@ -719,6 +905,11 @@ void test_chest_proto(void)
     TEST_RUN(test_chest_absent_blocks);
     TEST_RUN(test_chest_older_version_is_bad_version);
     TEST_RUN(test_chest_master_offsets_against_chest_vectors);
+    TEST_RUN(test_chest_cancel_vectors);
+    TEST_RUN(test_chest_cancel_and_confirm_magics_distinct);
+    TEST_RUN(test_chest_cancel_request_needs_the_armed_instance);
+    TEST_RUN(test_chest_cancel_step);
+    TEST_RUN(test_chest_arbitrate_cancel_vs_confirm);
     TEST_RUN(test_chest_label_sanitize_bounds);
     TEST_RUN(test_chest_dma_segment_ok);
     TEST_RUN(test_chest_mounted_without_mode_is_corrupt);

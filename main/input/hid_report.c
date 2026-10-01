@@ -248,6 +248,36 @@ void send_hid_kb_mouse(uint8_t modifier, const uint8_t kc[6],
     }
 }
 
+bool hid_report_type_usages(const uint8_t *usages, uint8_t n)
+{
+    if (!hid_queue || !usages || n == 0 || n > 16) return false;
+    /* All or nothing: room for every press AND its release, so the sequence
+     * never stops on a press the host would then hold. Another producer (the
+     * keyboard task) may still slip a report in between two of ours —
+     * harmless, each of ours is a complete report. */
+    if (uxQueueSpacesAvailable(hid_queue) < (UBaseType_t)(2u * n)) return false;
+    hid_msg_t msg = { .type = HID_MSG_KEYBOARD };
+    bool ok = true;
+    for (uint8_t i = 0; i < n && ok; i++) {
+        msg.enqueue_tick = xTaskGetTickCount();
+        memset(msg.payload.keyboard.keycodes, 0, 6);
+        msg.payload.keyboard.keycodes[0] = usages[i];
+        msg.payload.keyboard.modifier = 0;
+        if (xQueueSend(hid_queue, &msg, pdMS_TO_TICKS(20)) != pdTRUE) {
+            ok = false;                     /* the press never left: nothing held */
+            break;
+        }
+        memset(msg.payload.keyboard.keycodes, 0, 6);
+        if (xQueueSend(hid_queue, &msg, pdMS_TO_TICKS(20)) != pdTRUE
+            && xQueueSend(hid_queue, &msg, pdMS_TO_TICKS(100)) != pdTRUE) {
+            ESP_LOGW(TAG, "typed sequence: a release was not queued");
+            ok = false;
+        }
+    }
+    memset(&msg, 0, sizeof msg);
+    return ok;
+}
+
 uint8_t keyboard_get_usb_bl_state(void) { return usb_bl_state; }
 
 /* Returns the current HID modifier byte.

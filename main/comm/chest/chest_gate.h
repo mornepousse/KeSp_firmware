@@ -41,14 +41,37 @@ bool     chest_gate_take_mode_next(void);
  * plain load+store races the take and silently drops or duplicates a step
  * (review 2026-09-29, see chest_gate.c). */
 void     chest_gate_oath_nav(int8_t delta);
+/* key_processor: a new K_OATH_PREV/K_OATH_NEXT press. During a prompt (the
+ * published pending op is non-zero) it is a CANCEL of that prompt: stores the
+ * published tag (op, instance) AT PRESS TIME — like chest_gate_press() — and
+ * queues NO cursor move. Otherwise it is chest_gate_oath_nav(delta). Accepted
+ * from either half: a cancel can only refuse (contract §5, 0xC5). */
+void     chest_gate_oath_key(int8_t delta);
+/* link task: consume the cancel tag (0 = none) and clear it. Matched against
+ * the CURRENT block by chest_cancel_request — a stale one is dropped. */
+uint32_t chest_gate_take_cancel(void);
 /* link task: consume the accumulated delta (0 = none) and clear it. The
  * other writer of s_oath_nav — see chest_gate_oath_nav()'s comment. */
 int8_t   chest_gate_take_oath_nav(void);
-/* key_processor: a new K_OATH_CODE press (a request for the account under
- * the cursor's code — not an arming, the chest still needs K_SEC_CONFIRM). */
-void     chest_gate_oath_code(void);
-/* link task: consume the request (false = none pending). */
-bool     chest_gate_take_oath_code(void);
+/* link task: the epoch (chest_oath_visible_epoch) of the code visible on the
+ * screen, 0 = none. Published after every round, 0 when the chest goes. */
+void     chest_gate_publish_code(uint16_t epoch);
+/* key_processor: a new K_OATH_CODE press. Stores a press record carrying the
+ * code epoch published AT PRESS TIME — like chest_gate_press()'s tag, the
+ * meaning of the press is what the screen showed when it was pressed:
+ * epoch 0 = a request for the account under the cursor's code (not an
+ * arming, the chest still needs K_SEC_CONFIRM); non-zero = type that code
+ * if it is still the one visible (chest_oath_code_key, Mae 2026-10-01). A
+ * second press before the take overwrites the record (one press, not a
+ * counter). */
+void     chest_gate_oath_code(bool local);
+/* link task: consume the press record (0 = no press) and clear it. */
+uint32_t chest_gate_take_oath_code(void);
+#define CHEST_GATE_CODE_PRESS        0x10000u
+#define CHEST_GATE_CODE_LOCAL_BIT    0x20000u
+#define CHEST_GATE_CODE_LOCAL(r)     (((r) & CHEST_GATE_CODE_LOCAL_BIT) != 0u)
+#define CHEST_GATE_CODE_PRESSED(r)   (((r) & CHEST_GATE_CODE_PRESS) != 0u)
+#define CHEST_GATE_CODE_EPOCH(r)     ((uint16_t)((r) & 0xFFFFu))
 /* Wake-up hook: chest_link.c registers a function that wakes its task
  * (xTaskNotifyGive) so a K_OATH_* / K_CHEST_NEXT press, or a K_SEC_CONFIRM
  * press that the chest takes, is served at once instead of at the next

@@ -303,6 +303,23 @@ static void test_view_code_survives_corrupt_round_then_ages_out(void)
     TEST_ASSERT(!v.code_visible, "still ages out on time regardless of the transport (I2)");
 }
 
+/* Cancelling a prompt (contract §5): the prompt goes only when the CHEST
+ * clears the op — V17 (cancel written, block still V1's) keeps it on screen,
+ * V19 (the block after) drops it. Never an optimistic hide. */
+static void test_view_prompt_stays_until_the_chest_clears_it(void)
+{
+    chest_block_t blk;
+    chest_view_t v;
+    chest_status_t st = parse(CHEST_TV_V17, &blk);
+    chest_view_build(&v, blk, &st, st.active_mode, CHEST_MODE_ARRIVED, NULL, 0);
+    TEST_ASSERT_EQ(v.op, 7, "V17: a cancel written, the chest has not served it: the prompt stays");
+    TEST_ASSERT(strcmp(v.label, "GITHUB") == 0, "V17: its label too");
+    st = parse(CHEST_TV_V19, &blk);
+    chest_view_build(&v, blk, &st, st.active_mode, CHEST_MODE_ARRIVED, NULL, 0);
+    TEST_ASSERT_EQ(v.op, 0, "V19: the chest cleared the op, the prompt is gone");
+    TEST_ASSERT(v.label[0] == '\0', "V19: no label left");
+}
+
 void test_chest_view(void)
 {
     TEST_SUITE("chest link screen view (S3 master, v3, bytes -> pixels)");
@@ -310,6 +327,7 @@ void test_chest_view(void)
     TEST_RUN(test_view_absent_and_badversion);
     TEST_RUN(test_view_v16_reset);
     TEST_RUN(test_view_prompt_uses_chest_label_not_cursor_name);
+    TEST_RUN(test_view_prompt_stays_until_the_chest_clears_it);
     TEST_RUN(test_view_v9_has_nothing_to_show_either_way);
     TEST_RUN(test_view_v15_no_time_while_browsing);
     TEST_RUN(test_view_code_lifecycle);

@@ -2,6 +2,14 @@
 
 From: KeSp (left half, S3 master), 2026-09-30. For: Niphar_chest (`docs/LINK_CONTRACT.md`).
 
+**Status: answered and implemented (2026-10-01).** The chest froze `0xC5` at
+`0x38` + echo of the armed instance at `0x39` — contract §5 "Cancelling a
+prompt", vectors V17 (cancel), V18 (stale echo, ignored), V19 (the block
+after: op 0, label empty, instance and `0x11` unchanged), Niphar_chest
+`3da17cc`; still protocol version 3. KeSp side on branch `oath-type-code`:
+`chest_cancel_*` (chest_proto), `chest_gate_oath_key` (PREV/NEXT cancel during
+a prompt, no cursor move), `write_cancel` (chest_link). Bench: smoke item 13.
+
 ## Why
 
 Bench, 2026-09-30 (Mae): after `K_OATH_CODE` the full-screen prompt (op + the

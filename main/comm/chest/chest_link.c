@@ -41,6 +41,8 @@
 #include "chest_gate.h"
 #include "veille_task.h"
 #include "rf_bus.h"
+#include "hid_report.h"     /* hid_report_type_usages, keyboard_get_usb_bl_state */
+#include "usb_presence.h"   /* kbd_active_route: typing only on the USB route */
 #include "board.h"
 #include <string.h>
 #include "driver/gpio.h"
@@ -84,6 +86,7 @@ static chest_view_t         s_view;
 static chest_oath_t         s_oath;          /* ~1.2 KB: static, never on a stack (chest_oath.h) */
 static chest_round_t        s_round;
 static chest_confirm_t      s_confirm;
+static chest_cancel_t       s_cancel;        /* a prompt cancel being delivered (contract §5) */
 static uint8_t              s_mode_wanted;   /* CHEST_MODE_*; none at every presence session */
 static chest_mode_track_t   s_mode_track;
 static uint8_t              s_mode_state = CHEST_MODE_ARRIVED;
@@ -162,6 +165,17 @@ static void write_confirm(uint8_t instance)
     spi_transaction_t t = { .cmd = CHEST_CMD_WRBUF, .addr = CHEST_REG_USER_CONFIRM,
                             .length = 16, .tx_buffer = s_tx };
     if (!xfer_seq(&t, 1)) ESP_LOGW(TAG, "confirmation not written (bus busy) — retried by the rule");
+}
+
+/* Contract §5 "Cancelling a prompt": {0xC5, armed instance} in ONE write at
+ * 0x38, the confirm's own word. It can only refuse. */
+static void write_cancel(uint8_t instance)
+{
+    chest_cancel_pack(s_tx, instance);
+    spi_transaction_t t = { .cmd = CHEST_CMD_WRBUF, .addr = CHEST_REG_USER_CONFIRM,
+                            .length = 16, .tx_buffer = s_tx };
+    if (xfer_seq(&t, 1)) ESP_LOGI(TAG, "prompt cancel written (instance %u)", instance);
+    else ESP_LOGW(TAG, "prompt cancel not written (bus busy) — retried by the rule");
 }
 
 /* Contract §6.4: one byte at 0x3A, never in the same write as 0x38. */
@@ -258,7 +272,7 @@ static void consume_segment(const chest_status_t *st, uint32_t now)
     memset(s_dma, 0, st->dma_len);   /* a code does not linger in the DMA buffer */
 }
 
-static void round_ok(const chest_status_t *st, uint32_t pressed, bool mode_next,
+static void round_ok(const chest_status_t *st, uint32_t pressed, uint32_t cancel, bool mode_next,
                      bool nav, bool code_key, uint32_t now)
 {
     chest_gate_publish(st->pending_op, st->instance);
@@ -289,8 +303,15 @@ static void round_ok(const chest_status_t *st, uint32_t pressed, bool mode_next,
     }
 
     /* Confirm (contract §5): the press must match THIS block's op AND instance. */
-    if (chest_press_matches(pressed, CHEST_BLOCK_OK, st)) chest_confirm_request(&s_confirm, st, now);
-    if (chest_confirm_step(&s_confirm, st, now)) write_confirm(s_confirm.instance);
+    /* Confirm / cancel (contract §5): they share 0x38; who writes this round
+     * is chest_arbitrate's (pure, test_chest_arbitrate_cancel_vs_confirm).
+     * The prompt goes only when the chest clears the op — the view is built
+     * from the block, never from these requests. */
+    switch (chest_arbitrate(&s_confirm, &s_cancel, pressed, cancel, st, now)) {
+    case CHEST_WRITE_CANCEL:  write_cancel(s_cancel.instance);   break;
+    case CHEST_WRITE_CONFIRM: write_confirm(s_confirm.instance); break;
+    default: break;
+    }
 
     if (p.read_segment) {
         bool ok = read_segment(st->dma_len);
@@ -305,6 +326,31 @@ static void round_ok(const chest_status_t *st, uint32_t pressed, bool mode_next,
     }
 }
 
+/* A K_OATH_CODE press (chest_oath_code_key decides, pure and tested): true
+ * when it is a code REQUEST for the round planner. TYPE goes through the
+ * engine's own HID queue (hid_report_type_usages) — the left's route must be
+ * USB: on the radio route the dongle types and hid_transport drops the
+ * left's reports (fusion), so the code would vanish unseen. The chest only
+ * exists while a host is there anyway; the guard makes it explicit. */
+static bool type_or_request(uint16_t press_epoch, bool local, uint32_t now)
+{
+    uint8_t u[CHEST_OATH_TYPE_MAX];
+    uint8_t n = 0;
+    bool route_usb = kbd_active_route() == KBD_OUT_USB && keyboard_get_usb_bl_state() == 0;
+    chest_oath_key_t k = chest_oath_code_key(&s_oath, press_epoch, local, now, route_usb, u, &n);
+    if (k == CHEST_OATH_KEY_TYPE) {
+        bool ok = hid_report_type_usages(u, n);
+        memset(u, 0, sizeof u);          /* the digits do not outlive the queueing */
+        if (ok) ESP_LOGI(TAG, "TOTP code typed (%u digits)", n);
+        else    ESP_LOGW(TAG, "TOTP code not typed: HID queue full (code hidden)");
+    } else if (k == CHEST_OATH_KEY_IGNORE) {
+        DIAG("K_OATH_CODE on a code no longer typeable (expired, changed, or route %s)",
+             route_usb ? "USB" : "not USB");
+    }
+    memset(u, 0, sizeof u);
+    return k == CHEST_OATH_KEY_REQUEST;
+}
+
 /* The chest vanished while the host is still there (reboot, unpowered):
  * the next one is a new chest — its 0x11, doorbell and instances restart.
  * The WANTED mode stays: the self-heal re-requests it once it is back. */
@@ -313,6 +359,7 @@ static void chest_vanished(void)
     chest_round_reset(&s_round);
     chest_oath_reset(&s_oath);
     s_confirm.armed = false;
+    s_cancel.armed = false;
     s_mode_track.differ_reads = 0;
 }
 
@@ -326,6 +373,7 @@ static void go_absent(void)
     }
     cs_release();
     chest_gate_publish(0, 0);
+    chest_gate_publish_code(0);
     chest_vanished();
     s_mode_wanted = CHEST_MODE_NONE;               /* v2 spec §3: presence lost -> none */
     s_mode_state = CHEST_MODE_ARRIVED;
@@ -358,9 +406,11 @@ static void chest_task(void *arg)
          * other keys are taken every round too, so none waits for a later
          * chest to act on it. */
         uint32_t pressed   = chest_gate_take_press();
+        uint32_t cancel    = chest_gate_take_cancel();   /* dropped on a non-OK round, like a press */
         bool     mode_next = chest_gate_take_mode_next();
         int8_t   nav       = chest_gate_take_oath_nav();
-        bool     code_key  = chest_gate_take_oath_code() || s_code_pending;
+        uint32_t code_rec  = chest_gate_take_oath_code();
+        bool     code_key  = s_code_pending;
         s_code_pending = false;
 
         if (s_want && !s_dev) {
@@ -382,13 +432,20 @@ static void chest_task(void *arg)
          * navigation key, whatever the wire does. The LIST decision it
          * implies waits for the next OK round. */
         if (nav) { chest_oath_nav(&s_oath, nav); s_nav_pending = true; }
+        /* K_OATH_CODE (Mae, 2026-10-01): typed if the press was made on the
+         * code still visible now, a request if no code was on screen. Decided
+         * before this round's read, so a code arriving later in the round is
+         * never typed by a press that did not see it (the record's epoch). */
+        if (CHEST_GATE_CODE_PRESSED(code_rec)) {
+            if (type_or_request(CHEST_GATE_CODE_EPOCH(code_rec), CHEST_GATE_CODE_LOCAL(code_rec), now)) code_key = true;
+        }
 
         if (read_block()) {
             chest_status_t st = {0};   /* chest_proto_parse writes it only on OK (its own contract) */
             chest_block_t blk = chest_proto_parse(s_rx, CHEST_REG_SIZE, &st);
             switch (blk) {
             case CHEST_BLOCK_OK:
-                round_ok(&st, pressed, mode_next, s_nav_pending, code_key, now);
+                round_ok(&st, pressed, cancel, mode_next, s_nav_pending, code_key, now);
                 s_nav_pending = false;
                 s_st = st;
                 break;
@@ -415,6 +472,8 @@ static void chest_task(void *arg)
         chest_view_t v;
         chest_view_build(&v, s_blk, &s_st, s_mode_wanted, s_mode_state, &s_oath, now);
         taskENTER_CRITICAL(&s_view_mux); s_view = v; taskEXIT_CRITICAL(&s_view_mux);
+        /* The code on screen, for the engine to stamp a K_OATH_CODE press with. */
+        chest_gate_publish_code(chest_oath_visible_epoch(&s_oath, now));
         /* Mae, 2026-09-29: no sleep while a code is on the screen (bounded
          * by its window, <= 30 s — chest_oath_code_visible hides it then). */
         if (v.code_visible != s_veto_code) {

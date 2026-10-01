@@ -337,14 +337,83 @@ means a test, or a line.
   writers — key_processor.c accumulates, the link task's take clears — and
   is a CAS loop, not a plain store, so a take racing an accumulate never
   drops or duplicates a step [test:test_chest_gate_oath_nav_cas_survives_a_concurrent_take].
+  During a chest PROMPT (the published pending op is non-zero, any op —
+  TOTP, PGP sign, RESET…), K_OATH_PREV/K_OATH_NEXT CANCEL it instead of
+  browsing (Niphar_chest contract §5 "Cancelling a prompt", 3da17cc): the
+  press stores the prompt's tag (op, instance) AT PRESS TIME and queues NO
+  cursor move, once per new press, from either half — a cancel can only
+  refuse [test:test_kp_oath_nav_cancels_a_prompt_without_moving]
+  [test:test_kp_oath_nav_cancel_from_the_right_half]. The link task arms it
+  only if the tag's op AND instance are the CURRENT block's (a key seen on an
+  older prompt never cancels a newer one, the V18 case)
+  [test:test_chest_cancel_request_needs_the_armed_instance], then writes
+  {0xC5, armed instance} at 0x38-0x39 — V17's master word byte for byte —
+  once, one retry after 200 ms while the same prompt is still up, never a
+  third, disarmed as soon as the op or the instance moves
+  [test:test_chest_cancel_vectors][test:test_chest_cancel_step]. 0xC5 and
+  0x5A are the only cancel and grant values and six bits apart
+  [test:test_chest_cancel_and_confirm_magics_distinct]. A cancel taken in
+  the same round as a K_SEC_CONFIRM press of the same prompt wins (refusing
+  is the safe side); a LATER real press re-arms the confirm and drops an
+  in-flight cancel; a stale tag on either side blocks nothing — one pure
+  decision, `chest_arbitrate` [test:test_chest_arbitrate_cancel_vs_confirm].
+  The prompt goes
+  only when the chest clears the op (V19: op 0, label gone, instance and
+  0x11 unchanged) — never optimistically: the view is built from the block
+  [test:test_view_prompt_stays_until_the_chest_clears_it], and a CODE
+  request it cancels is retracted by the existing "op 0 without 0x11
+  moving" rule [test:test_armed_then_op_gone_without_segment_is_cancelled].
+  The host gets 6985, as on a timeout [smoke:Chest link].
   K_OATH_CODE requests a code for the account under the cursor, once per
   physical press and touching no other channel
   [test:test_kp_oath_code_requests_once]
-  [test:test_kp_oath_code_twice_before_take_yields_one]. None of the three
+  [test:test_kp_oath_code_twice_before_take_yields_one].
+  A SECOND K_OATH_CODE press while a code is VISIBLE types it (Mae,
+  2026-10-01): the digits go to the host as top-row usages, `1`..`9` ->
+  0x1E..0x26 and `0` -> 0x27, no modifier, NO Enter, any other byte refused
+  [test:test_chest_oath_digit_usage]; 6 or 8 digits taken from the decoded
+  CODE segment (`chest_code_t`), never from screen text
+  [test:test_chest_oath_code_key_types_6_digits_and_hides]
+  [test:test_chest_oath_code_key_types_8_digits], and typing HIDES the code
+  and wipes its digits, so it is typed at most once
+  [test:test_chest_oath_code_key_never_twice]. The press is stamped with
+  the epoch of the code the screen showed AT PRESS TIME (published by the
+  link task every round, `chest_gate_publish_code`, like K_SEC_CONFIRM's
+  tag) [test:test_kp_oath_code_records_the_code_on_screen_at_press]
+  [test:test_chest_oath_visible_epoch]: epoch 0 (no code on screen) is a
+  request as before, even if a code surfaced since
+  [test:test_chest_oath_code_key_no_code_at_press_requests]; a press made
+  on a code is typed only if THAT code is still visible at the decision
+  (same predicate as the screen, `chest_oath_code_visible`), otherwise
+  nothing at all — not a request: a press after the window ended
+  [test:test_chest_oath_code_key_after_window_does_nothing], a press seen
+  on a code a navigation key since replaced
+  [test:test_chest_oath_code_key_stale_epoch_does_nothing], a press from
+  before a chest reset (the epoch counter survives `chest_oath_reset`)
+  [test:test_chest_oath_code_key_epoch_survives_reset]. Typing needs the
+  left's own HID route to be USB (`kbd_active_route() == KBD_OUT_USB`, no
+  BLE): on the radio route the dongle types and the left's reports are
+  dropped, so the code is not typed and stays on screen
+  [test:test_chest_oath_code_key_refused_off_usb]; a non-digit types
+  nothing, not even a prefix, and hides the code
+  [test:test_chest_oath_code_key_refuses_a_non_digit]. The keystrokes are
+  8 (or 6) press + release pairs appended to the engine's own HID queue
+  (`hid_report_type_usages`, all or nothing on queue room) from the chest
+  task — never from the scan or HID sender task; the digits are never
+  logged and the chest task's buffer is wiped once queued
+  [smoke:Chest link]. Typing is LEFT-ONLY (Mae, 2026-10-01), like
+  K_SEC_CONFIRM — a right-half key travels over an unauthenticated radio:
+  the press record carries the half, by the SAME predicate
+  (`sec_confirm_from_local`, `SEC_CONFIRM_LOCAL_COLS`)
+  [test:test_kp_oath_code_records_the_half]; a right-half press on a visible
+  code does nothing (no type, no request, the code stays), while with no
+  code on screen it is still a request
+  [test:test_chest_oath_code_key_typing_is_left_only].
+  None of the three
   keys is left-only or security-bound: browsing the list and asking for a
   code carry no authority by themselves — only K_SEC_CONFIRM arms or
   authorizes; a press on any of them from a remote (right-half) column is
-  accepted the same as from the left
+  accepted the same as from the left (except TYPING a visible code, left-only, above)
   [test:test_kp_oath_keys_accepted_from_the_right_half]. A right-half key
   held through more than `HALF_LINK_TIMEOUT_MS` (400 ms) of radio silence is
   released by the left and then re-affirmed once the link resumes, which

@@ -342,7 +342,30 @@ in the PR/release.
       9. a RESET armed from the host → the prompt shows `RESET!`, the
          label, `N ACCTS` with the number of accounts and `PRESS`;
       10. `K_SEC_CONFIRM` placed on the right half does nothing: the prompt
-          stays, the chest's counter does not move.
+          stays, the chest's counter does not move;
+      11. typing the code (left on USB, a text editor focused on the host):
+          `K_OATH_CODE` → `K_SEC_CONFIRM` → the code shows → a SECOND
+          `K_OATH_CODE` types its 6 digits (then an 8-digit account: its 8
+          digits) into the editor, NO Enter, and the code disappears from
+          the screen at once (back to the browser); a third press is a new
+          request (the prompt again), it types nothing; the console shows
+          `TOTP code typed (6 digits)` and never the digits; with
+          `K_OATH_CODE` ALSO mapped on the right half: a right-half press
+          while the code shows types NOTHING and the code stays (then the
+          left key types it), and a right-half press with no code shows the
+          prompt as usual;
+      12. let a code run out (countdown to the end, panel back to the
+          browser), then `K_OATH_CODE` → nothing is typed (the editor stays
+          as it was); after `K_OATH_NEXT` hid a code, `K_OATH_CODE` is a
+          request, never a type;
+      13. cancelling a prompt (chest at 3da17cc or later): note the cursor
+          position, `K_OATH_CODE` → the prompt → `K_OATH_NEXT` → the prompt
+          is gone within ~1 s, back to the browser at the SAME cursor
+          position, no code ever shows; the console shows `prompt cancel
+          written (instance N)`; then a host request (`echo t | gpg --sign`,
+          or an OATH calculate from the host) → prompt → `K_OATH_PREV` from
+          the RIGHT half → prompt gone, the host gets 6985 (gpg: card
+          error / operation cancelled) at once instead of after 15 s.
 
 ## BLE (relevant boards)
 - [ ] Host pairing OK, types with no drop for 1 min
