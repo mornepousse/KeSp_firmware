@@ -111,7 +111,19 @@ keystrokes 6–12 mA (six rest pollers interleaved used to keep core 0 from ever
 napping), a held key 23 mA. A held key vetoes sleep — and on battery that veto
 was never updated until 2026-09-30 (it sat after an early return taken on every
 scan off USB): the half either slept key-down and flashed its sleep image every
-5 s, or kept a stale veto and never slept. Deep sleep was **unreachable until 2026-09-15**:
+5 s, or kept a stale veto and never slept.
+
+**Battery life in daily use (estimate, 2026-10-05, v4.2.0-beta.3).** Four days
+of normal typing without recharging (from 2026-10-01, cells assumed full that
+day): the left half went to 4.0 V (~80 %), the right to 4.1 V (~90 %) — about
+**5 % a day on the left and 2.5 % on the right**, i.e. roughly three weeks for
+the left and over a month for the right at that pace. Before the end-of-
+September fixes a single day of typing cost 0.2 V. The left spends about twice
+the right's budget: it is the master (busier screen, radio relay to the
+dongle, longer awake windows). A rough estimate: the dongle only sees the
+voltage in 0.1 V steps (≈ 10 % near the top) and a LiPo's curve is flat in the
+middle, so the decline will not be linear; it is being logged daily to firm it
+up. Deep sleep was **unreachable until 2026-09-15**:
 inactivity was only measured while awake, and a light-sleeping half sits in
 `esp_light_sleep_start()` until a key — which resets the counter. A timer wake
 at the deep threshold now performs the switch. Every wake logs how long the
