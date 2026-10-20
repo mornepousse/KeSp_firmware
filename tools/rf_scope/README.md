@@ -1,0 +1,194 @@
+# rf_scope — both ends of the KeSp radio link
+
+Host tool for the rf-scope trace (design: `docs/superpowers/specs/2026-10-20-rf-scope-design.md`,
+plan: `docs/superpowers/plans/2026-10-20-rf-scope.md`). It switches the trace on
+at the dongle (CDC) and at the halves (UART0 through an ESP-Prog), timestamps
+every record on arrival, writes a JSONL run file, matches each frame a half
+sent to the frame the dongle read, and shows loss, retries, signal and delay
+live (curses) or afterwards (`replay`, `report`).
+
+## Install
+
+Python 3.10+, standard library plus **pyserial** (and `curses`, in the standard
+library on Linux/macOS). No package to install: run it in place.
+
+```sh
+nix shell --impure --expr 'with import <nixpkgs> {}; python3.withPackages (p: [p.pytest p.pyserial])' \
+  --command tools/rf_scope/rf_scope --help
+# or, with pyserial available:
+python3 tools/rf_scope/rf_scope.py --help      # same thing: rf_scope, rf_scope.py
+cd tools/rf_scope && python3 -m rftrace --help # same thing
+```
+
+## Commands
+
+```sh
+# Capture 10 minutes, dongle + left half (ESP-Prog on /dev/ttyUSB0), TUI on:
+rf_scope capture --dongle /dev/ttyACM0 --left /dev/ttyUSB0 --duration 10m -o run.jsonl
+# Both halves (two ESP-Progs), no TUI (a status line every 5 s on stderr):
+rf_scope capture --dongle /dev/ttyACM0 --left /dev/ttyUSB0 --right /dev/ttyUSB1 --duration 2m --no-tui
+
+rf_scope replay run.jsonl --speed 4          # the same TUI, fed from the file
+rf_scope replay run.jsonl --dump 110x34 --at 60   # one rendered frame as text (no terminal needed)
+rf_scope report run.jsonl [--window 60]      # text summary + per-window table
+```
+
+`capture` ends on Ctrl-C or when `--duration` elapses; either way it sends
+**stop** to every source, waits (4 s at most) for the acks, prints the report
+and leaves the boards with the trace off. The firmware also switches the trace
+off by itself (`duration + 30 s`, at most 65535 s) and at every reboot, so a
+crashed tool cannot leave a half tracing.
+
+TUI keys: `q` quit, `p` pause the event scroll, `r` reset the windows (the
+panels then count from now). It degrades on a small terminal: below 76 columns
+the halves stack, below the height of the full panels they shrink to one line
+each, below 40x6 it just says so.
+
+### Port safety
+
+* Only the ports named on the command line are ever opened.
+* Before opening anything, every port is checked with `fuser` (or a
+  `/proc/*/fd` scan when `fuser` is missing); a port held by another process is
+  refused with the holder's name and pid, and **nothing** is opened.
+* Half ports (`--left`, `--right`) are opened with `dtr=False; rts=False` set
+  on the unopened `serial.Serial` and never touched again: an ESP-Prog wires
+  them to EN / IO0. (The kernel may still raise both for an instant inside
+  `open(2)`, before pyserial can lower them; that is outside userland's reach.)
+  The dongle's CDC port keeps pyserial's defaults, like `scripts/kesp_cdc.py`:
+  **DTR must stay asserted** there, the dongle ties the trace to it (DTR dropped
+  = trace stopped and flushed), and the host must keep reading (a reader thread
+  per port does).
+* Do not run the remapping software, `kesp_cdc.py` or a terminal on the same
+  port during a capture.
+
+### Starting a half that sleeps
+
+A half hears UART0 only while awake (no UART driver, no wake source: the sleep
+current stays at its baseline). The start request is therefore **repeated every
+250 ms** until the empty `KR BA` ack (or, if the ack got lost among console
+text, the first trace frame) comes back. If nothing answers in 20 s the tool
+says so (`press a key on the half to wake it`) and goes on with the other
+sources. The dongle never sleeps and answers at once.
+
+## Run file (JSONL)
+
+One JSON object per line, self-contained:
+
+| `type` | fields |
+|---|---|
+| `meta` | `version`, `sources` (role -> port), `started`, `duration_s` |
+| `rec` | `src` (`dongle`/`left`/`right`), `port`, `host_ns`, `kind` (`tx`/`rx`/`periodic`) and the record's fields exactly as in `main/comm/rf/rf_trace.h` |
+| `text` | `src`, `host_ns`, `text`: a console line of a half (kept so the run explains itself) |
+| `ctl` | `src`, `host_ns`, `event`: `start_sent`, `ack` (`attempts`), `giveup` (`message`), `stop_sent`, `stop_ack`, `closed` |
+
+`host_ns` is `time.monotonic_ns()` when the chunk carrying the record was read
+(records of one chunk share it). A truncated last line (killed capture) is
+ignored on read.
+
+## What is measured, and what it is not
+
+**Matching.** A TX record (half) and an RX record (dongle) are the same frame
+when `(emitter, pkt_kind, seq)` agree. The 8-bit seq wraps every 256 frames, so
+the tool also requires the two to be *plausible neighbours in time*: through
+the fitted clock map once it exists (excess delay between -20 ms and 300 ms),
+through host arrival times (+-1 s) before that. A TX whose seq comes round again
+while the previous frame with it is still unmatched closes the old one. An RX
+that arrives before its TX line (the half's UART is slower than the dongle's USB)
+waits as an orphan and is claimed when the TX arrives. Frames flagged `NOSEQ`
+(HIDREPORT, SYNC_REQ...) carry no seq: they are counted as frames, retries and
+MAX_RT, but never matched, never lost.
+
+**Device time.** `t_us` is 32 bits and wraps every 71.6 min. Each source's
+timeline is unwrapped by small signed steps, anchored at every periodic record
+by its `uptime_s` (so a sleep of hours is handled), and a SLEEPING record makes
+the next step forward-only. A drop of `uptime_s` is a reboot: that source's
+timeline and clock fit restart.
+
+**Loss %** = lost / (matched + lost), per half, over frames carrying a seq. A
+frame is *lost* only when (1) the half sent it, (2) the dongle was tracing over
+the whole `[tx, tx + 1 s]` (it was heard at least every 3 s, with the dongle's
+own host clock closing the window: a stalled USB stream closes nothing), and
+(3) nothing arrived. Otherwise it is *unobserved* (dongle not tracing yet) or
+*other channel* (the half transmitted on a channel other than the dongle's, e.g.
+the right talking to the left): neither counts as loss. A sleeping half sends
+nothing, so no loss accrues while it sleeps; an outage never spans a sleep.
+A frame declared lost that shows up within 5 s is *recovered* and moved to
+matched. MAX_RT with the frame received anyway (lost ACK) is a match.
+
+**Outage** = the unbroken run of frames the dongle never saw right before one it
+did, measured from the first of them to the next received one (default
+threshold 100 ms): how long the receiver was in the dark. One lost frame of a
+held key (re-asserted every 100 ms) is therefore a ~100-200 ms outage.
+
+**Dup %** = dongle RX records flagged duplicate / RX records. **RPD %** = RX
+records with the RPD bit: the *last valid packet* was at least -64 dBm (the
+nRF24 latches it; it is a coarse indicator, not RSSI). **Retries** = the `arc`
+histogram (OBSERVE_TX.ARC_CNT: retransmissions of that frame), **PLOS** = the
+packets-lost counter delta (the chip's 4-bit counter saturates at 15 until the
+next channel write: on a very bad link count failures from MAX_RT, not from
+PLOS). **FIFO full** = RX records read at depth 3: a frame
+arriving then was not acknowledged.
+
+### Latency, and why it is relative
+
+The two chips have unrelated clocks: the dongle's `t_us` and a half's differ by
+their boot times (hours, days) and drift apart by tens of ppm. For each matched
+pair the tool has `x` = the half's TX stamp and `y` = the dongle's RX stamp, so
+`y = c + d*x + delay`. Everything the tool says about delay comes from that
+equation:
+
+1. **slope d** is the Theil-Sen estimate (median of pairwise slopes on up to 160
+   evenly spread pairs, at least 1/8 of the run apart): the crystals' drift,
+   robust to outliers. Under a 5 s span it is 1.
+2. **c** is the median residual, **jitter** is the MAD of the residuals around it
+   (the typical spread of the delay, unscaled).
+3. **latency** printed everywhere is `residual - 1st percentile of residuals`:
+   *how much later than the run's fastest frames the dongle read this one*,
+   after removing the clock offset and drift. The fit is refreshed as pairs arrive
+   (and `report` uses the final one for every pair); memory is bounded by
+   decimation, so a multi-hour soak is fine.
+
+What it **is**: the spread of airtime + retries + the ACK path + the time the
+dongle's task takes to read its FIFO — i.e. the jitter and the tail (p95/p99)
+that cause a late keystroke. What it **is not**:
+
+* *Not an absolute one-way latency.* Without a common clock the constant part
+  of the delay (a few hundred microseconds of airtime and SPI) cannot be
+  separated from the clock offset; the floor is set to zero. Add roughly
+  0.3-1 ms for the real minimum.
+* The half stamps `t_us` *after* the transmission completes (ACK received, or
+  MAX_RT), the dongle stamps when its task *reads the FIFO*. Retries delay the
+  first and a busy dongle task delays the second; both are in the number.
+* Host arrival times (UART/USB batching: an FTDI latency timer of 16 ms is
+  common) are used only for matching and liveness, never for latency.
+* A drift that is not linear (a thermal ramp) widens the jitter; a reboot of
+  either end restarts the fit, and the first ~8 pairs after it are matched on
+  host time only.
+* End-to-end key-to-host latency is out of scope (it needs a stimulus and host
+  HID timestamps).
+
+**Asleep** = time between a SLEEPING and the next WOKE record (host arrival
+times), or to the end of the run. **Ring drops** = records the firmware's trace
+ring dropped (`drops` of the periodic records): the run then has holes, and
+frames missing from them show as *unobserved/orphan*, not as loss only if the
+TX record itself survived.
+
+## Tests and demo data
+
+```sh
+nix shell --impure --expr 'with import <nixpkgs> {}; python3.withPackages (p: [p.pytest p.pyserial])' \
+  --command python3 -m pytest tools/rf_scope/tests -q
+```
+
+`scripts/check.sh --fast` runs them through the `rf-scope-pytest` brick when
+`python3` can import pytest (otherwise it announces the skip).
+
+`tests/fake_run.py` writes a synthetic run (two halves typing, sleeping,
+8-bit seq wrap, 32-bit `t_us` wrap, drift, losses, a burst outage, duplicates,
+a ring drop); `samples/demo_run.jsonl` is one of them (`--seed 1 --seconds 120
+--wrap-at 50`), so `replay` and `report` can be tried without hardware:
+
+```sh
+rf_scope replay tools/rf_scope/samples/demo_run.jsonl --speed 8
+rf_scope report tools/rf_scope/samples/demo_run.jsonl
+```

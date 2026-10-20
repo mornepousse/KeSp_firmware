@@ -1,0 +1,3 @@
+#!/bin/sh
+# Wrapper: ./tools/rf_scope/rf_scope capture --dongle /dev/ttyACM0 ...
+exec python3 "$(dirname "$0")/rf_scope.py" "$@"
