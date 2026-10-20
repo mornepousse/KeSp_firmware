@@ -89,6 +89,28 @@ sleep state (a sleeping half does not emit — the TUI must show "asleep", not
   in reset) — `dtr=rts=False` before open; check `fuser` first and refuse a busy
   port; never open a port the user did not name.
 
+## Stress tests (Mae, 2026-10-20)
+
+Typing by hand cannot load the link reproducibly. A **stress generator** on the
+half under test emits synthetic frames on demand:
+`RF_STRESS start(kind, rate_hz, count | duration, pattern)` over the same UART0
+framing — patterns: constant rate, bursts (N back-to-back then pause), maximum
+rate (next frame as soon as the previous TX completes), and a "held keys"
+pattern that mimics the 100 ms re-assertions of held keys. Both halves can run
+it at once (two ESP-Progs, or the right driven by the dongle-side tool later).
+
+**Hard rule: a stress frame can never reach the host as a keystroke.** Stress
+frames use a dedicated kind (or a flag bit) that the dongle counts and traces,
+then DROPS before the fusion engine — tested host-side (the engine never sees a
+stress frame), and the dongle refuses to forward any frame of that kind even if
+tracing is off. On the left, stress never goes through the local engine either.
+
+The tool drives scenarios and reports them like a capture:
+`rf_scope stress --left … --dongle … --scenario burst|max|held|soak
+[--duration …]` — loss, retries, latency percentiles under load, and the
+dongle's queue overflow counter (`transitions_ecrasees`); `soak` runs for hours
+and reports per-10-min windows.
+
 ## Out of scope (for now)
 
 - End-to-end key→host latency (needs a stimulus and host HID timestamps) —
