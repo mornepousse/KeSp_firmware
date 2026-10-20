@@ -39,6 +39,19 @@ means a test, or a line.
   2.5 s releases the buttons only. A foreign firmware (the Conchodytes rewrite
   in Rust, 2026-09-21) is built against these bytes: changing one changes the
   document, the generator and the test in the same commit.
+- [test:test_rf_trace] The rf-scope trace format (`main/comm/rf/rf_trace.h`)
+  is one byte layout for the halves (UART0) and the dongle (CDC): a KR reply
+  of command 0xBA (`KS_CMD_RF_TRACE`) carrying version, kind, 1..16 fixed-size
+  little-endian records (TX 13 B, RX 13 B, periodic 20 B) and `ks_crc8`. The
+  decoder refuses, each with its own code, a short, trailing, wrong-magic,
+  wrong-command, wrong-status, wrong-version, unknown-kind, out-of-bound
+  count, inconsistent length or bad-CRC frame; the scanner finds every frame
+  through console text and fake headers (a refused candidate advances ONE
+  byte); the ring never blocks and counts its drops. The host codec
+  (`tools/rf_scope/rftrace/codec.py`) is pinned to the same bytes by
+  `docs/contracts/rf_trace_vectors.json` (C side: test_rf_trace_vectors_json;
+  Python side: `tools/rf_scope/tests/test_codec.py`, brick
+  `scripts/tripwire.d/rf-scope-pytest.sh`).
 
 <!-- Other radio invariants still need to be written down (Mae, 2026-09-13). -->
 

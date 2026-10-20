@@ -22,6 +22,7 @@ extern void test_combo(void);
 extern void test_leader(void);
 extern void test_rf_packet(void);
 extern void test_mouse_slot_vectors(void);
+extern void test_rf_trace(void);
 extern void test_rf_slot(void);
 extern void test_heartbeat(void);
 extern void test_trackpad_map(void);
@@ -111,6 +112,7 @@ int main(void) {
     test_leader();
     test_rf_packet();
     test_mouse_slot_vectors();
+    test_rf_trace();
     test_rf_slot();
     test_heartbeat();
     test_trackpad_map();

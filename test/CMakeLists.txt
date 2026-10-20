@@ -30,6 +30,9 @@ add_executable(test_runner
     ../main/input/leader.c
     test_rf_packet.c
     test_mouse_slot_vectors.c
+    test_rf_trace.c
+    ../main/comm/rf/rf_trace.c
+    ../scripts/gen/rf_trace_vectors.c
     test_heartbeat.c
     ../main/comm/rf/heartbeat.c
     test_trackpad_map.c
@@ -127,6 +130,13 @@ add_executable(test_runner
 )
 
 target_compile_definitions(test_runner PRIVATE SEC_CONFIRM_LOCAL_COLS=4)
+
+# rf-scope vectors: the generator is linked into the runner (no main) and
+# test_rf_trace compares its output with the committed JSON.
+set_source_files_properties(../scripts/gen/rf_trace_vectors.c PROPERTIES
+    COMPILE_DEFINITIONS "RF_TRACE_VECTORS_NO_MAIN")
+set_source_files_properties(test_rf_trace.c PROPERTIES
+    COMPILE_DEFINITIONS "RF_TRACE_VECTORS_JSON=\"${CMAKE_CURRENT_SOURCE_DIR}/../docs/contracts/rf_trace_vectors.json\"")
 
 # chest_gate.c's oath-nav CAS loop takes a test-only seam (I1, review
 # 2026-09-29) — scoped to this one source file, not the whole target, so no
