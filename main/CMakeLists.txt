@@ -25,6 +25,11 @@ set(srcs
     # functions are gated inside the file (dongle role / wireless keyboard).
     "comm/rf/cfg_bridge.c"
 
+    # rf-scope trace (spec 2026-10-20): the record format and the pure
+    # control decisions, shared by the dongle (CDC) and the halves (UART0).
+    "comm/rf/rf_trace.c"
+    "comm/rf/rf_trace_ctl.c"
+
     # Security confirmation gate — compiled for all roles (key_processor calls it)
     "security/sec_confirm.c"
     # Chest link, pure half: key→link hand-off and the register protocol
@@ -218,6 +223,7 @@ if(CONFIG_KASE_HAS_RF_RX)
         "comm/rf/rf_driver.c"
         "comm/rf/rf_rx_task.c"
         "comm/rf/dongle_state.c"
+        "comm/rf/rf_trace_dongle.c"   # rf-scope: RX/periodic records → CDC
         # Plus de mapping trackpad ici : la moitié gauche applique la gestuelle
         # elle-même (elle doit le faire pour fonctionner en USB sans dongle) et
         # envoie du HID souris déjà fini.

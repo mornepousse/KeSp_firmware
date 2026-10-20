@@ -15,6 +15,15 @@ void cdc_send_binary(const uint8_t *data, size_t len)
 /* ── Receive: USB CDC chunks → binary protocol ──────────────────── */
 
 static TaskHandle_t s_cdc_task;
+static void (*volatile s_pump)(void);
+
+void cdc_set_unsolicited_pump(void (*pump)(void)) { s_pump = pump; }
+
+void cdc_wake(void)
+{
+    TaskHandle_t t = s_cdc_task;
+    if (t) xTaskNotifyGive(t);
+}
 
 void receive_data(const char *data, uint16_t len)
 {
@@ -43,6 +52,8 @@ void cdc_process_commands_task(void *arg)
     for (;;) {
         while (ks_process_one())
             ;
+        void (*pump)(void) = s_pump;
+        if (pump) pump();   /* rf-scope trace batches (dongle), between replies */
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(CDC_ATTENTE_MAX_MS));
     }
 }

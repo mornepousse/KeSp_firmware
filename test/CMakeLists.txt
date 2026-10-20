@@ -33,6 +33,8 @@ add_executable(test_runner
     test_rf_trace.c
     ../main/comm/rf/rf_trace.c
     ../scripts/gen/rf_trace_vectors.c
+    test_rf_trace_ctl.c
+    ../main/comm/rf/rf_trace_ctl.c
     test_heartbeat.c
     ../main/comm/rf/heartbeat.c
     test_trackpad_map.c

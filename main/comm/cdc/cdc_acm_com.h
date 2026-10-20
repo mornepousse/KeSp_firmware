@@ -34,3 +34,10 @@ void receive_data(const char *data, uint16_t len);
 
 /* Initialize binary protocol processing task */
 void init_cdc_commands(void);
+
+/* Unsolicited output (rf-scope trace, dongle): `pump` runs in the CDC
+ * command task after each command batch, so every CDC write leaves ONE task
+ * and a pushed frame never interleaves with a command reply. cdc_wake()
+ * (any task, not an ISR) makes the task run its pump now. */
+void cdc_set_unsolicited_pump(void (*pump)(void));
+void cdc_wake(void);

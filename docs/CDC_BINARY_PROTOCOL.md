@@ -814,6 +814,67 @@ ser.write(ks_frame(0xB9, payload))
 
 ---
 
+#### RF_TRACE (0xBA)
+rf-scope trace of the dongle's radio reception (spec `docs/superpowers/specs/2026-10-20-rf-scope-design.md`). Dongle only. **Off by default and after every reboot**; switched on for a duration, then off by itself.
+
+- Request (sub-command first):
+  - `[0x00]` — stop. Stop while off is a no-op success.
+  - `[0x01]` — start for the default duration (600 s).
+  - `[0x01][duration_s:u16 LE]` — start for `duration_s` seconds (1..65535; `0` = default). A start while the trace is on **restarts** it: new duration counted from now, counters and duplicate state reset (the previous run's counters close with a periodic record).
+- Response: **empty** KR (`KR BA 00 0000 00`, CRC of an empty payload) — the request is posted to the radio task, which applies it within ~1 ms.
+- Error: `ERR_INVALID` — any other length or sub-command (`[0x00 xx]`, `[0x01 xx]`, `[0x01 xx xx xx]`, `[0x02…]`).
+- Error: `ERR_UNKNOWN` — no radio present (the radio task never started).
+
+**While on, the dongle pushes unsolicited KR frames of the same command** (`KR BA 00 len …`), each a batch of records — the format of `main/comm/rf/rf_trace.h`, pinned by `docs/contracts/rf_trace_vectors.json`:
+
+```
+[0x4B][0x52][0xBA][0x00][len:u16 LE] [version=1][kind][count 1..16] [count × record] [crc8]
+```
+
+A trace frame always has `len = 3 + count × record_size ≥ 16`; the ack has `len = 0` — that is how the host tells them apart. The CRC is the usual `ks_crc8` over the payload. All multi-byte fields little-endian. Trace frames are written by the same task that answers commands, between two replies: they never interleave with a reply's bytes.
+
+RX record (`kind = 2`, 13 bytes, one per frame read from a radio FIFO):
+
+| Offset | Type   | Field         | Description |
+|-------:|--------|---------------|-------------|
+| 0      | u32 LE | `t_us`        | dongle `esp_timer` µs, truncated to 32 bits (wraps every 71.6 min; unwrap with `uptime_s`) |
+| 4      | u8     | `emitter`     | 0 left, 1 right, 3 mouse — mouse slot → mouse; keyboard slot → the half the frame names (MATRIX/STRESS low nibble, STATUS flag), left otherwise |
+| 5      | u8     | `seq`         | the frame's 8-bit sequence (MATRIX, STATUS, HEARTBEAT, STRESS); 0 for kinds without one (HIDREPORT, SYNC_REQ) |
+| 6      | u8     | `pkt_kind`    | `PKT_TYPE_*` (high nibble of byte 0): 4 MATRIX, 5 HIDREPORT, 6 STATUS, 9 SYNC_REQ, 0xA STRESS… |
+| 7      | u8     | `payload_len` | dynamic payload length read |
+| 8      | u8     | `pipe`        | `STATUS.RX_P_NO` before the read (always 0 today: one pipe enabled) |
+| 9      | u8     | `rpd`         | `RPD` bit0: signal ≥ −64 dBm, latched on the last valid packet received (nRF24L01+ PS v1.0, p. 25) |
+| 10     | u8     | `channel`     | the radio's RF channel |
+| 11     | u8     | `fifo_depth`  | frames queued when this one was read, itself included (1..3), reconstructed from the drain pass — the chip has no counter. 3 = FIFO full: a frame arriving then was not acknowledged |
+| 12     | u8     | `flags`       | bit0 `delivered` (handed to the fusion engine — MATRIX — or to the host — HIDREPORT), bit1 `dup` (same seq as the previous frame of the same emitter) |
+
+Periodic record (`kind = 3`, 20 bytes, ~1 Hz, plus one at start and one at stop/auto-off):
+
+| Offset | Type   | Field      | Description |
+|-------:|--------|------------|-------------|
+| 0      | u32 LE | `t_us`     | as above |
+| 4      | u32 LE | `uptime_s` | seconds since boot |
+| 8      | u8     | `source`   | 2 = dongle |
+| 9      | u8     | `state`    | 0 awake (the dongle never sleeps) |
+| 10     | u8     | `batt_dV`  | 0 (USB powered) |
+| 11     | u8     | `channel`  | keyboard radio channel |
+| 12     | u16 LE | `frames`   | frames read since the previous periodic record |
+| 14     | u16 LE | `fails`    | 0 on the dongle |
+| 16     | u16 LE | `dups`     | duplicates since the previous periodic record |
+| 18     | u16 LE | `drops`    | records lost to a full trace ring since the previous periodic record |
+
+(TX records, `kind = 1`, come from the halves over UART0 — same framing.)
+
+**Stress frames** (`PKT_TYPE_STRESS` = 0xA, rf-scope stress generator) are traced with `delivered = 0` and **dropped before every handler** — fusion engine, HID, battery cache, link supervision — whether the trace is on or off.
+
+```python
+ser.write(ks_frame(0xBA, bytes([0x01]) + struct.pack("<H", 120)))   # start, 2 min
+# … read KR frames: len == 0 → ack; cmd 0xBA, len ≥ 16 → trace batch
+ser.write(ks_frame(0xBA, bytes([0x00])))                           # stop
+```
+
+---
+
 ### OTA (0xF0–0xFF)
 
 #### OTA_START (0xF0)

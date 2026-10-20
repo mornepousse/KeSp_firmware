@@ -57,6 +57,16 @@ in the PR/release.
 - [ ] **Held key**: hold Backspace ≥ 10 s with nothing else — the host keeps
       auto-repeating without a stutter, the heartbeat shows `vetos=key`, no
       `light sleep` line until release.
+- [ ] **RF trace (dongle)**: remapping software closed, `fuser` the dongle
+      port first. Send `KS BA [01 1E 00]` (start, 30 s) → empty `KR BA 00`
+      ack, then a periodic batch (kind 3) about every second; type on both
+      halves → RX batches (kind 2) with emitters 0 and 1, `seq` climbing,
+      `delivered` set on MATRIX frames; other CDC commands (`rfstat`) still
+      answer with intact CRCs in the middle of the stream. After 30 s the
+      last periodic record arrives and the stream stops by itself; `KS BA
+      [00]` while off → ack; `KS BA [02]` → `ERR_INVALID`. Reboot during a
+      trace → nothing is pushed after the reboot until a new start. Typing
+      unchanged with the trace on (no double, no lost key).
 - [ ] RF link establishes with a half (pairing < 120s)
 - [ ] NRF doesn't wedge after 5 min (watchdog OK)
 - [ ] Idle wake (DFS): console at boot "DFS actif : 160 MHz en travail,

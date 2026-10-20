@@ -52,6 +52,20 @@ means a test, or a line.
   `docs/contracts/rf_trace_vectors.json` (C side: test_rf_trace_vectors_json;
   Python side: `tools/rf_scope/tests/test_codec.py`, brick
   `scripts/tripwire.d/rf-scope-pytest.sh`).
+- [test:test_rf_trace_ctl] The dongle's rf-scope trace (`KS_CMD_RF_TRACE`
+  0xBA, `rf_trace_ctl.c` pure, `rf_trace_dongle.c` glue) is off by default
+  and after every reboot; `[0x01][duration_s u16]` starts it (0 or absent =
+  600 s; a start while on restarts with the new duration), `[0x00]` stops
+  it, any other payload is refused; it switches itself off when the
+  duration has elapsed, measured as elapsed time (safe across the u32 ms
+  wrap). An RX record per frame read carries a duplicate flag (same seq as
+  the PREVIOUS frame of the same emitter, never for frames without a seq)
+  and a FIFO depth reconstructed from the drain pass. A synthetic stress
+  frame (`PKT_TYPE_STRESS` 0xA) is dropped before every handler — engine,
+  HID, battery, proof of life — traced or not
+  (test_rf_trace_ctl_drop_stress). Records leave on the CDC from the CDC
+  task only, never interleaved with a reply.
+  [smoke:RF trace (dongle)]
 
 <!-- Other radio invariants still need to be written down (Mae, 2026-09-13). -->
 

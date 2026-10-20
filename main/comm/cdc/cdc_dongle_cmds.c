@@ -10,6 +10,7 @@
  *   - KS_CMD_RF_PAIR_LIST   → 13 bytes: paired_count + mac_left + mac_right
  *   - KS_CMD_RF_PAIR_RESET  → 1 byte: paired_count after reset (always 0)
  *   - KS_CMD_BATTERY        → 14 bytes: dV/soc/charging/age_ms per half
+ *   - KS_CMD_RF_TRACE       → empty ack; trace batches follow, unsolicited
  *
  * All multi-byte integers are little-endian.
  */
@@ -19,6 +20,7 @@
 #include "rf_pairing.h"
 #include "dongle_engine.h"   /* fusion: left<->dongle config coherence */
 #include "hid_transport.h"   /* USB send counters (RF_STATUS) */
+#include "rf_trace_dongle.h"  /* rf-scope: KS_CMD_RF_TRACE */
 
 #include <string.h>
 #include <stdint.h>
@@ -232,6 +234,26 @@ static void bin_cmd_config_coherence(uint8_t cmd, const uint8_t *p, uint16_t l)
     ks_respond(cmd, KS_STATUS_OK, buf, sizeof(buf));
 }
 
+/* ── KS_CMD_RF_TRACE (rf-scope) ─────────────────────────────────────
+ * Request: [0x00] stop | [0x01] start, default 600 s | [0x01][duration_s:u16 LE]
+ * (0 = default). A start while on restarts with the new duration.
+ * Response: EMPTY KR (status only). While on, unsolicited KR frames of the
+ * same command carry record batches (rf_trace.h), from the CDC task's pump.
+ * ERR_INVALID: malformed payload. ERR_UNKNOWN: no radio, no rx task. */
+static void bin_cmd_rf_trace(uint8_t cmd, const uint8_t *p, uint16_t l)
+{
+    rf_trace_ctl_cmd_t c;
+    if (rf_trace_ctl_parse(p, l, &c) != RF_TRACE_CTL_OK) {
+        ks_respond_err(cmd, KS_STATUS_ERR_INVALID);
+        return;
+    }
+    if (!rf_trace_dongle_request(&c)) {
+        ks_respond_err(cmd, KS_STATUS_ERR_UNKNOWN);
+        return;
+    }
+    ks_respond_ok(cmd);
+}
+
 /* ── Command table + init ──────────────────────────────────────── */
 
 static const ks_bin_cmd_entry_t dongle_cmd_table[] = {
@@ -240,6 +262,7 @@ static const ks_bin_cmd_entry_t dongle_cmd_table[] = {
     { KS_CMD_RF_PAIR_RESET,    bin_cmd_rf_pair_reset    },
     { KS_CMD_BATTERY,          bin_cmd_battery          },
     { KS_CMD_CONFIG_COHERENCE, bin_cmd_config_coherence },
+    { KS_CMD_RF_TRACE,         bin_cmd_rf_trace         },
 };
 
 void cdc_dongle_cmds_init(void)

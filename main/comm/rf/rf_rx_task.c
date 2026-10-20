@@ -47,6 +47,7 @@ uint8_t rf_signal_q255(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
 #include "rf_packet.h"
 #include "rf_slot.h"
 #include "dongle_engine.h"   /* fusion: embedded keymap engine (kept internal) */
+#include "rf_trace_dongle.h" /* rf-scope: RX records, stress drop */
 #include "batt_calc.h"      /* batt_soc_pct — SoC derived from voltage, dongle side */
 #include "board_rf.h"
 #include "rf_pairing.h"   /* rf_pairing_load_set_id_dongle, rf_apply_set_id */
@@ -148,13 +149,47 @@ static void cache_battery_half(uint8_t half, uint8_t batt_dV, uint8_t charging)
     dongle_cache_set_battery(idx, batt_dV, batt_soc_pct(batt_dV), charging);
 }
 
+/* nRF24L01+ registers read only while tracing (rf-scope). RPD bit0: a
+ * signal ≥ −64 dBm, "latched when a valid packet is received" (nRF24L01+
+ * PS v1.0 §6.4, p. 25) — i.e. the strength of the LAST packet received,
+ * which is the one read unless the FIFO holds several. STATUS bits 3:1:
+ * RX_P_NO, the pipe of the payload at the head of the RX FIFO. */
+#define RF_REG_STATUS 0x07
+#define RF_REG_RPD    0x09
+
 /* ── Drain pending packets on a radio ── */
 static void drain_radio(rf_radio_t *radio, uint8_t slot)
 {
     uint8_t buf[32];
+    /* rf-scope: the one flag check of the off path, once per pass. */
+    const bool tr = rf_trace_dongle_on();
+    const uint8_t tr_ch = (slot == RF_SLOT_KBD) ? s_kbd_cfg.channel : s_mouse_cfg.channel;
+    rf_trace_pass_t tr_pass;
+    tr_pass.n = 0;
     while (rf_driver_rx_available(radio)) {
+        uint8_t tr_pipe = 0, tr_rpd = 0;
+        if (tr) {
+            tr_pipe = (uint8_t)((rf_driver_read_reg(radio, RF_REG_STATUS) >> 1) & 0x07);
+            tr_rpd  = (uint8_t)(rf_driver_read_reg(radio, RF_REG_RPD) & 0x01);
+        }
         uint16_t n = rf_driver_read_rx(radio, buf, sizeof(buf));
         if (n == 0) break;
+        bool delivered = false;   /* rf-scope: handed to the engine / the host */
+
+        /* A synthetic stress frame (rf-scope, PKT_TYPE_STRESS) is counted
+         * and traced, then DROPPED before every handler — engine, HID,
+         * battery cache, and the link's proof of life (it says nothing of
+         * the keyboard's state). Traced or not. */
+        if (rf_trace_drop_before_engine(buf, n)) {
+            if (tr) {
+                rf_trace_rx_t rec;
+                rf_trace_dongle_rx_note(&rec, buf, n, slot == RF_SLOT_MOUSE,
+                                        tr_pipe, tr_rpd, tr_ch, false);
+                rf_trace_pass_add(&tr_pass, &rec, rf_trace_dongle_ring());
+            }
+            continue;
+        }
+
         /* Every packet counts as proof of life, not just heartbeats. */
         rf_slot_link_rx(&s_link[slot], (uint32_t)(esp_timer_get_time() / 1000));
         uint8_t type = rf_packet_type(buf, n);
@@ -232,8 +267,8 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
              * path therefore stays necessary in both modes. */
             uint8_t sub, mod, kb[6], btn; int8_t x, y, w;
             if (rf_decode_hidreport(buf, n, &sub, &mod, kb, &btn, &x, &y, &w)) {
-                if (sub == RF_HID_SUB_KBD)        hid_send_keyboard(mod, kb);
-                else if (sub == RF_HID_SUB_MOUSE) hid_send_mouse(btn, x, y, w);
+                if (sub == RF_HID_SUB_KBD)        { hid_send_keyboard(mod, kb); delivered = true; }
+                else if (sub == RF_HID_SUB_MOUSE) { hid_send_mouse(btn, x, y, w); delivered = true; }
             }
         }
 #if CONFIG_KASE_DONGLE_FUSION
@@ -246,6 +281,7 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
                  * (In USB mode it emits no matrix, it announces via STATUS.) */
                 if (m.half == RF_HALF_LEFT) dongle_engine_set_left_usb(false);
                 dongle_engine_on_matrix(&m);
+                delivered = true;
 
                 /* Left-USB mode: re-emit the RIGHT half's half-matrix toward
                  * the left half (RF_CH_HALF_LINK / KaSe.03), as a heartbeat that
@@ -290,7 +326,14 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
          * the left half, see above. */
         if (apl) rf_driver_load_ack_payload(radio, 0, ap, (uint8_t)apl);
 #endif
+        if (tr) {
+            rf_trace_rx_t rec;
+            rf_trace_dongle_rx_note(&rec, buf, n, slot == RF_SLOT_MOUSE,
+                                    tr_pipe, tr_rpd, tr_ch, delivered);
+            rf_trace_pass_add(&tr_pass, &rec, rf_trace_dongle_ring());
+        }
     }
+    if (tr) rf_trace_dongle_pass_end(&tr_pass);
 }
 
 bool rf_rx_pair_start(uint8_t reset, uint16_t *set_id_out, uint8_t *paired_count_out)
@@ -492,6 +535,10 @@ static void rf_rx_task(void *arg)
         apply_safe_action(a_mouse);
 
         rf_rx_watchdog(now);   /* fix a frozen radio, without a reboot */
+
+        /* rf-scope: start/stop requests, auto-off, periodic record. Off and
+         * nothing requested: one load and out. */
+        rf_trace_dongle_service(now, s_kbd_cfg.channel);
     }
 }
 
@@ -569,6 +616,7 @@ bool rf_rx_start(void)
         rf_radio_set_irq_sem(&s_mouse, s_evt_sem);
     }
 
+    rf_trace_dongle_init();   /* rf-scope: ring + CDC pump, before the producer task */
     xTaskCreatePinnedToCore(rf_rx_task, "rf_rx", 8192, NULL, 10, NULL, 0);
     ESP_LOGI(TAG, "RF RX started (keyboard=%d mouse=%d)", s_kbd.present, s_mouse.present);
 
