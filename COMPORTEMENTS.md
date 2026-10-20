@@ -66,6 +66,30 @@ means a test, or a line.
   (test_rf_trace_ctl_drop_stress). Records leave on the CDC from the CDC
   task only, never interleaved with a reply.
   [smoke:RF trace (dongle)]
+- [test:test_radio_owner] rf-scope, half side: while a trace session runs,
+  the radio owner writes ONE TX record per transmission that left the chip
+  (PTX send or left-relay excursion), under its lock, from the frame it sent
+  (type nibble, the type's own seq — `RF_TRACE_TXF_NOSEQ` for a HID report —
+  and length) and the driver's verdict: ACK / MAX_RT / poll timeout from the
+  STATUS read before its clear, ARC_CNT, and the PLOS_CNT increase. A stale,
+  unavailable or wrong-mode transmission writes none. Off, the hot path is
+  one load of `g_rf_trace_session`; the excursion reads OBSERVE_TX only while
+  tracing, BEFORE its PRX return rewrites RF_CH (which zeroes PLOS_CNT), and
+  its record carries the excursion flag and the channel it was SENT on.
+- [test:test_rf_trace_half] The half's trace decisions are pure, and the
+  request payload, auto-off timer and frame identity are the dongle's own
+  (`rf_trace_ctl.c`: one semantics on both ends; the half applies the
+  timer across the u32 ms wrap too): the PLOS delta (baseline 0 at a new session, the whole counter after an RF_CH
+  write, the counter itself for an excursion), the session control (first
+  periodic record at once, then every 1 s on a grid; ONE SLEEPING record on
+  the way into sleep, none while asleep, ONE WOKE on the way out; a duration
+  that ran out during the sleep turns tracing off at wake), and the UART0 KS
+  assembler (resyncs on noise, refuses a bad CRC and an oversized header at
+  once).
+- [smoke:RF trace (half)] A half traces over its console UART0 without a
+  UART driver, without a wake veto and without a new cadence: tracing off,
+  its sleep current and `HB … slept=` are those of a build without the trace;
+  off at every boot, off at the end of the requested duration.
 
 <!-- Other radio invariants still need to be written down (Mae, 2026-09-13). -->
 

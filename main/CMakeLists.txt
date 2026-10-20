@@ -316,6 +316,12 @@ endif()
 # Frequence dynamique (esp_pm) — ne coute rien sans CONFIG_PM_ENABLE.
 list(APPEND srcs "power/pm_dfs.c")
 
+# rf-scope, halves: TX records from the radio owner, out on the console UART0
+# (rf_trace_uart.c). Off at boot, started over UART0 RX.
+if(CONFIG_KASE_RF_TRACE_HALF)
+    list(APPEND srcs "comm/rf/rf_trace_half.c" "comm/rf/rf_trace_uart.c")   # rf_trace.c, rf_trace_ctl.c: base list
+endif()
+
 # Lien radio inter-moities (B3). rf_driver.c est deja tire par les gardes RF
 # ci-dessus quand l'un des deux bouts est actif.
 if(CONFIG_KASE_HALF_LINK_TX)

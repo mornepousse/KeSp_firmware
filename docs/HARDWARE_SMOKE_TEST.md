@@ -139,6 +139,24 @@ in the PR/release.
       why `age_ms` climbed to ~60 s first; the sync needs an awake left
 
 ## Half (left / right)
+- [ ] RF trace (half) — ESP-Prog on the half's prog connector, nothing else
+      holding the port. (1) Trace OFF (fresh boot, no request sent): no
+      frame on the console, the half sleeps at 5 s as before, `HB … slept=` grows as on the previous
+      build, and the ammeter in series with the battery reads the usual
+      light-sleep current (left ~0.67 mA, 2026-09-25) — the UART0 RX reader
+      must not add anything. (2) Send `RF_TRACE start(120)` (KS frame, cmd
+      0xBA, payload `01 78 00`) and repeat it every 250 ms until the KR ack
+      `4B 52 BA 00 00 00 00` comes back — press a key if the half sleeps
+      (bytes sent while it sleeps are not received); console `rftrace: ON
+      for 120 s`. (3) Type on that half: one TX record per transmission
+      (left on battery: PTX, `flags=0`; left on USB: excursion records,
+      `flags=1`, channel = the dongle's), a periodic record every ~1 s, the
+      console text still readable between frames. (4) Stop typing: a
+      SLEEPING record at the 5 s sleep, nothing while asleep, WOKE on the
+      next key. (5) At 120 s: console `rftrace: OFF (duration over)`, no
+      more frames. (6) Start again, then reset the half: no frame after
+      the reboot until a new start. (7) With the trace OFF again, the
+      sleep current and `slept=` are back to (1).
 - [ ] Low battery: build a half with `BATT_FAIBLE_DV`/`BATT_CRITIQUE_DV`
       shifted above the real voltage (bench, do not commit) → console
       "battery: LOW" then, when critical, "light sleep"

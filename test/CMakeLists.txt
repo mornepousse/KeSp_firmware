@@ -32,6 +32,8 @@ add_executable(test_runner
     test_mouse_slot_vectors.c
     test_rf_trace.c
     ../main/comm/rf/rf_trace.c
+    test_rf_trace_half.c
+    ../main/comm/rf/rf_trace_half.c
     ../scripts/gen/rf_trace_vectors.c
     test_rf_trace_ctl.c
     ../main/comm/rf/rf_trace_ctl.c

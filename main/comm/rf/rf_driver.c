@@ -255,6 +255,8 @@ bool rf_driver_oob_tx_ap(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
         if (status & 0x30) break;
     } while ((uint32_t)esp_timer_get_time() < deadline);
     bool ok = (status & 0x20) != 0;   /* TX_DS = ACK received */
+    r->tx_status = status;            /* rf-scope: MAX_RT vs timeout */
+    if (r->trace_obs) r->tx_observe = rf_driver_read_reg(r, REG_OBSERVE_TX);   /* tracing only: before the RF_CH restore */
 
     /* Flush the TX FIFO whenever the send did NOT succeed — not only
      * on MAX_RT. If the poll times out without either flag showing
@@ -743,6 +745,7 @@ bool rf_driver_send_ap(rf_radio_t *r, const uint8_t *buf, uint8_t len,
     } while ((uint32_t)esp_timer_get_time() < deadline_us);
 
     bool success = (status & 0x20) != 0;   /* bit5 TX_DS = ACK received */
+    r->tx_status = status;                 /* rf-scope: MAX_RT vs timeout, read before the clear below */
 
     if (status & 0x10) {
         /* MAX_RT: flush TX FIFO or the failed packet blocks all future sends */
@@ -754,7 +757,8 @@ bool rf_driver_send_ap(rf_radio_t *r, const uint8_t *buf, uint8_t len,
     /* Accumulate this packet's retransmit count for the link-quality metric.
      * OBSERVE_TX ARC_CNT (bits 3:0) resets at the next TX; on MAX_RT it reads the
      * max (ARC=3). Must be read before the next send. */
-    rf_tx_retr_sum += (uint32_t)(rf_driver_read_reg(r, REG_OBSERVE_TX) & 0x0F);
+    r->tx_observe = rf_driver_read_reg(r, REG_OBSERVE_TX);   /* kept for rf-scope: no extra SPI read */
+    rf_tx_retr_sum += (uint32_t)(r->tx_observe & 0x0F);
     rf_tx_count++;
 
     /* ACK payload (EN_ACK_PAY): if the ACK carried a payload, the chip raises

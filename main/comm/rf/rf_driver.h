@@ -25,6 +25,14 @@ typedef struct {
     uint32_t pkt_rx;        /* diagnostics counters */
     uint32_t pkt_dup;
     uint32_t fifo_ovf;
+    /* rf-scope (radio_owner.c reads them under its lock, only while tracing):
+     * STATUS at the end of the last TX poll, before the flags are cleared
+     * (tells MAX_RT from a poll timeout); OBSERVE_TX after the last TX — the
+     * PTX send reads it anyway (link_q), an excursion reads it only when
+     * trace_obs, BEFORE its PRX return rewrites RF_CH (which zeroes PLOS_CNT). */
+    uint8_t tx_status;
+    uint8_t tx_observe;
+    bool    trace_obs;
 } rf_radio_t;
 
 /* Initialize SPI (if shares_bus_first), the chip, RX mode (PRX), channel,

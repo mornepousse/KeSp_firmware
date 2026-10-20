@@ -88,6 +88,7 @@
 #define RF_TRACE_TX_TIMEOUT     2u     /* neither flag came up */
 
 #define RF_TRACE_TXF_EXCURSION  0x01u  /* left relay PRX→PTX→PRX */
+#define RF_TRACE_TXF_NOSEQ      0x02u  /* the frame's type carries no seq (HIDREPORT…): seq = 0, match nothing on it */
 #define RF_TRACE_RXF_DELIVERED  0x01u  /* consumed by the fusion engine */
 #define RF_TRACE_RXF_DUP        0x02u  /* same (emitter, seq) already seen */
 

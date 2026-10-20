@@ -251,6 +251,19 @@ config KASE_HALF_LINK_TX
         (RF_CH_HALF_LINK, see rf_slot.h) on every change. It has neither
         keymap engine nor HID output: it's a scanner.
 
+config KASE_RF_TRACE_HALF
+    bool "rf-scope: radio trace records on the console UART0 (halves)"
+    default y
+    depends on (KASE_KBD_WIRELESS || KASE_HALF_LINK_TX) && ESP_CONSOLE_UART_DEFAULT
+    help
+        One record per transmission (seq, result, retries, lost-packet
+        delta, channel, excursion) and a periodic record, as KR frames of
+        command 0xBA on the console UART0, for tools/rf_scope. Compiled in,
+        OFF at boot: started by a KS_CMD_RF_TRACE request on UART0 RX with
+        a duration, off again at its end. Off, it costs one flag check per
+        transmission; no wake veto, no cadence change, no UART driver.
+        See main/comm/rf/rf_trace_uart.c.
+
 config KASE_RF_FORCE_ROUTE
     bool "Force HID over radio even when USB is plugged in"
     default n

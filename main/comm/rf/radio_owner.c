@@ -35,6 +35,46 @@ static rf_radio_cfg_t s_cible;
 static uint32_t       s_ok, s_refus, s_indispo, s_perimes;
 static bool           s_endormie, s_verrou_sommeil;
 
+/* ── rf-scope: one TX record per transmission ─────────────────────────────
+ * Built here because the owner is the only module that sees every
+ * transmission, under the lock, with the frame in hand (seq, kind) and the
+ * driver's verdict (STATUS, OBSERVE_TX). Tracing off costs ONE load of
+ * g_rf_trace_session and a branch per transmission; the excursion's extra
+ * OBSERVE_TX read happens only while tracing. Any frame sent through here —
+ * a future stress frame included — gets its record the same way. */
+#if defined(TEST_HOST) || CONFIG_KASE_RF_TRACE_HALF
+#define RADIO_TRACE 1
+#include "rf_trace_half.h"
+#include "rf_trace_uart.h"
+static rf_trace_plos_t s_plos;
+static rf_plos_reset_t s_plos_reset;   /* RF_CH written since the last traced read (zeroes PLOS_CNT) */
+#define RF_CH_ECRIT() (s_plos_reset = RF_PLOS_RESET_SINCE)
+
+static void tracer_tx(uint32_t session, const uint8_t *buf, uint8_t len, bool ok,
+                      uint8_t canal, bool excursion)   /* lock held */
+{
+    rf_trace_tx_t r;
+    memset(&r, 0, sizeof r);
+    rf_trace_ident_t id;                   /* the dongle's own reading of a frame (rf_trace_ctl.c) */
+    rf_trace_frame_ident(buf, len, false, &id);
+    r.pkt_kind = id.pkt_kind; r.seq = id.seq;
+    if (!id.has_seq) r.flags |= RF_TRACE_TXF_NOSEQ;
+    if (excursion) r.flags |= RF_TRACE_TXF_EXCURSION;
+    r.payload_len = len;
+    r.result = rf_trace_tx_result(ok, s_radio.tx_status);
+    /* An excursion wrote RF_CH just before its packet (the far channel): its
+     * PLOS_CNT, read before the return, is this packet's alone. */
+    r.plos_delta = rf_trace_observe_step(&s_plos, s_radio.tx_observe, session,
+                                         excursion ? RF_PLOS_RESET_NOW : s_plos_reset, &r.arc);
+    s_plos_reset = excursion ? RF_PLOS_RESET_SINCE : RF_PLOS_NO_RESET;   /* the return wrote RF_CH again */
+    r.channel = canal;
+    rf_trace_uart_tx(&r);   /* stamps t_us and the emitter, copies, never blocks */
+}
+#else
+#define RADIO_TRACE 0
+#define RF_CH_ECRIT() ((void)0)
+#endif
+
 #ifndef TEST_HOST
 static const radio_hw_t radio_hw_defaut = {
     .init_tx = rf_driver_init_tx,   .set_ptx = rf_driver_set_ptx,       .rearm_rx = rf_driver_rearm_rx,
@@ -56,12 +96,19 @@ bool radio_owner_init(const rf_radio_cfg_t *cible, const radio_hw_t *hw)
     memset(&s_radio, 0, sizeof s_radio);
     s_mode = RADIO_ETEINTE; s_ok = s_refus = s_indispo = s_perimes = 0;
     s_endormie = s_verrou_sommeil = false;
+#if RADIO_TRACE
+    memset(&s_plos, 0, sizeof s_plos);
+#endif
+    RF_CH_ECRIT();
     lock_create();
     if (s_hw.init_tx(&s_radio, cible) != ESP_OK || !s_radio.present) return false;
     s_cible = *cible; s_mode = RADIO_PTX;
 #if !defined(TEST_HOST) && CONFIG_KASE_VEILLE
     static const veille_hook_t hook = { "radio", radio_sleep, radio_wake, NULL };
     veille_hook_enregistrer(&hook);
+#endif
+#if !defined(TEST_HOST) && CONFIG_KASE_RF_TRACE_HALF
+    rf_trace_uart_init();   /* AFTER the radio's hook: SLEEPING follows the power-down */
 #endif
     return true;
 }
@@ -86,6 +133,7 @@ static void appliquer(radio_mode_t mode, const rf_radio_cfg_t *cfg)   /* lock he
     if (mode == RADIO_PTX) s_hw.set_ptx(&s_radio, cfg);
     else                   s_hw.rearm_rx(&s_radio, cfg);
     s_mode = mode; s_cible = *cfg;
+    RF_CH_ECRIT();
 }
 
 bool radio_mode_set(radio_mode_t mode, const rf_radio_cfg_t *cfg)
@@ -119,6 +167,10 @@ radio_tx_t radio_emettre(const uint8_t *buf, uint8_t len, uint8_t *ack, uint8_t 
     bool ok = (ack && ack_len) ? s_hw.send_ap(&s_radio, buf, len, ack, ack_len)
                                : s_hw.send(&s_radio, buf, len);
     if (ok) s_ok++; else s_refus++;
+#if RADIO_TRACE
+    uint32_t session = g_rf_trace_session;
+    if (session) tracer_tx(session, buf, len, ok, s_cible.channel, false);
+#endif
     lock_give();
     return ok ? RADIO_TX_ACK : RADIO_TX_REFUS;
 }
@@ -151,8 +203,16 @@ bool radio_excursion_tx(uint8_t canal, const uint8_t addr[5], const uint8_t *buf
     vider(cb, ctx);                                               /* BEFORE: the excursion ends with FLUSH_RX */
     uint8_t retour[5] = { s_cible.rx_addr[0], s_cible.rx_addr[1], s_cible.rx_addr[2], s_cible.rx_addr[3],
                           s_cible.addr_suffix };
+#if RADIO_TRACE
+    uint32_t session = g_rf_trace_session;
+    s_radio.trace_obs = session != 0;   /* the driver reads OBSERVE_TX only while tracing */
+#endif
     bool ok = s_hw.oob_tx(&s_radio, canal, addr, buf, len, s_cible.channel, retour);
     if (ok) s_ok++; else s_refus++;
+#if RADIO_TRACE
+    if (session) tracer_tx(session, buf, len, ok, canal, true);
+    else         RF_CH_ECRIT();
+#endif
     lock_give();
     return ok;
 }
@@ -165,7 +225,7 @@ bool radio_pair_round(const uint8_t rdv_addr[5], uint8_t rdv_ch, const uint8_t *
     if (!lock_take(200)) return false;
     s_hw.set_tx_address(&s_radio, rdv_addr);
     s_hw.set_channel(&s_radio, rdv_ch);
-    s_hw.send(&s_radio, req, n);
+    s_hw.send(&s_radio, req, n);      /* pairing: not traced (not the link); appliquer() marks RF_CH */
     *rx_n = s_hw.pair_listen(&s_radio, rdv_ch, rdv_addr, rx, rx_max, listen_ms);
     appliquer(s_mode, &s_cible);      /* RETURN to the target, ACK or not */
     lock_give();

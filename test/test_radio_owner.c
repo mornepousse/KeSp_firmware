@@ -2,21 +2,34 @@
  * against the SEQUENCE of calls to the hardware (fake recorder). */
 #include "test_framework.h"
 #include "../main/comm/rf/radio_owner.h"
+#include "../main/comm/rf/rf_trace_uart.h"
+#include "../main/comm/rf/rf_packet.h"
 #include <string.h>
 #include <stdio.h>
 
 static char s_trace[512];
 static int  s_pending_rx;          /* frames pending in the fake FIFO */
 static bool s_ack = true;
+/* rf-scope: what the fake chip reports after a TX, and the records captured. */
+static uint8_t s_fail_status = 0x1E;   /* STATUS on a failed send: MAX_RT by default */
+static uint8_t s_obs;                  /* OBSERVE_TX after a send */
+volatile uint32_t g_rf_trace_session;
+static rf_trace_tx_t s_rec[8];
+static int s_nrec;
+void rf_trace_uart_tx(const rf_trace_tx_t *r) { if (s_nrec < 8) s_rec[s_nrec] = *r; s_nrec++; }
+static void f_after_tx(rf_radio_t *r) { r->tx_status = s_ack ? 0x2E : s_fail_status; r->tx_observe = s_obs; }
 #define T(s) strncat(s_trace, s, sizeof s_trace - strlen(s_trace) - 1)
 
 static esp_err_t f_init_tx(rf_radio_t *r, const rf_radio_cfg_t *c) { (void)c; r->present = true; T("init_tx;"); return ESP_OK; }
 static void f_set_ptx(rf_radio_t *r, const rf_radio_cfg_t *c)   { (void)r; char b[24]; snprintf(b, sizeof b, "ptx(%02X);", c->channel); T(b); }
 static void f_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *c)  { (void)r; char b[24]; snprintf(b, sizeof b, "prx(%02X);", c->channel); T(b); }
-static bool f_send(rf_radio_t *r, const uint8_t *b, uint8_t n)  { (void)r; (void)b; (void)n; T("send;"); return s_ack; }
-static bool f_send_ap(rf_radio_t *r, const uint8_t *b, uint8_t n, uint8_t *a, uint8_t *al) { (void)r; (void)b; (void)n; (void)a; *al = 0; T("send_ap;"); return s_ack; }
+static bool f_send(rf_radio_t *r, const uint8_t *b, uint8_t n)  { (void)b; (void)n; T("send;"); f_after_tx(r); return s_ack; }
+static bool f_send_ap(rf_radio_t *r, const uint8_t *b, uint8_t n, uint8_t *a, uint8_t *al) { (void)b; (void)n; (void)a; *al = 0; T("send_ap;"); f_after_tx(r); return s_ack; }
+/* The real excursion reads OBSERVE_TX only when trace_obs (before its RF_CH
+ * restore): the fake says so in the call sequence. */
 static bool f_oob(rf_radio_t *r, uint8_t ch, const uint8_t a[5], const uint8_t *b, uint8_t n, uint8_t rch, const uint8_t ra[5])
-{ (void)r; (void)a; (void)b; (void)n; (void)ra; char t[32]; snprintf(t, sizeof t, "oob(%02X->%02X);", ch, rch); T(t); return s_ack; }
+{ (void)a; (void)b; (void)n; (void)ra; char t[40]; snprintf(t, sizeof t, "oob(%02X->%02X)%s;", ch, rch, r->trace_obs ? "+obs" : "");
+  T(t); r->tx_status = s_ack ? 0x2E : s_fail_status; if (r->trace_obs) r->tx_observe = s_obs; return s_ack; }
 static bool f_rx_avail(rf_radio_t *r) { (void)r; return s_pending_rx > 0; }
 static uint16_t f_read_rx(rf_radio_t *r, uint8_t *b, uint16_t n) { (void)r; (void)n; if (!s_pending_rx) return 0; s_pending_rx--; b[0] = 0xAB; T("read;"); return 1; }
 static void f_pd(rf_radio_t *r) { (void)r; T("pd;"); }
@@ -29,7 +42,7 @@ static const radio_hw_t FAKE = { f_init_tx, f_set_ptx, f_rearm_rx, f_send, f_sen
                                  f_set_tx_address, f_set_channel, f_pair_listen };
 
 static rf_radio_cfg_t cfg(uint8_t ch) { rf_radio_cfg_t c; memset(&c, 0, sizeof c); c.channel = ch; c.addr_suffix = 0x01; return c; }
-static void reset(void) { s_trace[0] = 0; s_pending_rx = 0; s_ack = true; }
+static void reset(void) { s_trace[0] = 0; s_pending_rx = 0; s_ack = true; s_fail_status = 0x1E; s_obs = 0; g_rf_trace_session = 0; s_nrec = 0; }
 static int s_livrees; static void compte(const uint8_t *t, uint16_t n, void *ctx) { (void)t; (void)n; (void)ctx; s_livrees++; }
 
 static void test_init_est_ptx_vers_la_cible(void)
@@ -208,6 +221,90 @@ static void test_sommeil_idempotent_et_verrou_rendu(void)
     TEST_ASSERT(!radio_lock(0), "the other one's lock is still held"); radio_unlock();
 }
 
+/* ── rf-scope: one TX record per transmission, from the owner ── */
+
+static uint8_t matrix(uint8_t *b, uint8_t seq)
+{ rf_matrix_t m = { .half = RF_HALF_LEFT, .bitmap = { 1, 2, 3, 4 }, .seq = seq }; return (uint8_t)rf_encode_matrix(b, &m); }
+
+static void test_trace_off_produces_nothing_and_reads_nothing(void)
+{
+    reset(); rf_radio_cfg_t d = cfg(0x68), l = cfg(0x4F); radio_owner_init(&d, &FAKE);
+    uint8_t b[8]; uint8_t n = matrix(b, 9); uint8_t addr[5] = {0};
+    radio_send(b, n, 20);
+    radio_mode_set(RADIO_PRX, &l); s_trace[0] = 0;
+    radio_excursion_tx(0x68, addr, b, n, NULL, NULL);
+    TEST_ASSERT_EQ(s_nrec, 0, "tracing off: no record");
+    TEST_ASSERT(strcmp(s_trace, "oob(68->4F);") == 0, "tracing off: the excursion reads no OBSERVE_TX");
+}
+
+static void test_trace_ptx_record_from_the_frame(void)
+{
+    reset(); rf_radio_cfg_t d = cfg(0x68); radio_owner_init(&d, &FAKE);
+    g_rf_trace_session = 3; s_obs = 0x02;
+    uint8_t b[8]; uint8_t n = matrix(b, 0xA7);
+    TEST_ASSERT(radio_send(b, n, 20), "sent");
+    TEST_ASSERT_EQ(s_nrec, 1, "one record");
+    TEST_ASSERT_EQ(s_rec[0].seq, 0xA7, "seq from the frame");
+    TEST_ASSERT_EQ(s_rec[0].pkt_kind, PKT_TYPE_MATRIX, "kind from the frame");
+    TEST_ASSERT_EQ(s_rec[0].payload_len, n, "length");
+    TEST_ASSERT_EQ(s_rec[0].result, RF_TRACE_TX_ACK, "ACK");
+    TEST_ASSERT_EQ(s_rec[0].arc, 2, "ARC_CNT");
+    TEST_ASSERT_EQ(s_rec[0].channel, 0x68, "the target's channel");
+    TEST_ASSERT_EQ(s_rec[0].flags, 0, "no excursion, has a seq");
+
+    s_ack = false; s_obs = 0x1F;
+    TEST_ASSERT(!radio_send(b, n, 20), "refused");
+    TEST_ASSERT_EQ(s_rec[1].result, RF_TRACE_TX_MAX_RT, "MAX_RT from STATUS");
+    TEST_ASSERT_EQ(s_rec[1].plos_delta, 1, "one more lost packet");
+    s_fail_status = 0x0E;
+    radio_send(b, n, 20);
+    TEST_ASSERT_EQ(s_rec[2].result, RF_TRACE_TX_TIMEOUT, "neither flag: timeout");
+
+    uint8_t kb[6] = { 4 }; uint8_t hn = (uint8_t)rf_encode_hidreport_kbd(b, 0, kb); s_ack = true;
+    radio_send(b, hn, 20);
+    TEST_ASSERT_EQ(s_rec[3].pkt_kind, PKT_TYPE_HIDREPORT, "HID report kind");
+    TEST_ASSERT(s_rec[3].flags & RF_TRACE_TXF_NOSEQ, "HID report: no seq, said so");
+}
+
+static void test_trace_excursion_record(void)
+{
+    reset(); rf_radio_cfg_t d = cfg(0x68), l = cfg(0x4F); radio_owner_init(&d, &FAKE);
+    radio_mode_set(RADIO_PRX, &l); s_trace[0] = 0;
+    g_rf_trace_session = 5; s_ack = false; s_obs = 0x1F;
+    uint8_t b[8]; uint8_t n = matrix(b, 0x10); uint8_t addr[5] = {'K','a','S','e',0x01};
+    radio_excursion_tx(0x68, addr, b, n, NULL, NULL);
+    TEST_ASSERT(strcmp(s_trace, "oob(68->4F)+obs;") == 0, s_trace);
+    TEST_ASSERT_EQ(s_nrec, 1, "one record");
+    TEST_ASSERT_EQ(s_rec[0].flags, RF_TRACE_TXF_EXCURSION, "excursion flag");
+    TEST_ASSERT_EQ(s_rec[0].channel, 0x68, "the channel it was SENT on, not the listening one");
+    TEST_ASSERT_EQ(s_rec[0].result, RF_TRACE_TX_MAX_RT, "MAX_RT");
+    TEST_ASSERT_EQ(s_rec[0].plos_delta, 1, "PLOS read before the restore: this packet's loss, even in a new session");
+}
+
+static void test_trace_nothing_sent_nothing_recorded(void)
+{
+    reset(); rf_radio_cfg_t d = cfg(0x68), l = cfg(0x4F); radio_owner_init(&d, &FAKE);
+    g_rf_trace_session = 1;
+    uint8_t b[8]; uint8_t n = matrix(b, 1);
+    TEST_ASSERT(radio_emettre(b, n, NULL, NULL, 20, pred_faux_sous_verrou, &(bool){false}) == RADIO_TX_PERIME, "stale");
+    radio_sleep(); radio_send(b, n, 0); radio_wake();
+    radio_mode_set(RADIO_PRX, &l); radio_send(b, n, 20);
+    TEST_ASSERT_EQ(s_nrec, 0, "stale, asleep, wrong mode: nothing left the chip, no record");
+}
+
+static void test_trace_plos_after_a_mode_change(void)
+{
+    reset(); rf_radio_cfg_t d = cfg(0x68), l = cfg(0x4F); radio_owner_init(&d, &FAKE);
+    uint8_t b[8]; uint8_t n = matrix(b, 1);
+    g_rf_trace_session = 2; s_obs = 0x30;
+    radio_send(b, n, 20);
+    TEST_ASSERT_EQ(s_rec[0].plos_delta, 0, "first record of the session: baseline");
+    radio_mode_set(RADIO_PRX, &l); radio_mode_set(RADIO_PTX, &d);   /* RF_CH written: PLOS back to 0 */
+    s_obs = 0x40;   /* 4 lost since the reset: above the old 3, a plain difference would say 1 */
+    radio_send(b, n, 20);
+    TEST_ASSERT_EQ(s_rec[1].plos_delta, 4, "counted from the reset, not 4 - 3");
+}
+
 void test_radio_owner(void)
 {
     TEST_SUITE("radio_owner: one chip, one owner");
@@ -225,4 +322,9 @@ void test_radio_owner(void)
     TEST_RUN(test_pair_round_revient_a_la_cible);
     TEST_RUN(test_emission_perimee_n_est_pas_emise);
     TEST_RUN(test_sommeil_idempotent_et_verrou_rendu);
+    TEST_RUN(test_trace_off_produces_nothing_and_reads_nothing);
+    TEST_RUN(test_trace_ptx_record_from_the_frame);
+    TEST_RUN(test_trace_excursion_record);
+    TEST_RUN(test_trace_nothing_sent_nothing_recorded);
+    TEST_RUN(test_trace_plos_after_a_mode_change);
 }
