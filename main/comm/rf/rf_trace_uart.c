@@ -64,6 +64,7 @@
 #include "radio_owner.h"
 #include "cdc_binary_protocol.h"   /* KS_CMD_RF_TRACE, KS_STATUS_* */
 #include "rf_packet.h"             /* PKT_TYPE_STRESS */
+#include "rf_stress_half.h"        /* KS_CMD_RF_STRESS rides this reader */
 #include "cadence.h"
 #include "sdkconfig.h"
 #include "esp_timer.h"
@@ -97,7 +98,7 @@ static const char *TAG = "rftrace";
 #define EMITTER RF_TRACE_EMIT_LEFT
 #endif
 
-#define RING_CAP   128u          /* ~3 KB; a full batch of 16 TX records is 23 + 15×13 B */
+#define RING_CAP   128u          /* 4 KB (32-byte slots); a full batch of 16 TX records is 23 + 15×13 B */
 #define RXB_CAP    64u
 #define NOTE_DATA  0x1u
 #define NOTE_RX    0x2u
@@ -306,11 +307,20 @@ static void command_trace(const rf_trace_ks_rx_t *rx)   /* drain task */
     }
 }
 
+static void command_stress(const rf_trace_ks_rx_t *rx)   /* drain task */
+{
+    uint8_t ack[RF_TRACE_ACK_LEN];
+    size_t ack_n = 0;
+    uint8_t status = rf_stress_half_command(rx->payload, rx->len, ack, sizeof ack, &ack_n);
+    reply(rx->cmd, status, ack, (uint16_t)ack_n);
+}
+
 static void command(const rf_trace_ks_rx_t *rx)   /* drain task */
 {
     switch (rx->cmd) {
-    case KS_CMD_RF_TRACE: command_trace(rx); break;
-    default:              reply(rx->cmd, KS_STATUS_ERR_UNKNOWN, NULL, 0); break;
+    case KS_CMD_RF_TRACE:  command_trace(rx); break;
+    case KS_CMD_RF_STRESS: command_stress(rx); break;
+    default:               reply(rx->cmd, KS_STATUS_ERR_UNKNOWN, NULL, 0); break;
     }
 }
 
@@ -372,6 +382,7 @@ static void rf_trace_task(void *arg)
 #if CONFIG_KASE_VEILLE
 static void hook_sleep(void)   /* veille task, after the radio's power-down */
 {
+    rf_stress_half_sleep();        /* a stress run ends with the sleep (vetoed while it runs anyway) */
     portENTER_CRITICAL(&s_ctl_mux);
     bool emit = rf_trace_sess_sleep(&s_ctl);
     portEXIT_CRITICAL(&s_ctl_mux);

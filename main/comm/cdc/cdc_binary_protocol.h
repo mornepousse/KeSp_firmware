@@ -113,6 +113,7 @@ typedef enum {
     KS_CMD_TRACKPAD_GET     = 0xB8,  /* get trackpad accel cfg (trackpad_cfg_t, 7B) */
     KS_CMD_TRACKPAD_SET     = 0xB9,  /* set accel cfg (payload 6B: base,accel,gain_max LE) */
     KS_CMD_RF_TRACE         = 0xBA,  /* rf-scope: start/stop; unsolicited KR batches (rf_trace.h) */
+    KS_CMD_RF_STRESS        = 0xBB,  /* rf-scope: a half's stress generator, UART0 only (rf_stress.h) */
 
     /* Security key provisioning (dongle) — write-only, no secret read-back (0xC0-0xC3) */
     KS_CMD_SEC_SET_SLOT     = 0xC0,

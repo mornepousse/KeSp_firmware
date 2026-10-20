@@ -18,7 +18,7 @@ static uint32_t s_session_next;            /* CDC task only: the numbering of th
 static uint32_t s_session;                 /* rx task writes (atomic): the running session, 0 = off */
 static bool    s_ready;                    /* init done: the rx task exists */
 
-#define RING_CAP 128u                      /* ~3.5 KB; 8 frames of 16 records */
+#define RING_CAP 128u                      /* 4 KB (32-byte slots); 8 frames of 16 records */
 static rf_trace_rec_t  s_slots[RING_CAP];
 static rf_trace_ring_t s_ring;
 

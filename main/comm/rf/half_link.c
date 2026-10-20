@@ -27,6 +27,9 @@
 #include "freertos/task.h"
 #include <string.h>
 #include <stdio.h>
+#if CONFIG_KASE_RF_TRACE_HALF && CONFIG_KASE_HALF_LINK_TX
+#include "rf_stress_half.h"   /* rf-scope stress: this policy is its sink */
+#endif
 
 static const char *TAG = "half_link";
 
@@ -146,6 +149,20 @@ static void half_fusion_pairing_task(void *arg)
 }
 #endif /* CONFIG_KASE_DONGLE_FUSION */
 
+#if CONFIG_KASE_RF_TRACE_HALF && CONFIG_KASE_HALF_LINK_TX
+/* rf-scope stress sink (rf_stress_half.h): through the owner toward the
+ * CURRENT target, like the matrix — same lock, same 50 ms budget, same ESB
+ * retries. It touches neither s_seq, nor the fallback FSM, nor "dongle
+ * seen": a stress run measures the link, it must not move the half's target
+ * (a fallen-back right stresses the left-USB, whose consumer drops stress
+ * frames before anything). */
+static radio_tx_t half_link_stress_sink(const uint8_t *buf, uint8_t len)
+{
+    if (!radio_presente()) return RADIO_TX_INDISPO;
+    return radio_emettre(buf, len, NULL, NULL, 50, NULL, NULL);
+}
+#endif
+
 bool half_link_tx_init(void)
 {
     rf_radio_cfg_t cfg = half_link_cfg();
@@ -198,6 +215,10 @@ bool half_link_tx_init(void)
         xTaskCreate(half_fusion_pairing_task, "half_pair", 4096, NULL, 5, NULL);
         return true;
     }
+#endif
+
+#if CONFIG_KASE_RF_TRACE_HALF && CONFIG_KASE_HALF_LINK_TX
+    rf_stress_half_set_sink(half_link_stress_sink);   /* paired, radio up */
 #endif
 
     /* Startup probe burst. Without it, knowing whether the link carries

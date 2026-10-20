@@ -320,6 +320,8 @@ list(APPEND srcs "power/pm_dfs.c")
 # (rf_trace_uart.c). Off at boot, started over UART0 RX.
 if(CONFIG_KASE_RF_TRACE_HALF)
     list(APPEND srcs "comm/rf/rf_trace_half.c" "comm/rf/rf_trace_uart.c")   # rf_trace.c, rf_trace_ctl.c: base list
+    # Stress generator: KS_CMD_RF_STRESS on the same UART0 reader. Task created at the first start.
+    list(APPEND srcs "comm/rf/rf_stress.c" "comm/rf/rf_stress_half.c")
 endif()
 
 # Lien radio inter-moities (B3). rf_driver.c est deja tire par les gardes RF

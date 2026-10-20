@@ -39,12 +39,16 @@ typedef enum {
                                    * as long as nobody types, never completing enumeration (2026-10-01).
                                    * Bounded by the guard's own timeout (2 s) or by mount, whichever
                                    * comes first — see usb_wake_guard.h. */
+    VEILLE_VETO_STRESS = 1u << 8, /* an rf-scope stress run is transmitting (rf_stress_half.c): the radio
+                                   * is the subject, a sleep would end the measurement. Bounded by the
+                                   * run's own count/duration (it always ends by itself) and released
+                                   * at its stop (2026-10-20). */
 } veille_veto_t;
 
 /* Room for every veto name joined by '+' in the heartbeat, NUL included:
- * "usb+link+sync+test+pair+key+code+enum" = 38 characters. Sized once, here
- * — the HB and its "sleep REFUSED" line use it, the test checks all eight fit. */
-#define VEILLE_VETOS_STR_MAX 40
+ * "usb+link+sync+test+pair+key+code+enum+stress" = 45 characters. Sized once,
+ * here — the HB and its "sleep REFUSED" line use it, the test checks all nine fit. */
+#define VEILLE_VETOS_STR_MAX 48
 
 typedef struct { uint32_t actifs; } veille_vetos_t;
 
@@ -66,7 +70,7 @@ static inline bool veille_touche_tenue(const uint8_t *etat, size_t n)
 }
 
 /* Names of active vetoes for the heartbeat: "usb+link", "-" if
- * none. Bounded to n bytes (n >= 2), cleanly truncated beyond that — the seven
+ * none. Bounded to n bytes (n >= 2), cleanly truncated beyond that — the nine
  * fit within VEILLE_VETOS_STR_MAX. */
 static inline const char *veille_vetos_str(const veille_vetos_t *v, char *out, size_t n)
 {
@@ -75,6 +79,7 @@ static inline const char *veille_vetos_str(const veille_vetos_t *v, char *out, s
         { VEILLE_VETO_SYNC, "sync" }, { VEILLE_VETO_TEST, "test" },
         { VEILLE_VETO_PAIR, "pair" }, { VEILLE_VETO_TOUCHE, "key" },
         { VEILLE_VETO_CODE, "code" }, { VEILLE_VETO_USB_ENUM, "enum" },
+        { VEILLE_VETO_STRESS, "stress" },
     };
     if (n == 0) return "";
     out[0] = '\0';

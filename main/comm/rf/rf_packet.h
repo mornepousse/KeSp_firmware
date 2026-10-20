@@ -13,9 +13,9 @@
 #define PKT_TYPE_MATRIX     0x4   /* fusion: RAW half→dongle half-matrix (half identity) */
 #define PKT_TYPE_HIDREPORT  0x5   /* keyboard-agnostic relay: final HID report */
 #define PKT_TYPE_STATUS     0x6   /* link supervision: battery + quality, no state */
-/* rf-scope stress generator (spec 2026-10-20, Task 5b; no producer yet):
- * [0xA0 | half][seq][padding…]. SYNTHETIC — the dongle drops it before any
- * handler, traced or not (rf_trace_drop_before_engine, rf_trace_ctl.h). */
+/* rf-scope stress generator (spec 2026-10-20; producer rf_stress.c, a half's
+ * KS_CMD_RF_STRESS): [0xA0 | half][seq][padding…]. SYNTHETIC — the dongle
+ * drops it before any handler, traced or not (rf_rx_dispatch, rf_trace_ctl.h). */
 #define PKT_TYPE_STRESS     0xA
 #define PKT_TYPE_PAIR_ACK   0xE   /* dongle→half pairing ACK (RF-2) */
 #define PKT_TYPE_PAIR_REQ   0xF   /* half→dongle pairing request (RF-2) */

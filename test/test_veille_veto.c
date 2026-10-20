@@ -141,6 +141,35 @@ static void test_usb_enum_est_un_veto(void)
                 "its own bit");
 }
 
+/* A running rf-scope stress test holds the half awake (rf_stress_half.c,
+ * 2026-10-20): the radio is the subject, a sleep in the middle would end the
+ * measurement. Bounded by the run's own count/duration (the generator stops
+ * itself) and released at its stop. */
+static void test_stress_est_un_veto(void)
+{
+    veille_vetos_t v = {0};
+    char buf[VEILLE_VETOS_STR_MAX];
+    veille_veto_poser(&v, VEILLE_VETO_STRESS, true);
+    TEST_ASSERT(veille_bloquee(&v), "a stress run alone blocks sleep");
+    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "stress") == 0, "named stress in the HB");
+    veille_veto_poser(&v, VEILLE_VETO_USB, true);  veille_veto_poser(&v, VEILLE_VETO_LIEN, true);
+    veille_veto_poser(&v, VEILLE_VETO_SYNC, true); veille_veto_poser(&v, VEILLE_VETO_TEST, true);
+    veille_veto_poser(&v, VEILLE_VETO_PAIR, true); veille_veto_poser(&v, VEILLE_VETO_TOUCHE, true);
+    veille_veto_poser(&v, VEILLE_VETO_CODE, true); veille_veto_poser(&v, VEILLE_VETO_USB_ENUM, true);
+    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "usb+link+sync+test+pair+key+code+enum+stress") == 0,
+                "all nine fit in VEILLE_VETOS_STR_MAX");
+    veille_veto_poser(&v, VEILLE_VETO_STRESS, false);
+    TEST_ASSERT(strcmp(veille_vetos_str(&v, buf, sizeof buf), "usb+link+sync+test+pair+key+code+enum") == 0,
+                "stopped: its veto goes, the others stay");
+    veille_vetos_t w = {0};
+    veille_veto_poser(&w, VEILLE_VETO_STRESS, true);
+    veille_veto_poser(&w, VEILLE_VETO_STRESS, false);
+    TEST_ASSERT(!veille_bloquee(&w), "after the run: nothing left");
+    TEST_ASSERT((VEILLE_VETO_STRESS & (VEILLE_VETO_USB | VEILLE_VETO_LIEN | VEILLE_VETO_SYNC | VEILLE_VETO_TEST
+                                       | VEILLE_VETO_PAIR | VEILLE_VETO_TOUCHE | VEILLE_VETO_CODE
+                                       | VEILLE_VETO_USB_ENUM)) == 0, "its own bit");
+}
+
 void test_veille_veto(void)
 {
     TEST_SUITE("sleep vetos");
@@ -152,4 +181,5 @@ void test_veille_veto(void)
     TEST_RUN(test_detection_touche_tenue);
     TEST_RUN(test_code_visible_est_un_veto);
     TEST_RUN(test_usb_enum_est_un_veto);
+    TEST_RUN(test_stress_est_un_veto);
 }

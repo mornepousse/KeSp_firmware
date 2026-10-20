@@ -4,6 +4,7 @@
 #include "../main/comm/rf/radio_owner.h"
 #include "../main/comm/rf/rf_trace_uart.h"
 #include "../main/comm/rf/rf_packet.h"
+#include "../main/comm/rf/rf_stress.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -105,6 +106,29 @@ static void test_excursion_en_ptx_est_refusee(void)
     uint8_t b[4] = {0}; uint8_t addr[5] = {0};
     TEST_ASSERT(!radio_excursion_tx(0x4F, addr, b, sizeof b, NULL, NULL), "no excursion from PTX: send is enough");
     TEST_ASSERT(strcmp(s_trace, "") == 0, "nothing");
+}
+
+/* The excursion's verdict tells "went out" from "never left" — the stress
+ * generator counts the first and backs off on the second. */
+static void test_excursion_verdict_unavailable_vs_refused(void)
+{
+    reset(); rf_radio_cfg_t d = cfg(0x68), l = cfg(0x4F); radio_owner_init(&d, &FAKE);
+    uint8_t b[4] = {0}; uint8_t addr[5] = {'K','a','S','e',0x01};
+    TEST_ASSERT_EQ(radio_excursion_emettre(0x68, addr, b, sizeof b, NULL, NULL), RADIO_TX_INDISPO,
+                   "from PTX: nothing left the chip");
+    radio_mode_set(RADIO_PRX, &l);
+    TEST_ASSERT_EQ(radio_excursion_emettre(0x68, addr, b, sizeof b, NULL, NULL), RADIO_TX_ACK, "acknowledged");
+    s_ack = false;
+    TEST_ASSERT_EQ(radio_excursion_emettre(0x68, addr, b, sizeof b, NULL, NULL), RADIO_TX_REFUS, "MAX_RT: went out");
+    radio_sleep();
+    TEST_ASSERT_EQ(radio_excursion_emettre(0x68, addr, b, sizeof b, NULL, NULL), RADIO_TX_INDISPO,
+                   "lock held by the sleep: nothing left");
+    radio_wake();
+    uint32_t ok, refus, indispo;
+    radio_stats(&ok, &refus, &indispo, NULL);
+    TEST_ASSERT_EQ(ok, 1, "one acknowledged");
+    TEST_ASSERT_EQ(refus, 1, "one refused");
+    TEST_ASSERT_EQ(indispo, 2, "two unavailable, counted as such");
 }
 
 static void test_drain_livre_en_prx_seulement(void)
@@ -292,6 +316,31 @@ static void test_trace_nothing_sent_nothing_recorded(void)
     TEST_ASSERT_EQ(s_nrec, 0, "stale, asleep, wrong mode: nothing left the chip, no record");
 }
 
+/* rf-scope stress: a stress frame goes through the owner like a real one —
+ * same lock, same send — and gets a TX record with ITS kind and ITS seq, both
+ * in PTX and through the left's excursion. */
+static void test_trace_stress_frame_is_recorded_like_a_real_one(void)
+{
+    reset(); rf_radio_cfg_t d = cfg(0x68), l = cfg(0x4F); radio_owner_init(&d, &FAKE);
+    g_rf_trace_session = 9;
+    uint8_t f[RF_STRESS_FRAME_LEN];
+    uint8_t n = (uint8_t)rf_stress_frame(f, sizeof f, RF_HALF_RIGHT, 0x3C);
+    TEST_ASSERT(radio_send(f, n, 20), "PTX: sent");
+    TEST_ASSERT_EQ(s_nrec, 1, "one record");
+    TEST_ASSERT_EQ(s_rec[0].pkt_kind, PKT_TYPE_STRESS, "kind STRESS");
+    TEST_ASSERT_EQ(s_rec[0].seq, 0x3C, "its own seq");
+    TEST_ASSERT_EQ(s_rec[0].payload_len, RF_STRESS_FRAME_LEN, "a matrix frame's size");
+    TEST_ASSERT_EQ(s_rec[0].flags, 0, "has a seq, no excursion");
+    radio_mode_set(RADIO_PRX, &l); s_trace[0] = 0;
+    uint8_t addr[5] = {'K','a','S','e',0x01};
+    n = (uint8_t)rf_stress_frame(f, sizeof f, RF_HALF_LEFT, 0x3D);
+    radio_excursion_tx(0x68, addr, f, n, NULL, NULL);
+    TEST_ASSERT_EQ(s_nrec, 2, "excursion: one more record");
+    TEST_ASSERT_EQ(s_rec[1].pkt_kind, PKT_TYPE_STRESS, "excursion: kind STRESS");
+    TEST_ASSERT_EQ(s_rec[1].seq, 0x3D, "excursion: its seq");
+    TEST_ASSERT_EQ(s_rec[1].flags, RF_TRACE_TXF_EXCURSION, "excursion flag");
+}
+
 static void test_trace_plos_after_a_mode_change(void)
 {
     reset(); rf_radio_cfg_t d = cfg(0x68), l = cfg(0x4F); radio_owner_init(&d, &FAKE);
@@ -314,6 +363,7 @@ void test_radio_owner(void)
     TEST_RUN(test_emettre_en_prx_est_refuse);
     TEST_RUN(test_excursion_vide_la_fifo_AVANT_et_revient);
     TEST_RUN(test_excursion_en_ptx_est_refusee);
+    TEST_RUN(test_excursion_verdict_unavailable_vs_refused);
     TEST_RUN(test_drain_livre_en_prx_seulement);
     TEST_RUN(test_reveil_rearme_le_mode);
     TEST_RUN(test_le_verrou_est_tenu_pendant_le_sommeil);
@@ -327,4 +377,5 @@ void test_radio_owner(void)
     TEST_RUN(test_trace_excursion_record);
     TEST_RUN(test_trace_nothing_sent_nothing_recorded);
     TEST_RUN(test_trace_plos_after_a_mode_change);
+    TEST_RUN(test_trace_stress_frame_is_recorded_like_a_real_one);
 }

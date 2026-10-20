@@ -169,6 +169,28 @@ in the PR/release.
       2026-09-25) — a floating RX0 would wake the drain task; GPIO44 keeps
       its pull-up. Tracing ON perturbs timing slightly: never measure
       current with a trace running.
+- [ ] RF stress — dongle on its CDC, ESP-Prog on the half under test,
+      `fuser` both ports first, remapping software closed. On the HOST,
+      focus a text editor (an empty document) and leave it focused for the
+      whole item: **NOTHING may be typed in it, ever** — a single character
+      fails the item (a stress frame reached the host as a keystroke).
+      Run each scenario 30 s, on the left then on the right:
+      `rf_scope stress --dongle /dev/ttyACM0 --left /dev/ttyUSB0 --scenario
+      burst --duration 30` then `max`, `held`, `rate --rate 200` (`--right`
+      for the right half). For each: (1) the half's console logs `rfstress:
+      session N: <pattern> …` and, at the end, `rfstress: session N stopped
+      (duration over): S sent (A acked, R MAX_RT), U unavailable`; (2)
+      during the run, `HB … vetos=stress` (with whatever else holds it), and
+      in the first HB after the end `stress` is gone — then the half sleeps
+      at 5 s as usual; (3) the report's "stress" section shows the frames
+      offered and delivered, the dongle's `stress` counter close to the
+      half's acked count, the loss, retries and latency under load; (4)
+      typing on the OTHER half during a `max` run still works, keys arrive
+      once (the radio is loaded, not the engine); (5) the editor is still
+      empty. Also: left on USB (chip in PRX): a `burst` run goes out by
+      excursions (`flags=1` TX records), still nothing typed. A `stop`
+      mid-run (Ctrl-C in the tool) → `stopped (stop command)` and the veto
+      goes. With the trace stopped and no run, sleep current unchanged.
 - [ ] Low battery: build a half with `BATT_FAIBLE_DV`/`BATT_CRITIQUE_DV`
       shifted above the real voltage (bench, do not commit) → console
       "battery: LOW" then, when critical, "light sleep"

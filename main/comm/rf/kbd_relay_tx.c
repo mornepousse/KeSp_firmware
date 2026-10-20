@@ -45,6 +45,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"    /* CE-pin scan during pairing */
+#if CONFIG_KASE_RF_TRACE_HALF
+#include "rf_stress_half.h" /* rf-scope stress: this policy is its sink */
+#include "rf_trace_ctl.h"   /* rf_trace_drop_before_engine */
+#endif
 
 static const char *TAG = "kbd_relay";
 
@@ -255,6 +259,12 @@ static void remote_relacher(void)
 static void kbd_relay_rx_droite(const uint8_t *rb, uint16_t rn, void *ctx)
 {
     uint32_t now = *(uint32_t *)ctx;
+#if CONFIG_KASE_RF_TRACE_HALF
+    /* rf-scope: a stress frame (a right that fell back to the left, under a
+     * stress run) never reaches the local engine — dropped before anything,
+     * like on the dongle; rf_decode_heartbeat would refuse its kind anyway. */
+    if (rf_trace_drop_before_engine(rb, rn)) return;
+#endif
     rf_heartbeat_t h;
     if (!rf_decode_heartbeat(rb, rn, &h)) return;
     remote_poser(h.bitmap);
@@ -410,6 +420,37 @@ static void kbd_relay_refresh_body(void)
     kbd_tx_locked(buf, (uint8_t)n);
 }
 
+#if CONFIG_KASE_RF_TRACE_HALF
+/* rf-scope stress sink (rf_stress_half.h): a stress frame leaves exactly as
+ * this half's real frames do, through the owner — PTX toward the dongle
+ * (with the ACK payload handed to the keymap pull, so a chunk the dongle
+ * slipped into the ACK is not lost), or, on the USB route (chip listening in
+ * PRX), by the same excursion as the mode announcement, the FIFO drained
+ * into the right-half consumer first. It touches no relay state: no
+ * counters, no "dongle seen", no supervision clock (a stress frame is no
+ * proof of the keyboard's life: the dongle drops it before its supervision). */
+static radio_tx_t kbd_relay_stress_sink(const uint8_t *buf, uint8_t len)
+{
+    if (!radio_presente()) return RADIO_TX_INDISPO;
+#if CONFIG_KASE_DONGLE_FUSION
+    if (radio_mode() == RADIO_PRX) {
+        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+        uint8_t dst[5] = { s_kbd_cfg.rx_addr[0], s_kbd_cfg.rx_addr[1],
+                           s_kbd_cfg.rx_addr[2], s_kbd_cfg.rx_addr[3],
+                           s_kbd_cfg.addr_suffix };
+        return radio_excursion_emettre(s_kbd_cfg.channel, dst, buf, len, kbd_relay_rx_droite, &now);
+    }
+#endif
+    uint8_t ack[32];
+    uint8_t ack_n = 0;
+    radio_tx_t r = radio_emettre(buf, len, ack, &ack_n, 20, NULL, NULL);
+#if CONFIG_KASE_DONGLE_FUSION
+    if (r == RADIO_TX_ACK || r == RADIO_TX_REFUS) keymap_pull_on_ack(ack, ack_n);
+#endif
+    return r;
+}
+#endif
+
 /* ── Radio config helper (mirrors board_nrf_cfg in half_scan_task.c) ─────── */
 
 static rf_radio_cfg_t kbd_nrf_cfg(void)
@@ -553,6 +594,9 @@ void kbd_relay_init(void)
     ESP_LOGI(TAG, "kbd_relay: paired set_id=0x%04X slot=0x%02X — relay active",
              set_id, slot);
     s_paired = true;
+#if CONFIG_KASE_RF_TRACE_HALF
+    rf_stress_half_set_sink(kbd_relay_stress_sink);   /* rf-scope: stress frames go out like ours */
+#endif
 
     /* Periodic keyboard-state refresh: self-heals lost key-ups over the lossy
      * link (no heartbeat reconciliation on the HIDREPORT path). Streams only

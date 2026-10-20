@@ -20,6 +20,9 @@ static void test_cfg_routing(void) {
      * (forwarded, the start would reach the left half and its ack would come
      * back as the dongle's: the trace would never start) */
     TEST_ASSERT(cfg_is_dongle_local(KS_CMD_RF_TRACE), "RF_TRACE local");
+    /* rf-scope stress: a half's UART0 command; on the CDC the dongle refuses it
+     * itself — forwarded, a host could start a stress run through the dongle */
+    TEST_ASSERT(cfg_is_dongle_local(KS_CMD_RF_STRESS), "RF_STRESS local (never forwarded)");
 
     /* dongle-local: diagnostics that belong to the dongle */
     TEST_ASSERT(cfg_is_dongle_local(KS_CMD_NVS_RESET), "NVS_RESET local");

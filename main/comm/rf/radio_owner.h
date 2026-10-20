@@ -100,6 +100,11 @@ void radio_rx_drain(radio_rx_cb_t cb, void *ctx);
  * and it says so). Refused in PTX (radio_send is enough). */
 bool radio_excursion_tx(uint8_t canal, const uint8_t addr[5], const uint8_t *buf, uint8_t len,
                         radio_rx_cb_t cb, void *ctx);
+/* The same, with the verdict of radio_emettre: ACK / REFUS (went out) or
+ * INDISPO (nothing left: not in PRX, chip absent, lock held under 20 ms —
+ * counted as unavailable). The rf-scope stress generator needs the difference. */
+radio_tx_t radio_excursion_emettre(uint8_t canal, const uint8_t addr[5], const uint8_t *buf, uint8_t len,
+                                   radio_rx_cb_t cb, void *ctx);
 
 /* One pairing round: aim at the rendezvous (address + channel), transmit `req`,
  * listen `listen_ms` for the response (returned in rx/rx_n), then COME BACK to the

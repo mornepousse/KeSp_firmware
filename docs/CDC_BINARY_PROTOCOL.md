@@ -889,6 +889,36 @@ ser.write(ks_frame(0xBA, bytes([0x00])))                           # stop
 
 ---
 
+#### RF_STRESS (0xBB)
+rf-scope stress generator of a **half** (spec "Stress tests", `main/comm/rf/rf_stress.h`). **Halves only, over their console UART0** (the ESP-Prog), in the same KS framing as `RF_TRACE`; on the dongle's CDC it is local and refused (`ERR_UNKNOWN`), never forwarded. Off at boot; a run always ends by itself.
+
+The half sends synthetic frames of their own kind, `PKT_TYPE_STRESS` (0xA): `[0xA0 | half][seq][0 × 4]`, the size of a MATRIX frame, with their own 8-bit seq — **through the radio owner like a real frame** (same lock, same ESB retries; a left on USB uses the same PRX→PTX→PRX excursion as its mode announcement). Each one gets the usual TX trace record (`pkt_kind` 0xA). **A stress frame can never reach the host as a keystroke**: the dongle drops it before every handler, traced or not (it counts it in its periodic record's `stress`); the left's receive path drops it first too.
+
+- Request (sub-command first, little-endian):
+  - `[0x00]` — stop. Stop while off is a no-op success.
+  - `[0x01][pattern u8][rate_hz u16][count u32][duration_s u16][burst_len u8][burst_pause_ms u16]` — 13 bytes, start (a start while running replaces the run):
+
+    | `pattern` | Frames |
+    |---|---|
+    | 0 `RATE`  | one every `1/rate_hz` s on a grid (`rate_hz` 1..2000); a late frame is rebased, never a catch-up burst |
+    | 1 `BURST` | `burst_len` (≥ 1) back to back, then a pause of `burst_pause_ms` from the end of the last TX |
+    | 2 `MAX`   | the next frame as soon as the previous TX completed |
+    | 3 `HELD`  | one every 100 ms — the halves' re-assertion of held keys (`rate_hz` ignored) |
+
+    `count` = frames that left the chip (ACK or MAX_RT), 0 = no count. `duration_s` 0 = 30 s without a count, 600 s with one. Between two frames the generator blocks at least 200 µs (it never starves the idle task); a radio that cannot transmit (lock held, asleep) consumes nothing and is retried 10 ms later.
+- Response: KR with the same 7-byte ack as `RF_TRACE`: `[sub][session u32 LE][remaining_s u16 LE]` — start: the run's number and duration; stop: the run that was stopped (0 if none) and 0.
+- Errors: `ERR_INVALID` (length, sub-command, pattern), `ERR_RANGE` (`rate_hz` 0 or > 2000 for RATE, `burst_len` 0 for BURST), `ERR_UNKNOWN` (no radio, half not paired, or another command than `RF_TRACE`/`RF_STRESS` on UART0).
+- While a run is active the half posts the sleep veto `stress` (`HB … vetos=stress`); it is released when the run stops — count reached, duration over, stop command, or the sleep itself (a sleep forced past the veto ends the run first). The end of a run is logged on the console (`rfstress: session N stopped (…): sent, acked, MAX_RT, unavailable`).
+
+```python
+import struct
+start = bytes([0x01, 2]) + struct.pack("<HIHBH", 0, 0, 30, 0, 0)    # MAX for 30 s
+ser.write(ks_frame(0xBB, start))       # repeat every 250 ms until the KR BB ack (a half hears UART0 only awake)
+ser.write(ks_frame(0xBB, bytes([0x00])))                            # stop
+```
+
+---
+
 ### OTA (0xF0–0xFF)
 
 #### OTA_START (0xF0)

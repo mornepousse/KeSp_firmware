@@ -266,7 +266,7 @@ config KASE_RF_TRACE_HALF
         What it costs with tracing OFF (the normal state):
         - RAM: the drain task's 3 KB stack (+ TCB), blocked on
           portMAX_DELAY - it never runs on its own; the record ring
-          (128 x 24 B = 3 KB) plus ~0.8 KB of batch/frame/RX buffers;
+          (128 x 32 B = 4 KB) plus ~1 KB of batch/frame/RX buffers;
         - CPU: one flag check per transmission in the radio owner;
         - the UART0 RX interrupt stays enabled (RX FIFO threshold +
           timeout): a byte on RX0 wakes the drain task, which drops it
@@ -279,6 +279,12 @@ config KASE_RF_TRACE_HALF
         slightly (drain task wake-ups, up to ~11 ms in the sleep hook):
         keep it off for current measurements.
         See main/comm/rf/rf_trace_uart.c.
+
+        The same UART0 reader carries KS_CMD_RF_STRESS (0xBB), the
+        rf-scope stress generator (main/comm/rf/rf_stress_half.c): its
+        task and timer are created at the FIRST start only, so a half
+        that is never stressed pays nothing but ~0.2 KB of state. A run
+        posts the "stress" sleep veto and always ends by itself.
 
 config KASE_RF_FORCE_ROUTE
     bool "Force HID over radio even when USB is plugged in"

@@ -113,6 +113,47 @@ means a test, or a line.
   that ran out during the sleep turns tracing off at wake), and the UART0 KS
   assembler (resyncs on noise, refuses a bad CRC and an oversized header at
   once).
+- [test:test_rf_stress] rf-scope stress generator, pure part
+  (`main/comm/rf/rf_stress.c`): `KS_CMD_RF_STRESS` (0xBB) on a half's UART0
+  — `[0x00]` stop, `[0x01][pattern][rate_hz u16][count u32][duration_s
+  u16][burst_len][burst_pause_ms u16]` start, anything else refused (length,
+  sub-command, pattern; RATE 0 or > 2000 Hz and an empty BURST out of
+  range). A run ALWAYS ends on its own: no count and no duration = 30 s, a
+  count alone is capped at 600 s. Stress frames are `[0xA0|half][seq][0×4]`
+  (kind STRESS, the size of a MATRIX frame, their own seq). The scheduler:
+  RATE on a grid of its due times (no drift from the TX time) and rebased
+  when late (never a catch-up storm); BURST back to back then the pause
+  from the end of the last TX; MAX the next frame when the previous TX
+  completed; HELD every 100 ms; after every frame a WAIT of at least 200 µs
+  (the task blocks — the send busy-polls the chip, MAX without it would
+  starve IDLE); an unavailable radio consumes no seq and no count and backs
+  off 10 ms (never a spin); the run stops on count or duration, a WAIT never
+  overshoots the end, a stop or a restart makes a late TX completion count
+  for nothing, every start is a new non-zero session.
+- [test:test_radio_owner] A stress frame goes through the radio owner like
+  a real one (same lock, same send, the same excursion on a left on USB)
+  and gets its TX record with kind STRESS and its own seq
+  (test_trace_stress_frame_is_recorded_like_a_real_one); the excursion's
+  verdict tells "went out" (ACK/REFUS) from "never left" (INDISPO, counted
+  as unavailable: not in PRX, lock held) — radio_excursion_emettre
+  (test_excursion_verdict_unavailable_vs_refused).
+- [test:test_veille_veto] While a stress run is active the half posts the
+  `stress` sleep veto (`HB … vetos=stress`), released when the run stops —
+  count, duration, stop command or the sleep itself, which ends the run
+  first; the nine veto names fit the HB (test_stress_est_un_veto).
+- [smoke:RF stress] The stress generator (`rf_stress_half.c`) is created at
+  the first start (a half never stressed pays nothing), blocks on a one-shot
+  esp_timer between frames and on `portMAX_DELAY` at rest (no periodic wait
+  at rest; a run may tick faster than 30 ms but always ends by itself). Its
+  frames reach the radio only through the half's policy sink — the left's
+  through the owner toward the dongle (the ACK payload still handed to the
+  keymap pull) or by its USB excursion, the right's toward its current
+  target — touching no policy state (seq, fallback FSM, "dongle seen",
+  supervision clock). A stress frame NEVER reaches the host as a keystroke:
+  the dongle drops it before every handler (test_rf_rx_dispatch…), the
+  left's right-half consumer drops it first, the left's local engine never
+  sees it. `KS_CMD_RF_STRESS` is dongle-local on the CDC (test_cfg_bridge:
+  refused, never forwarded).
 - [smoke:RF trace (half)] A half traces over its console UART0 without a
   UART driver, without a wake veto and without a new cadence: tracing off,
   its sleep current and `HB … slept=` are those of a build without the trace

@@ -41,7 +41,7 @@ static bool           s_endormie, s_verrou_sommeil;
  * driver's verdict (STATUS, OBSERVE_TX). Tracing off costs ONE load of
  * g_rf_trace_session and a branch per transmission; the excursion's extra
  * OBSERVE_TX read happens only while tracing. Any frame sent through here —
- * a future stress frame included — gets its record the same way. */
+ * a stress frame included (rf_stress_half.c) — gets its record the same way. */
 #if defined(TEST_HOST) || CONFIG_KASE_RF_TRACE_HALF
 #define RADIO_TRACE 1
 #include "rf_trace_half.h"
@@ -195,11 +195,11 @@ void radio_rx_drain(radio_rx_cb_t cb, void *ctx)
     vider(cb, ctx);
     lock_give();
 }
-bool radio_excursion_tx(uint8_t canal, const uint8_t addr[5], const uint8_t *buf, uint8_t len,
-                        radio_rx_cb_t cb, void *ctx)
+radio_tx_t radio_excursion_emettre(uint8_t canal, const uint8_t addr[5], const uint8_t *buf, uint8_t len,
+                                   radio_rx_cb_t cb, void *ctx)
 {
-    if (!s_radio.present || s_mode != RADIO_PRX) return false;   /* from PTX: radio_send */
-    if (!lock_take(20)) return false;
+    if (!s_radio.present || s_mode != RADIO_PRX) { s_indispo++; return RADIO_TX_INDISPO; }   /* from PTX: radio_send */
+    if (!lock_take(20)) { s_indispo++; return RADIO_TX_INDISPO; }
     vider(cb, ctx);                                               /* BEFORE: the excursion ends with FLUSH_RX */
     uint8_t retour[5] = { s_cible.rx_addr[0], s_cible.rx_addr[1], s_cible.rx_addr[2], s_cible.rx_addr[3],
                           s_cible.addr_suffix };
@@ -214,8 +214,11 @@ bool radio_excursion_tx(uint8_t canal, const uint8_t addr[5], const uint8_t *buf
     else         RF_CH_ECRIT();
 #endif
     lock_give();
-    return ok;
+    return ok ? RADIO_TX_ACK : RADIO_TX_REFUS;
 }
+bool radio_excursion_tx(uint8_t canal, const uint8_t addr[5], const uint8_t *buf, uint8_t len,
+                        radio_rx_cb_t cb, void *ctx)
+{ return radio_excursion_emettre(canal, addr, buf, len, cb, ctx) == RADIO_TX_ACK; }
 
 bool radio_pair_round(const uint8_t rdv_addr[5], uint8_t rdv_ch, const uint8_t *req, uint8_t n,
                       uint8_t *rx, uint16_t rx_max, uint32_t listen_ms, uint16_t *rx_n)

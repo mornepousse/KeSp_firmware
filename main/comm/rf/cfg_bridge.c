@@ -127,6 +127,9 @@ bool cfg_is_dongle_local(uint8_t cmd_id)
         case KS_CMD_MONITOR:
         /* rf-scope trace: the dongle's own radio and its CDC stream */
         case KS_CMD_RF_TRACE:
+        /* rf-scope stress: a HALF's command (its UART0); never forwarded —
+         * the dongle answers ERR_UNKNOWN itself */
+        case KS_CMD_RF_STRESS:
         /* Security: HMAC key slots live on the dongle */
         case KS_CMD_SEC_SET_SLOT:
         case KS_CMD_SEC_CLEAR_SLOT:
