@@ -51,15 +51,21 @@ class StartController:
             if now >= self._next:
                 self.attempts += 1
                 self._next = now + self.interval_s
-                return ks_frame(CMD_RF_TRACE, b"\x01" + self.duration_s.to_bytes(2, "little"))
+                return self._start_frame()
         elif self.state == "stopping":
             if now - self._stop_t0 > self.stop_budget_s:
                 self.state = "off"
                 return None
             if now >= self._next:
                 self._next = now + self.interval_s
-                return ks_frame(CMD_RF_TRACE, b"\x00")
+                return self._stop_frame()
         return None
+
+    def _start_frame(self) -> bytes:
+        return ks_frame(CMD_RF_TRACE, b"\x01" + self.duration_s.to_bytes(2, "little"))
+
+    def _stop_frame(self) -> bytes:
+        return ks_frame(CMD_RF_TRACE, b"\x00")
 
     def on_ack(self, now: float, info: dict | None = None) -> None:
         if self.state == "starting":

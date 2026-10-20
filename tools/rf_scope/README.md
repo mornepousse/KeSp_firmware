@@ -28,9 +28,15 @@ rf_scope capture --dongle /dev/ttyACM0 --left /dev/ttyUSB0 --duration 10m -o run
 # Both halves (two ESP-Progs), no TUI (a status line every 5 s on stderr):
 rf_scope capture --dongle /dev/ttyACM0 --left /dev/ttyUSB0 --right /dev/ttyUSB1 --duration 2m --no-tui
 
+# Load the link: the left's stress generator, 30 s of bursts, traced at both ends:
+rf_scope stress --dongle /dev/ttyACM0 --left /dev/ttyUSB0 --scenario burst --duration 30
+rf_scope stress --dongle /dev/ttyACM0 --left /dev/ttyUSB0 --right /dev/ttyUSB1 --scenario max
+rf_scope stress --dongle /dev/ttyACM0 --left /dev/ttyUSB0 --scenario rate --rate 200 -o rate200.jsonl
+rf_scope stress --dongle /dev/ttyACM0 --left /dev/ttyUSB0 --scenario soak --duration 4h --no-tui
+
 rf_scope replay run.jsonl --speed 4          # the same TUI, fed from the file
 rf_scope replay run.jsonl --dump 110x34 --at 60   # one rendered frame as text (no terminal needed)
-rf_scope report run.jsonl [--window 60]      # text summary + per-window table
+rf_scope report run.jsonl [--window 60]      # text summary + per-window table (+ "stress" section)
 ```
 
 `capture` ends on Ctrl-C or when `--duration` elapses; either way it sends
@@ -43,6 +49,51 @@ TUI keys: `q` quit, `p` pause the event scroll, `r` reset the windows (the
 panels then count from now). It degrades on a small terminal: below 76 columns
 the halves stack, below the height of the full panels they shrink to one line
 each, below 40x6 it just says so.
+
+### Stress runs
+
+`stress` is a capture (same ports, same safety, same TUI, same run file) that
+also drives the **stress generator** of each half named (`KS_CMD_RF_STRESS`,
+0xBB, on its UART0 — `docs/CDC_BINARY_PROTOCOL.md`). Scenarios:
+
+| `--scenario` | firmware pattern | default |
+|---|---|---|
+| `burst` | `--burst-len` frames back to back, then `--burst-pause` ms | 10 frames / 200 ms, 30 s |
+| `max`   | the next frame as soon as the previous TX completed (≥ 200 µs gap) | 30 s |
+| `held`  | one frame every 100 ms, like a held key's re-assertion | 30 s |
+| `rate`  | `--rate` frames per second on a grid (1..2000) | 50 Hz, 30 s |
+| `soak`  | `--rate` frames per second for hours; report windows of 10 min | 20 Hz, 1 h |
+
+`--count N` ends the run after N frames (the firmware still caps a count-only
+run at 600 s). The order is fixed: trace on (dongle and halves) → stress start
+on each half, **repeated until its `KR BB` ack** (a half hears UART0 only
+awake) → the run → **stress stop first**, then the trace stop, so the last
+stress frames and records are in the file. The firmware ends the run by itself
+at its duration (and the tool captures 3 s more), on its count, and if the
+half sleeps; while it runs the half posts the sleep veto `stress` (`HB …
+vetos=stress`). Parameters out of range are refused before any port is opened;
+a half that refuses (`ERR_UNKNOWN`: not paired, no radio) is reported
+(`stress_refused`) and the capture goes on.
+
+**A stress frame can never be typed on the host.** It is of its own kind
+(`PKT_TYPE_STRESS` 0xA); the dongle drops it before every handler, traced or
+not, and counts it (periodic `stress`). The smoke item "RF stress" checks it
+with a text editor focused during every scenario.
+
+The report adds a **stress** section built from the stress frames alone
+(kind 0xA; matched exactly like the full run): per half, the time the run was
+active, frames **offered** (TX records, per second) against the rate
+**requested**, frames **delivered** (matched at the dongle, per second),
+**loss**, ACKs, MAX_RT, retries, **latency under load** (p50/p95/p99), the
+trace ring drops of both ends (records lost: the counts become lower bounds),
+the dongle's `stress` counter (frames it dropped before the engine) against
+the half's, and a per-window table (10 min for a soak). The fusion queue's
+overflow counter (`transitions_ecrasees`) is not in the trace: read it with
+`scripts/kesp_cdc.py rfstat` right after the run.
+
+At `max` a half sends far more frames than its 115200-baud trace can carry
+(~800 TX records/s): expect half ring drops, and read loss on the frames that
+were recorded.
 
 ### Port safety
 
@@ -78,10 +129,10 @@ One JSON object per line, self-contained:
 
 | `type` | fields |
 |---|---|
-| `meta` | `version`, `sources` (role -> port), `started`, `duration_s` |
+| `meta` | `version`, `sources` (role -> port), `started`, `duration_s`; a stress run adds `scenario` (`name`, `params`) |
 | `rec` | `src` (`dongle`/`left`/`right`), `port`, `host_ns`, `kind` (`tx`/`rx`/`periodic`) and the record's fields exactly as in `main/comm/rf/rf_trace.h` |
 | `text` | `src`, `host_ns`, `text`: a console line of a half (kept so the run explains itself) |
-| `ctl` | `src`, `host_ns`, `event`: `start_sent`, `ack` (`attempts`, `session`, `remaining_s`), `refused` (`status`), `giveup` (`message`), `stop_sent`, `stop_ack` (`session`), `closed` |
+| `ctl` | `src`, `host_ns`, `event`: `start_sent`, `ack` (`attempts`, `session`, `remaining_s`), `refused` (`status`), `giveup` (`message`), `stop_sent`, `stop_ack` (`session`), `closed`; stress runs: `stress_start_sent` (`scenario`, `params`), `stress_ack` (`attempts`, `session`, `remaining_s`), `stress_refused` (`status`, `message`), `stress_giveup`, `stress_stop_sent`, `stress_stop_ack` |
 
 `host_ns` is `time.monotonic_ns()` when the chunk carrying the record was read
 (records of one chunk share it). A truncated last line (killed capture) is

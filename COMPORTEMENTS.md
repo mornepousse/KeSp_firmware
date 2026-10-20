@@ -154,6 +154,17 @@ means a test, or a line.
   left's right-half consumer drops it first, the left's local engine never
   sees it. `KS_CMD_RF_STRESS` is dongle-local on the CDC (test_cfg_bridge:
   refused, never forwarded).
+  Host side, `rf_scope stress --scenario burst|max|held|rate|soak`
+  (`tools/rf_scope/rftrace/stress.py`, pytest `tests/test_stress.py`, brick
+  `rf-scope-pytest`): parameters out of range are refused before any port
+  is opened (the same `fuser` check and `dtr=rts=False` as `capture`); the
+  stress start goes to a half only once its trace is on, repeated until its
+  `KR BB` ack, never to the dongle; at the end the stress is stopped FIRST
+  and the trace only once the stress is off; the run file carries the
+  scenario and the `stress_*` control events, and `report` adds a stress
+  section (offered vs delivered, loss, MAX_RT, retries, latency under load,
+  ring drops of both ends, the dongle's stress counter; 10-min windows for a
+  soak).
 - [smoke:RF trace (half)] A half traces over its console UART0 without a
   UART driver, without a wake veto and without a new cadence: tracing off,
   its sleep current and `HB … slept=` are those of a build without the trace

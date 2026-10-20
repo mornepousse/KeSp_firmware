@@ -27,7 +27,12 @@ def name_of(e) -> str:
 
 
 class Analyzer:
-    def __init__(self, cfg: MatcherConfig | None = None, expect: tuple = ()) -> None:
+    def __init__(self, cfg: MatcherConfig | None = None, expect: tuple = (), only_pkt_kind: int | None = None) -> None:
+        """`only_pkt_kind`: keep only the TX/RX records of that frame kind (the
+        report's stress section: 0xA). Matching keys on the kind, so the
+        filtered matches are exactly the full run's matches of that kind; the
+        periodic records (liveness, sleep, drops, counters) all go through."""
+        self.only_pkt_kind = only_pkt_kind
         self.cfg = cfg or MatcherConfig()
         self.fits: dict[int, ClockFit] = {}
         self.matcher = Matcher(self.cfg, fits=lambda e: self.fits.get(e))
@@ -49,6 +54,9 @@ class Analyzer:
         self.orphans: dict[int, int] = {}
         self.unflagged_dups: dict[int, int] = {}
         self.reboots = 0
+        self.tx_span: dict[int, list[int]] = {}       # emitter -> [first, last] host_ns of its TX records
+        self.stress_counter: dict = {}                # "dongle" / emitter -> sum of the periodic `stress`
+        self.stress: dict[str, dict] = {}             # src -> {"state", "session", "params"}
 
     # -- helpers ----------------------------------------------------------------
 
@@ -79,6 +87,11 @@ class Analyzer:
             self.t0 = ns
             self.stats.t0_ns = ns
         self.last_ns = max(self.last_ns, ns)
+        if t == "rec" and self.only_pkt_kind is not None and item["kind"] in ("tx", "rx") \
+                and item.get("pkt_kind") != self.only_pkt_kind:
+            if item["kind"] == "rx":                    # still proof that the dongle was tracing
+                self._apply(self.matcher.dongle_alive(ns), ns)
+            return                                      # same t0 as the full run: same window edges
         self.n_items += 1
         if t == "rec":
             self.ports.setdefault(item["src"], item.get("port", ""))
@@ -95,6 +108,9 @@ class Analyzer:
                  "stop_sent": "stopping", "stop_ack": "off"}.get(ev)
         if state:
             self.trace[src] = state
+        if ev.startswith("stress_"):
+            self._stress_ctl(src, ev, it, ns)
+            return
         if ev == "ack":
             self._event(ns, "info", None, "trace", f"{src}: trace on (ack after {it.get('attempts', '?')} request(s))")
         elif ev == "giveup":
@@ -106,8 +122,30 @@ class Analyzer:
         if src == "dongle" and ev in ("stop_sent", "stop_ack", "closed"):
             self._apply(self.matcher.dongle_off(ns), ns)
 
+    def _stress_ctl(self, src: str, ev: str, it: dict, ns: int) -> None:
+        st = self.stress.setdefault(src, {"state": "-", "session": None, "params": None})
+        state = {"stress_start_sent": "starting", "stress_ack": "on", "stress_refused": "refused",
+                 "stress_giveup": "gave_up", "stress_stop_sent": "stopping", "stress_stop_ack": "off"}.get(ev)
+        if state:
+            st["state"] = state
+            self.trace[src + ".stress"] = state
+        if ev == "stress_start_sent":
+            st["params"] = it.get("params")
+        elif ev == "stress_ack":
+            st["session"] = it.get("session")
+            st["on_ns"] = ns
+            self._event(ns, "info", None, "stress", f"{src}: stress session {it.get('session')} on "
+                        f"({it.get('remaining_s')} s)")
+        elif ev in ("stress_refused", "stress_giveup"):
+            self._event(ns, "bad", None, "giveup", it.get("message", f"{src}: stress {state}"))
+        elif ev == "stress_stop_ack":
+            st["off_ns"] = ns
+            self._event(ns, "info", None, "stress", f"{src}: stress off")
+
     def _rec_tx(self, it: dict, ns: int) -> None:
         e = it["emitter"]
+        span = self.tx_span.setdefault(e, [ns, ns])
+        span[0], span[1] = min(span[0], ns), max(span[1], ns)
         t = self._unwrapper(it["src"]).unwrap(it["t_us"])
         self.stats.add_tx(e, ns, it)
         self.half.setdefault(e, {"awake": True, "batt_dV": 0, "channel": None})
@@ -141,6 +179,8 @@ class Analyzer:
             self._event(ns, "bad", it["source"], "reboot", f"{src} rebooted (uptime {self._uptime[src]} s -> {up} s)")
         self._uptime[src] = up
         u.anchor(it["t_us"], up)
+        key = "dongle" if it["source"] == codec.EMIT_DONGLE else it["source"]
+        self.stress_counter[key] = self.stress_counter.get(key, 0) + it.get("stress", 0)
         if it["source"] == codec.EMIT_DONGLE:
             self.dongle.update(seen_ns=ns, channel=it["channel"])
             self.matcher.dongle_channel(it["channel"])

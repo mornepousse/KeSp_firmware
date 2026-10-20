@@ -1,4 +1,4 @@
-"""rf_scope command line: capture / replay / report."""
+"""rf_scope command line: capture / stress / replay / report."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 
-from . import jsonl, ports, report, tui
+from . import jsonl, ports, report, stress, tui
 from .analyzer import Analyzer
 from .control import StartController
 from .source import SourceRunner
@@ -30,11 +30,24 @@ def parse_duration(s: str) -> int:
     return h * 3600 + mi * 60 + se
 
 
+def _is_stress(it: dict) -> bool:
+    return (it.get("type") == "rec" and it.get("pkt_kind") == stress.PKT_STRESS) or \
+        str(it.get("event", "")).startswith("stress_")
+
+
 def analyze_file(path, expect: tuple = ()) -> Analyzer:
+    """The run's analyzer; `.stress_view` is a second one restricted to the
+    stress frames when the run has any (the report's stress section)."""
     an = Analyzer(expect=expect)
+    san = Analyzer(only_pkt_kind=stress.PKT_STRESS)
+    has = False
     for it in jsonl.read(path):
         an.feed(it)
+        san.feed(it)
+        has = has or _is_stress(it)
     an.finish()
+    san.finish()
+    an.stress_view = san if has else None
     return an
 
 
@@ -57,7 +70,26 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--at", type=float, default=None, help="with --dump: seconds into the run (default the end)")
     p = sub.add_parser("report", help="text summary of a run file")
     p.add_argument("run")
-    p.add_argument("--window", type=int, default=60, metavar="S")
+    p.add_argument("--window", type=int, default=None, metavar="S",
+                   help="per-window table width (default 60 s; 600 s for a soak run)")
+    s = sub.add_parser("stress", help="load the link with a half's stress generator, trace it, report it")
+    s.add_argument("--dongle", metavar="/dev/ttyACMx", help="dongle CDC port (required)")
+    s.add_argument("--left", metavar="/dev/ttyUSBx", help="left half's UART0 (ESP-Prog): stressed")
+    s.add_argument("--right", metavar="/dev/ttyUSBy", help="right half's UART0 (ESP-Prog): stressed")
+    s.add_argument("--scenario", required=True, choices=stress.SCENARIOS,
+                   help="burst: 10 back to back + 200 ms pause; max: back to back; held: every 100 ms; "
+                        "rate: --rate Hz; soak: --rate Hz (default 20) for hours, 10-min windows")
+    s.add_argument("--rate", type=int, default=None, metavar="HZ", help="rate / soak: frames per second")
+    s.add_argument("--burst-len", type=int, default=10, metavar="N", help="burst: frames per burst")
+    s.add_argument("--burst-pause", type=int, default=200, metavar="MS", help="burst: pause after a burst")
+    s.add_argument("--count", type=int, default=0, help="stop after this many frames (0: duration only)")
+    s.add_argument("--duration", type=parse_duration, default=None, metavar="30s",
+                   help="stress duration (default 30 s, soak 1 h)")
+    s.add_argument("-o", "--output", default=None, help="run file (default rf_stress_<scenario>_<date>.jsonl)")
+    s.add_argument("--no-tui", action="store_true", help="no curses: one status line every 5 s on stderr")
+    s.add_argument("--baud", type=int, default=115200, help="half UART baud rate")
+    s.add_argument("--window", type=int, default=None, metavar="S",
+                   help="report window (default 60 s; 600 s for a soak)")
     return ap
 
 
@@ -68,6 +100,31 @@ def cmd_capture(a) -> int:
     if not chosen:
         print("rf_scope capture: give at least one of --dongle / --left / --right", file=sys.stderr)
         raise SystemExit(2)
+    return _session(a, chosen, a.duration, None)
+
+
+def cmd_stress(a) -> int:
+    chosen = {r: getattr(a, r) for r in ROLES if getattr(a, r)}
+    if "dongle" not in chosen or not ({"left", "right"} & set(chosen)):
+        print("rf_scope stress: give --dongle and at least one of --left / --right (the stressed halves)",
+              file=sys.stderr)
+        return 2
+    try:                                   # refused BEFORE any port is touched
+        params = stress.scenario_params(a.scenario, a.duration, rate=a.rate, burst_len=a.burst_len,
+                                        burst_pause_ms=a.burst_pause, count=a.count)
+    except ValueError as exc:
+        print(f"rf_scope stress: {exc}", file=sys.stderr)
+        return 2
+    if a.window is None and a.scenario == "soak":
+        a.window = stress.SOAK_WINDOW_S
+    if a.output is None:
+        a.output = f"rf_stress_{a.scenario}_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + ".jsonl"
+    # The firmware ends the run by itself at its duration; the capture lasts a
+    # little longer so the last frames and records arrive, then stops both.
+    return _session(a, chosen, params["duration_s"] + 3, params)
+
+
+def _session(a, chosen: dict, duration_s: int, stress_params: dict | None) -> int:
     if len(set(chosen.values())) != len(chosen):
         print("rf_scope: the same port was given twice", file=sys.stderr)
         return 2
@@ -78,6 +135,7 @@ def cmd_capture(a) -> int:
         print(f"rf_scope: {exc}", file=sys.stderr)
         return 2
     out_path = a.output or "rf_run_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + ".jsonl"
+    win_s = getattr(a, "window", None) or 60
     open_ports = {}
     try:
         for role, path in chosen.items():
@@ -89,8 +147,11 @@ def cmd_capture(a) -> int:
         return 2
 
     q: queue.Queue = queue.Queue()
-    request_s = min(65535, a.duration + 30)          # the firmware's own auto-off is the safety net
-    runners = {r: SourceRunner(r, chosen[r], open_ports[r], StartController(request_s), q.put) for r in chosen}
+    request_s = min(65535, duration_s + 30)          # the firmware's own auto-off is the safety net
+    runners = {r: SourceRunner(r, chosen[r], open_ports[r], StartController(request_s), q.put,
+                               stress=stress.StressController(stress_params)
+                               if stress_params is not None and r != "dongle" else None)
+               for r in chosen}
     stop = threading.Event()
     deadline = [None]
 
@@ -111,11 +172,18 @@ def cmd_capture(a) -> int:
 
     threads = [threading.Thread(target=worker, args=(r,), daemon=True) for r in runners.values()]
     an = Analyzer(expect=tuple(EMITTER_OF[r] for r in chosen if r in EMITTER_OF))
+    san = Analyzer(only_pkt_kind=stress.PKT_STRESS) if stress_params is not None else None
     t_start = time.monotonic()
     writer = jsonl.Writer(out_path)
-    writer.write({"type": "meta", "version": jsonl.VERSION, "tool": "rf_scope", "sources": chosen,
-                  "started": datetime.datetime.now().isoformat(timespec="seconds"),
-                  "duration_s": a.duration, "host_ns0": time.monotonic_ns()})
+    meta = {"type": "meta", "version": jsonl.VERSION, "tool": "rf_scope", "sources": chosen,
+            "started": datetime.datetime.now().isoformat(timespec="seconds"),
+            "duration_s": duration_s, "host_ns0": time.monotonic_ns()}
+    if stress_params is not None:
+        meta["scenario"] = {"name": stress_params["scenario"], "params": stress_params}
+    writer.write(meta)
+    an.feed(meta)
+    if san is not None:
+        san.feed(meta)
     for t in threads:
         t.start()
 
@@ -127,7 +195,9 @@ def cmd_capture(a) -> int:
                 return
             writer.write(it)
             an.feed(it)
-            if it["type"] == "ctl" and it["event"] == "giveup":
+            if san is not None:
+                san.feed(it)
+            if it["type"] == "ctl" and it["event"] in ("giveup", "stress_giveup", "stress_refused"):
                 print("rf_scope: " + it["message"], file=sys.stderr)
 
     def finished() -> bool:
@@ -135,12 +205,13 @@ def cmd_capture(a) -> int:
 
     def step() -> tuple[int, bool]:
         drain()
-        if not stop.is_set() and time.monotonic() - t_start >= a.duration:
+        if not stop.is_set() and time.monotonic() - t_start >= duration_s:
             stop.set()
             deadline[0] = time.monotonic() + 4.0
         return time.monotonic_ns(), finished()
 
-    info = {"mode": "LIVE", "run_file": out_path, "duration_s": a.duration}
+    mode = "LIVE" if stress_params is None else f"STRESS {stress_params['scenario']}"
+    info = {"mode": mode, "run_file": out_path, "duration_s": duration_s}
     try:
         if a.no_tui or not sys.stdout.isatty():
             last = 0.0
@@ -172,8 +243,11 @@ def cmd_capture(a) -> int:
             except OSError:
                 pass
     an.finish()
+    if san is not None:
+        san.finish()
+    an.stress_view = san
     print(f"rf_scope: wrote {out_path}", file=sys.stderr)
-    print(report.render(an, out_path), end="")
+    print(report.render(an, out_path, win_s), end="")
     return 0
 
 
@@ -181,7 +255,11 @@ def cmd_capture(a) -> int:
 
 def cmd_report(a) -> int:
     an = analyze_file(a.run)
-    print(report.render(an, a.run, a.window), end="")
+    win = a.window
+    if win is None:
+        soak = ((an.meta or {}).get("scenario") or {}).get("name") == "soak"
+        win = stress.SOAK_WINDOW_S if soak else 60
+    print(report.render(an, a.run, win), end="")
     return 0
 
 
@@ -209,7 +287,7 @@ def cmd_replay(a) -> int:
         print(render_dump(a.run, int(m[1]), int(m[2]), a.at))
         return 0
     if a.no_tui or not sys.stdout.isatty():
-        return cmd_report(argparse.Namespace(run=a.run, window=60))
+        return cmd_report(argparse.Namespace(run=a.run, window=None))
     items = list(jsonl.read(a.run))
     an = Analyzer(expect=(0, 1))
     t0 = next((i["host_ns"] for i in items if "host_ns" in i), 0)
@@ -236,4 +314,4 @@ def cmd_replay(a) -> int:
 
 def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
-    return {"capture": cmd_capture, "replay": cmd_replay, "report": cmd_report}[a.cmd](a)
+    return {"capture": cmd_capture, "stress": cmd_stress, "replay": cmd_replay, "report": cmd_report}[a.cmd](a)
