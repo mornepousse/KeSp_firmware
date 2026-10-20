@@ -105,6 +105,13 @@ static ks_bin_handler_t find_handler(uint8_t cmd_id)
 
 /* ── Response framing ───────────────────────────────────────────── */
 
+/* Replies refused for lack of TX room (the host stopped reading): diagnostic. */
+static uint32_t s_tx_dropped;
+/* A stream whose whole frame did not fit at begin: its writes are skipped. */
+static bool s_stream_dropped;
+
+uint32_t ks_tx_dropped(void) { return s_tx_dropped; }
+
 void ks_respond(uint8_t cmd_id, uint8_t status, const uint8_t *payload, uint16_t len)
 {
     uint8_t hdr[6] = {
@@ -120,6 +127,15 @@ void ks_respond(uint8_t cmd_id, uint8_t status, const uint8_t *payload, uint16_t
             resp_redirect_append(payload, len);
         resp_redirect_append(&crc, 1);
     } else {
+        /* All or nothing: write_queue writes what fits and returns the
+         * count, so three calls into a FIFO the host stopped draining would
+         * leave a truncated KR glued to the next frame (rf-scope review I1).
+         * A reply that fits — every reply while the host reads — is written
+         * exactly as before. */
+        if (!ks_tx_reserve(6u + len + 1u)) {
+            s_tx_dropped++;
+            return;
+        }
         tinyusb_cdcacm_write_queue(CDC_ITF, hdr, 6);
         if (len > 0 && payload)
             tinyusb_cdcacm_write_queue(CDC_ITF, payload, len);
@@ -149,8 +165,12 @@ void ks_respond_begin(uint8_t cmd_id, uint8_t status, uint16_t total_len)
         cmd_id, status,
         (uint8_t)(total_len & 0xFF), (uint8_t)((total_len >> 8) & 0xFF)
     };
+    s_stream_dropped = false;
     if (s_resp_redirect) {
         resp_redirect_append(hdr, 6);
+    } else if (!ks_tx_reserve(6u + (uint32_t)total_len + 1u)) {
+        s_stream_dropped = true;           /* all or nothing, as ks_respond */
+        s_tx_dropped++;
     } else {
         tinyusb_cdcacm_write_queue(CDC_ITF, hdr, 6);
     }
@@ -161,7 +181,7 @@ void ks_respond_write(const uint8_t *data, uint16_t len)
 {
     if (s_resp_redirect) {
         resp_redirect_append(data, len);
-    } else {
+    } else if (!s_stream_dropped) {
         tinyusb_cdcacm_write_queue(CDC_ITF, data, len);
     }
     /* Update CRC incrementally */
@@ -176,7 +196,7 @@ void ks_respond_end(void)
 {
     if (s_resp_redirect) {
         resp_redirect_append(&stream_crc, 1);
-    } else {
+    } else if (!s_stream_dropped) {
         tinyusb_cdcacm_write_queue(CDC_ITF, &stream_crc, 1);
         tinyusb_cdcacm_write_flush(CDC_ITF, 0);
     }

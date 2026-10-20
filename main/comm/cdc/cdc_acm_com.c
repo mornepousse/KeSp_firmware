@@ -12,6 +12,29 @@ void cdc_send_binary(const uint8_t *data, size_t len)
     tinyusb_cdcacm_write_flush(CDC_ITF, 0);
 }
 
+/* Room for a whole KR frame of `need` bytes in the CDC TX FIFO. A host that
+ * reads drains the FIFO at USB speed: the room is there at once and nothing
+ * changes. A host that stopped reading (tool suspended, port closed): wait a
+ * little for the IN transfers, then refuse — the caller drops the WHOLE reply
+ * instead of writing a truncated one. A frame larger than the FIFO itself can
+ * never be reserved: it keeps the old progressive write (true). */
+#define KS_TX_WAIT_TICKS 2   /* ≤ 20 ms at 100 Hz, only when the FIFO is full */
+bool ks_tx_reserve(uint32_t need)
+{
+    if (need > CFG_TUD_CDC_TX_BUFSIZE) return true;
+    for (int i = 0; ; i++) {
+        if (tud_cdc_n_write_available(CDC_ITF) >= need) return true;
+        if (i >= KS_TX_WAIT_TICKS) return false;
+        tud_cdc_n_write_flush(CDC_ITF);
+        vTaskDelay(1);
+    }
+}
+
+bool     cdc_host_connected(void) { return tud_cdc_n_connected(CDC_ITF); }
+uint32_t cdc_tx_room(void)        { return tud_cdc_n_write_available(CDC_ITF); }
+uint32_t cdc_tx_capacity(void)    { return CFG_TUD_CDC_TX_BUFSIZE; }
+void     cdc_tx_discard(void)     { (void)tud_cdc_n_write_clear(CDC_ITF); }
+
 /* ── Receive: USB CDC chunks → binary protocol ──────────────────── */
 
 static TaskHandle_t s_cdc_task;

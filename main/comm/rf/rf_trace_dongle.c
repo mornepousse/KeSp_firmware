@@ -6,6 +6,7 @@
 #include "cdc_binary_protocol.h"   /* ks_respond, KS_CMD_RF_TRACE */
 #include "cdc_acm_com.h"           /* cdc_set_unsolicited_pump, cdc_wake */
 #include "esp_timer.h"
+#include "sdkconfig.h"
 
 /* ── Shared between the tasks (atomics + the SPSC ring) ── */
 bool g_rf_trace_dongle_on;                 /* written by the rf_rx task only */
@@ -28,6 +29,21 @@ static uint32_t now_us32(void) { return (uint32_t)esp_timer_get_time(); }
 rf_trace_ring_t *rf_trace_dongle_ring(void) { return &s_ring; }
 
 /* ── Consumer: the CDC command task ── */
+
+/* The trace never takes the room of the largest reply: a command answered
+ * while the host is slow still finds room for its whole frame. */
+#define CDC_REPLY_RESERVE ((uint32_t)KS_PAYLOAD_MAX + 7u)
+#if defined(CONFIG_TINYUSB_CDC_TX_BUFSIZE)
+_Static_assert(CONFIG_TINYUSB_CDC_TX_BUFSIZE >= CDC_REPLY_RESERVE + RF_TRACE_FRAME_MAX,
+               "CDC TX FIFO too small for a reply AND a trace frame: the trace would never be sent");
+#endif
+
+static void discard_ring(rf_trace_rec_t *scratch)
+{
+    while (rf_trace_ring_pop_batch(&s_ring, scratch, RF_TRACE_BATCH_MAX) != 0)
+        ;
+}
+
 static void pump(void)
 {
     static rf_trace_rec_t batch[RF_TRACE_BATCH_MAX];
@@ -35,12 +51,40 @@ static void pump(void)
     /* Bounded per call so a command waiting behind a burst is not starved;
      * whatever remains re-arms the task. */
     for (unsigned i = 0; i < RING_CAP / RF_TRACE_BATCH_MAX; i++) {
-        size_t n = rf_trace_ring_pop_batch(&s_ring, batch, RF_TRACE_BATCH_MAX);
+        size_t n;
+        switch (rf_trace_pump_plan(cdc_host_connected(), rf_trace_dongle_on(),
+                                   rf_trace_ring_peek_kind(&s_ring), cdc_tx_room(),
+                                   CDC_REPLY_RESERVE, &n)) {
+        case RF_TRACE_PUMP_IDLE:
+            return;
+        case RF_TRACE_PUMP_HOLD:
+            /* The host stopped reading: pop nothing, do not re-wake. The
+             * ring overflows and counts its drops (the next periodic record
+             * reports them); the next producer wake or the CDC task's 1 s
+             * safety net tries again. */
+            return;
+        case RF_TRACE_PUMP_STOP: {
+            /* The host closed the port (DTR dropped) while tracing: stop the
+             * trace, and throw away what nobody will read — the ring and the
+             * TX FIFO — so the next open does not start with stale frames. */
+            const rf_trace_ctl_cmd_t stop = { .start = false };
+            (void)rf_trace_dongle_request(&stop);
+            cdc_tx_discard();
+            discard_ring(batch);
+            return;
+        }
+        case RF_TRACE_PUMP_DISCARD:
+            discard_ring(batch);               /* the stop's final record, no host */
+            return;
+        case RF_TRACE_PUMP_SEND:
+            break;
+        }
+        n = rf_trace_ring_pop_batch(&s_ring, batch, n);
         if (n == 0) return;
         size_t len = rf_trace_frame_encode(frame, sizeof frame, batch[0].kind, batch, n);
         if (len > RF_TRACE_KR_HDR + 1u)
             ks_respond(KS_CMD_RF_TRACE, KS_STATUS_OK, frame + RF_TRACE_KR_HDR,
-                       (uint16_t)(len - RF_TRACE_KR_HDR - 1u));   /* same bytes, same CRC */
+                       (uint16_t)(len - RF_TRACE_KR_HDR - 1u));   /* same bytes, same CRC; room checked */
     }
     if (rf_trace_ring_count(&s_ring) != 0) cdc_wake();
 }

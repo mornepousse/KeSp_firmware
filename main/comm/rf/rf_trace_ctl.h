@@ -118,4 +118,33 @@ size_t rf_trace_pass_end(rf_trace_pass_t *p, rf_trace_ring_t *ring);
  * the keyboard's state. */
 bool rf_trace_drop_before_engine(const uint8_t *buf, uint16_t n);
 
+/* ── Output budget: a frame is written WHOLE or not at all ───────────────
+ * Number of records of `kind` whose encoded frame (header + k records + CRC)
+ * fits in `room` bytes, capped at RF_TRACE_BATCH_MAX; 0 when not even one
+ * fits or the kind is unknown. Both ends size their batch with it BEFORE
+ * popping: the half to the UART0 TX FIFO's free bytes (128-byte FIFO: 9
+ * TX records, 5 periodic), the dongle to the CDC TX FIFO's. */
+size_t rf_trace_batch_fit(uint32_t room, uint8_t kind);
+
+/* The dongle's CDC pump, one decision per batch (rf_trace_dongle.c):
+ *   STOP    — the host is gone (no DTR) while tracing: stop the trace and
+ *             discard the ring and the TX FIFO (nothing stale on reopen);
+ *   DISCARD — host gone, trace off, records left: drop them, never send;
+ *   IDLE    — nothing to send;
+ *   HOLD    — the TX FIFO lacks room for one whole frame beyond `reserve`
+ *             (the largest reply's room): pop nothing, do not re-wake — the
+ *             ring overflows and counts its drops;
+ *   SEND    — pop *n records (≥ 1, ≤ BATCH_MAX) of next_kind and send them.
+ * next_kind = rf_trace_ring_peek_kind() (0 = empty ring). *n is 0 except
+ * for SEND. */
+typedef enum {
+    RF_TRACE_PUMP_IDLE = 0,
+    RF_TRACE_PUMP_SEND,
+    RF_TRACE_PUMP_HOLD,
+    RF_TRACE_PUMP_DISCARD,
+    RF_TRACE_PUMP_STOP,
+} rf_trace_pump_t;
+rf_trace_pump_t rf_trace_pump_plan(bool connected, bool tracing, uint8_t next_kind,
+                                   uint32_t tx_free, uint32_t reserve, size_t *n);
+
 #endif /* RF_TRACE_CTL_H */

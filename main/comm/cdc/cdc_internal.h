@@ -17,6 +17,10 @@
 #define CDC_ITF TINYUSB_CDC_ACM_0
 #endif
 
+/* Room for a whole response in the CDC TX FIFO (cdc_acm_com.c; host tests: a
+ * fake). */
+bool ks_tx_reserve(uint32_t need);
+
 /* Shared log tag */
 extern const char *TAG_CDC;
 

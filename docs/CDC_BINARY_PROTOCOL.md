@@ -833,6 +833,10 @@ rf-scope trace of the dongle's radio reception (spec `docs/superpowers/specs/202
 
 A trace frame always has `len = 3 + count × record_size ≥ 16`; the ack has `len = 0` — that is how the host tells them apart. The CRC is the usual `ks_crc8` over the payload. All multi-byte fields little-endian. Trace frames are written by the same task that answers commands, between two replies: they never interleave with a reply's bytes.
 
+**The host must keep reading, with DTR set.**
+- *Back-pressure.* A batch is sent only when the CDC TX FIFO (8 KB) has room for its **whole** frame on top of the room of the largest reply (`KS_PAYLOAD_MAX` + 7 = 4103 B). A host that stops reading (tool suspended) never gets a truncated frame and a command reply never loses its room to the trace: records pile up in the dongle's ring instead, and what overflows it is counted in the next periodic record's `drops`. Replies in general (any command) are written whole or not at all: with no room after ~20 ms the reply is dropped rather than cut (the host times out and retries — a cut frame would desynchronise it).
+- *Presence.* The trace is tied to the CDC connection: **DTR** (pyserial asserts it on open and drops it on close — keep that default). When DTR drops while tracing, the dongle **stops** the trace and discards both its ring and the bytes still waiting in the CDC TX FIFO, so the next open starts clean instead of receiving stale frames before its first reply. A host that opens the port without DTR cannot trace: the start is acknowledged, then the trace stops at once.
+
 RX record (`kind = 2`, 13 bytes, one per frame read from a radio FIFO):
 
 | Offset | Type   | Field         | Description |
@@ -863,7 +867,7 @@ Periodic record (`kind = 3`, 20 bytes, ~1 Hz, plus one at start and one at stop/
 | 16     | u16 LE | `dups`     | duplicates since the previous periodic record |
 | 18     | u16 LE | `drops`    | records lost to a full trace ring since the previous periodic record |
 
-(TX records, `kind = 1`, come from the halves over UART0 — same framing.)
+(TX records, `kind = 1`, come from the halves over UART0 — same framing. Their `plos_delta` is the increase of the nRF24's `OBSERVE_TX.PLOS_CNT`, a 4-bit counter that **saturates at 15** until the next RF_CH write: on a very degraded link it under-counts MAX_RT (deltas read 0 while packets keep failing). Count failures from the per-record `result`, not from the sum of `plos_delta`.)
 
 **Stress frames** (`PKT_TYPE_STRESS` = 0xA, rf-scope stress generator) are traced with `delivered = 0` and **dropped before every handler** — fusion engine, HID, battery cache, link supervision — whether the trace is on or off.
 

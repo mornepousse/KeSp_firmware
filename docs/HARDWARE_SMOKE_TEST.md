@@ -66,7 +66,13 @@ in the PR/release.
       last periodic record arrives and the stream stops by itself; `KS BA
       [00]` while off → ack; `KS BA [02]` → `ERR_INVALID`. Reboot during a
       trace → nothing is pushed after the reboot until a new start. Typing
-      unchanged with the trace on (no double, no lost key).
+      unchanged with the trace on (no double, no lost key). Back-pressure:
+      start 120 s, suspend the reader (Ctrl-Z) for 20 s while typing, resume
+      → every frame read decodes (no CRC error), the next periodic record
+      reports `drops` > 0, and `rfstat` answers intact. Presence: start 120 s,
+      close the port, reopen 5 s later → the first bytes read are the reply
+      to the first command sent, no stale trace frame; no trace frame at all
+      until a new start.
 - [ ] RF link establishes with a half (pairing < 120s)
 - [ ] NRF doesn't wedge after 5 min (watchdog OK)
 - [ ] Idle wake (DFS): console at boot "DFS actif : 160 MHz en travail,
@@ -156,7 +162,12 @@ in the PR/release.
       next key. (5) At 120 s: console `rftrace: OFF (duration over)`, no
       more frames. (6) Start again, then reset the half: no frame after
       the reboot until a new start. (7) With the trace OFF again, the
-      sleep current and `slept=` are back to (1).
+      sleep current and `slept=` are back to (1). (8) Build with
+      `KASE_RF_TRACE_HALF=y` (the default), trace never started, ESP-Prog
+      UNPLUGGED from the half: light-sleep current = 0.67 mA as before (left,
+      2026-09-25) — a floating RX0 would wake the drain task; GPIO44 keeps
+      its pull-up. Tracing ON perturbs timing slightly: never measure
+      current with a trace running.
 - [ ] Low battery: build a half with `BATT_FAIBLE_DV`/`BATT_CRITIQUE_DV`
       shifted above the real voltage (bench, do not commit) → console
       "battery: LOW" then, when critical, "light sleep"

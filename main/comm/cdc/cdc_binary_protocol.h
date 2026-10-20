@@ -153,7 +153,13 @@ void ks_register_binary_commands(const ks_bin_cmd_entry_t *table, size_t count);
 
 /* ── Response helpers ───────────────────────────────────────────── */
 
+/* A response goes out WHOLE or not at all: when the CDC TX FIFO has no room
+ * for the complete frame (the host stopped reading), ks_respond waits ≤ 2
+ * ticks for it, then drops the reply and counts it (ks_tx_dropped) instead of
+ * writing a truncated frame. With room — every reply while the host reads —
+ * the bytes are exactly as before. Streams reserve their total at begin. */
 void ks_respond(uint8_t cmd_id, uint8_t status, const uint8_t *payload, uint16_t len);
+uint32_t ks_tx_dropped(void);
 void ks_respond_ok(uint8_t cmd_id);
 void ks_respond_err(uint8_t cmd_id, uint8_t status);
 

@@ -295,6 +295,85 @@ static void test_rf_trace_ctl_drop_stress(void)
     TEST_ASSERT(!rf_trace_drop_before_engine(NULL, 8), "NULL: not a stress frame");
 }
 
+
+/* ── How many records fit a byte budget (UART0 TX FIFO, CDC TX FIFO) ──── */
+
+static void test_rf_trace_ctl_batch_fit(void)
+{
+    /* frame = 9-byte header + k × record + 1 CRC byte */
+    TEST_ASSERT_EQ(rf_trace_batch_fit(0, RF_TRACE_KIND_TX), 0, "no room: nothing");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(9 + 13, RF_TRACE_KIND_TX), 0, "one byte short of one TX record");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(9 + 13 + 1, RF_TRACE_KIND_TX), 1, "exactly one TX record");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(128, RF_TRACE_KIND_TX), 9, "the S3's 128-byte UART FIFO: 9 TX records (127 B)");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(128, RF_TRACE_KIND_RX), 9, "same for RX (13 B)");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(128, RF_TRACE_KIND_PERIODIC), 5, "5 periodic records (110 B)");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(9 + 5 * 20 + 1 - 1, RF_TRACE_KIND_PERIODIC), 4, "one byte short of 5 periodic");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(100000, RF_TRACE_KIND_TX), RF_TRACE_BATCH_MAX, "capped at a full batch");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(RF_TRACE_FRAME_MAX, RF_TRACE_KIND_PERIODIC), RF_TRACE_BATCH_MAX,
+                   "RF_TRACE_FRAME_MAX holds a full batch of the largest record");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(100000, 0), 0, "unknown kind: nothing");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(100000, 9), 0, "unknown kind: nothing");
+
+    /* Whatever fit says, the encoded frame really fits the budget. */
+    rf_trace_rec_t recs[RF_TRACE_BATCH_MAX];
+    uint8_t buf[RF_TRACE_FRAME_MAX];
+    for (unsigned i = 0; i < RF_TRACE_BATCH_MAX; i++) recs[i] = (rf_trace_rec_t){ .kind = RF_TRACE_KIND_TX };
+    for (uint32_t room = 0; room <= RF_TRACE_FRAME_MAX; room++) {
+        size_t k = rf_trace_batch_fit(room, RF_TRACE_KIND_TX);
+        if (k == 0) continue;
+        size_t len = rf_trace_frame_encode(buf, sizeof buf, RF_TRACE_KIND_TX, recs, k);
+        if (len == 0 || len > room) {
+            TEST_ASSERT(false, "an encoded frame of fit() records exceeds the room");
+            break;
+        }
+    }
+}
+
+/* ── Dongle CDC pump: send, hold, discard, stop ───────────────────────── */
+
+static void test_rf_trace_ctl_pump_plan(void)
+{
+    const uint32_t reserve = 4103;       /* the largest KS reply: the trace never takes its room */
+    size_t n = 99;
+
+    /* Nothing queued, host there: idle. */
+    TEST_ASSERT_EQ(rf_trace_pump_plan(true, true, 0, 8192, reserve, &n), RF_TRACE_PUMP_IDLE, "empty ring: idle");
+    TEST_ASSERT_EQ(n, 0, "idle pops nothing");
+
+    /* Host reading, plenty of room: a full batch. */
+    TEST_ASSERT_EQ(rf_trace_pump_plan(true, true, RF_TRACE_KIND_RX, 8192, reserve, &n), RF_TRACE_PUMP_SEND, "room: send");
+    TEST_ASSERT_EQ(n, RF_TRACE_BATCH_MAX, "a full batch");
+
+    /* Room only for part of a batch beyond the reserve: a smaller WHOLE frame. */
+    TEST_ASSERT_EQ(rf_trace_pump_plan(true, true, RF_TRACE_KIND_RX, reserve + 9 + 2 * 13 + 1, reserve, &n),
+                   RF_TRACE_PUMP_SEND, "room for two records beyond the reserve");
+    TEST_ASSERT_EQ(n, 2, "two records");
+
+    /* Host stopped reading: the FIFO is full — hold, pop nothing (the ring
+     * overflows and counts its drops; the reply room stays free). */
+    TEST_ASSERT_EQ(rf_trace_pump_plan(true, true, RF_TRACE_KIND_RX, reserve + 9 + 13, reserve, &n),
+                   RF_TRACE_PUMP_HOLD, "one byte short of one record beyond the reserve: hold");
+    TEST_ASSERT_EQ(n, 0, "hold pops nothing");
+    TEST_ASSERT_EQ(rf_trace_pump_plan(true, true, RF_TRACE_KIND_RX, reserve, reserve, &n), RF_TRACE_PUMP_HOLD, "only the reserve left: hold");
+    TEST_ASSERT_EQ(rf_trace_pump_plan(true, true, RF_TRACE_KIND_RX, 100, reserve, &n), RF_TRACE_PUMP_HOLD, "less than the reserve: hold");
+    TEST_ASSERT_EQ(rf_trace_pump_plan(true, true, RF_TRACE_KIND_RX, 0, reserve, &n), RF_TRACE_PUMP_HOLD, "FIFO full: hold");
+
+    /* Host gone (DTR low) while tracing: stop the trace — whatever the room. */
+    TEST_ASSERT_EQ(rf_trace_pump_plan(false, true, RF_TRACE_KIND_RX, 8192, reserve, &n), RF_TRACE_PUMP_STOP, "disconnected while on: stop");
+    TEST_ASSERT_EQ(n, 0, "stop pops nothing itself");
+    TEST_ASSERT_EQ(rf_trace_pump_plan(false, true, 0, 0, reserve, &n), RF_TRACE_PUMP_STOP, "disconnected while on, empty ring: stop");
+
+    /* Host gone, trace already off, records left (the final periodic): discard. */
+    TEST_ASSERT_EQ(rf_trace_pump_plan(false, false, RF_TRACE_KIND_PERIODIC, 8192, reserve, &n), RF_TRACE_PUMP_DISCARD,
+                   "disconnected, off, records left: discard, never send");
+    TEST_ASSERT_EQ(rf_trace_pump_plan(false, false, 0, 8192, reserve, &n), RF_TRACE_PUMP_IDLE, "disconnected, off, empty: idle");
+
+    /* Off but connected with leftovers (the run's final record): still sent. */
+    TEST_ASSERT_EQ(rf_trace_pump_plan(true, false, RF_TRACE_KIND_PERIODIC, 8192, reserve, &n), RF_TRACE_PUMP_SEND,
+                   "off, connected, final record: sent");
+    TEST_ASSERT_EQ(n, RF_TRACE_BATCH_MAX, "batch bound (the ring pop stops at the kind boundary)");
+}
+
 void test_rf_trace_ctl(void)
 {
     TEST_SUITE("rf_trace_ctl");
@@ -305,4 +384,6 @@ void test_rf_trace_ctl(void)
     TEST_RUN(test_rf_trace_ctl_fifo_depth);
     TEST_RUN(test_rf_trace_ctl_pass);
     TEST_RUN(test_rf_trace_ctl_drop_stress);
+    TEST_RUN(test_rf_trace_ctl_batch_fit);
+    TEST_RUN(test_rf_trace_ctl_pump_plan);
 }

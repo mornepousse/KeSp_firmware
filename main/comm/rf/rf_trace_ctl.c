@@ -133,3 +133,26 @@ bool rf_trace_drop_before_engine(const uint8_t *buf, uint16_t n)
 {
     return buf != NULL && n > 0 && rf_packet_type(buf, n) == PKT_TYPE_STRESS;
 }
+
+size_t rf_trace_batch_fit(uint32_t room, uint8_t kind)
+{
+    size_t rs = rf_trace_rec_size(kind);
+    size_t fixed = RF_TRACE_HDR + 1u;              /* header + CRC */
+    if (rs == 0 || room < fixed + rs) return 0;
+    size_t k = (room - fixed) / rs;
+    return k > RF_TRACE_BATCH_MAX ? RF_TRACE_BATCH_MAX : k;
+}
+
+rf_trace_pump_t rf_trace_pump_plan(bool connected, bool tracing, uint8_t next_kind,
+                                   uint32_t tx_free, uint32_t reserve, size_t *n)
+{
+    *n = 0;
+    if (!connected) {
+        if (tracing)   return RF_TRACE_PUMP_STOP;
+        if (next_kind) return RF_TRACE_PUMP_DISCARD;
+        return RF_TRACE_PUMP_IDLE;
+    }
+    if (next_kind == 0) return RF_TRACE_PUMP_IDLE;
+    *n = tx_free > reserve ? rf_trace_batch_fit(tx_free - reserve, next_kind) : 0;
+    return *n ? RF_TRACE_PUMP_SEND : RF_TRACE_PUMP_HOLD;
+}

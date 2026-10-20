@@ -41,3 +41,11 @@ void init_cdc_commands(void);
  * (any task, not an ISR) makes the task run its pump now. */
 void cdc_set_unsolicited_pump(void (*pump)(void));
 void cdc_wake(void);
+
+/* For that pump (CDC command task): is a host there (DTR set — pyserial's
+ * default on open, dropped on close), how many bytes the TX FIFO takes now,
+ * its total size, and discarding what it still holds. */
+bool     cdc_host_connected(void);
+uint32_t cdc_tx_room(void);
+uint32_t cdc_tx_capacity(void);
+void     cdc_tx_discard(void);

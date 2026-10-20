@@ -64,8 +64,22 @@ means a test, or a line.
   frame (`PKT_TYPE_STRESS` 0xA) is dropped before every handler — engine,
   HID, battery, proof of life — traced or not
   (test_rf_trace_ctl_drop_stress). Records leave on the CDC from the CDC
-  task only, never interleaved with a reply.
+  task only, never interleaved with a reply. Back-pressure and presence
+  (test_rf_trace_ctl_pump_plan): a batch is popped only when the CDC TX FIFO
+  holds its WHOLE frame on top of the largest reply's room (a stalled host
+  makes the ring overflow and count drops, never a cut frame, never a reply
+  without room); the trace needs DTR, and a host that drops it while tracing
+  STOPS the trace, its ring and the CDC TX FIFO being discarded (no stale
+  frame on the next open). `KS_CMD_RF_TRACE` is dongle-local
+  (test_cfg_bridge).
   [smoke:RF trace (dongle)]
+- [test:test_cdc_rx_feed] A KR reply on the CDC goes out WHOLE or not at
+  all (`ks_respond`, and the streamed `ks_respond_begin/write/end`): without
+  room in the TX FIFO for the complete frame after ≤ 2 ticks, the reply is
+  dropped and counted (`ks_tx_dropped`), never truncated — a cut frame
+  desynchronises the host. With room (every reply while the host reads) the
+  bytes are unchanged; a frame larger than the FIFO keeps the old
+  progressive write.
 - [test:test_radio_owner] rf-scope, half side: while a trace session runs,
   the radio owner writes ONE TX record per transmission that left the chip
   (PTX send or left-relay excursion), under its lock, from the frame it sent
@@ -88,8 +102,16 @@ means a test, or a line.
   once).
 - [smoke:RF trace (half)] A half traces over its console UART0 without a
   UART driver, without a wake veto and without a new cadence: tracing off,
-  its sleep current and `HB … slept=` are those of a build without the trace;
-  off at every boot, off at the end of the requested duration.
+  its sleep current and `HB … slept=` are those of a build without the trace
+  (0.67 mA asleep, ESP-Prog UNPLUGGED: RX0/GPIO44 keeps its reset pull-up,
+  re-asserted by `rf_trace_uart_init`, so a floating line raises no
+  interrupt); off at every boot, off at the end of the requested duration.
+  A frame enters the UART0 TX FIFO whole or not at all, sized to the room
+  of that instant (`rf_trace_batch_fit`, test_rf_trace_ctl_batch_fit); the
+  console lock is never held across a wait, and the sleep hook waits for no
+  lock. Tracing ON perturbs timing slightly (drain task wake-ups, a backlog
+  retried every tick, up to ~11 ms in the sleep hook for the SLEEPING record
+  to leave before the sleep): keep it OFF for current measurements.
 
 <!-- Other radio invariants still need to be written down (Mae, 2026-09-13). -->
 

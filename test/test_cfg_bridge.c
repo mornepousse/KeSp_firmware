@@ -16,6 +16,11 @@ static void test_cfg_routing(void) {
     TEST_ASSERT(cfg_is_dongle_local(KS_CMD_BATTERY), "BATTERY local");
     TEST_ASSERT(cfg_is_dongle_local(KS_CMD_MONITOR), "MONITOR local");
 
+    /* dongle-local: rf-scope trace — the dongle's own radio, never forwarded
+     * (forwarded, the start would reach the left half and its ack would come
+     * back as the dongle's: the trace would never start) */
+    TEST_ASSERT(cfg_is_dongle_local(KS_CMD_RF_TRACE), "RF_TRACE local");
+
     /* dongle-local: diagnostics that belong to the dongle */
     TEST_ASSERT(cfg_is_dongle_local(KS_CMD_NVS_RESET), "NVS_RESET local");
     TEST_ASSERT(cfg_is_dongle_local(KS_CMD_DFU),       "DFU local");

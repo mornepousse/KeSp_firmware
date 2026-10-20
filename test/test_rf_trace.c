@@ -337,6 +337,7 @@ static void test_rf_trace_ring(void)
     TEST_ASSERT(!rf_trace_ring_init(&r, NULL, 8), "no storage refused");
     TEST_ASSERT(rf_trace_ring_init(&r, store, 8), "capacity 8 accepted");
     TEST_ASSERT_EQ(rf_trace_ring_pop_batch(&r, out, 4), 0, "empty ring pops nothing");
+    TEST_ASSERT_EQ(rf_trace_ring_peek_kind(&r), 0, "empty ring: peek says 0");
 
     for (uint8_t i = 0; i < 8; i++) { rf_trace_rec_t x = mk_tx(i, i); TEST_ASSERT(rf_trace_ring_push(&r, &x), "push while room"); }
     TEST_ASSERT_EQ(rf_trace_ring_count(&r), 8, "full");
@@ -358,7 +359,10 @@ static void test_rf_trace_ring(void)
     TEST_ASSERT(rf_trace_ring_init(&r, store, 8), "re-init");
     rf_trace_rec_t a = mk_rx(1, 1), p = mk_per(2);
     rf_trace_ring_push(&r, &a); rf_trace_ring_push(&r, &a); rf_trace_ring_push(&r, &p); rf_trace_ring_push(&r, &a);
+    TEST_ASSERT_EQ(rf_trace_ring_peek_kind(&r), RF_TRACE_KIND_RX, "peek: the oldest record's kind");
+    TEST_ASSERT_EQ(rf_trace_ring_count(&r), 4, "peek pops nothing");
     TEST_ASSERT_EQ(rf_trace_ring_pop_batch(&r, out, 16), 2, "batch = the run of same-kind records");
+    TEST_ASSERT_EQ(rf_trace_ring_peek_kind(&r), RF_TRACE_KIND_PERIODIC, "peek follows the tail");
     TEST_ASSERT_EQ(rf_trace_ring_pop_batch(&r, out, 16), 1, "then the periodic alone");
     TEST_ASSERT_EQ(out[0].kind, RF_TRACE_KIND_PERIODIC, "periodic popped");
     TEST_ASSERT_EQ(rf_trace_ring_pop_batch(&r, out, 16), 1, "then the last RX");

@@ -13,7 +13,7 @@
  *    received, or the next periodic record (1 s, and only while tracing —
  *    tracing off, it blocks forever: no poller, no cadence added).
  *
- * ── UART0 out: the console's own lock ────────────────────────────────────
+ * ── UART0 out: the console's own lock, never a wait under it ─────────────
  * The bytes are exactly rf_trace_frame_encode()'s (a KR of 0xBA), written
  * straight into the TX FIFO — not through stdout, whose CRLF translation
  * would corrupt any 0x0A. The console's FILE lock is held around the write:
@@ -21,6 +21,14 @@
  * land INSIDE a frame (text may be split around one: the host resyncs).
  * ROM prints (esp_rom_printf, panic) bypass it — a frame cut by one fails its
  * CRC and is lost, nothing worse.
+ * The lock is held for a FIFO copy only (≤ 128 bytes, microseconds), never
+ * across a wait: a batch is sized to the TX FIFO's free room at that instant
+ * (rf_trace_batch_fit) and popped only then, so a whole frame always goes in
+ * at once. When the FIFO is full the records stay in the ring, the task
+ * retries a tick later WITHOUT any lock held, and a ring that fills up in the
+ * meantime counts its drops (reported by the next periodic record). A
+ * higher-priority task's ESP_LOG therefore never waits behind this prio-1
+ * task for more than one FIFO copy.
  *
  * ── UART0 in: an RX interrupt, no driver ─────────────────────────────────
  * The console UART0 is the ROM's: configured at boot on the XTAL clock, no
@@ -36,7 +44,21 @@
  * The price: bytes that arrive while the half sleeps (automatic light sleep
  * between keystrokes, or the 5 s veille) are not received. The host therefore
  * repeats the start request until the KR ack comes back — at most a key
- * press away. */
+ * press away.
+ * RX0 (GPIO44) with the ESP-Prog unplugged: the pad's reset state is input +
+ * weak pull-up (ESP32-S3 TRM v1.8, Table 6.12-1 "IO MUX Pin Functions",
+ * p. 494: GPIO44/U0RXD, RST = 3 → IE = 1, WPU = 1), so it idles high, not
+ * floating. rx_init() re-asserts the pull-up anyway (same IO_MUX function,
+ * U0RXD untouched) in case anything cleared it, and the drain task returns
+ * to sleep at once on an RX notification that completed no request.
+ *
+ * ── Timing: tracing perturbs it slightly ─────────────────────────────────
+ * While tracing, the drain task wakes for every frame pushed and, while a
+ * backlog waits for FIFO room, every tick; the sleep hook spends up to the
+ * transmission time of what the TX FIFO holds (≤ 128 chars, ~11 ms at
+ * 115200 baud, ~3 ms for the SLEEPING frame alone) so that the record leaves
+ * BEFORE the sleep. Tracing must be OFF for current measurements — off, none
+ * of this runs (COMPORTEMENTS.md, smoke "RF trace"). */
 #include "rf_trace_uart.h"
 #include "rf_trace_half.h"
 #include "radio_owner.h"
@@ -46,7 +68,10 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_intr_alloc.h"
+#include "esp_rom_sys.h"
+#include "driver/gpio.h"
 #include "soc/interrupts.h"
+#include "soc/uart_pins.h"
 #include "hal/uart_ll.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -76,6 +101,8 @@ static const char *TAG = "rftrace";
 #define NOTE_DATA  0x1u
 #define NOTE_RX    0x2u
 #define NOTE_WAKE  0x4u
+#define UART0_US_PER_CHAR ((10u * 1000000u + CONFIG_ESP_CONSOLE_UART_BAUDRATE - 1u) / CONFIG_ESP_CONSOLE_UART_BAUDRATE)
+#define REPLY_TRIES 3            /* a full FIFO empties in ~11 ms: three ticks are plenty */
 
 volatile uint32_t g_rf_trace_session;
 
@@ -145,34 +172,67 @@ static void periodic(uint8_t state)   /* s_out held: drops_take is the consumer'
 
 /* ── UART0 out ── */
 
-static void uart0_write(const uint8_t *b, size_t n)   /* s_out held */
+/* Writes b[0..n) WHOLE if the TX FIFO has room for it now; false otherwise.
+ * The console lock is held for the copy only. */
+static bool uart0_try_write(const uint8_t *b, size_t n)
 {
     uart_dev_t *u = UART_LL_GET_HW(0);
     flockfile(stdout);                    /* no console write() inside the frame */
-    while (n) {
-        uint32_t room = uart_ll_get_txfifo_len(u);
-        if (room == 0) { vTaskDelay(1); continue; }   /* 10 ms = ~115 bytes out at 115200 */
-        uint32_t k = n < room ? (uint32_t)n : room;
-        uart_ll_write_txfifo(u, b, k);
-        b += k; n -= k;
+    bool ok = uart_ll_get_txfifo_len(u) >= n;
+    if (ok) uart_ll_write_txfifo(u, b, (uint32_t)n);
+    funlockfile(stdout);
+    return ok;
+}
+
+typedef enum { OUT_EMPTY, OUT_FULL, OUT_SENT } out_t;
+
+/* One frame, as many records as the TX FIFO takes at this instant.
+ * `blocking`: false in the sleep hook — gives up instead of waiting for the
+ * console lock held by a task in the middle of a print. */
+static out_t drain_one(bool blocking)   /* s_out held */
+{
+    uart_dev_t *u = UART_LL_GET_HW(0);
+    if (blocking) flockfile(stdout);
+    else if (ftrylockfile(stdout) != 0) return OUT_FULL;
+    out_t res;
+    uint8_t kind = rf_trace_ring_peek_kind(&s_ring);
+    size_t k = kind ? rf_trace_batch_fit(uart_ll_get_txfifo_len(u), kind) : 0;
+    if (kind == 0) {
+        res = OUT_EMPTY;
+    } else if (k == 0) {
+        res = OUT_FULL;                   /* the records wait in the ring, no lock held */
+    } else {
+        size_t n = rf_trace_ring_pop_batch(&s_ring, s_batch, k);
+        size_t len = rf_trace_frame_encode(s_frame, sizeof s_frame, s_batch[0].kind, s_batch, n);
+        if (len) uart_ll_write_txfifo(u, s_frame, (uint32_t)len);
+        res = OUT_SENT;
     }
     funlockfile(stdout);
+    return res;
 }
 
-static void drain(void)   /* s_out held */
+/* True when records are left behind a full TX FIFO (retry a tick later). */
+static bool drain(bool blocking)   /* s_out held */
 {
-    size_t n;
-    while ((n = rf_trace_ring_pop_batch(&s_ring, s_batch, RF_TRACE_BATCH_MAX)) > 0) {
-        size_t len = rf_trace_frame_encode(s_frame, sizeof s_frame, s_batch[0].kind, s_batch, n);
-        if (len) uart0_write(s_frame, len);
+    for (unsigned i = 0; i < RING_CAP; i++) {
+        out_t r = drain_one(blocking);
+        if (r == OUT_EMPTY) return false;
+        if (r == OUT_FULL)  return true;
     }
+    return rf_trace_ring_count(&s_ring) != 0;
 }
 
-static void reply(uint8_t cmd, uint8_t status)   /* s_out held */
+/* The KR ack: its own 7 bytes, no ring, no s_out. The FIFO may be full of
+ * trace frames: retry a few ticks with no lock held, then give up (the host
+ * repeats its request until the ack comes). */
+static void reply(uint8_t cmd, uint8_t status)
 {
     uint8_t f[8];
     size_t n = rf_trace_kr_encode(f, sizeof f, cmd, status, NULL, 0);
-    if (n) uart0_write(f, n);
+    for (int i = 0; n && !uart0_try_write(f, n); i++) {
+        if (i + 1 >= REPLY_TRIES) return;
+        vTaskDelay(1);
+    }
 }
 
 /* ── UART0 in ── */
@@ -198,6 +258,10 @@ static void uart0_rx_isr(void *arg)
 static void rx_init(void)
 {
     uart_dev_t *u = UART_LL_GET_HW(0);
+    /* Already the pad's reset state (TRM Table 6.12-1 p. 494): a floating RX0
+     * with the ESP-Prog unplugged would raise noise interrupts. Pull bit
+     * only — the IO_MUX function stays U0RXD. */
+    gpio_pullup_en((gpio_num_t)U0RXD_GPIO_NUM);
     uart_ll_disable_intr_mask(u, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
     uart_ll_rxfifo_rst(u);                       /* whatever the boot left there */
     uart_ll_set_rxfifo_full_thr(u, 32);
@@ -224,9 +288,7 @@ static void command(const rf_trace_ks_rx_t *rx)   /* drain task */
         g_rf_trace_session = s_ctl.session;
         portEXIT_CRITICAL(&s_ctl_mux);
     }
-    xSemaphoreTake(s_out, portMAX_DELAY);
     reply(rx->cmd, status);
-    xSemaphoreGive(s_out);
     if (status == KS_STATUS_OK) {
         if (c.start)
             ESP_LOGW(TAG, "ON for %u s (session %lu)", (unsigned)c.duration_s, (unsigned long)g_rf_trace_session);
@@ -235,13 +297,16 @@ static void command(const rf_trace_ks_rx_t *rx)   /* drain task */
     }
 }
 
-static void rx_bytes(void)
+/* True when a complete request was handled. */
+static bool rx_bytes(void)
 {
+    bool handled = false;
     while (s_rx_tail != s_rx_head) {
         uint8_t b = s_rxb[s_rx_tail % RXB_CAP];
         s_rx_tail = s_rx_tail + 1;
-        if (rf_trace_ks_rx_feed(&s_ks, b)) command(&s_ks);
+        if (rf_trace_ks_rx_feed(&s_ks, b)) { command(&s_ks); handled = true; }
     }
+    return handled;
 }
 
 /* ── The drain task ── */
@@ -249,8 +314,16 @@ static void rx_bytes(void)
 static void rf_trace_task(void *arg)
 {
     (void)arg;
+    uint32_t bits = 0;
     for (;;) {
-        rx_bytes();
+        bool handled = rx_bytes();
+        if (bits == NOTE_RX && !handled && g_rf_trace_session == 0) {
+            /* Bytes only (noise on RX0, a request still incomplete) and
+             * tracing off: nothing to do — straight back to sleep. */
+            bits = 0;
+            xTaskNotifyWait(0, UINT32_MAX, &bits, portMAX_DELAY);
+            continue;
+        }
         uint32_t wait_ms;
         portENTER_CRITICAL(&s_ctl_mux);
         rf_trace_act_t act = rf_trace_sess_tick(&s_ctl, now_ms(), &wait_ms);
@@ -259,17 +332,21 @@ static void rf_trace_task(void *arg)
         g_rf_trace_session = s_ctl.session;
         portEXIT_CRITICAL(&s_ctl_mux);
 
-        xSemaphoreTake(s_out, portMAX_DELAY);
+        xSemaphoreTake(s_out, portMAX_DELAY);    /* held for µs: never across a wait */
         if (woke)                         periodic(RF_TRACE_ST_WOKE);
         if (act == RF_TRACE_ACT_PERIODIC) periodic(RF_TRACE_ST_AWAKE);
-        drain();
+        bool backlog = drain(true);
         xSemaphoreGive(s_out);
         if (act == RF_TRACE_ACT_EXPIRED) ESP_LOGW(TAG, "OFF (duration over)");
 
         /* Off: forever. On: until the next periodic record or the deadline
-         * (>= 1 s apart, CADENCE_REPOS_OK above) — or a push / a byte. */
+         * (>= 1 s apart, CADENCE_REPOS_OK above) — or a push / a byte. A
+         * backlog behind a full TX FIFO: one tick (the FIFO empties in
+         * ~11 ms) — only while tracing, and only while records wait. */
         TickType_t t = (wait_ms == UINT32_MAX) ? portMAX_DELAY : pdMS_TO_TICKS(wait_ms) + 1;
-        xTaskNotifyWait(0, UINT32_MAX, NULL, t);
+        if (backlog && t > 1) t = 1;
+        bits = 0;                                    /* 0 after a timeout: the full pass */
+        xTaskNotifyWait(0, UINT32_MAX, &bits, t);
     }
 }
 
@@ -281,11 +358,22 @@ static void hook_sleep(void)   /* veille task, after the radio's power-down */
     portENTER_CRITICAL(&s_ctl_mux);
     bool emit = rf_trace_sess_sleep(&s_ctl);
     portEXIT_CRITICAL(&s_ctl_mux);
-    if (!emit || xSemaphoreTake(s_out, pdMS_TO_TICKS(50)) != pdTRUE) return;
+    /* Never wait for a lock here: the drain task holds s_out for µs only, a
+     * printing task may hold the console for ms — then the SLEEPING record is
+     * skipped (the WOKE record after the sleep still says it slept). */
+    if (!emit || xSemaphoreTake(s_out, 0) != pdTRUE) return;
     periodic(RF_TRACE_ST_SLEEPING);
-    drain();                                        /* out BEFORE the sleep, not glued to the wake */
-    for (int i = 0; i < 20 && !uart_ll_is_tx_idle(UART_LL_GET_HW(0)); i++) vTaskDelay(1);
+    (void)drain(false);                             /* what fits the TX FIFO now; the rest waits for the wake */
     xSemaphoreGive(s_out);
+    /* The light sleep SUSPENDS UART0 (xoff) with its FIFO — the SLEEPING
+     * record would only leave at the wake, and the host would not know the
+     * half sleeps. Let the FIFO empty first: bounded by what it holds (≤ 128
+     * chars, ~11 ms at 115200; ~3 ms for the SLEEPING frame alone), busy,
+     * tracing on only. */
+    uart_dev_t *u = UART_LL_GET_HW(0);
+    uint32_t chars = UART_LL_FIFO_DEF_LEN - uart_ll_get_txfifo_len(u) + 1u;
+    int64_t until = esp_timer_get_time() + (int64_t)chars * UART0_US_PER_CHAR;
+    while (!uart_ll_is_tx_idle(u) && esp_timer_get_time() < until) esp_rom_delay_us(50);
 }
 
 static void hook_wake(void)    /* veille task; touches neither the SPI bus nor the UART */

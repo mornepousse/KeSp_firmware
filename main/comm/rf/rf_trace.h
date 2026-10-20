@@ -65,6 +65,12 @@
 #define RF_TRACE_KIND_RX        2u
 #define RF_TRACE_KIND_PERIODIC  3u
 
+/* plos_delta (TX record): the increase of OBSERVE_TX.PLOS_CNT, a 4-bit
+ * counter that SATURATES at 15 and is reset only by an RF_CH write. On a very
+ * degraded link (15 MAX_RT without a channel write in between) it stops
+ * counting: deltas read 0 while packets keep failing. The record's `result`
+ * (MAX_RT) stays exact per packet — count failures from it, not from the
+ * sum of plos_delta (rf_trace_half.h: rf_trace_observe_step). */
 #define RF_TRACE_TX_SIZE        13u
 #define RF_TRACE_RX_SIZE        13u
 #define RF_TRACE_PERIODIC_SIZE  20u
@@ -216,6 +222,9 @@ uint32_t rf_trace_ring_count(const rf_trace_ring_t *r);
 /* Pops up to `max` consecutive records of the SAME kind as the oldest one
  * (one frame's worth). Returns the number popped, 0 when empty. */
 size_t   rf_trace_ring_pop_batch(rf_trace_ring_t *r, rf_trace_rec_t *out, size_t max);
+/* Kind of the oldest record (consumer side), 0 when the ring is empty: lets
+ * the consumer size a batch to the room it has before popping it. */
+uint8_t  rf_trace_ring_peek_kind(const rf_trace_ring_t *r);
 /* Drops since the previous call (consumer side). */
 uint32_t rf_trace_ring_drops_take(rf_trace_ring_t *r);
 

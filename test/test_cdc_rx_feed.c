@@ -38,6 +38,16 @@ esp_err_t tinyusb_cdcacm_write_queue(tinyusb_cdcacm_itf_t itf,
     return 0;
 }
 
+/* TX room fake: ks_respond / ks_respond_begin ask for the WHOLE frame's room
+ * before writing anything (all-or-nothing, rf-scope fix I1). */
+static uint32_t fake_tx_room = 1u << 20;
+static uint32_t fake_tx_need_last;
+bool ks_tx_reserve(uint32_t need)
+{
+    fake_tx_need_last = need;
+    return need <= fake_tx_room;
+}
+
 esp_err_t tinyusb_cdcacm_write_flush(tinyusb_cdcacm_itf_t itf,
                                       uint32_t timeout_ticks)
 {
@@ -74,6 +84,8 @@ static void reset_state(void)
     ks_rx_reset();
     fake_cdc_pos      = 0;
     fake_write_count  = 0;
+    fake_tx_room      = 1u << 20;
+    fake_tx_need_last = 0;
     memset(fake_cdc_buf, 0, sizeof(fake_cdc_buf));
     fake_rx_called    = false;
     fake_rx_cmd       = 0;
@@ -369,6 +381,75 @@ static void test_oversized_then_garbage_then_valid_frame(void)
     TEST_ASSERT_EQ(fake_rx_cmd, KS_CMD_PING, "cmd of the rescued frame = PING");
 }
 
+
+/* ══ Response framing: all or nothing ═════════════════════════════════ */
+
+/* A reply that does not fit the CDC TX FIFO is not cut: before the fix the
+ * three write_queue calls wrote what fitted, and a host that resumed reading
+ * got a truncated KR glued to the next one. */
+static void test_respond_whole_frame_or_nothing(void)
+{
+    static const uint8_t pl[3] = { 0x11, 0x22, 0x33 };
+
+    reset_state();
+    fake_tx_room = 6 + 3 + 1 - 1;          /* one byte short */
+    ks_respond(KS_CMD_VERSION, KS_STATUS_OK, pl, 3);
+    TEST_ASSERT_EQ(fake_tx_need_last, 10, "asks for header + payload + CRC at once");
+    TEST_ASSERT_EQ(fake_cdc_pos, 0, "no room for the whole frame: nothing written");
+
+    reset_state();
+    fake_tx_room = 10;                     /* exactly the frame */
+    ks_respond(KS_CMD_VERSION, KS_STATUS_OK, pl, 3);
+    TEST_ASSERT_EQ(fake_cdc_pos, 10, "room: the whole frame");
+    TEST_ASSERT(fake_cdc_buf[0] == KS_MAGIC_0 && fake_cdc_buf[1] == KR_MAGIC_1 &&
+                fake_cdc_buf[2] == KS_CMD_VERSION && fake_cdc_buf[4] == 3 &&
+                fake_cdc_buf[9] == ks_crc8(pl, 3), "the frame is the usual KR");
+
+    reset_state();
+    fake_tx_room = 6;                      /* an empty reply needs 7 */
+    ks_respond_ok(KS_CMD_PING);
+    TEST_ASSERT_EQ(fake_cdc_pos, 0, "empty reply without room: nothing");
+}
+
+static void test_respond_stream_whole_or_nothing(void)
+{
+    static const uint8_t a[2] = { 1, 2 }, b[3] = { 3, 4, 5 };
+
+    reset_state();
+    fake_tx_room = 6 + 5 + 1 - 1;
+    ks_respond_begin(KS_CMD_VERSION, KS_STATUS_OK, 5);
+    ks_respond_write(a, 2);
+    ks_respond_write(b, 3);
+    ks_respond_end();
+    TEST_ASSERT_EQ(fake_tx_need_last, 12, "begin asks for the whole stream's room");
+    TEST_ASSERT_EQ(fake_cdc_pos, 0, "no room: the stream writes nothing at all");
+
+    reset_state();
+    fake_tx_room = 12;
+    ks_respond_begin(KS_CMD_VERSION, KS_STATUS_OK, 5);
+    ks_respond_write(a, 2);
+    ks_respond_write(b, 3);
+    ks_respond_end();
+    static const uint8_t all[5] = { 1, 2, 3, 4, 5 };
+    TEST_ASSERT_EQ(fake_cdc_pos, 12, "room: the whole stream");
+    TEST_ASSERT_EQ(fake_cdc_buf[11], ks_crc8(all, 5), "stream CRC over the whole payload");
+
+    /* A refused stream does not poison the next reply. */
+    reset_state();
+    fake_tx_room = 3;
+    ks_respond_begin(KS_CMD_VERSION, KS_STATUS_OK, 5);
+    ks_respond_write(a, 2);
+    ks_respond_end();
+    fake_tx_room = 1u << 20;
+    ks_respond_ok(KS_CMD_PING);
+    TEST_ASSERT_EQ(fake_cdc_pos, 7, "the next reply goes out whole");
+    ks_respond_begin(KS_CMD_VERSION, KS_STATUS_OK, 5);
+    ks_respond_write(a, 2);
+    ks_respond_write(b, 3);
+    ks_respond_end();
+    TEST_ASSERT_EQ(fake_cdc_pos, 7 + 12, "and so does the next stream");
+}
+
 /* ══ Suite entry point ════════════════════════════════════════ */
 
 void test_cdc_rx_feed(void)
@@ -402,4 +483,8 @@ void test_cdc_rx_feed(void)
     TEST_RUN(test_oversized_payload_rejected);
     TEST_RUN(test_oversized_then_garbage_consumes_header);
     TEST_RUN(test_oversized_then_garbage_then_valid_frame);
+
+    /* Response framing */
+    TEST_RUN(test_respond_whole_frame_or_nothing);
+    TEST_RUN(test_respond_stream_whole_or_nothing);
 }

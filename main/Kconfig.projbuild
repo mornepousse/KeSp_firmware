@@ -260,8 +260,24 @@ config KASE_RF_TRACE_HALF
         delta, channel, excursion) and a periodic record, as KR frames of
         command 0xBA on the console UART0, for tools/rf_scope. Compiled in,
         OFF at boot: started by a KS_CMD_RF_TRACE request on UART0 RX with
-        a duration, off again at its end. Off, it costs one flag check per
-        transmission; no wake veto, no cadence change, no UART driver.
+        a duration, off again at its end. No wake veto, no cadence change,
+        no UART driver, no PM lock.
+
+        What it costs with tracing OFF (the normal state):
+        - RAM: the drain task's 3 KB stack (+ TCB), blocked on
+          portMAX_DELAY - it never runs on its own; the record ring
+          (128 x 24 B = 3 KB) plus ~0.8 KB of batch/frame/RX buffers;
+        - CPU: one flag check per transmission in the radio owner;
+        - the UART0 RX interrupt stays enabled (RX FIFO threshold +
+          timeout): a byte on RX0 wakes the drain task, which drops it
+          straight back to sleep when no request completed. GPIO44's
+          pull-up (its reset state) keeps an unplugged RX0 quiet;
+        - one task notification per veille wake-up (the wake hook), i.e.
+          one short pass of the drain task per wake.
+        The sleep current is unchanged (smoke "RF trace": 0.67 mA asleep
+        with trace off, ESP-Prog unplugged). Tracing ON perturbs timing
+        slightly (drain task wake-ups, up to ~11 ms in the sleep hook):
+        keep it off for current measurements.
         See main/comm/rf/rf_trace_uart.c.
 
 config KASE_RF_FORCE_ROUTE

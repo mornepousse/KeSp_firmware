@@ -273,6 +273,13 @@ size_t rf_trace_ring_pop_batch(rf_trace_ring_t *r, rf_trace_rec_t *out, size_t m
     return n;
 }
 
+uint8_t rf_trace_ring_peek_kind(const rf_trace_ring_t *r)
+{
+    uint32_t t = r->tail;                          /* consumer owns tail */
+    if (ld(&r->head) == t) return 0;
+    return r->slots[t & (r->cap - 1)].kind;
+}
+
 uint32_t rf_trace_ring_drops_take(rf_trace_ring_t *r)
 {
     uint32_t d = ld(&r->dropped);

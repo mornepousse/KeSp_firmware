@@ -15,6 +15,19 @@
  *  - The CDC handler only POSTS a request (atomic word); the rx task applies
  *    it on its next loop (≤ 1 ms). Off by default, off after every reboot.
  *
+ *
+ * Back-pressure and the host's presence (review I1/I2, rf_trace_pump_plan):
+ *  - a batch is popped only when the CDC TX FIFO has room for its WHOLE
+ *    frame on top of the room of the largest reply (KS_PAYLOAD_MAX + 7). A
+ *    host that stops reading therefore never gets a truncated frame, and a
+ *    command reply never loses its room to the trace: the ring overflows
+ *    instead, and the drops are counted in the next periodic record;
+ *  - the trace needs DTR (pyserial sets it on open, drops it on close). When
+ *    the host closes the port while tracing, the trace STOPS (not just
+ *    paused): the ring and the CDC TX FIFO are discarded, so the next open
+ *    starts clean instead of receiving minutes-old frames before its first
+ *    reply. A host that opens without DTR cannot trace (it stops at once).
+ *
  * Cost when off: one relaxed load per received frame and one per rx loop.
  */
 #ifndef RF_TRACE_DONGLE_H
