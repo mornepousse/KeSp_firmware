@@ -15,8 +15,16 @@
  * Any other length or sub-command is refused (ERR_INVALID on the wire). A
  * start while the trace is on RESTARTS it with the new duration (counters,
  * duplicate state and deadline reset); a stop while off is a no-op success.
- * The reply is an EMPTY KR of cmd 0xBA (status only): a trace data frame
- * always has a payload ≥ 16 bytes, so the host tells them apart by length.
+ * The reply is a KR of cmd 0xBA carrying the 7-byte ack below (errors: status
+ * only, no payload): a trace data frame always has a payload ≥ 16 bytes, so
+ * the host tells them apart by length.
+ *
+ * ── Ack payload (RF_TRACE and RF_STRESS start/stop) ──────────────────────
+ *   [sub][session:u32 LE][remaining_s:u16 LE]          RF_TRACE_ACK_LEN = 7
+ *   start: the new session's number and its duration;
+ *   stop : the session that was stopped (0 if none was on) and 0.
+ * The host learns which session the following records belong to (periodic
+ * `session`) and how long the device will go on on its own.
  */
 #ifndef RF_TRACE_CTL_H
 #define RF_TRACE_CTL_H
@@ -56,6 +64,13 @@ void rf_trace_timer_start(rf_trace_timer_t *t, uint32_t now_ms, uint16_t duratio
 void rf_trace_timer_stop(rf_trace_timer_t *t);
 /* True once `duration` has elapsed since start (false when off). */
 bool rf_trace_timer_expired(const rf_trace_timer_t *t, uint32_t now_ms);
+/* Whole seconds left, rounded UP (0 when off or over), for the ack. */
+uint16_t rf_trace_timer_remaining_s(const rf_trace_timer_t *t, uint32_t now_ms);
+
+#define RF_TRACE_ACK_LEN 7u
+/* Writes the ack payload; returns RF_TRACE_ACK_LEN, 0 when out is NULL or
+ * cap is too small. */
+size_t rf_trace_ack_encode(uint8_t *out, size_t cap, uint8_t sub, uint32_t session, uint16_t remaining_s);
 
 /* ── Duplicate detector: a frame is a duplicate when it carries the same seq
  * as the PREVIOUS frame of the same emitter (an application-level re-send
@@ -118,12 +133,49 @@ size_t rf_trace_pass_end(rf_trace_pass_t *p, rf_trace_ring_t *ring);
  * the keyboard's state. */
 bool rf_trace_drop_before_engine(const uint8_t *buf, uint16_t n);
 
+/* RX record flags. A frame without a seq is never a duplicate. */
+uint8_t rf_trace_rx_flags(bool delivered, bool dup, bool has_seq);
+
+/* ── The dongle's dispatch decision for one received frame ───────────────
+ * drain_radio (rf_rx_task.c) switches on this and on nothing else, so the
+ * host test of this function is the proof that a stress frame reaches no
+ * handler (test_rf_rx_dispatch_never_hands_a_stress_frame_to_a_handler):
+ *   STRESS_DROP — synthetic: traced if tracing, then dropped. No engine, no
+ *                 HID, no battery cache, no proof of life, no ACK payload;
+ *   STATUS      — battery cache, link quality, left's mode and fingerprint;
+ *   HEARTBEAT   — legacy: link quality, battery;
+ *   HIDREPORT   — straight to the host (mouse; pre-fusion keyboard);
+ *   MATRIX      — the fusion engine (and the right's re-emission);
+ *   OTHER       — no handler (SYNC_REQ only feeds the sync ACK payload).
+ * `trace` = tracing, for every frame (a dropped one included). */
+typedef enum {
+    RF_RX_ROUTE_OTHER = 0,
+    RF_RX_ROUTE_STRESS_DROP,
+    RF_RX_ROUTE_STATUS,
+    RF_RX_ROUTE_HEARTBEAT,
+    RF_RX_ROUTE_HIDREPORT,
+    RF_RX_ROUTE_MATRIX,
+} rf_rx_route_t;
+
+typedef struct {
+    rf_rx_route_t route;
+    bool proof_of_life;      /* rf_slot_link_rx: the keyboard is alive */
+    bool ack_payload_ok;     /* may be followed by the sync ACK payload */
+    bool trace;              /* an RX record is written */
+} rf_rx_decision_t;
+
+rf_rx_decision_t rf_rx_dispatch(const uint8_t *buf, uint16_t n, bool tracing);
+/* MATRIX (engine) and HIDREPORT (host): what ends up typed. */
+bool rf_rx_route_reaches_engine(rf_rx_route_t r);
+/* Any route drain_radio has code for (everything but OTHER and STRESS_DROP). */
+bool rf_rx_route_has_handler(rf_rx_route_t r);
+
 /* ── Output budget: a frame is written WHOLE or not at all ───────────────
  * Number of records of `kind` whose encoded frame (header + k records + CRC)
  * fits in `room` bytes, capped at RF_TRACE_BATCH_MAX; 0 when not even one
  * fits or the kind is unknown. Both ends size their batch with it BEFORE
  * popping: the half to the UART0 TX FIFO's free bytes (128-byte FIFO: 9
- * TX records, 5 periodic), the dongle to the CDC TX FIFO's. */
+ * TX records, 4 periodic), the dongle to the CDC TX FIFO's. */
 size_t rf_trace_batch_fit(uint32_t room, uint8_t kind);
 
 /* The dongle's CDC pump, one decision per batch (rf_trace_dongle.c):

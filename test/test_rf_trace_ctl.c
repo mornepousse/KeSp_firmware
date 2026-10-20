@@ -296,6 +296,133 @@ static void test_rf_trace_ctl_drop_stress(void)
 }
 
 
+/* ── The start/stop acknowledgement payload ───────────────────────────── */
+
+static void test_rf_trace_ctl_ack_payload(void)
+{
+    uint8_t b[RF_TRACE_ACK_LEN + 2];
+    memset(b, 0xEE, sizeof b);
+    TEST_ASSERT_EQ(rf_trace_ack_encode(b, sizeof b, RF_TRACE_SUB_START, 0x11223344u, 0xA1B2), RF_TRACE_ACK_LEN,
+                   "ack is 7 bytes");
+    static const uint8_t exp[RF_TRACE_ACK_LEN] = { RF_TRACE_SUB_START, 0x44, 0x33, 0x22, 0x11, 0xB2, 0xA1 };
+    TEST_ASSERT(memcmp(b, exp, sizeof exp) == 0, "ack: [sub][session u32 LE][remaining_s u16 LE]");
+    TEST_ASSERT_EQ(b[RF_TRACE_ACK_LEN], 0xEE, "ack writes exactly 7 bytes");
+    /* A trace data frame carries >= 16 payload bytes (header + one record):
+     * an ack must stay shorter, the host tells them apart by length. */
+    TEST_ASSERT(RF_TRACE_ACK_LEN < RF_TRACE_PAYLOAD_HDR + RF_TRACE_TX_SIZE, "ack shorter than any trace frame payload");
+    TEST_ASSERT_EQ(rf_trace_ack_encode(b, RF_TRACE_ACK_LEN - 1, RF_TRACE_SUB_STOP, 1, 0), 0, "too small: nothing");
+    TEST_ASSERT_EQ(rf_trace_ack_encode(NULL, 16, RF_TRACE_SUB_STOP, 1, 0), 0, "NULL: nothing");
+}
+
+static void test_rf_trace_ctl_timer_remaining(void)
+{
+    rf_trace_timer_t t;
+    rf_trace_timer_start(&t, 1000, 120);
+    TEST_ASSERT_EQ(rf_trace_timer_remaining_s(&t, 1000), 120, "at start: the whole duration");
+    TEST_ASSERT_EQ(rf_trace_timer_remaining_s(&t, 1001), 120, "rounded UP: 119.999 s left says 120");
+    TEST_ASSERT_EQ(rf_trace_timer_remaining_s(&t, 1000 + 119000), 1, "one second left");
+    TEST_ASSERT_EQ(rf_trace_timer_remaining_s(&t, 1000 + 120000), 0, "over: 0");
+    TEST_ASSERT_EQ(rf_trace_timer_remaining_s(&t, 1000 + 500000), 0, "long over: 0");
+    rf_trace_timer_start(&t, 0xFFFFF000u, 10);
+    TEST_ASSERT_EQ(rf_trace_timer_remaining_s(&t, 0x00000FA0u), 2, "across the u32 ms wrap");
+    rf_trace_timer_stop(&t);
+    TEST_ASSERT_EQ(rf_trace_timer_remaining_s(&t, 0), 0, "off: 0");
+}
+
+/* ── RX record flags ──────────────────────────────────────────────────── */
+
+static void test_rf_trace_ctl_rx_flags(void)
+{
+    TEST_ASSERT_EQ(rf_trace_rx_flags(false, false, true), 0, "plain frame with a seq: no flag");
+    TEST_ASSERT_EQ(rf_trace_rx_flags(true, false, true), RF_TRACE_RXF_DELIVERED, "delivered");
+    TEST_ASSERT_EQ(rf_trace_rx_flags(false, true, true), RF_TRACE_RXF_DUP, "dup");
+    TEST_ASSERT_EQ(rf_trace_rx_flags(true, false, false), RF_TRACE_RXF_DELIVERED | RF_TRACE_RXF_NOSEQ,
+                   "a HIDREPORT: delivered, no seq");
+    TEST_ASSERT_EQ(rf_trace_rx_flags(false, true, false), RF_TRACE_RXF_NOSEQ,
+                   "no seq is never a duplicate, whatever the caller says");
+    TEST_ASSERT(RF_TRACE_RXF_NOSEQ != RF_TRACE_RXF_DELIVERED && RF_TRACE_RXF_NOSEQ != RF_TRACE_RXF_DUP,
+                "NOSEQ is its own bit on RX");
+}
+
+/* ── The dongle's dispatch: a stress frame reaches NO handler ─────────────
+ * drain_radio (rf_rx_task.c) switches on rf_rx_dispatch() and nothing else.
+ * A mixed stream — real frames of every kind interleaved with stress frames
+ * of both halves, short and long — goes through it with the trace on AND
+ * off: every stress frame comes out as STRESS_DROP (no engine, no HID, no
+ * battery cache, no proof of life, no ACK payload), every real frame keeps
+ * its handler, and the trace flag follows the trace and nothing else. */
+
+static size_t mixed_stream(uint8_t frames[][32], uint16_t *len, bool *stress)
+{
+    size_t k = 0;
+    rf_matrix_t m = { .half = RF_HALF_LEFT, .bitmap = {1, 0, 0, 0}, .seq = 1 };
+    rf_status_t st = { .batt_dV = 40, .seq = 2, .half = RF_HALF_RIGHT };
+    rf_heartbeat_t h = { .bitmap = {0, 2, 0, 0}, .seq = 3 };
+    const uint8_t kb[6] = { 4, 0, 0, 0, 0, 0 };
+    rf_sync_req_t q = { .next = 1 };
+    for (int round = 0; round < 3; round++) {
+        len[k] = rf_encode_matrix(frames[k], &m);            stress[k++] = false;
+        frames[k][0] = (uint8_t)((PKT_TYPE_STRESS << 4) | RF_HALF_LEFT); frames[k][1] = (uint8_t)round;
+        memset(frames[k] + 2, 0, 4); len[k] = 6;              stress[k++] = true;
+        len[k] = rf_encode_status(frames[k], &st);           stress[k++] = false;
+        frames[k][0] = (uint8_t)((PKT_TYPE_STRESS << 4) | RF_HALF_RIGHT); frames[k][1] = 0xFF;
+        len[k] = 1;                                            stress[k++] = true;   /* truncated */
+        len[k] = rf_encode_heartbeat(frames[k], &h);         stress[k++] = false;
+        len[k] = rf_encode_hidreport_kbd(frames[k], 0, kb);  stress[k++] = false;
+        /* A stress frame that LOOKS like a matrix in its body. */
+        len[k] = rf_encode_matrix(frames[k], &m);
+        frames[k][0] = (uint8_t)((PKT_TYPE_STRESS << 4) | RF_HALF_RIGHT); stress[k++] = true;
+        len[k] = rf_encode_sync_req(frames[k], &q);          stress[k++] = false;
+        frames[k][0] = (uint8_t)((PKT_TYPE_STRESS << 4) | 0x0F); memset(frames[k] + 1, 0xA5, 31);
+        len[k] = 32;                                           stress[k++] = true;   /* full ESB payload */
+    }
+    return k;
+}
+
+static void test_rf_rx_dispatch_never_hands_a_stress_frame_to_a_handler(void)
+{
+    static uint8_t frames[32][32];
+    uint16_t len[32];
+    bool stress[32];
+    size_t k = mixed_stream(frames, len, stress);
+    for (int tracing = 0; tracing <= 1; tracing++) {
+        unsigned engine = 0, handled = 0, dropped = 0, real = 0;
+        for (size_t i = 0; i < k; i++) {
+            rf_rx_decision_t d = rf_rx_dispatch(frames[i], len[i], tracing);
+            TEST_ASSERT_EQ(d.trace, tracing, "the RX record follows the trace, for every frame");
+            if (stress[i]) {
+                TEST_ASSERT_EQ(d.route, RF_RX_ROUTE_STRESS_DROP, "stress frame → STRESS_DROP");
+                TEST_ASSERT(!rf_rx_route_reaches_engine(d.route), "stress frame: never the engine / HID");
+                TEST_ASSERT(!rf_rx_route_has_handler(d.route), "stress frame: no handler at all");
+                TEST_ASSERT(!d.proof_of_life, "stress frame: not proof of the keyboard's life");
+                TEST_ASSERT(!d.ack_payload_ok, "stress frame: no sync ACK payload loaded after it");
+                if (rf_rx_route_reaches_engine(d.route)) engine++;
+                dropped++;
+            } else {
+                real++;
+                TEST_ASSERT(d.route != RF_RX_ROUTE_STRESS_DROP, "real frame never dropped as stress");
+                TEST_ASSERT(d.proof_of_life, "real frame: proof of life");
+                TEST_ASSERT(d.ack_payload_ok, "real frame: may carry the sync ACK payload");
+                if (rf_rx_route_has_handler(d.route)) handled++;
+            }
+        }
+        TEST_ASSERT_EQ(engine, 0, "no stress frame reached the engine");
+        TEST_ASSERT_EQ(dropped, 12, "all 12 stress frames dropped");
+        TEST_ASSERT_EQ(handled, 12, "matrix, status, heartbeat, hidreport ×3 rounds keep their handler");
+        TEST_ASSERT_EQ(real, 15, "15 real frames");
+    }
+    /* Each real kind's route. */
+    TEST_ASSERT_EQ(rf_rx_dispatch(frames[0], len[0], false).route, RF_RX_ROUTE_MATRIX, "matrix → MATRIX");
+    TEST_ASSERT_EQ(rf_rx_dispatch(frames[2], len[2], false).route, RF_RX_ROUTE_STATUS, "status → STATUS");
+    TEST_ASSERT_EQ(rf_rx_dispatch(frames[4], len[4], false).route, RF_RX_ROUTE_HEARTBEAT, "heartbeat → HEARTBEAT");
+    TEST_ASSERT_EQ(rf_rx_dispatch(frames[5], len[5], false).route, RF_RX_ROUTE_HIDREPORT, "hidreport → HIDREPORT");
+    TEST_ASSERT_EQ(rf_rx_dispatch(frames[7], len[7], false).route, RF_RX_ROUTE_OTHER, "sync req → OTHER (ACK payload only)");
+    TEST_ASSERT(rf_rx_route_reaches_engine(RF_RX_ROUTE_MATRIX), "MATRIX is the engine");
+    TEST_ASSERT(rf_rx_route_reaches_engine(RF_RX_ROUTE_HIDREPORT), "HIDREPORT is the HID path");
+    TEST_ASSERT(!rf_rx_route_has_handler(RF_RX_ROUTE_OTHER), "OTHER has no handler");
+    TEST_ASSERT_EQ(rf_rx_dispatch(NULL, 0, true).route, RF_RX_ROUTE_OTHER, "empty: no handler");
+}
+
 /* ── How many records fit a byte budget (UART0 TX FIFO, CDC TX FIFO) ──── */
 
 static void test_rf_trace_ctl_batch_fit(void)
@@ -306,8 +433,8 @@ static void test_rf_trace_ctl_batch_fit(void)
     TEST_ASSERT_EQ(rf_trace_batch_fit(9 + 13 + 1, RF_TRACE_KIND_TX), 1, "exactly one TX record");
     TEST_ASSERT_EQ(rf_trace_batch_fit(128, RF_TRACE_KIND_TX), 9, "the S3's 128-byte UART FIFO: 9 TX records (127 B)");
     TEST_ASSERT_EQ(rf_trace_batch_fit(128, RF_TRACE_KIND_RX), 9, "same for RX (13 B)");
-    TEST_ASSERT_EQ(rf_trace_batch_fit(128, RF_TRACE_KIND_PERIODIC), 5, "5 periodic records (110 B)");
-    TEST_ASSERT_EQ(rf_trace_batch_fit(9 + 5 * 20 + 1 - 1, RF_TRACE_KIND_PERIODIC), 4, "one byte short of 5 periodic");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(128, RF_TRACE_KIND_PERIODIC), 4, "4 periodic records (114 B)");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(9 + 4 * 26 + 1 - 1, RF_TRACE_KIND_PERIODIC), 3, "one byte short of 4 periodic");
     TEST_ASSERT_EQ(rf_trace_batch_fit(100000, RF_TRACE_KIND_TX), RF_TRACE_BATCH_MAX, "capped at a full batch");
     TEST_ASSERT_EQ(rf_trace_batch_fit(RF_TRACE_FRAME_MAX, RF_TRACE_KIND_PERIODIC), RF_TRACE_BATCH_MAX,
                    "RF_TRACE_FRAME_MAX holds a full batch of the largest record");
@@ -386,4 +513,8 @@ void test_rf_trace_ctl(void)
     TEST_RUN(test_rf_trace_ctl_drop_stress);
     TEST_RUN(test_rf_trace_ctl_batch_fit);
     TEST_RUN(test_rf_trace_ctl_pump_plan);
+    TEST_RUN(test_rf_trace_ctl_ack_payload);
+    TEST_RUN(test_rf_trace_ctl_timer_remaining);
+    TEST_RUN(test_rf_trace_ctl_rx_flags);
+    TEST_RUN(test_rf_rx_dispatch_never_hands_a_stress_frame_to_a_handler);
 }

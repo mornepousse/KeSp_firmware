@@ -52,8 +52,10 @@ void rf_trace_dongle_init(void);
 
 /* CDC handler side: posts start(duration)/stop. False when the trace is not
  * available (no rx task). The last request posted before the rx task reads
- * it wins. */
-bool rf_trace_dongle_request(const rf_trace_ctl_cmd_t *cmd);
+ * it wins. Fills the ack's fields (rf_trace_ctl.h): a start's NEW session
+ * number (allocated here, carried by every periodic record of the run) and
+ * its duration; a stop's running session (0 if off) and 0. */
+bool rf_trace_dongle_request(const rf_trace_ctl_cmd_t *cmd, uint32_t *session, uint16_t *remaining_s);
 
 /* ── rf_rx task only ──────────────────────────────────────────────────── */
 

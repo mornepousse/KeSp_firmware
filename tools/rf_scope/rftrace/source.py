@@ -14,7 +14,7 @@ from typing import Callable
 
 from . import jsonl
 from .control import StartController
-from .stream import SourceStream
+from .stream import CMD_RF_TRACE, SourceStream
 
 
 class SourceRunner:
@@ -55,7 +55,7 @@ class SourceRunner:
         if self.ctl.state == "gave_up" and not self._gave_up_sent:
             self._gave_up_sent = True
             self._emit(event="giveup", attempts=self.ctl.attempts, message=self.ctl.message(self.src))
-        if self.ctl.state == "off":
+        if self.ctl.state in ("off", "refused"):
             self.done = True
 
     def _handle(self, item: tuple, host_ns: int) -> None:
@@ -67,15 +67,26 @@ class SourceRunner:
                 self._emit(event="ack", attempts=self.ctl.attempts, via="data")
             for it in jsonl.frame_items(item[1], self.src, self.port_name, host_ns):
                 self.sink(it)
-        elif kind == "ack":
-            was = self.ctl.state
-            self.ctl.on_ack(self.mono())
-            if was == "starting":
-                self._emit(event="ack", attempts=self.ctl.attempts)
-            elif was == "stopping":
-                self._emit(event="stop_ack")
+        elif kind == "reply":
+            self._reply(item[1], item[2], item[3])
         elif kind == "line":
             self.sink({"type": "text", "src": self.src, "host_ns": host_ns, "text": item[1]})
+
+    def _reply(self, cmd: int, status: int, info: dict | None) -> None:
+        if cmd != CMD_RF_TRACE:
+            return
+        was = self.ctl.state
+        if status != 0:
+            self.ctl.on_refused(self.mono(), status)
+            if was == "starting":
+                self._emit(event="refused", status=status)
+            return
+        self.ctl.on_ack(self.mono(), info)
+        extra = {"session": info["session"], "remaining_s": info["remaining_s"]} if info else {}
+        if was == "starting":
+            self._emit(event="ack", attempts=self.ctl.attempts, **extra)
+        elif was == "stopping":
+            self._emit(event="stop_ack", **extra)
 
     def flush(self) -> None:
         for kind, val in self.stream.flush():

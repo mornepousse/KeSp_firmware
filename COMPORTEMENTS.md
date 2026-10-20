@@ -42,7 +42,9 @@ means a test, or a line.
 - [test:test_rf_trace] The rf-scope trace format (`main/comm/rf/rf_trace.h`)
   is one byte layout for the halves (UART0) and the dongle (CDC): a KR reply
   of command 0xBA (`KS_CMD_RF_TRACE`) carrying version, kind, 1..16 fixed-size
-  little-endian records (TX 13 B, RX 13 B, periodic 20 B) and `ks_crc8`. The
+  little-endian records (TX 13 B, RX 13 B, periodic 26 B — format version 2,
+  2026-10-20: the periodic record carries the trace `session` and the
+  `stress` frame count; a version-1 frame is refused) and `ks_crc8`. The
   decoder refuses, each with its own code, a short, trailing, wrong-magic,
   wrong-command, wrong-status, wrong-version, unknown-kind, out-of-bound
   count, inconsistent length or bad-CRC frame; the scanner finds every frame
@@ -62,8 +64,19 @@ means a test, or a line.
   the PREVIOUS frame of the same emitter, never for frames without a seq)
   and a FIFO depth reconstructed from the drain pass. A synthetic stress
   frame (`PKT_TYPE_STRESS` 0xA) is dropped before every handler — engine,
-  HID, battery, proof of life — traced or not
-  (test_rf_trace_ctl_drop_stress). Records leave on the CDC from the CDC
+  HID, battery, proof of life, sync ACK payload — traced or not
+  (test_rf_trace_ctl_drop_stress): `drain_radio` switches on the pure
+  `rf_rx_dispatch()` and on nothing else, and a mixed stream of real and
+  stress frames (both halves, truncated, full-length, a stress frame whose
+  body looks like a matrix) through it, trace on AND off, hands no stress
+  frame to any handler while every real frame keeps its own
+  (test_rf_rx_dispatch_never_hands_a_stress_frame_to_a_handler). The dongle's
+  periodic record counts the stress frames it dropped (`stress`) and carries
+  the session; an RX record of a kind without a seq is flagged `no_seq`
+  (test_rf_trace_ctl_rx_flags). The start/stop reply carries
+  `[sub][session u32][remaining_s u16]`, 7 bytes, always shorter than a
+  trace frame's payload (test_rf_trace_ctl_ack_payload,
+  test_rf_trace_ctl_timer_remaining). Records leave on the CDC from the CDC
   task only, never interleaved with a reply. Back-pressure and presence
   (test_rf_trace_ctl_pump_plan): a batch is popped only when the CDC TX FIFO
   holds its WHOLE frame on top of the largest reply's room (a stalled host

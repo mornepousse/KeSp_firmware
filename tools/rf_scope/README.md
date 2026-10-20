@@ -65,8 +65,10 @@ each, below 40x6 it just says so.
 
 A half hears UART0 only while awake (no UART driver, no wake source: the sleep
 current stays at its baseline). The start request is therefore **repeated every
-250 ms** until the empty `KR BA` ack (or, if the ack got lost among console
-text, the first trace frame) comes back. If nothing answers in 20 s the tool
+250 ms** until the `KR BA` ack (or, if the ack got lost among console
+text, the first trace frame) comes back. The ack carries the session number
+(every periodic record of the run repeats it) and the duration granted; an
+error reply (`refused`) ends the attempt at once. If nothing answers in 20 s the tool
 says so (`press a key on the half to wake it`) and goes on with the other
 sources. The dongle never sleeps and answers at once.
 
@@ -79,7 +81,7 @@ One JSON object per line, self-contained:
 | `meta` | `version`, `sources` (role -> port), `started`, `duration_s` |
 | `rec` | `src` (`dongle`/`left`/`right`), `port`, `host_ns`, `kind` (`tx`/`rx`/`periodic`) and the record's fields exactly as in `main/comm/rf/rf_trace.h` |
 | `text` | `src`, `host_ns`, `text`: a console line of a half (kept so the run explains itself) |
-| `ctl` | `src`, `host_ns`, `event`: `start_sent`, `ack` (`attempts`), `giveup` (`message`), `stop_sent`, `stop_ack`, `closed` |
+| `ctl` | `src`, `host_ns`, `event`: `start_sent`, `ack` (`attempts`, `session`, `remaining_s`), `refused` (`status`), `giveup` (`message`), `stop_sent`, `stop_ack` (`session`), `closed` |
 
 `host_ns` is `time.monotonic_ns()` when the chunk carrying the record was read
 (records of one chunk share it). A truncated last line (killed capture) is

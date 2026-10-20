@@ -31,6 +31,7 @@ from dataclasses import dataclass
 
 NOSEQ = 0x02
 RXF_DUP = 0x02
+RXF_NOSEQ = 0x04         # format v2: the dongle says the kind carries no seq
 
 
 @dataclass
@@ -211,7 +212,7 @@ class Matcher:
 
     def rx(self, obs: dict) -> list[dict]:
         out: list[dict] = []
-        if obs["pkt_kind"] in self._noseq_kinds:
+        if obs.get("flags", 0) & RXF_NOSEQ or obs["pkt_kind"] in self._noseq_kinds:
             out.append({"ev": "noseq_rx", "e": obs["emitter"], "rx_host_ns": obs["host_ns"]})
             return out
         key = (obs["emitter"], obs["pkt_kind"], obs["seq"])

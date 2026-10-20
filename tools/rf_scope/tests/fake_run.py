@@ -170,7 +170,7 @@ def generate(path, seed=1, seconds=120, wrap_at_s=50):
             fr = counts.get(sec, [0, 0])[0]
             rec = {"t_us": int(tt) % W, "uptime_s": int(tt // 1_000_000), "source": e, "state": state,
                    "batt_dV": 41 - int(tau // 90), "channel": CHANNEL, "frames": fr, "fails": 0,
-                   "dups": 0, "drops": drops}
+                   "dups": 0, "drops": drops, "session": 1, "stress": 0}
             put(half_host(tau), {"type": "rec", "src": s, "port": ports[s], "kind": "periodic", **rec,
                                  "host_ns": 0})
             items[-1][2]["host_ns"] = items[-1][0]
@@ -203,7 +203,7 @@ def generate(path, seed=1, seconds=120, wrap_at_s=50):
         put(dongle_host(sec + 0.5), {"type": "rec", "src": "dongle", "port": ports["dongle"], "kind": "periodic",
                                      "t_us": int(tt) % W, "uptime_s": int(tt // 1_000_000), "source": 2,
                                      "state": 0, "batt_dV": 0, "channel": CHANNEL, "frames": f, "fails": 0,
-                                     "dups": d, "drops": 0, "host_ns": 0})
+                                     "dups": d, "drops": 0, "session": 1, "stress": 0, "host_ns": 0})
         items[-1][2]["host_ns"] = items[-1][0]
     end = HOST0 + int((seconds + 1) * NS)
     for s in ("dongle", "left", "right"):

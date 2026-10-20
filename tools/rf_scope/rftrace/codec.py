@@ -19,7 +19,7 @@ import struct
 MAGIC = b"KR"
 CMD = 0xBA
 STATUS_OK = 0x00
-VERSION = 1
+VERSION = 2          # v2: the periodic record carries `session` and `stress` (26 B)
 BATCH_MAX = 16
 KR_HDR = 6
 PAYLOAD_HDR = 3
@@ -36,9 +36,9 @@ _RECORDS = {
     KIND_RX: (struct.Struct("<IBBBBBBBBB"),
               ("t_us", "emitter", "seq", "pkt_kind", "payload_len",
                "pipe", "rpd", "channel", "fifo_depth", "flags")),
-    KIND_PERIODIC: (struct.Struct("<IIBBBBHHHH"),
+    KIND_PERIODIC: (struct.Struct("<IIBBBBHHHHIH"),
                     ("t_us", "uptime_s", "source", "state", "batt_dV",
-                     "channel", "frames", "fails", "dups", "drops")),
+                     "channel", "frames", "fails", "dups", "drops", "session", "stress")),
 }
 REC_SIZE = {k: s.size for k, (s, _) in _RECORDS.items()}
 REC_SIZE_MAX = max(REC_SIZE.values())
@@ -48,8 +48,9 @@ FRAME_MAX = HDR + BATCH_MAX * REC_SIZE_MAX + 1
 # Identities and flags (rf_trace.h)
 EMIT_LEFT, EMIT_RIGHT, EMIT_DONGLE, EMIT_MOUSE = 0, 1, 2, 3
 TX_ACK, TX_MAX_RT, TX_TIMEOUT = 0, 1, 2
-TXF_EXCURSION = 0x01
-RXF_DELIVERED, RXF_DUP = 0x01, 0x02
+TXF_EXCURSION, TXF_NOSEQ = 0x01, 0x02
+RXF_DELIVERED, RXF_DUP, RXF_NOSEQ = 0x01, 0x02, 0x04
+PKT_STRESS = 0xA     # PKT_TYPE_STRESS: synthetic frames of the stress generator
 ST_AWAKE, ST_SLEEPING, ST_WOKE = 0, 1, 2
 
 

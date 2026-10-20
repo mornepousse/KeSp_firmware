@@ -2,10 +2,12 @@
 
 The dongle answers a start at once, but a HALF only hears UART0 while awake:
 bytes sent while it sleeps (light sleep between keystrokes, the 5 s veille)
-are lost. So the start request is REPEATED every `interval_s` until the empty
-KR ack (or, if the ack was lost in console text, the first trace frame) comes
+are lost. So the start request is REPEATED every `interval_s` until the KR
+ack (or, if the ack was lost in console text, the first trace frame) comes
 back; a start that lands while the trace is on merely restarts it. If nothing
-answers within `give_up_s` the half is asleep for good: say so.
+answers within `give_up_s` the half is asleep for good: say so. The ack
+carries the session number and the time the device will go on by itself
+(stream.parse_ack); an error reply ends the attempt (`refused`).
 
 Pure: no I/O, time is passed in (seconds, any monotonic origin).
 """
@@ -29,7 +31,10 @@ class StartController:
         self.interval_s = interval_s
         self.give_up_s = give_up_s
         self.stop_budget_s = stop_budget_s
-        self.state = "idle"       # idle | starting | on | gave_up | stopping | off
+        self.state = "idle"       # idle | starting | on | gave_up | refused | stopping | off
+        self.session: int | None = None
+        self.remaining_s: int | None = None
+        self.refused_status: int | None = None
         self.attempts = 0
         self._t0 = 0.0
         self._next = 0.0
@@ -56,9 +61,19 @@ class StartController:
                 return ks_frame(CMD_RF_TRACE, b"\x00")
         return None
 
-    def on_ack(self, now: float) -> None:
+    def on_ack(self, now: float, info: dict | None = None) -> None:
         if self.state == "starting":
             self.state = "on"
+            if info:
+                self.session, self.remaining_s = info["session"], info["remaining_s"]
+        elif self.state == "stopping":
+            self.state = "off"
+
+    def on_refused(self, now: float, status: int) -> None:
+        """An error reply: the device will not do it — repeating cannot help."""
+        if self.state == "starting":
+            self.state = "refused"
+            self.refused_status = status
         elif self.state == "stopping":
             self.state = "off"
 

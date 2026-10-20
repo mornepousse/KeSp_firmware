@@ -91,7 +91,7 @@ class Analyzer:
     def _ctl(self, it: dict, ns: int) -> None:
         src, ev = it["src"], it["event"]
         self.ports.setdefault(src, it.get("port", ""))
-        state = {"start_sent": "starting", "ack": "on", "giveup": "gave_up",
+        state = {"start_sent": "starting", "ack": "on", "giveup": "gave_up", "refused": "refused",
                  "stop_sent": "stopping", "stop_ack": "off"}.get(ev)
         if state:
             self.trace[src] = state
@@ -99,6 +99,8 @@ class Analyzer:
             self._event(ns, "info", None, "trace", f"{src}: trace on (ack after {it.get('attempts', '?')} request(s))")
         elif ev == "giveup":
             self._event(ns, "bad", None, "giveup", it.get("message", f"{src}: no answer"))
+        elif ev == "refused":
+            self._event(ns, "bad", None, "giveup", f"{src}: trace start refused (status {it.get('status')})")
         elif ev == "stop_ack":
             self._event(ns, "info", None, "trace", f"{src}: trace off")
         if src == "dongle" and ev in ("stop_sent", "stop_ack", "closed"):

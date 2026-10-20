@@ -63,6 +63,7 @@
 #include "rf_trace_half.h"
 #include "radio_owner.h"
 #include "cdc_binary_protocol.h"   /* KS_CMD_RF_TRACE, KS_STATUS_* */
+#include "rf_packet.h"             /* PKT_TYPE_STRESS */
 #include "cadence.h"
 #include "sdkconfig.h"
 #include "esp_timer.h"
@@ -109,7 +110,7 @@ volatile uint32_t g_rf_trace_session;
 static rf_trace_rec_t    s_slots[RING_CAP];
 static rf_trace_ring_t   s_ring;
 static portMUX_TYPE      s_push_mux = portMUX_INITIALIZER_UNLOCKED;
-static uint16_t          s_frames, s_fails;          /* since the last periodic record, under s_push_mux */
+static uint16_t          s_frames, s_fails, s_stress; /* since the last periodic record, under s_push_mux */
 static portMUX_TYPE      s_ctl_mux = portMUX_INITIALIZER_UNLOCKED;
 static rf_trace_sess_t   s_ctl;                      /* under s_ctl_mux */
 static bool              s_woke_pending;             /* under s_ctl_mux */
@@ -143,6 +144,7 @@ void rf_trace_uart_tx(const rf_trace_tx_t *r)
     portENTER_CRITICAL_SAFE(&s_push_mux);
     s_frames++;
     if (r->result != RF_TRACE_TX_ACK) s_fails++;
+    if (r->pkt_kind == PKT_TYPE_STRESS) s_stress++;
     rf_trace_ring_push(&s_ring, &rec);
     portEXIT_CRITICAL_SAFE(&s_push_mux);
     notify(NOTE_DATA);
@@ -163,9 +165,10 @@ static void periodic(uint8_t state)   /* s_out held: drops_take is the consumer'
     p->channel = radio_cible()->channel;   /* diagnostic read, like the HB */
     uint32_t d = rf_trace_ring_drops_take(&s_ring);
     p->drops = d > 0xFFFFu ? 0xFFFFu : (uint16_t)d;
+    p->session = g_rf_trace_session;       /* 0 once a stop or the auto-off closed the run */
     portENTER_CRITICAL(&s_push_mux);
-    p->frames = s_frames; p->fails = s_fails;
-    s_frames = s_fails = 0;
+    p->frames = s_frames; p->fails = s_fails; p->stress = s_stress;
+    s_frames = s_fails = s_stress = 0;
     portEXIT_CRITICAL(&s_push_mux);
     push(&rec);
 }
@@ -222,13 +225,13 @@ static bool drain(bool blocking)   /* s_out held */
     return rf_trace_ring_count(&s_ring) != 0;
 }
 
-/* The KR ack: its own 7 bytes, no ring, no s_out. The FIFO may be full of
- * trace frames: retry a few ticks with no lock held, then give up (the host
- * repeats its request until the ack comes). */
-static void reply(uint8_t cmd, uint8_t status)
+/* A KR reply: its own bytes (7 + payload ≤ 16), no ring, no s_out. The FIFO
+ * may be full of trace frames: retry a few ticks with no lock held, then give
+ * up (the host repeats its request until the ack comes). */
+static void reply(uint8_t cmd, uint8_t status, const uint8_t *payload, uint16_t len)
 {
-    uint8_t f[8];
-    size_t n = rf_trace_kr_encode(f, sizeof f, cmd, status, NULL, 0);
+    uint8_t f[7 + RF_TRACE_KS_PAYLOAD_MAX];
+    size_t n = rf_trace_kr_encode(f, sizeof f, cmd, status, payload, len);
     for (int i = 0; n && !uart0_try_write(f, n); i++) {
         if (i + 1 >= REPLY_TRIES) return;
         vTaskDelay(1);
@@ -275,25 +278,39 @@ static void rx_init(void)
     uart_ll_ena_intr_mask(u, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
 }
 
-static void command(const rf_trace_ks_rx_t *rx)   /* drain task */
+static void command_trace(const rf_trace_ks_rx_t *rx)   /* drain task */
 {
     rf_trace_ctl_cmd_t c = { 0 };
     uint8_t status = KS_STATUS_OK;
-    if (rx->cmd != KS_CMD_RF_TRACE)                                          status = KS_STATUS_ERR_UNKNOWN;
-    else if (rf_trace_ctl_parse(rx->payload, rx->len, &c) != RF_TRACE_CTL_OK) status = KS_STATUS_ERR_INVALID;
+    uint8_t ack[RF_TRACE_ACK_LEN];
+    size_t ack_n = 0;
+    if (rf_trace_ctl_parse(rx->payload, rx->len, &c) != RF_TRACE_CTL_OK) status = KS_STATUS_ERR_INVALID;
     else {
+        uint32_t sess; uint16_t rem;
         portENTER_CRITICAL(&s_ctl_mux);
+        uint32_t was = s_ctl.session;
         if (c.start) rf_trace_sess_start(&s_ctl, now_ms(), c.duration_s);
         else                           rf_trace_sess_stop(&s_ctl);
         g_rf_trace_session = s_ctl.session;
+        sess = c.start ? s_ctl.session : was;
+        rem  = c.start ? rf_trace_timer_remaining_s(&s_ctl.timer, now_ms()) : 0;
         portEXIT_CRITICAL(&s_ctl_mux);
+        ack_n = rf_trace_ack_encode(ack, sizeof ack, c.start ? RF_TRACE_SUB_START : RF_TRACE_SUB_STOP, sess, rem);
     }
-    reply(rx->cmd, status);
+    reply(rx->cmd, status, ack, (uint16_t)ack_n);
     if (status == KS_STATUS_OK) {
         if (c.start)
             ESP_LOGW(TAG, "ON for %u s (session %lu)", (unsigned)c.duration_s, (unsigned long)g_rf_trace_session);
         else
             ESP_LOGW(TAG, "OFF (stop)");
+    }
+}
+
+static void command(const rf_trace_ks_rx_t *rx)   /* drain task */
+{
+    switch (rx->cmd) {
+    case KS_CMD_RF_TRACE: command_trace(rx); break;
+    default:              reply(rx->cmd, KS_STATUS_ERR_UNKNOWN, NULL, 0); break;
     }
 }
 

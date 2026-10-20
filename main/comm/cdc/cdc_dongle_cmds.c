@@ -10,7 +10,8 @@
  *   - KS_CMD_RF_PAIR_LIST   → 13 bytes: paired_count + mac_left + mac_right
  *   - KS_CMD_RF_PAIR_RESET  → 1 byte: paired_count after reset (always 0)
  *   - KS_CMD_BATTERY        → 14 bytes: dV/soc/charging/age_ms per half
- *   - KS_CMD_RF_TRACE       → empty ack; trace batches follow, unsolicited
+ *   - KS_CMD_RF_TRACE       → 7-byte ack [sub][session u32][remaining_s u16];
+ *                             trace batches follow, unsolicited
  *
  * All multi-byte integers are little-endian.
  */
@@ -237,9 +238,11 @@ static void bin_cmd_config_coherence(uint8_t cmd, const uint8_t *p, uint16_t l)
 /* ── KS_CMD_RF_TRACE (rf-scope) ─────────────────────────────────────
  * Request: [0x00] stop | [0x01] start, default 600 s | [0x01][duration_s:u16 LE]
  * (0 = default). A start while on restarts with the new duration.
- * Response: EMPTY KR (status only). While on, unsolicited KR frames of the
- * same command carry record batches (rf_trace.h), from the CDC task's pump.
- * ERR_INVALID: malformed payload. ERR_UNKNOWN: no radio, no rx task. */
+ * Response: KR with the 7-byte ack [sub][session u32 LE][remaining_s u16 LE]
+ * (rf_trace_ctl.h). While on, unsolicited KR frames of the same command carry
+ * record batches (rf_trace.h, payload >= 16 bytes), from the CDC task's pump.
+ * ERR_INVALID: malformed payload. ERR_UNKNOWN: no radio, no rx task (errors
+ * carry no payload). */
 static void bin_cmd_rf_trace(uint8_t cmd, const uint8_t *p, uint16_t l)
 {
     rf_trace_ctl_cmd_t c;
@@ -247,11 +250,15 @@ static void bin_cmd_rf_trace(uint8_t cmd, const uint8_t *p, uint16_t l)
         ks_respond_err(cmd, KS_STATUS_ERR_INVALID);
         return;
     }
-    if (!rf_trace_dongle_request(&c)) {
+    uint32_t session = 0; uint16_t remaining = 0;
+    if (!rf_trace_dongle_request(&c, &session, &remaining)) {
         ks_respond_err(cmd, KS_STATUS_ERR_UNKNOWN);
         return;
     }
-    ks_respond_ok(cmd);
+    uint8_t ack[RF_TRACE_ACK_LEN];
+    size_t n = rf_trace_ack_encode(ack, sizeof ack, c.start ? RF_TRACE_SUB_START : RF_TRACE_SUB_STOP,
+                                   session, remaining);
+    ks_respond(cmd, KS_STATUS_OK, ack, (uint16_t)n);
 }
 
 /* ── Command table + init ──────────────────────────────────────── */

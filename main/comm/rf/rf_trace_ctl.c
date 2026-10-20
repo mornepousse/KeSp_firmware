@@ -42,6 +42,25 @@ bool rf_trace_timer_expired(const rf_trace_timer_t *t, uint32_t now_ms)
     return t->on && (uint32_t)(now_ms - t->start_ms) >= t->dur_ms;
 }
 
+uint16_t rf_trace_timer_remaining_s(const rf_trace_timer_t *t, uint32_t now_ms)
+{
+    if (!t->on) return 0;
+    uint32_t el = (uint32_t)(now_ms - t->start_ms);
+    if (el >= t->dur_ms) return 0;
+    uint32_t left = t->dur_ms - el;
+    return (uint16_t)((left + 999u) / 1000u);   /* dur ≤ 65 535 s: fits */
+}
+
+size_t rf_trace_ack_encode(uint8_t *out, size_t cap, uint8_t sub, uint32_t session, uint16_t remaining_s)
+{
+    if (out == NULL || cap < RF_TRACE_ACK_LEN) return 0;
+    out[0] = sub;
+    out[1] = (uint8_t)session; out[2] = (uint8_t)(session >> 8);
+    out[3] = (uint8_t)(session >> 16); out[4] = (uint8_t)(session >> 24);
+    out[5] = (uint8_t)remaining_s; out[6] = (uint8_t)(remaining_s >> 8);
+    return RF_TRACE_ACK_LEN;
+}
+
 void rf_trace_dup_reset(rf_trace_dup_t *d)
 {
     for (unsigned i = 0; i < RF_TRACE_DUP_EMITTERS; i++) d->last[i] = 0;
@@ -132,6 +151,44 @@ size_t rf_trace_pass_end(rf_trace_pass_t *p, rf_trace_ring_t *ring)
 bool rf_trace_drop_before_engine(const uint8_t *buf, uint16_t n)
 {
     return buf != NULL && n > 0 && rf_packet_type(buf, n) == PKT_TYPE_STRESS;
+}
+
+uint8_t rf_trace_rx_flags(bool delivered, bool dup, bool has_seq)
+{
+    return (uint8_t)((delivered ? RF_TRACE_RXF_DELIVERED : 0) |
+                     ((dup && has_seq) ? RF_TRACE_RXF_DUP : 0) |
+                     (has_seq ? 0 : RF_TRACE_RXF_NOSEQ));
+}
+
+rf_rx_decision_t rf_rx_dispatch(const uint8_t *buf, uint16_t n, bool tracing)
+{
+    rf_rx_decision_t d = { .route = RF_RX_ROUTE_OTHER, .proof_of_life = true,
+                           .ack_payload_ok = true, .trace = tracing };
+    if (rf_trace_drop_before_engine(buf, n)) {       /* FIRST: before any kind is looked at */
+        d.route = RF_RX_ROUTE_STRESS_DROP;
+        d.proof_of_life = false;
+        d.ack_payload_ok = false;
+        return d;
+    }
+    switch (buf != NULL && n > 0 ? rf_packet_type(buf, n) : 0) {
+    case PKT_TYPE_STATUS:    d.route = RF_RX_ROUTE_STATUS;    break;
+    case PKT_TYPE_HEARTBEAT: d.route = RF_RX_ROUTE_HEARTBEAT; break;
+    case PKT_TYPE_HIDREPORT: d.route = RF_RX_ROUTE_HIDREPORT; break;
+    case PKT_TYPE_MATRIX:    d.route = RF_RX_ROUTE_MATRIX;    break;
+    default:                 break;
+    }
+    return d;
+}
+
+bool rf_rx_route_reaches_engine(rf_rx_route_t r)
+{
+    return r == RF_RX_ROUTE_MATRIX || r == RF_RX_ROUTE_HIDREPORT;
+}
+
+bool rf_rx_route_has_handler(rf_rx_route_t r)
+{
+    return r == RF_RX_ROUTE_STATUS || r == RF_RX_ROUTE_HEARTBEAT ||
+           r == RF_RX_ROUTE_HIDREPORT || r == RF_RX_ROUTE_MATRIX;
 }
 
 size_t rf_trace_batch_fit(uint32_t room, uint8_t kind)

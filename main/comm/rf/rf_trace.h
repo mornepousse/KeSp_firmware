@@ -41,10 +41,19 @@
  *     9 arc | 10 plos_delta | 11 channel | 12 flags (bit0 excursion)
  *   RX (13 B, the dongle, per frame read from the FIFO)
  *     0 t_us u32 | 4 emitter | 5 seq | 6 pkt_kind | 7 payload_len | 8 pipe
- *     9 rpd | 10 channel | 11 fifo_depth | 12 flags (bit0 delivered, bit1 dup)
- *   PERIODIC (20 B, both ends, ~1 Hz while tracing)
+ *     9 rpd | 10 channel | 11 fifo_depth | 12 flags (bit0 delivered, bit1 dup,
+ *     (bit2 no_seq: the frame's kind carries no seq — HIDREPORT, SYNC_REQ…)
+ *   PERIODIC (26 B, both ends, ~1 Hz while tracing)
  *     0 t_us u32 | 4 uptime_s u32 | 8 source | 9 state | 10 batt_dV
  *     11 channel | 12 frames u16 | 14 fails u16 | 16 dups u16 | 18 drops u16
+ *     20 session u32 | 24 stress u16
+ *
+ * Version 2 (2026-10-20, rf-scope stress): the periodic record grew from 20
+ * to 26 bytes — `session` (the trace session the record belongs to, the
+ * number the start ack returned) and `stress` (synthetic stress frames since
+ * the previous periodic record: sent by a half, received and dropped by the
+ * dongle). A version-1 frame is refused (ERR_VERSION), both here and in the
+ * host tool: there was no room left in the 20-byte layout.
  *
  * t_us is the emitter's esp_timer, truncated to 32 bits (wraps every 71.6
  * min); the periodic uptime_s lets the host unwrap it. Unused flag bits must
@@ -58,7 +67,7 @@
 #include <stddef.h>
 
 #define RF_TRACE_CMD            0xBAu  /* = KS_CMD_RF_TRACE (static-asserted in rf_trace.c) */
-#define RF_TRACE_VERSION        1u
+#define RF_TRACE_VERSION        2u
 #define RF_TRACE_BATCH_MAX      16u    /* records per frame */
 
 #define RF_TRACE_KIND_TX        1u
@@ -73,8 +82,8 @@
  * sum of plos_delta (rf_trace_half.h: rf_trace_observe_step). */
 #define RF_TRACE_TX_SIZE        13u
 #define RF_TRACE_RX_SIZE        13u
-#define RF_TRACE_PERIODIC_SIZE  20u
-#define RF_TRACE_REC_SIZE_MAX   20u
+#define RF_TRACE_PERIODIC_SIZE  26u
+#define RF_TRACE_REC_SIZE_MAX   26u
 
 /* Header: K R cmd status len_lo len_hi | version kind count */
 #define RF_TRACE_KR_HDR         6u
@@ -97,6 +106,7 @@
 #define RF_TRACE_TXF_NOSEQ      0x02u  /* the frame's type carries no seq (HIDREPORT…): seq = 0, match nothing on it */
 #define RF_TRACE_RXF_DELIVERED  0x01u  /* consumed by the fusion engine */
 #define RF_TRACE_RXF_DUP        0x02u  /* same (emitter, seq) already seen */
+#define RF_TRACE_RXF_NOSEQ      0x04u  /* the frame's kind carries no seq: seq = 0, match nothing on it */
 
 /* Periodic state */
 #define RF_TRACE_ST_AWAKE       0u
@@ -123,6 +133,8 @@ typedef struct {
     uint16_t fails;    /* half: MAX_RT + timeouts; dongle: 0 */
     uint16_t dups;     /* dongle: duplicates; half: 0 */
     uint16_t drops;    /* ring overflow since the previous periodic record */
+    uint32_t session;  /* the trace session (0 = the record closes a stopped run) */
+    uint16_t stress;   /* stress frames since the previous periodic record: half sent, dongle dropped */
 } rf_trace_periodic_t;
 
 /* One ring slot: a tagged record. */

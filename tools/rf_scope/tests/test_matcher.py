@@ -214,3 +214,11 @@ def test_rx_of_seqless_kinds_is_not_an_orphan():
     m.dongle_alive(0)
     out = m.rx(rx(0, 0, 100, kind=5)) + m.dongle_alive(3000 * MS)
     assert len(evs(out, "noseq_rx")) == 1 and not evs(out, "orphan")
+
+
+def test_rx_flagged_noseq_is_never_an_orphan_even_for_an_unknown_kind():
+    # The dongle says it (RXF_NOSEQ, format v2): no learning needed, no orphan.
+    m = Matcher(CFG)
+    out = m.rx(rx(0, 0, 100, kind=12, flags=0x04))
+    out += alive_until(m, 100, 3000)
+    assert len(evs(out, "noseq_rx")) == 1 and not evs(out, "orphan")

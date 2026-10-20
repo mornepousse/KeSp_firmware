@@ -821,17 +821,25 @@ rf-scope trace of the dongle's radio reception (spec `docs/superpowers/specs/202
   - `[0x00]` — stop. Stop while off is a no-op success.
   - `[0x01]` — start for the default duration (600 s).
   - `[0x01][duration_s:u16 LE]` — start for `duration_s` seconds (1..65535; `0` = default). A start while the trace is on **restarts** it: new duration counted from now, counters and duplicate state reset (the previous run's counters close with a periodic record).
-- Response: **empty** KR (`KR BA 00 0000 00`, CRC of an empty payload) — the request is posted to the radio task, which applies it within ~1 ms.
+- Response: KR with a 7-byte ack — the request is posted to the radio task, which applies it within ~1 ms:
+
+  | Offset | Type   | Field         | Description |
+  |-------:|--------|---------------|-------------|
+  | 0      | u8     | `sub`         | the request's sub-command (0 stop, 1 start) |
+  | 1      | u32 LE | `session`     | start: the NEW session's number (non-zero, +1 per start; every periodic record of the run carries it). Stop: the session that was running, 0 if none |
+  | 5      | u16 LE | `remaining_s` | start: the duration granted (the default applied). Stop: 0 |
+
+  Errors carry no payload. (Firmware before format version 2 answered an empty KR; the host tool still takes it as an ack.)
 - Error: `ERR_INVALID` — any other length or sub-command (`[0x00 xx]`, `[0x01 xx]`, `[0x01 xx xx xx]`, `[0x02…]`).
 - Error: `ERR_UNKNOWN` — no radio present (the radio task never started).
 
 **While on, the dongle pushes unsolicited KR frames of the same command** (`KR BA 00 len …`), each a batch of records — the format of `main/comm/rf/rf_trace.h`, pinned by `docs/contracts/rf_trace_vectors.json`:
 
 ```
-[0x4B][0x52][0xBA][0x00][len:u16 LE] [version=1][kind][count 1..16] [count × record] [crc8]
+[0x4B][0x52][0xBA][0x00][len:u16 LE] [version=2][kind][count 1..16] [count × record] [crc8]
 ```
 
-A trace frame always has `len = 3 + count × record_size ≥ 16`; the ack has `len = 0` — that is how the host tells them apart. The CRC is the usual `ks_crc8` over the payload. All multi-byte fields little-endian. Trace frames are written by the same task that answers commands, between two replies: they never interleave with a reply's bytes.
+A trace frame always has `len = 3 + count × record_size ≥ 16`; a reply (ack: 7, error: 0) is always shorter — that is how the host tells them apart. Version 2 (2026-10-20) grew the periodic record to 26 bytes; a version-1 frame is refused by the decoders. The CRC is the usual `ks_crc8` over the payload. All multi-byte fields little-endian. Trace frames are written by the same task that answers commands, between two replies: they never interleave with a reply's bytes.
 
 **The host must keep reading, with DTR set.**
 - *Back-pressure.* A batch is sent only when the CDC TX FIFO (8 KB) has room for its **whole** frame on top of the room of the largest reply (`KS_PAYLOAD_MAX` + 7 = 4103 B). A host that stops reading (tool suspended) never gets a truncated frame and a command reply never loses its room to the trace: records pile up in the dongle's ring instead, and what overflows it is counted in the next periodic record's `drops`. Replies in general (any command) are written whole or not at all: with no room after ~20 ms the reply is dropped rather than cut (the host times out and retries — a cut frame would desynchronise it).
@@ -850,9 +858,9 @@ RX record (`kind = 2`, 13 bytes, one per frame read from a radio FIFO):
 | 9      | u8     | `rpd`         | `RPD` bit0: signal ≥ −64 dBm, latched on the last valid packet received (nRF24L01+ PS v1.0, p. 25) |
 | 10     | u8     | `channel`     | the radio's RF channel |
 | 11     | u8     | `fifo_depth`  | frames queued when this one was read, itself included (1..3), reconstructed from the drain pass — the chip has no counter. 3 = FIFO full: a frame arriving then was not acknowledged |
-| 12     | u8     | `flags`       | bit0 `delivered` (handed to the fusion engine — MATRIX — or to the host — HIDREPORT), bit1 `dup` (same seq as the previous frame of the same emitter) |
+| 12     | u8     | `flags`       | bit0 `delivered` (handed to the fusion engine — MATRIX — or to the host — HIDREPORT), bit1 `dup` (same seq as the previous frame of the same emitter), bit2 `no_seq` (the frame's kind carries no sequence number — HIDREPORT, SYNC_REQ…: `seq` is 0, match nothing on it; never `dup`) |
 
-Periodic record (`kind = 3`, 20 bytes, ~1 Hz, plus one at start and one at stop/auto-off):
+Periodic record (`kind = 3`, 26 bytes, ~1 Hz, plus one at start and one at stop/auto-off):
 
 | Offset | Type   | Field      | Description |
 |-------:|--------|------------|-------------|
@@ -866,6 +874,8 @@ Periodic record (`kind = 3`, 20 bytes, ~1 Hz, plus one at start and one at stop/
 | 14     | u16 LE | `fails`    | 0 on the dongle |
 | 16     | u16 LE | `dups`     | duplicates since the previous periodic record |
 | 18     | u16 LE | `drops`    | records lost to a full trace ring since the previous periodic record |
+| 20     | u32 LE | `session`  | the trace session (the start ack's number); 0 on a half's record written after the run closed |
+| 24     | u16 LE | `stress`   | stress frames (`PKT_TYPE_STRESS`) since the previous periodic record: received **and dropped** (dongle), sent (half) |
 
 (TX records, `kind = 1`, come from the halves over UART0 — same framing. Their `plos_delta` is the increase of the nRF24's `OBSERVE_TX.PLOS_CNT`, a 4-bit counter that **saturates at 15** until the next RF_CH write: on a very degraded link it under-counts MAX_RT (deltas read 0 while packets keep failing). Count failures from the per-record `result`, not from the sum of `plos_delta`.)
 
@@ -873,7 +883,7 @@ Periodic record (`kind = 3`, 20 bytes, ~1 Hz, plus one at start and one at stop/
 
 ```python
 ser.write(ks_frame(0xBA, bytes([0x01]) + struct.pack("<H", 120)))   # start, 2 min
-# … read KR frames: len == 0 → ack; cmd 0xBA, len ≥ 16 → trace batch
+# … read KR frames: cmd 0xBA, len 7 → ack [sub][session][remaining_s]; len ≥ 16 → trace batch
 ser.write(ks_frame(0xBA, bytes([0x00])))                           # stop
 ```
 

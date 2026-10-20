@@ -176,12 +176,16 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
         if (n == 0) break;
         bool delivered = false;   /* rf-scope: handed to the engine / the host */
 
-        /* A synthetic stress frame (rf-scope, PKT_TYPE_STRESS) is counted
-         * and traced, then DROPPED before every handler — engine, HID,
-         * battery cache, and the link's proof of life (it says nothing of
-         * the keyboard's state). Traced or not. */
-        if (rf_trace_drop_before_engine(buf, n)) {
-            if (tr) {
+        /* THE dispatch decision (pure, rf_trace_ctl.h): every handler below
+         * is selected by d.route and by nothing else — the host test of
+         * rf_rx_dispatch is the proof that a frame reaches none of them when
+         * it should not. A synthetic stress frame (rf-scope, PKT_TYPE_STRESS)
+         * is counted and traced, then DROPPED before every handler — engine,
+         * HID, battery cache, the sync ACK payload and the link's proof of
+         * life (it says nothing of the keyboard's state). Traced or not. */
+        const rf_rx_decision_t d = rf_rx_dispatch(buf, n, tr);
+        if (d.route == RF_RX_ROUTE_STRESS_DROP) {
+            if (d.trace) {
                 rf_trace_rx_t rec;
                 rf_trace_dongle_rx_note(&rec, buf, n, slot == RF_SLOT_MOUSE,
                                         tr_pipe, tr_rpd, tr_ch, false);
@@ -191,9 +195,9 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
         }
 
         /* Every packet counts as proof of life, not just heartbeats. */
-        rf_slot_link_rx(&s_link[slot], (uint32_t)(esp_timer_get_time() / 1000));
-        uint8_t type = rf_packet_type(buf, n);
+        if (d.proof_of_life) rf_slot_link_rx(&s_link[slot], (uint32_t)(esp_timer_get_time() / 1000));
 #if CONFIG_KASE_DONGLE_FUSION
+        uint8_t type = rf_packet_type(buf, n);   /* who sent it: the sync ACK payload only */
         /* Auto keymap sync via ACK payload (phase 3). On a known divergence,
          * we load the payload that will go out in the ACK of the NEXT frame
          * from the left half: the CHUNK it just requested (SYNC_REQ), else the
@@ -218,7 +222,7 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
          * 2026-09-14, seen with a screen frame since removed). */
         uint8_t  ap[32];
         uint16_t apl = 0;
-        if (slot == RF_SLOT_KBD && de_la_gauche && dongle_sync_active()) {
+        if (d.ack_payload_ok && slot == RF_SLOT_KBD && de_la_gauche && dongle_sync_active()) {
             uint8_t req_next = SYNC_N_CHUNKS;   /* default: beacon */
             rf_sync_req_t q;
             if (type == PKT_TYPE_SYNC_REQ && rf_decode_sync_req(buf, n, &q)) req_next = q.next;
@@ -230,7 +234,7 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
          * were removed, and the Niphargus sends already-finished HID. The
          * dongle no longer decodes any matrix — which is what makes the
          * existence of two keymap engines in the system impossible. */
-        if (type == PKT_TYPE_STATUS) {
+        if (d.route == RF_RX_ROUTE_STATUS) {
             /* Idle frame: battery and link quality, no key state. */
             rf_status_t st;
             if (rf_decode_status(buf, n, &st)) {
@@ -251,7 +255,7 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
                 }
 #endif
             }
-        } else if (type == PKT_TYPE_HEARTBEAT) {
+        } else if (d.route == RF_RX_ROUTE_HEARTBEAT) {
             /* Old format, kept until the Niphargus replaces it: its bitmap is
              * no longer read, there is no more matrix here. */
             rf_heartbeat_t h;
@@ -259,7 +263,7 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
                 s_link_q[slot] = h.link_q;
                 cache_battery_half(RF_HALF_LEFT, h.batt_dV, 0);   /* old format: left half only */
             }
-        } else if (type == PKT_TYPE_HIDREPORT) {
+        } else if (d.route == RF_RX_ROUTE_HIDREPORT) {
             /* The keyboard has already run its engine: pushed on as-is.
              * Under fusion mode the KEYBOARD no longer emits finished HID (it
              * sends its raw matrix, see PKT_TYPE_MATRIX) — but the
@@ -272,7 +276,7 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
             }
         }
 #if CONFIG_KASE_DONGLE_FUSION
-        else if (type == PKT_TYPE_MATRIX) {
+        else if (d.route == RF_RX_ROUTE_MATRIX) {
             /* Fusion: a half's raw half-matrix. We hand it to the embedded
              * engine, which merges the two halves and outputs the HID. */
             rf_matrix_t m;
@@ -326,7 +330,7 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
          * the left half, see above. */
         if (apl) rf_driver_load_ack_payload(radio, 0, ap, (uint8_t)apl);
 #endif
-        if (tr) {
+        if (d.trace) {
             rf_trace_rx_t rec;
             rf_trace_dongle_rx_note(&rec, buf, n, slot == RF_SLOT_MOUSE,
                                     tr_pipe, tr_rpd, tr_ch, delivered);

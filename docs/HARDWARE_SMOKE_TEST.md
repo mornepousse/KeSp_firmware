@@ -58,8 +58,9 @@ in the PR/release.
       auto-repeating without a stutter, the heartbeat shows `vetos=key`, no
       `light sleep` line until release.
 - [ ] **RF trace (dongle)**: remapping software closed, `fuser` the dongle
-      port first. Send `KS BA [01 1E 00]` (start, 30 s) → empty `KR BA 00`
-      ack, then a periodic batch (kind 3) about every second; type on both
+      port first. Send `KS BA [01 1E 00]` (start, 30 s) → `KR BA 00` ack
+      `[01][session u32][1E 00]` (the session +1 at every start, repeated by
+      every periodic record of the run), then a periodic batch (kind 3) about every second; type on both
       halves → RX batches (kind 2) with emitters 0 and 1, `seq` climbing,
       `delivered` set on MATRIX frames; other CDC commands (`rfstat`) still
       answer with intact CRCs in the middle of the stream. After 30 s the
@@ -152,7 +153,7 @@ in the PR/release.
       light-sleep current (left ~0.67 mA, 2026-09-25) — the UART0 RX reader
       must not add anything. (2) Send `RF_TRACE start(120)` (KS frame, cmd
       0xBA, payload `01 78 00`) and repeat it every 250 ms until the KR ack
-      `4B 52 BA 00 00 00 00` comes back — press a key if the half sleeps
+      `4B 52 BA 00 07 00 01 <session u32> 78 00 <crc>` comes back — press a key if the half sleeps
       (bytes sent while it sleeps are not received); console `rftrace: ON
       for 120 s`. (3) Type on that half: one TX record per transmission
       (left on battery: PTX, `flags=0`; left on USB: excursion records,

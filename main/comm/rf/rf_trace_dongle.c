@@ -5,6 +5,7 @@
 #include "rf_trace_dongle.h"
 #include "cdc_binary_protocol.h"   /* ks_respond, KS_CMD_RF_TRACE */
 #include "cdc_acm_com.h"           /* cdc_set_unsolicited_pump, cdc_wake */
+#include "rf_packet.h"             /* PKT_TYPE_STRESS */
 #include "esp_timer.h"
 #include "sdkconfig.h"
 
@@ -12,6 +13,9 @@
 bool g_rf_trace_dongle_on;                 /* written by the rf_rx task only */
 #define REQ_NONE  (-1)
 static int32_t s_req = REQ_NONE;           /* CDC → rx task: 0 stop, > 0 start(duration_s) */
+static uint32_t s_req_session;             /* CDC → rx task: the start's session, stored BEFORE s_req */
+static uint32_t s_session_next;            /* CDC task only: the numbering of the starts */
+static uint32_t s_session;                 /* rx task writes (atomic): the running session, 0 = off */
 static bool    s_ready;                    /* init done: the rx task exists */
 
 #define RING_CAP 128u                      /* ~3.5 KB; 8 frames of 16 records */
@@ -22,7 +26,7 @@ static rf_trace_ring_t s_ring;
 static rf_trace_timer_t s_timer;
 static rf_trace_dup_t   s_dup;
 static uint32_t s_last_periodic_ms;
-static uint16_t s_frames, s_dups;          /* since the previous periodic record */
+static uint16_t s_frames, s_dups, s_stress; /* since the previous periodic record */
 
 static uint32_t now_us32(void) { return (uint32_t)esp_timer_get_time(); }
 
@@ -68,7 +72,8 @@ static void pump(void)
              * trace, and throw away what nobody will read — the ring and the
              * TX FIFO — so the next open does not start with stale frames. */
             const rf_trace_ctl_cmd_t stop = { .start = false };
-            (void)rf_trace_dongle_request(&stop);
+            uint32_t sess; uint16_t rem;
+            (void)rf_trace_dongle_request(&stop, &sess, &rem);
             cdc_tx_discard();
             discard_ring(batch);
             return;
@@ -96,9 +101,19 @@ void rf_trace_dongle_init(void)
     __atomic_store_n(&s_ready, true, __ATOMIC_RELEASE);
 }
 
-bool rf_trace_dongle_request(const rf_trace_ctl_cmd_t *cmd)
+bool rf_trace_dongle_request(const rf_trace_ctl_cmd_t *cmd, uint32_t *session, uint16_t *remaining_s)
 {
     if (!__atomic_load_n(&s_ready, __ATOMIC_ACQUIRE)) return false;
+    if (cmd->start) {
+        uint32_t s = ++s_session_next;
+        if (s == 0) s = ++s_session_next;              /* 0 means off */
+        __atomic_store_n(&s_req_session, s, __ATOMIC_RELEASE);
+        *session = s;
+        *remaining_s = cmd->duration_s;
+    } else {
+        *session = __atomic_load_n(&s_session, __ATOMIC_ACQUIRE);   /* the one being stopped */
+        *remaining_s = 0;
+    }
     __atomic_store_n(&s_req, cmd->start ? (int32_t)cmd->duration_s : 0, __ATOMIC_RELEASE);
     return true;
 }
@@ -121,9 +136,11 @@ static void push_periodic(uint32_t now_ms, uint8_t channel)
         /* drops_take is called from this task only (both drop counters are
          * then the producer's — the consumer never reads them). */
         .drops = (uint16_t)rf_trace_ring_drops_take(&s_ring),
+        .session = __atomic_load_n(&s_session, __ATOMIC_RELAXED),
+        .stress = s_stress,                /* stress frames received and DROPPED */
     };
     rf_trace_ring_push(&s_ring, &rec);
-    s_frames = s_dups = 0;
+    s_frames = s_dups = s_stress = 0;
     s_last_periodic_ms = now_ms;
 }
 
@@ -140,14 +157,16 @@ void rf_trace_dongle_service(uint32_t now_ms, uint8_t channel)
         if (on) push_periodic(now_ms, channel);   /* close the previous run's counters */
         rf_trace_timer_start(&s_timer, now_ms, (uint16_t)req);
         rf_trace_dup_reset(&s_dup);
-        s_frames = s_dups = 0;
+        s_frames = s_dups = s_stress = 0;
         (void)rf_trace_ring_drops_take(&s_ring);  /* drops of a previous run are not this one's */
+        __atomic_store_n(&s_session, __atomic_load_n(&s_req_session, __ATOMIC_ACQUIRE), __ATOMIC_RELEASE);
         __atomic_store_n(&g_rf_trace_dongle_on, true, __ATOMIC_RELAXED);
         push_periodic(now_ms, channel);           /* the run's first record */
         wake = true;
     } else if (on && (req == 0 || rf_trace_timer_expired(&s_timer, now_ms))) {
-        push_periodic(now_ms, channel);           /* final counters */
+        push_periodic(now_ms, channel);           /* final counters, still under the session */
         rf_trace_timer_stop(&s_timer);
+        __atomic_store_n(&s_session, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&g_rf_trace_dongle_on, false, __ATOMIC_RELAXED);
         wake = true;
     } else if (on && (uint32_t)(now_ms - s_last_periodic_ms) >= RF_TRACE_PERIODIC_MS) {
@@ -174,10 +193,10 @@ void rf_trace_dongle_rx_note(rf_trace_rx_t *rec, const uint8_t *buf, uint16_t n,
         .rpd = rpd,
         .channel = channel,
         .fifo_depth = 0,                          /* fixed at the end of the pass */
-        .flags = (uint8_t)((delivered ? RF_TRACE_RXF_DELIVERED : 0) |
-                           (dup ? RF_TRACE_RXF_DUP : 0)),
+        .flags = rf_trace_rx_flags(delivered, dup, id.has_seq),
     };
     s_frames++;
+    if (id.pkt_kind == PKT_TYPE_STRESS) s_stress++;
     if (dup) s_dups++;
 }
 

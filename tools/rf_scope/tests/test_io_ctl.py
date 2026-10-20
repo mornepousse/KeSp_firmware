@@ -8,7 +8,7 @@ import pytest
 from rftrace import codec, jsonl, ports
 from rftrace.control import StartController, ks_frame
 from rftrace.source import SourceRunner
-from rftrace.stream import SourceStream, ACK
+from rftrace.stream import SourceStream, ACK, kr_reply
 
 
 # ---- JSONL ------------------------------------------------------------------
@@ -156,8 +156,76 @@ def test_stream_finds_ack_frames_and_lines_across_chunks():
     for i in range(0, len(blob), 3):
         got += s.feed(blob[i:i + 3])
     kinds = [g[0] for g in got]
-    assert kinds.count("ack") == 1 and kinds.count("frame") == 1
+    assert kinds.count("reply") == 1 and kinds.count("frame") == 1
     assert [g[1] for g in got if g[0] == "line"] == ["I (10) boot: hello", "HB up=3"]
+
+
+def ack_v2(sub, session, remaining, cmd=0xBA):
+    return kr_reply(cmd, 0, bytes([sub]) + session.to_bytes(4, "little") + remaining.to_bytes(2, "little"))
+
+
+def test_reply_parser_decodes_the_ack_payload():
+    s = SourceStream()
+    got = s.feed(ack_v2(1, 0x0A0B0C0D, 630))
+    assert got == [("reply", 0xBA, 0, {"sub": 1, "session": 0x0A0B0C0D, "remaining_s": 630})]
+
+
+def test_ack_whose_payload_holds_a_newline_survives_any_chunking():
+    # session 0x0A0A0A0A: four '\n' bytes INSIDE the reply. Split anywhere, the
+    # reply must come out whole and the console lines around it intact.
+    blob = b"I (5) x: before\n" + ack_v2(1, 0x0A0A0A0A, 10) + b"after\n"
+    for cut in range(1, len(blob)):
+        s = SourceStream()
+        got = s.feed(blob[:cut]) + s.feed(blob[cut:])
+        replies = [g for g in got if g[0] == "reply"]
+        assert replies == [("reply", 0xBA, 0, {"sub": 1, "session": 0x0A0A0A0A, "remaining_s": 10})], cut
+        assert [g[1] for g in got if g[0] == "line"] == ["I (5) x: before", "after"], cut
+
+
+def test_error_reply_and_stress_reply_are_told_apart():
+    s = SourceStream()
+    got = s.feed(kr_reply(0xBB, 0x03) + ack_v2(0, 7, 0, cmd=0xBB) + kr_reply(0xBA, 0x01))
+    assert got == [("reply", 0xBB, 0x03, None),
+                   ("reply", 0xBB, 0, {"sub": 0, "session": 7, "remaining_s": 0}),
+                   ("reply", 0xBA, 0x01, None)]
+
+
+def test_a_reply_with_a_bad_crc_is_text_not_a_reply():
+    bad = bytearray(ack_v2(1, 5, 5))
+    bad[-1] ^= 0xFF
+    s = SourceStream()
+    got = s.feed(bytes(bad) + b"\n")
+    assert not [g for g in got if g[0] == "reply"]
+
+
+def test_start_ack_carries_the_session_into_the_run_file():
+    clock, port = Clock(), FakePort()
+    items = []
+    r = SourceRunner("dongle", "/dev/ttyACM0", port, StartController(600), items.append,
+                     clock_mono=clock.mono, clock_ns=clock.ns)
+    r.pump()
+    port.rx += ack_v2(1, 42, 600)
+    clock.t = 0.1
+    r.pump()
+    ack = [i for i in items if i.get("event") == "ack"]
+    assert ack and ack[0]["session"] == 42 and ack[0]["remaining_s"] == 600
+    assert r.ctl.session == 42
+
+
+def test_refused_start_is_reported_not_retried_forever():
+    clock, port = Clock(), FakePort()
+    items = []
+    r = SourceRunner("left", "/dev/ttyUSB0", port, StartController(600), items.append,
+                     clock_mono=clock.mono, clock_ns=clock.ns)
+    r.pump()
+    port.rx += kr_reply(0xBA, 0x01)
+    clock.t = 0.1
+    r.pump()
+    clock.t = 2.0
+    n = len(port.written)
+    r.pump()
+    assert r.ctl.state == "refused" and len(port.written) == n
+    assert [i for i in items if i.get("event") == "refused"][0]["status"] == 1
 
 
 def test_runner_repeats_start_until_ack_then_streams_items():
@@ -169,7 +237,7 @@ def test_runner_repeats_start_until_ack_then_streams_items():
         r.pump()
         clock.t += 0.1
     assert len(port.written) == 2                # 0.0 and 0.3 (0.25 elapsed)
-    port.rx += b"console noise\n" + ACK
+    port.rx += b"console noise\n" + ack_v2(1, 3, 600)
     clock.t = 0.5
     r.pump()
     port.rx += tx_frame(7)
