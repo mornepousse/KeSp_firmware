@@ -62,6 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("-o", "--output", default=None, help="run file (default rf_run_<date>.jsonl)")
     c.add_argument("--no-tui", action="store_true", help="no curses: one status line every 5 s on stderr")
     c.add_argument("--baud", type=int, default=115200, help="half UART baud rate")
+    c.add_argument("--half", choices=("left", "right"), default="left",
+                   help="which half the auto-detected ESP-Prog is wired to (default left)")
     r = sub.add_parser("replay", help="the TUI fed from a run file")
     r.add_argument("run")
     r.add_argument("--speed", type=float, default=1.0)
@@ -88,6 +90,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-o", "--output", default=None, help="run file (default rf_stress_<scenario>_<date>.jsonl)")
     s.add_argument("--no-tui", action="store_true", help="no curses: one status line every 5 s on stderr")
     s.add_argument("--baud", type=int, default=115200, help="half UART baud rate")
+    s.add_argument("--half", choices=("left", "right"), default="left",
+                   help="which half the auto-detected ESP-Prog is wired to (default left)")
     s.add_argument("--window", type=int, default=None, metavar="S",
                    help="report window (default 60 s; 600 s for a soak)")
     return ap
@@ -95,16 +99,50 @@ def build_parser() -> argparse.ArgumentParser:
 
 # ---- capture ---------------------------------------------------------------------
 
+DONGLE_GLOB = "/dev/serial/by-id/usb-KaSe_KaSe_Dongle*-if00*"
+# The ESP-Prog is a dual FTDI: if00 is JTAG, if01 is the UART wired to the half.
+ESP_PROG_UART_GLOB = "/dev/serial/by-id/usb-FTDI_Dual_RS232-HS-if01*"
+
+
+def autodetect_ports(given: dict, glob=None, half: str = "left") -> dict:
+    """Fill in the ports the user did not name: the dongle by its USB name,
+    the ESP-Prog's UART channel as `half` (default left). Explicit ports win;
+    nothing is guessed when a half port was given."""
+    if glob is None:
+        import glob as _g
+        glob = _g.glob
+    chosen = dict(given)
+    if "dongle" not in chosen:
+        hits = glob(DONGLE_GLOB)
+        if hits:
+            chosen["dongle"] = hits[0]
+    if not ({"left", "right"} & set(chosen)):
+        hits = glob(ESP_PROG_UART_GLOB)
+        if hits:
+            chosen[half] = hits[0]
+    return chosen
+
+
+def _chosen_ports(a) -> dict:
+    given = {r: getattr(a, r) for r in ROLES if getattr(a, r)}
+    chosen = autodetect_ports(given, half=getattr(a, "half", "left"))
+    for role in ROLES:
+        if role in chosen and role not in given:
+            print(f"rf_scope: {role} = {chosen[role]} (auto)", file=sys.stderr)
+    return chosen
+
+
 def cmd_capture(a) -> int:
-    chosen = {r: getattr(a, r) for r in ROLES if getattr(a, r)}
+    chosen = _chosen_ports(a)
     if not chosen:
-        print("rf_scope capture: give at least one of --dongle / --left / --right", file=sys.stderr)
+        print("rf_scope capture: no dongle or ESP-Prog found — plug them in, or give --dongle / --left / --right",
+              file=sys.stderr)
         raise SystemExit(2)
     return _session(a, chosen, a.duration, None)
 
 
 def cmd_stress(a) -> int:
-    chosen = {r: getattr(a, r) for r in ROLES if getattr(a, r)}
+    chosen = _chosen_ports(a)
     if "dongle" not in chosen or not ({"left", "right"} & set(chosen)):
         print("rf_scope stress: give --dongle and at least one of --left / --right (the stressed halves)",
               file=sys.stderr)

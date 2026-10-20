@@ -1,3 +1,9 @@
 #!/bin/sh
-# Wrapper: ./tools/rf_scope/rf_scope capture --dongle /dev/ttyACM0 ...
-exec python3 "$(dirname "$0")/rf_scope.py" "$@"
+# rf_scope — run from anywhere: ./tools/rf_scope/rf_scope capture
+# Uses the system python if it has pyserial, else a throw-away nix shell.
+here="$(cd "$(dirname "$0")" && pwd)"
+if python3 -c 'import serial' 2>/dev/null; then
+    exec python3 "$here/rf_scope.py" "$@"
+fi
+exec nix shell --impure --quiet --expr 'with import <nixpkgs> {}; python3.withPackages (p: [p.pyserial])' \
+     --command python3 "$here/rf_scope.py" "$@"

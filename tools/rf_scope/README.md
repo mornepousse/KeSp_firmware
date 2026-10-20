@@ -22,6 +22,20 @@ cd tools/rf_scope && python3 -m rftrace --help # same thing
 
 ## Commands
 
+Shortest form — the dongle and the ESP-Prog are found by their USB names
+(`/dev/serial/by-id/usb-KaSe_KaSe_Dongle*`, the ESP-Prog's UART channel `if01`),
+the ESP-Prog is taken as the LEFT half unless `--half right`, and the wrapper
+fetches pyserial through `nix shell` when the system python lacks it:
+
+```sh
+rf_scope capture                      # 10 min, TUI, run file rf_run_<date>.jsonl
+rf_scope capture --duration 2m
+rf_scope stress --scenario burst
+rf_scope report rf_run_<date>.jsonl
+```
+
+Explicit ports always win over detection (and a busy port is still refused):
+
 ```sh
 # Capture 10 minutes, dongle + left half (ESP-Prog on /dev/ttyUSB0), TUI on:
 rf_scope capture --dongle /dev/ttyACM0 --left /dev/ttyUSB0 --duration 10m -o run.jsonl
