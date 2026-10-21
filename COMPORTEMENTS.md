@@ -898,6 +898,20 @@ means a test, or a line.
   "pa", 0 re-presses, 0 overwrites, no duplicate on screen.
   RF_STATUS[31..34] (max engine gap) and [35..42] (USB sent/refused,
   retries) remain the witnesses of the dongle→host link.
+- [test:test_engine_wake] [smoke:Engine wake on frame (dongle)] The
+  dongle's engine plays a fused state AS SOON AS it is queued: since
+  2026-10-21 `dongle_engine_on_matrix()` notifies the engine task after
+  queueing a transition (not on a hold reaffirmation, which queues
+  nothing), and the task blocks only for what is left until its next
+  10 ms TIMER round (`comm/rf/engine_wake.h`, pure, wrap-safe) — it used to
+  sleep a flat 10 ms, 0-10 ms (5 on average) added to every keystroke. The
+  timer round keeps its own deadline whatever frames wake the task in
+  between: tap-hold, tap-dance, leader and the release on silence keep
+  their 10 ms cadence; each queued transition still gets one full cycle,
+  in order; a tap still keeps 10 ms between its press and its clear. The
+  max engine gap (RF_STATUS[31..34], rf-scope `gap_max_ms`) is taken
+  between TIMER rounds only: nominal 10 ms, anything above is time the
+  engine spent blocked.
 
 ## Fusion — config-sync guard rail
 

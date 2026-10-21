@@ -104,6 +104,7 @@ add_executable(test_runner
     test_veille_veto.c
     test_radio_owner.c
     test_fusion_file.c
+    test_engine_wake.c
     ../main/comm/rf/radio_owner.c
     test_rf_status_cadence.c
     test_keymap_blob_size.c

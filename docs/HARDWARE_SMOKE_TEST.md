@@ -88,6 +88,18 @@ in the PR/release.
       ms, keys typed during the motion arrive once, tap-hold still resolves.
       No `BENCH` line in the report (a non-shipped nRF24 knob would print
       one; a half's HB would end with ` BENCH-RF(...)`).
+- [ ] **Engine wake on frame (dongle)** (2026-10-21): halves on battery,
+      dongle on the host. (1) Type fast for 2 min on both halves: no lost
+      and no doubled letter, `rfstat` re-presses and overwrites stay 0.
+      (2) Tap-hold: a MT/LT key tapped gives its tap, held > 200 ms gives its
+      hold — same feel as before; a tap-dance key resolves at its timeout.
+      (3) Hold a key ≥ 10 s: the host auto-repeats without a stutter, and
+      unplugging that half's battery releases it after ~400 ms (release on
+      silence still runs on the timer round). (4) `rf_scope capture` while
+      typing: `engine gap max` ≤ 12 ms (the gap is now taken between TIMER
+      rounds only; frame rounds in between do not shorten it), and the
+      latency report's dongle-side residual drops by ~5 ms on average versus
+      the 10 ms-round build (no more wait for the next round).
 - [ ] **RX settle — first attempt under load**: `rf_scope stress --dongle
       /dev/ttyACM0 --left /dev/ttyUSB0 --scenario held --duration 30` →
       first-attempt success ≥ 95 % (2026-10-21 reference with the

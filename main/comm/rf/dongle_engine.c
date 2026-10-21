@@ -24,6 +24,7 @@
 #include "half_link.h"          /* fusion_state_t, fusion_apply/timeout/collect */
 #include "fusion_file.h"        /* each received transition is replayed, in order */
 #include "fusion_route.h"       /* fusion_dongle_types (rule 3) */
+#include "engine_wake.h"        /* frame wake + 10 ms timer round */
 #include "key_processor.h"      /* build_keycode_report, process_matrix_changes, taps */
 #include "hid_report.h"         /* send_hid_key */
 #include "tap_hold.h"
@@ -66,6 +67,10 @@ uint32_t get_last_activity_time_ms(void) { return last_activity_time_ms; }
 static fusion_state_t   s_fusion;
 static fusion_file_t    s_file;      /* received transitions, to replay in order (under s_mux) */
 static SemaphoreHandle_t s_mux;
+/* The engine task: notified by dongle_engine_on_matrix() on every queued
+ * transition, so a state is played as soon as it arrives instead of at the
+ * next 10 ms round (engine_wake.h). */
+static TaskHandle_t      s_task;
 
 /* Left mode (phase 2). true = left is driven by a USB host: the dongle goes
  * quiet (it types locally) and re-sends right → left. Simple flag: written
@@ -188,9 +193,12 @@ static void fill_current_press(const fusion_state_t *fs)
  * engine could read" (536 in one evening) but only a queue OVERFLOW (8 states,
  * 80 ms of engine delay) — the exception it should always have been. */
 uint32_t dongle_engine_transitions_ecrasees(void) { return fusion_file_ecrasees(&s_file); }
-/* Maximum gap between two engine cycles since the last read (ms): a 70 ms
- * tap is only overwritten if the engine hasn't run for 70 ms. Tells what is
- * blocking it, not just that it happened. Reset to zero on read. */
+/* Maximum gap between two TIMER rounds of the engine since the last read
+ * (ms). Since frames wake the task (2026-10-21) a round can be a frame
+ * round, a few ms apart; the gap is taken only between timer rounds, so its
+ * nominal value stays the 10 ms period, and anything above it is time the
+ * engine spent blocked (a tap's 10 ms, send_tap's 40 ms, a macro, a core 0
+ * starved by the rx task). Reset to zero on read. */
 static uint32_t s_gap_max_ms, s_gap_dernier_ms;
 uint32_t dongle_engine_gap_max_ms(void) { uint32_t g = s_gap_max_ms; s_gap_max_ms = 0; return g; }
 /* The same peak for the rf-scope periodic record (v3 `gap_max_ms`), kept
@@ -241,15 +249,20 @@ void dongle_engine_on_matrix(const rf_matrix_t *m)
                            : (m->half == RF_HALF_LEFT)  ? &s_fusion.left : NULL;
     xSemaphoreTake(s_mux, portMAX_DELAY);
     bool changed = hs && memcmp(hs->bitmap, m->bitmap, RF_HALF_BITMAP_BYTES) != 0;
+    bool queued = false;
     if (changed) detecter_reappui(hs, m, now_ms());
     if (fusion_apply(&s_fusion, m, now_ms()) && changed) {
         uint32_t avant = fusion_file_ecrasees(&s_file);
-        fusion_file_push(&s_file, &s_fusion);   /* replayed by the engine, in order */
+        queued = fusion_file_push(&s_file, &s_fusion);   /* replayed by the engine, in order */
         if (fusion_file_ecrasees(&s_file) != avant)
             ESP_LOGW(TAG, "transition overwritten (#%lu): queue full, half %u",
                      (unsigned long)fusion_file_ecrasees(&s_file), (unsigned)m->half);
     }
     xSemaphoreGive(s_mux);
+    /* Wake the engine NOW (after releasing s_mux, which it takes first): the
+     * state is played within the same millisecond instead of at the next
+     * 10 ms round. A hold reaffirmation queues nothing and wakes nobody. */
+    if (queued && s_task) xTaskNotifyGive(s_task);
 }
 
 /* One full engine cycle: fusion→current_press already done, decode and send.
@@ -272,16 +285,25 @@ static void run_cycle(void)
 static void dongle_engine_task(void *arg)
 {
     (void)arg;
+    uint32_t timer_ms = now_ms();   /* last TIMER round */
     for (;;) {
-        /* 10 ms: tap-hold / tap-dance timer cadence, same as the keyboard. */
-        vTaskDelay(pdMS_TO_TICKS(10));
-        {
-            uint32_t t = now_ms();
+        /* Block until a frame notification OR the next timer round, 10 ms
+         * after the previous one (tap-hold / tap-dance / leader cadence,
+         * same as the keyboard; release on silence). A frame round runs the
+         * same body: every step below is time-based (tick functions compare
+         * timestamps) or queue-driven, so running it early only plays the
+         * new state sooner — it does not move the timer deadline. */
+        uint32_t wait = engine_wait_ms(timer_ms, now_ms(), DONGLE_ENGINE_TIMER_MS);
+        if (wait) ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait));
+        uint32_t t = now_ms();
+        if (engine_timer_due(timer_ms, t, DONGLE_ENGINE_TIMER_MS)) {
+            /* Gap between TIMER rounds only (see s_gap_max_ms). */
             uint32_t gap = s_gap_dernier_ms ? (uint32_t)(t - s_gap_dernier_ms) : 0;
             if (gap > s_gap_max_ms) s_gap_max_ms = gap;
             if (gap > __atomic_load_n(&s_gap_max_tr_ms, __ATOMIC_RELAXED))
                 __atomic_store_n(&s_gap_max_tr_ms, gap, __ATOMIC_RELAXED);
             s_gap_dernier_ms = t ? t : 1;
+            timer_ms = t;
         }
         tap_hold_tick();
         tap_dance_tick();
@@ -319,8 +341,9 @@ static void dongle_engine_task(void *arg)
         /* Minimal critical section: timeout, then take ONE pending
          * transition. Each received transition is played by a full cycle,
          * in order — no more "last state wins". If more are left, we chain
-         * through without waiting for the tick (10 ms per state only when a
-         * tap is in progress in run_cycle). */
+         * through without waiting (10 ms per state only when a tap is in
+         * progress in run_cycle); one that lands during a cycle has also
+         * notified us, so the next wait returns at once. */
         fusion_state_t etat; bool do_cycle;
         do {
             do_cycle = false;
@@ -385,7 +408,7 @@ void dongle_engine_start(void)
     key_override_init();
     hid_report_init();
 
-    xTaskCreatePinnedToCore(dongle_engine_task, "dongle_eng", 6144, NULL, 9, NULL, 0);
+    xTaskCreatePinnedToCore(dongle_engine_task, "dongle_eng", 6144, NULL, 9, &s_task, 0);
     ESP_LOGI(TAG, "dongle keymap engine started (fusion)");
 }
 
