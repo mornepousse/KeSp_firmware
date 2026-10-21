@@ -345,7 +345,11 @@ means a test, or a line.
   BOARD_DEBOUNCE_TICKS consecutive up scans, a down scan cancels it. With
   eager on, the row interrupt that ends the idle power save also scans AT
   ONCE instead of one 5 ms interval later. Press: ~10 ms → ~0 ms after the
-  contact; release unchanged. No new periodic wait (the scan still only
+  contact; release unchanged. The first scan after power save waits 20 µs
+  for the rows to discharge (columns were all held active): without it the
+  first column read a pressed key's row still high, a phantom at (row, 0)
+  that the eager press reported — 27 of 49 Backspace presses on the right
+  at the bench 2026-10-21, Shift and Backspace lost. No new periodic wait (the scan still only
   runs with a key down). Accepted failure mode: a single-scan glitch on a
   key at rest is reported as a phantom tap (~15 ms) — symmetric filtered
   it; the wake capture keeps its two-pass AND, so a phantom WAKE still

@@ -20,6 +20,12 @@
 
 static const char *TAG = "keyboard_button";
 
+/* KaSe: rows discharge through their pull resistor after power save (see
+ * kbd_handler). Tens of pF against an internal ~45 kOhm pull is a few us. */
+#ifndef KBD_POWER_SAVE_EXIT_SETTLE_US
+#define KBD_POWER_SAVE_EXIT_SETTLE_US 20
+#endif
+
 #define OUTPUT_MASK_HIGE 0xFFFFFFFF
 #define OUTPUT_MASK_LOW  0x00000000
 
@@ -48,6 +54,7 @@ typedef struct keyboard_btn_t {
     bool enable_power_save;
     bool can_enter_power_save;
     bool debounce_eager_press;   /*!< KaSe: kbd_debounce.h mode */
+    bool cols_held;              /*!< KaSe: columns left active by power save, rows to discharge */
     EventGroupHandle_t event_group;
     gptimer_handle_t gptimer_handle;
     kbd_cb_info_t *cb_info[KBD_EVENT_MAX];
@@ -88,6 +95,16 @@ static inline void kbd_handler(keyboard_btn_t *kbd)
         kbd_gpios_set_hold_dis(kbd->output_gpios, kbd->output_gpio_num);
     }
     kbd_gpios_set_level(kbd->output_gpios, kbd->output_gpio_num, output_level);
+    /* KaSe: leaving power save, every column was held active and the row of a
+     * pressed key was driven through its diode. With no settling delay, the
+     * first column scanned read that row still active: a phantom key at
+     * (row, col 0) for one scan. The symmetric debounce filtered it; the eager
+     * press reported it (bench 2026-10-21, right half: 27 Backspace presses out
+     * of 49 came with a phantom at r=0 c=0). Let the rows discharge first. */
+    if (kbd->cols_held) {
+        kbd->cols_held = false;
+        esp_rom_delay_us(KBD_POWER_SAVE_EXIT_SETTLE_US);
+    }
 
     for (int i = 0; i < kbd->output_gpio_num; i++) {
         /*!< Set the output level */
@@ -221,6 +238,7 @@ static void kbd_task(void *args)
                 kbd_gpios_intr_control(kbd->input_gpios, kbd->input_gpio_num, true);
                 kbd_gpios_set_level(kbd->output_gpios, kbd->output_gpio_num, kbd->active_level ? OUTPUT_MASK_HIGE : OUTPUT_MASK_LOW);
                 kbd_gpios_set_hold_en(kbd->output_gpios, kbd->output_gpio_num);
+                kbd->cols_held = true;
                 ESP_LOGD(TAG, "Enter power save");
             }
 
