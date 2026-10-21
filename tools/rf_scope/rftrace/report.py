@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from . import stress as stress_mod
 from .analyzer import Analyzer, name_of
+from .offset import MIN_PAIRS
 from .stats import NS
 
 
@@ -36,10 +37,21 @@ def render(an: Analyzer, title: str = "", win_s: int = 60) -> str:
             f"MAX_RT {w.max_rt}   timeouts {w.timeouts}   PLOS {w.plos}   FIFO full {w.fifo_full}")
         add("  retries (arc): " + ("  ".join(f"{i}:{n}" for i, n in enumerate(w.arc_hist) if n) or "-")
             + f"   mean {_f(w.retry_mean)}")
-        add(f"  latency over the floor (n={w.lat_n}): p50 {_f(w.lat_p50)} ms   p95 {_f(w.lat_p95)} ms   p99 {_f(w.lat_p99)} ms")
+        why = ""
+        if fit is None or not fit.ready:
+            why = f"   (no clock map: {fit.n if fit else 0} of {MIN_PAIRS} matched pairs needed)"
+        add(f"  latency over the floor (n={w.lat_n}): p50 {_f(w.lat_p50)} ms   p95 {_f(w.lat_p95)} ms   "
+            f"p99 {_f(w.lat_p99)} ms{why}")
         if fit is not None and fit.ready:
             add(f"  clock map to the dongle: slope {(fit.slope - 1) * 1e6:+.1f} ppm   jitter (MAD) {fit.jitter_us / 1000:.2f} ms   "
                 f"pairs {fit.n}")
+            arcs = an.stats.arc_residuals(e, 0, end_s, an.fits_for(e))
+            arcs = {a: v for a, v in arcs.items() if v[1] >= 5 and a < 15}
+            if arcs:
+                add("  residual by retries: " + ", ".join(f"arc{a} {v[0] / 1000:+.2f} ms" for a, v in arcs.items())
+                    + "   (median residual vs arc 0)")
+                add("    ~ 0: the dongle got the retransmission; ~ -k x (ARD + airtime): it got the first "
+                    "attempt and the ACKs were lost")
         else:
             add("  clock map: not enough matched pairs")
         add(f"  outages (first lost frame -> next received) > {an.cfg.gap_ms:.0f} ms: {w.gaps} (longest {w.gap_max_ms:.0f} ms)   "

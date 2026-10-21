@@ -27,6 +27,12 @@ def percentile(vals: list[float], p: float) -> float | None:
     return s[lo] + (s[hi] - s[lo]) * (k - lo)
 
 
+def _usable(fit):
+    """A clock map that has not been fitted yet (fewer than MIN_PAIRS pairs)
+    gives absurd offsets (boot-time differences, ~1e6 ms): no map, no number."""
+    return fit if fit is not None and getattr(fit, "ready", True) else None
+
+
 @dataclass
 class _Bucket:
     frames: int = 0
@@ -144,12 +150,12 @@ class Stats:
         else:
             setattr(b, kind, getattr(b, kind) + 1)
 
-    def pair(self, e: int, host_ns: int, tx_t: float, rx_t: float, fit=None) -> None:
+    def pair(self, e: int, host_ns: int, tx_t: float, rx_t: float, fit=None, arc: int = 0) -> None:
         b = self._bucket(e, host_ns)
         if len(b.pairs) < PAIRS_PER_SEC:
-            b.pairs.append((tx_t, rx_t, fit))
+            b.pairs.append((tx_t, rx_t, fit, arc))
         else:
-            b.pairs[b.pair_n % PAIRS_PER_SEC] = (tx_t, rx_t, fit)
+            b.pairs[b.pair_n % PAIRS_PER_SEC] = (tx_t, rx_t, fit, arc)
         b.pair_n += 1
 
     def gap(self, e: int, host_ns: int, dur_ms: float, missing: int) -> None:
@@ -212,8 +218,8 @@ class Stats:
             for dur, _miss in b.gaps:
                 w.gaps += 1
                 w.gap_max_ms = max(w.gap_max_ms, dur)
-            for tx_t, rx_t, fit in b.pairs:
-                f = fit or (fits or {}).get(e)
+            for tx_t, rx_t, fit, _arc in b.pairs:
+                f = _usable(fit or (fits or {}).get(e))
                 if f is not None:
                     lat.append(f.excess_us(tx_t, rx_t) / 1000.0)
         dup_total = sum(buckets[k].rx_dup for k in keys)
@@ -239,12 +245,29 @@ class Stats:
             b = buckets.get(k)
             vals = []
             if b:
-                for tx_t, rx_t, fit in b.pairs:
-                    f = fit or (fits or {}).get(e)
+                for tx_t, rx_t, fit, _arc in b.pairs:
+                    f = _usable(fit or (fits or {}).get(e))
                     if f is not None:
                         vals.append(f.excess_us(tx_t, rx_t) / 1000.0)
             out.append(percentile(vals, 50))
         return out
+
+    def arc_residuals(self, e: int, start_s: float, end_s: float, fits: dict | None = None) -> dict[int, tuple[float, int]]:
+        """{arc k >= 1: (median residual of arc=k frames minus that of arc=0, in
+        us; n)} over the clock-mapped pairs of [start_s, end_s). Empty without
+        a clock map or without arc=0 frames."""
+        res: dict[int, list[float]] = {}
+        for k, b in self._b.get(e, {}).items():
+            if not start_s <= k < end_s:
+                continue
+            for tx_t, rx_t, fit, arc in b.pairs:
+                f = _usable(fit or (fits or {}).get(e))
+                if f is not None:
+                    res.setdefault(arc, []).append(f.resid_us(tx_t, rx_t))
+        if not res.get(0):
+            return {}
+        ref = percentile(res[0], 50)
+        return {a: (percentile(v, 50) - ref, len(v)) for a, v in sorted(res.items()) if a > 0}
 
     def dongle_window(self, start_s: float, end_s: float) -> DongleSummary:
         d = DongleSummary(start_s, end_s)

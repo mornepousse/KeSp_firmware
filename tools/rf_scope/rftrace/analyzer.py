@@ -221,7 +221,7 @@ class Analyzer:
                 fit = self.fits.setdefault(e, ClockFit())
                 fit.add(ev["tx_t"], ev["rx_t"])
                 self.stats.outcome(e, ev["tx_host_ns"], k)
-                self.stats.pair(e, ev["tx_host_ns"], ev["tx_t"], ev["rx_t"], fit)
+                self.stats.pair(e, ev["tx_host_ns"], ev["tx_t"], ev["rx_t"], fit, ev.get("arc", 0))
                 if k == "recovered":
                     self._event(ns, "info", e, "recovered", f"{name_of(e)} seq {ev['seq']} arrived late (counted lost, now recovered)")
             elif k == "lost":

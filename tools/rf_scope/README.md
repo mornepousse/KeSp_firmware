@@ -206,9 +206,14 @@ equation:
 
 1. **slope d** is the Theil-Sen estimate (median of pairwise slopes on up to 160
    evenly spread pairs, at least 1/8 of the run apart): the crystals' drift,
-   robust to outliers. Under a 5 s span it is 1.
-2. **c** is the median residual, **jitter** is the MAD of the residuals around it
-   (the typical spread of the delay, unscaled).
+   robust to outliers. Under a 5 s span it is 1. It is only the *baseline*: the
+   offset between two chips is not a straight line over minutes (2026-10-21
+   soak: -210 ppm for 290 s, flat for 125 s, -210 ppm again; the single line
+   left +-45 ms of residual and a 11.8 ms p50 on a link that gives 0.7 ms in 20 s).
+2. **c** is a piecewise-linear curve through the median residual of each group of
+   consecutive 5 s bins (merged until >= 64 pairs), so a slow or changing drift is
+   followed; a short run has one group, i.e. a constant. **jitter** is the MAD of
+   the residuals around the curve (the typical spread of the delay, unscaled).
 3. **latency** printed everywhere is `residual - 1st percentile of residuals`:
    *how much later than the run's fastest frames the dongle read this one*,
    after removing the clock offset and drift. The fit is refreshed as pairs arrive
@@ -228,11 +233,22 @@ that cause a late keystroke. What it **is not**:
   first and a busy dongle task delays the second; both are in the number.
 * Host arrival times (UART/USB batching: an FTDI latency timer of 16 ms is
   common) are used only for matching and liveness, never for latency.
-* A drift that is not linear (a thermal ramp) widens the jitter; a reboot of
+* Fewer than 8 matched pairs: **no clock map**, so latency prints `-` (and the
+  report says why) instead of the meaningless difference of two boot times.
+  A drift that changes within a group (a few seconds) still widens the jitter; a reboot of
   either end restarts the fit, and the first ~8 pairs after it are matched on
   host time only.
 * End-to-end key-to-host latency is out of scope (it needs a stimulus and host
   HID timestamps).
+
+**Residual by retries** (report, per emitter): the median residual of the
+clock-mapped frames that needed `k` retries, minus that of the frames sent at
+the first attempt (`arc` 0), e.g. `arc1 -0.77 ms, arc2 -1.52 ms`. The half
+stamps `t_us` after the last attempt, the dongle when it reads its FIFO: if the
+dongle got the *retransmission*, arc=k frames sit at about 0 like arc=0; if
+they sit about `-k x (ARD + airtime)` below, the dongle had received the
+*first* attempt and it was the ACKs that were lost (this is how it was shown
+on 2026-10-21 with ARD 750 us). Needs >= 5 frames per arc.
 
 **Asleep** = time between a SLEEPING and the next WOKE record (host arrival
 times), or to the end of the run. **Ring drops** = records the firmware's trace
