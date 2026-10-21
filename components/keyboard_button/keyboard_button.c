@@ -221,6 +221,20 @@ static void kbd_task(void *args)
             break;
         }
         if (uxBits & KBD_TIMER_NOTIFY) {
+            /* KaSe: no listener yet, no scan. keyboard_button_create starts
+             * this task (prio 5) before the caller can register its callback
+             * — matrix_setup runs in the sleep task (prio 3) on the same core,
+             * and on a wake with a key held the row interrupt has already
+             * asked for a scan. The eager press reported that key on the very
+             * first scan, to nobody: the debounce then held it as pressed, no
+             * event followed, and the wake path concluded "released before the
+             * first scan" — Super lost from Super+F after light sleep (bench
+             * 2026-10-21). The symmetric debounce needed a second scan 5 ms
+             * later and hid the race. The timer keeps ticking, so the next
+             * scan comes after registration; power save is not entered. */
+            if (__atomic_load_n(&kbd->cb_size[KBD_EVENT_PRESSED], __ATOMIC_ACQUIRE) == 0) {
+                continue;
+            }
             /*!< Keyboard handler */
 #if CONFIG_KEYBOARD_TEST_RUN_TIME
             uint64_t start_time = esp_timer_get_time();
@@ -457,9 +471,12 @@ esp_err_t keyboard_button_register_cb(keyboard_btn_handle_t kbd_handle, keyboard
     }
 
     kbd_cb_info_t *cb_info = &kbd->cb_info[event][kbd->cb_size[event]];
-    kbd->cb_size[event]++;
     cb_info->cb = cb_cfg.callback;
     cb_info->user_data = cb_cfg.user_data;
+    /* KaSe: publish the entry only once it is filled — the scan task is
+     * already running (keyboard_button_create started it) and walks
+     * cb_size entries; counting first let it call a NULL callback. */
+    __atomic_store_n(&kbd->cb_size[event], kbd->cb_size[event] + 1, __ATOMIC_RELEASE);
 
     /*!< For combination event */
     if (event == KBD_EVENT_COMBINATION) {

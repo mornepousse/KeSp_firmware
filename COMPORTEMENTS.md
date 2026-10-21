@@ -349,7 +349,12 @@ means a test, or a line.
   for the rows to discharge (columns were all held active): without it the
   first column read a pressed key's row still high, a phantom at (row, 0)
   that the eager press reported — 27 of 49 Backspace presses on the right
-  at the bench 2026-10-21, Shift and Backspace lost. No new periodic wait (the scan still only
+  at the bench 2026-10-21, Shift and Backspace lost. The driver task does
+  not scan before its PRESSED callback is registered: matrix_setup (sleep
+  task, prio 3) creates it (prio 5) then registers, and on a wake with a key
+  held the first eager scan reported that key to nobody — the wake path
+  then published "released before the first scan", Super lost from Super+F
+  after light sleep (rf-scope trace 2026-10-21). No new periodic wait (the scan still only
   runs with a key down). Accepted failure mode: a single-scan glitch on a
   key at rest is reported as a phantom tap (~15 ms) — symmetric filtered
   it; the wake capture keeps its two-pass AND, so a phantom WAKE still
