@@ -1,7 +1,7 @@
 #!/bin/sh
 # rf_scope — run from anywhere: ./tools/rf_scope/rf_scope capture
 # Uses the system python if it has pyserial, else a throw-away nix shell.
-here="$(cd "$(dirname "$0")" && pwd)"
+here="$(dirname "$(readlink -f "$0")")"
 if python3 -c 'import serial' 2>/dev/null; then
     exec python3 "$here/rf_scope.py" "$@"
 fi

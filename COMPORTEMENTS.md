@@ -165,6 +165,7 @@ means a test, or a line.
   section (offered vs delivered, loss, MAX_RT, retries, latency under load,
   ring drops of both ends, the dongle's stress counter; 10-min windows for a
   soak).
+- [smoke:RF stress] Every board ships the nRF24 with SETUP_RETR 0x1F (ARD 500 µs, 15 retries); `KASE_RF_SETUP_RETR` exists only for rf-scope bench experiments and its default must not change without an `rf_scope stress` measurement (2026-10-21).
 - [smoke:RF trace (half)] A half traces over its console UART0 without a
   UART driver, without a wake veto and without a new cadence: tracing off,
   its sleep current and `HB … slept=` are those of a build without the trace

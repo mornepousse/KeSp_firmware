@@ -467,6 +467,19 @@ config KASE_NRF_PROBE
 
         Logs via ESP_LOGW (tag "rf_probe") — requires a console.
 
+config KASE_RF_SETUP_RETR
+    hex "nRF24 SETUP_RETR (ARD/ARC) — bench experiments only"
+    default 0x1F
+    range 0x00 0xFF
+    help
+        Value written to the nRF24's SETUP_RETR register everywhere the
+        driver configures the chip: high nibble = ARD (auto-retransmit delay,
+        (n+1) x 250 us), low nibble = ARC (retries). 0x1F = 500 us, 15
+        retries — the value every board ships with. Raised only for the
+        rf-scope bench experiment of 2026-10-21 (on Mae's clones ~90 % of
+        frames needed exactly one retransmission at any rate); never commit
+        another default without measuring it with rf_scope stress.
+
 config KASE_NRF_LINE_TEST
     bool "NRF line short-circuit test at boot (bring-up diagnostic)"
     default n
