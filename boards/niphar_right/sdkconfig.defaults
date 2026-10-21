@@ -105,3 +105,8 @@ CONFIG_KASE_VEILLE_LEGERE_S=5
 # Montserrat 12 for the low reading inside the drop (the 12 px text floor),
 # 14 for zZ (root defaults). The icon column's Montserrat 24 is gone.
 CONFIG_LV_FONT_MONTSERRAT_12=y
+
+# Eager press / deferred release (2026-10-21, kbd_debounce.h): the press is
+# reported on the first scan that reads it, ~10 ms sooner; the release keeps
+# its 2 x 5 ms of stability. V1/V2/V2D stay symmetric.
+CONFIG_KASE_DEBOUNCE_EAGER_PRESS=y

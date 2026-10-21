@@ -178,6 +178,19 @@ in the PR/release.
       why `age_ms` climbed to ~60 s first; the sync needs an awake left
 
 ## Half (left / right)
+- [ ] **Eager press debounce (halves)** (2026-10-21,
+      `KASE_DEBOUNCE_EAGER_PRESS`): both halves on battery, dongle on the
+      host. (1) Type fast for 2 min on EACH half (prose, then chained
+      same-finger letters and doubled letters like "ll", "ee"): no doubled
+      and no lost letter; dongle `rfstat` re-presses stay 0 (a re-press is
+      the signature of a release bounce > 10 ms or a glitch, now reported at
+      once). (2) Hold Backspace ≥ 10 s: the host auto-repeats without a
+      stutter, `vetos=key` in the HB, released once. (3) Let both halves
+      light-sleep (≥ 5 s), then tap ONE key on each: each typed exactly
+      once (no double from the capture + the driver's eager first scan),
+      also with a key held across the wake. (4) Leave the halves untouched
+      10 min next to the usual noise sources (TRRS cable, phone): nothing
+      typed by itself — a phantom tap is eager's failure mode.
 - [ ] RF trace (half) — ESP-Prog on the half's prog connector, nothing else
       holding the port. (1) Trace OFF (fresh boot, no request sent): no
       frame on the console, the half sleeps at 5 s as before, `HB … slept=` grows as on the previous

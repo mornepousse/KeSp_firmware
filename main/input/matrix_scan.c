@@ -473,6 +473,14 @@ void matrix_setup(void)
      * the DFS (power/pm_dfs.c) never really went down. The first scan
      * follows the press in < 1 ms, as before. */
     cfg.enable_power_save = true;
+    /* Eager press / deferred release (kbd_debounce.h, Niphargus halves):
+     * the first scan that reads a key down reports it, and the row
+     * interrupt that ends power save scans at once. A key captured at wake
+     * is already in prev_matrix_state, so the recreated driver's eager
+     * first report adds nothing (no double press). */
+#if CONFIG_KASE_DEBOUNCE_EAGER_PRESS
+    cfg.debounce_eager_press = true;
+#endif
     cfg.priority = 5;
     cfg.core_id = 0;
 

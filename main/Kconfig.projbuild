@@ -318,6 +318,26 @@ config KASE_MATRIX_LOG_CONSOLE
         from CLAUDE.md: it's too slow for real typing. Off by default, never
         compiled in production.
 
+config KASE_DEBOUNCE_EAGER_PRESS
+    bool "Eager press, deferred release (asymmetric per-key debounce)"
+    default n
+    depends on KASE_HAS_LOCAL_MATRIX
+    help
+        Matrix driver debounce (components/keyboard_button, kbd_debounce.h).
+        n: symmetric — a press or a release is reported after
+        BOARD_DEBOUNCE_TICKS stable scans (the historical behaviour).
+        y: QMK's asym_eager_defer_pk — a PRESS is reported on the first scan
+        that reads the key down (then the key ignores its contacts for
+        BOARD_DEBOUNCE_TICKS scans), a RELEASE after BOARD_DEBOUNCE_TICKS
+        consecutive up scans; and the row interrupt that ends the idle
+        power-save scans at once instead of one interval later. On the
+        Niphargus halves (5 ms scan, 2 ticks) the press goes from ~10 ms to
+        ~0 ms after the contact.
+
+        Trade-off: a single-scan glitch on a key at rest is reported as a
+        short phantom tap (symmetric filters it). Default n; the Niphargus
+        halves set it in their sdkconfig.defaults.
+
 config KASE_NO_DISPLAY
     bool "This board has no display"
     default n

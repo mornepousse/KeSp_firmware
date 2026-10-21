@@ -98,6 +98,8 @@ typedef struct {
     uint32_t debounce_ticks;          /*!< debounce time in ticks */
     uint32_t ticks_interval;          /*!< interval time in us */
     bool enable_power_save;           /*!< enable power save mode */
+    bool debounce_eager_press;        /*!< KaSe: report a press on the first scan that reads it,
+                                           defer the release (kbd_debounce.h); false = symmetric */
     UBaseType_t priority;             /*!< FreeRTOS task priority */
     BaseType_t core_id;               /*!< ESP32 core ID */
 } keyboard_btn_config_t;

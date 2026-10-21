@@ -122,3 +122,8 @@ CONFIG_LV_FONT_MONTSERRAT_32=y
 
 # Chest link (Niphar_chest ESP32-P4): status + confirmation relay (2026-09-29)
 CONFIG_KASE_CHEST_LINK=y
+
+# Eager press / deferred release (2026-10-21, kbd_debounce.h): the press is
+# reported on the first scan that reads it, ~10 ms sooner; the release keeps
+# its 2 x 5 ms of stability. V1/V2/V2D stay symmetric.
+CONFIG_KASE_DEBOUNCE_EAGER_PRESS=y

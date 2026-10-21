@@ -333,6 +333,26 @@ means a test, or a line.
   at 1 ms the scan task alone kept DFS up. Key held: 27-33 → 24 mA, several
   keys 28 mA; fast typing, first key after sleep and a held Backspace checked
   on the bench (2026-09-25).
+- [test:test_kbd_debounce] [smoke:Eager press debounce (halves)] The
+  Niphargus halves report a PRESS on the FIRST scan that reads the key down
+  and defer only the RELEASE (QMK's asym_eager_defer_pk,
+  `components/keyboard_button/include/kbd_debounce.h`, pure;
+  `CONFIG_KASE_DEBOUNCE_EAGER_PRESS=y` in both halves' defaults, n
+  elsewhere — V1/V2/V2D keep the symmetric debounce, which the test pins
+  scan for scan against the historical driver loop). After an eager press
+  the key ignores its contacts for BOARD_DEBOUNCE_TICKS scans (10 ms: press
+  chatter never becomes release + re-press); a release needs
+  BOARD_DEBOUNCE_TICKS consecutive up scans, a down scan cancels it. With
+  eager on, the row interrupt that ends the idle power save also scans AT
+  ONCE instead of one 5 ms interval later. Press: ~10 ms → ~0 ms after the
+  contact; release unchanged. No new periodic wait (the scan still only
+  runs with a key down). Accepted failure mode: a single-scan glitch on a
+  key at rest is reported as a phantom tap (~15 ms) — symmetric filtered
+  it; the wake capture keeps its two-pass AND, so a phantom WAKE still
+  types nothing, and a key captured at wake is already in
+  prev_matrix_state, so the recreated driver's eager first report is not a
+  second press. A release bounce longer than 10 ms would read as a re-press:
+  the dongle's re-press counter (RF_STATUS[43..46]) is the bench witness.
 - [test:test_kbd_refresh] [test:test_cadence] A key simply held on the left
   runs the relay tick at 50 ms, not 10: it only has to reaffirm the hold every
   100 ms. Repair, keymap sync and USB listening keep the 10 ms tick. Worst gap

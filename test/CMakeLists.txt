@@ -105,6 +105,7 @@ add_executable(test_runner
     test_radio_owner.c
     test_fusion_file.c
     test_engine_wake.c
+    test_kbd_debounce.c
     ../main/comm/rf/radio_owner.c
     test_rf_status_cadence.c
     test_keymap_blob_size.c
@@ -148,6 +149,9 @@ set_source_files_properties(../scripts/gen/rf_trace_vectors.c PROPERTIES
 # test_rf_settle pins rf_bench.h's shipped values against the Kconfig defaults.
 set_source_files_properties(test_rf_settle.c PROPERTIES
     COMPILE_DEFINITIONS "KCONFIG_PROJBUILD=\"${CMAKE_CURRENT_SOURCE_DIR}/../main/Kconfig.projbuild\"")
+# test_kbd_debounce reads the boards' sdkconfig.defaults (eager = Niphargus only).
+set_source_files_properties(test_kbd_debounce.c PROPERTIES
+    COMPILE_DEFINITIONS "KASE_REPO_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/..\"")
 set_source_files_properties(test_rf_trace.c PROPERTIES
     COMPILE_DEFINITIONS "RF_TRACE_VECTORS_JSON=\"${CMAKE_CURRENT_SOURCE_DIR}/../docs/contracts/rf_trace_vectors.json\"")
 
@@ -171,6 +175,7 @@ target_include_directories(test_runner PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/security
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/comm/cdc
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/display/oled
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/keyboard_button/include
 )
 
 # ---------------------------------------------------------------------------

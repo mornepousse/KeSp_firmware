@@ -16,6 +16,7 @@
 #include "kbd_gpio.h"
 #include "board.h"
 #include "kbd_gptimer.h"
+#include "kbd_debounce.h"
 
 static const char *TAG = "keyboard_button";
 
@@ -46,6 +47,7 @@ typedef struct keyboard_btn_t {
     int output_gpio_num;
     bool enable_power_save;
     bool can_enter_power_save;
+    bool debounce_eager_press;   /*!< KaSe: kbd_debounce.h mode */
     EventGroupHandle_t event_group;
     gptimer_handle_t gptimer_handle;
     kbd_cb_info_t *cb_info[KBD_EVENT_MAX];
@@ -55,10 +57,9 @@ typedef struct keyboard_btn_t {
     uint32_t ticks_interval;
     uint32_t key_pressed_num;
     uint8_t  active_level;
-    /*!< Size: output_gpio_num * sizeof(uint32_t) */
-    uint8_t *button_level;
-    /*!< Size: output_gpio_num * input_gpio_num * sizeof(uint8_t) */
-    uint8_t  *debounce_cnt;
+    /*!< KaSe: per-key debounce state (reported level, counter, lockout),
+     *   replaces button_level + debounce_cnt. Size: output_gpio_num * input_gpio_num */
+    kbd_db_key_t *db;
     /*!< Size: output_gpio_num * input_gpio_num * sizeof(keyboard_data_t) */
     keyboard_btn_data_t *key_data;
     /*!< Size: output_gpio_num * input_gpio_num * sizeof(keyboard_data_t) */
@@ -106,14 +107,19 @@ static inline void kbd_handler(keyboard_btn_t *kbd)
         for (int j = 0; j < kbd->input_gpio_num; j++) {
             uint8_t currect_btn_num = i * kbd->input_gpio_num + j;
             uint8_t read_gpio_level = (input_level >> j) & 0x01;
-            uint8_t button_level = kbd->active_level ? kbd->button_level[currect_btn_num] : !kbd->button_level[currect_btn_num];
-            if (read_gpio_level != button_level) {
+            /* KaSe: the per-key debounce is a pure state machine
+             * (kbd_debounce.h, host-tested). Symmetric mode is the original
+             * loop scan for scan; eager mode reports a press at once. */
+            bool raw_down = kbd->active_level ? read_gpio_level : !read_gpio_level;
+            kbd_db_key_t *db = &kbd->db[currect_btn_num];
+            if (raw_down != (bool)db->level) {
                 kbd->can_enter_power_save = false;
-                if (++kbd->debounce_cnt[currect_btn_num] >= kbd->debounce_ticks) {
-                    kbd->debounce_cnt[currect_btn_num] = 0;
-                    kbd->button_level[currect_btn_num] = kbd->active_level ? read_gpio_level : !read_gpio_level;
+            }
+            kbd_db_event_t db_ev = kbd_db_step(db, raw_down, kbd->debounce_ticks, kbd->debounce_eager_press);
+            if (db_ev != KBD_DB_NONE) {
+                {
                     // Make a report
-                    if (kbd->button_level[currect_btn_num] == 1) {
+                    if (db_ev == KBD_DB_PRESS) {
                         key_change_inc_flag = true;
                         kbd->key_data[kbd->key_pressed_num].output_index = i;
                         kbd->key_data[kbd->key_pressed_num].input_index = j;
@@ -136,8 +142,6 @@ static inline void kbd_handler(keyboard_btn_t *kbd)
                         key_release_num++;
                     }
                 }
-            } else {
-                kbd->debounce_cnt[currect_btn_num] = 0;
             }
         }
 
@@ -239,6 +243,15 @@ static void IRAM_ATTR kbd_power_save_isr_handler(void* arg)
         kbd->gptimer_start = true;
     }
     kbd_gpios_intr_control(kbd->input_gpios, kbd->input_gpio_num, false);
+    /* KaSe, eager press: scan NOW rather than one interval later — the
+     * timer's first alarm comes ticks_interval (5 ms on the halves) after
+     * this edge, and an eager press is reported by the first scan that reads
+     * it. Symmetric boards keep the original timing. */
+    if (kbd->debounce_eager_press) {
+        BaseType_t woken = pdFALSE;
+        xEventGroupSetBitsFromISR(kbd->event_group, KBD_TIMER_NOTIFY, &woken);
+        if (woken == pdTRUE) portYIELD_FROM_ISR();
+    }
 }
 
 esp_err_t keyboard_button_create(keyboard_btn_config_t *kbd_cfg, keyboard_btn_handle_t *kbd_handle)
@@ -275,11 +288,9 @@ esp_err_t keyboard_button_create(keyboard_btn_config_t *kbd_cfg, keyboard_btn_ha
     kbd->debounce_ticks = kbd_cfg->debounce_ticks;
     kbd->ticks_interval = kbd_cfg->ticks_interval;
     kbd->enable_power_save = kbd_cfg->enable_power_save;
-    kbd->button_level = calloc(kbd->output_gpio_num * kbd->input_gpio_num, sizeof(uint8_t));
-    ESP_GOTO_ON_FALSE(kbd->button_level, ESP_ERR_NO_MEM, exit, TAG, "Failed to allocate memory for button level");
-
-    kbd->debounce_cnt = calloc(kbd->output_gpio_num * kbd->input_gpio_num, sizeof(uint8_t));
-    ESP_GOTO_ON_FALSE(kbd->debounce_cnt, ESP_ERR_NO_MEM, exit, TAG, "Failed to allocate memory for debounce count");
+    kbd->debounce_eager_press = kbd_cfg->debounce_eager_press;
+    kbd->db = calloc(kbd->output_gpio_num * kbd->input_gpio_num, sizeof(kbd_db_key_t));
+    ESP_GOTO_ON_FALSE(kbd->db, ESP_ERR_NO_MEM, exit, TAG, "Failed to allocate memory for debounce state");
 
     kbd->key_data = calloc(kbd->output_gpio_num * kbd->input_gpio_num, sizeof(keyboard_btn_data_t));
     ESP_GOTO_ON_FALSE(kbd->key_data, ESP_ERR_NO_MEM, exit, TAG, "Failed to allocate memory for key data");
@@ -341,11 +352,8 @@ esp_err_t keyboard_button_create(keyboard_btn_config_t *kbd_cfg, keyboard_btn_ha
 
 exit:
     if (kbd) {
-        if (kbd->button_level) {
-            free(kbd->button_level);
-        }
-        if (kbd->debounce_cnt) {
-            free(kbd->debounce_cnt);
+        if (kbd->db) {
+            free(kbd->db);
         }
         if (kbd->key_data) {
             free(kbd->key_data);
@@ -381,11 +389,8 @@ esp_err_t keyboard_button_delete(keyboard_btn_handle_t kbd_handle)
 
     kbd_gpio_deinit(kbd->input_gpios, kbd->input_gpio_num);
     kbd_gpio_deinit(kbd->output_gpios, kbd->output_gpio_num);
-    if (kbd->button_level) {
-        free(kbd->button_level);
-    }
-    if (kbd->debounce_cnt) {
-        free(kbd->debounce_cnt);
+    if (kbd->db) {
+        free(kbd->db);
     }
     if (kbd->key_data) {
         free(kbd->key_data);
