@@ -59,7 +59,7 @@
  * Version 3 (2026-10-21, dongle RX settle): the periodic record grew from 26
  * to 33 bytes — the dongle's health under the per-radio settle (review C1/M5
  * of 88d49728): `ovf` (RX FIFO flushes on a corrupt payload width, the path
- * that lost 6 % of acked frames at a 200 us settle), `gap_max_ms` (the
+ * suspected, never confirmed, of acked-frame loss), `gap_max_ms` (the
  * fusion engine's longest round gap: a starved core 0 shows here first),
  * `settle_ms` (time the rx task waited for auto-ACKs) and `bench` (both
  * ends: RF_BENCH_* bits, an nRF24 knob off its shipped value — the dongle has

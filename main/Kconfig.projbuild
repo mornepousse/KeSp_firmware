@@ -513,7 +513,7 @@ config KASE_RF_RX_SETTLE_US
         The dongle's rx task wakes on that IRQ and used to read STATUS/FIFO
         over SPI at once — during the ACK. On Mae's clone modules that made
         ~90 % of first ACKs miss (the half retransmitted, the dongle had
-        already the frame), and at 200 us SPI also LOST 6 % of acked frames.
+        already the frame).
         Measured with rf_scope stress, 2026-10-21 (first attempt 6 % -> 98.5 %
         at 10/s, 1 % -> 99.9 % at 100/s, retries/frame 1.00 -> 0.01, no loss):
         500 us covers the longest ACK payload. 0 = read at once (old

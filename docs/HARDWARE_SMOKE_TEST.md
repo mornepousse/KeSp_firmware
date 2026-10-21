@@ -82,7 +82,7 @@ in the PR/release.
       second (timer passes wait nothing; 88d49728 burnt ~500 ms/s), `engine
       gap max` ≤ 12 ms (the engine ticks every 10 ms; a starved core 0
       shows up here first), `FIFO width flushes` 0 — a growing count is the
-      path that lost 6 % of acked frames at a 200 µs settle. While typing,
+      path suspected (never confirmed) of acked-frame loss. Max-rate runs where the half's trace ring drops records give FALSE losses (seq aliasing) — judge loss only on runs with half ring drops 0. While typing,
       `settle wait` stays a few ms per second (≤ 0.5 ms per frame), the gap
       still ≤ 12 ms. With the Conchodytes mouse moving (1 kHz): gap still ≤ 12
       ms, keys typed during the motion arrive once, tap-hold still resolves.
