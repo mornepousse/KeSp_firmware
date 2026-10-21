@@ -166,6 +166,7 @@ means a test, or a line.
   ring drops of both ends, the dongle's stress counter; 10-min windows for a
   soak).
 - [smoke:RF stress] Every board ships the nRF24 with SETUP_RETR 0x1F (ARD 500 µs, 15 retries); `KASE_RF_SETUP_RETR` exists only for rf-scope bench experiments and its default must not change without an `rf_scope stress` measurement (2026-10-21).
+- [smoke:RF stress] The dongle waits `KASE_RF_RX_SETTLE_US` (500 µs) after an RX IRQ before touching the nRF24 over SPI, so the auto-ACK leaves first: on the clone modules an immediate read made ~90 % of first ACKs miss (retries/frame 1.00) and a 200 µs wait lost 6 % of acked frames; at 500 µs `rf_scope stress` shows first-attempt success ≥ 97 % up to 300 frames/s and no loss (2026-10-21). Re-measure with `rf_scope stress --scenario held` after any change of the dongle's RX path.
 - [smoke:RF trace (half)] A half traces over its console UART0 without a
   UART driver, without a wake veto and without a new cadence: tracing off,
   its sleep current and `HB … slept=` are those of a build without the trace

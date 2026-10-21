@@ -50,6 +50,7 @@ uint8_t rf_signal_q255(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
 #include "rf_trace_dongle.h" /* rf-scope: RX records, stress drop */
 #include "batt_calc.h"      /* batt_soc_pct — SoC derived from voltage, dongle side */
 #include "board_rf.h"
+#include "esp_rom_sys.h"   /* esp_rom_delay_us (E8 bench knob) */
 #include "rf_pairing.h"   /* rf_pairing_load_set_id_dongle, rf_apply_set_id */
 #if CONFIG_KASE_NRF_LINE_TEST
 #include "rf_line_test.h"
@@ -166,6 +167,9 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
     const uint8_t tr_ch = (slot == RF_SLOT_KBD) ? s_kbd_cfg.channel : s_mouse_cfg.channel;
     rf_trace_pass_t tr_pass;
     tr_pass.n = 0;
+#if CONFIG_KASE_RF_RX_SETTLE_US > 0
+    esp_rom_delay_us(CONFIG_KASE_RF_RX_SETTLE_US);   /* E8: let the auto-ACK leave before any SPI */
+#endif
     while (rf_driver_rx_available(radio)) {
         uint8_t tr_pipe = 0, tr_rpd = 0;
         if (tr) {

@@ -480,6 +480,36 @@ config KASE_RF_SETUP_RETR
         frames needed exactly one retransmission at any rate); never commit
         another default without measuring it with rf_scope stress.
 
+config KASE_RF_FEATURE
+    hex "nRF24 FEATURE register — bench experiments only"
+    default 0x06
+    range 0x00 0x07
+    help
+        Value written to the nRF24's FEATURE register: 0x06 = EN_DPL |
+        EN_ACK_PAY, what every board ships with (the keymap sync rides ACK
+        payloads). 0x04 (EN_DPL only) exists for the rf-scope experiment E6
+        of 2026-10-21: on Mae's clones the ACK of a NEW packet is missed
+        (~90 % of frames retransmitted once while the dongle already had the
+        first attempt). Must be set identically on the dongle and the halves;
+        0x04 disables the keymap sync.
+
+config KASE_RF_RX_SETTLE_US
+    int "Dongle: wait before the first SPI access after an RX IRQ (us)"
+    default 500 if KASE_DEVICE_ROLE_DONGLE
+    default 0
+    range 0 2000
+    help
+        The nRF24 raises RX_DR on a NEW packet and sends its auto-ACK about
+        130 us later (up to ~460 us with a 32-byte ACK payload at 1 Mbit/s).
+        The dongle's rx task wakes on that IRQ and used to read STATUS/FIFO
+        over SPI at once — during the ACK. On Mae's clone modules that made
+        ~90 % of first ACKs miss (the half retransmitted, the dongle had
+        already the frame), and at 200 us SPI also LOST 6 % of acked frames.
+        Measured with rf_scope stress, 2026-10-21 (first attempt 6 % -> 98.5 %
+        at 10/s, 1 % -> 99.9 % at 100/s, retries/frame 1.00 -> 0.01, no loss):
+        500 us covers the longest ACK payload. 0 = read at once (old
+        behaviour). Halves: 0 (they poll, they do not wake on RX_DR).
+
 config KASE_NRF_LINE_TEST
     bool "NRF line short-circuit test at boot (bring-up diagnostic)"
     default n

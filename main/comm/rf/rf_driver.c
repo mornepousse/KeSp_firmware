@@ -424,7 +424,7 @@ esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_SETUP_RETR, CONFIG_KASE_RF_SETUP_RETR);      /* ARD=500us, ARC=15 */
     rf_driver_set_channel(r, cfg->channel);
     rf_driver_write_reg(r, REG_RF_SETUP, 0x06);        /* 1 Mbps, 0 dBm (clones don't support 250kbps) */
-    rf_driver_write_reg(r, REG_FEATURE, 0x06);         /* EN_DPL|EN_ACK_PAY */
+    rf_driver_write_reg(r, REG_FEATURE, CONFIG_KASE_RF_FEATURE);         /* EN_DPL|EN_ACK_PAY */
     rf_driver_write_reg(r, REG_DYNPD, 0x01);           /* dynamic payload pipe 0 */
 
     uint8_t addr[5];
@@ -469,7 +469,7 @@ void rf_driver_set_ptx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_SETUP_RETR, CONFIG_KASE_RF_SETUP_RETR);
     rf_driver_set_channel(r, cfg->channel);
     rf_driver_write_reg(r, REG_RF_SETUP, 0x06);      /* 1 Mbps, 0 dBm — same as init */
-    rf_driver_write_reg(r, REG_FEATURE, 0x06);   /* EN_DPL|EN_ACK_PAY */
+    rf_driver_write_reg(r, REG_FEATURE, CONFIG_KASE_RF_FEATURE);   /* EN_DPL|EN_ACK_PAY */
     rf_driver_write_reg(r, REG_DYNPD, 0x01);
     uint8_t addr[5];
     memcpy(addr, cfg->rx_addr, 4);
@@ -501,7 +501,7 @@ void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
                                                         peers. Dormant for halves (heartbeats
                                                         keep the watchdog from firing) but fatal
                                                         for the heartbeat-less HID relay. */
-    rf_driver_write_reg(r, REG_FEATURE, 0x06);   /* EN_DPL|EN_ACK_PAY */
+    rf_driver_write_reg(r, REG_FEATURE, CONFIG_KASE_RF_FEATURE);   /* EN_DPL|EN_ACK_PAY */
     rf_driver_write_reg(r, REG_DYNPD, 0x01);
     uint8_t addr[5];
     memcpy(addr, cfg->rx_addr, 4);
@@ -665,7 +665,7 @@ esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_SETUP_RETR, CONFIG_KASE_RF_SETUP_RETR);   /* ARD=500 µs, ARC=15 — max retransmit */
     rf_driver_set_channel(r, cfg->channel);
     rf_driver_write_reg(r, REG_RF_SETUP,   0x06);   /* 1 Mbps, 0 dBm — ~3dB better than 2Mbps; clones lack 250kbps */
-    rf_driver_write_reg(r, REG_FEATURE,    0x06);   /* EN_DPL (bit2) | EN_ACK_PAY (bit1) */
+    rf_driver_write_reg(r, REG_FEATURE,    CONFIG_KASE_RF_FEATURE);   /* EN_DPL (bit2) | EN_ACK_PAY (bit1) */
     rf_driver_write_reg(r, REG_DYNPD,      0x01);   /* DPL on pipe 0 */
 
     /* TX_ADDR and RX_ADDR_P0 must be the same 5-byte address for ESB auto-ACK.
