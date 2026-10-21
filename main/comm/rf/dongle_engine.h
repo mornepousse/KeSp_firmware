@@ -56,6 +56,8 @@ void dongle_engine_get_coherence(uint32_t *own_fp, uint32_t *left_fp,
 uint32_t dongle_engine_transitions_ecrasees(void);
 /* Max gap between two engine rounds since the last read (ms), reset to 0. */
 uint32_t dongle_engine_gap_max_ms(void);
+/* Same peak, separate accumulator for the rf-scope periodic record (v3). */
+uint32_t dongle_engine_gap_max_trace_ms(void);
 /* Re-presses of the same key < 30 ms after its release (a half's stale
  * repeat, or mechanical bounce) — CDC RF_STATUS[43..46]. */
 uint32_t dongle_engine_reappuis(void);

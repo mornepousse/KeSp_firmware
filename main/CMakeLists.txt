@@ -29,6 +29,10 @@ set(srcs
     # control decisions, shared by the dongle (CDC) and the halves (UART0).
     "comm/rf/rf_trace.c"
     "comm/rf/rf_trace_ctl.c"
+    # nRF24 pure helpers wherever rf_driver.c is built: the dongle's RX
+    # settle (rf_settle.h) and the bench-knob guard (rf_bench.h).
+    "comm/rf/rf_settle.c"
+    "comm/rf/rf_bench.c"
 
     # Security confirmation gate — compiled for all roles (key_processor calls it)
     "security/sec_confirm.c"

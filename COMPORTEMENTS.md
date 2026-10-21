@@ -42,9 +42,12 @@ means a test, or a line.
 - [test:test_rf_trace] The rf-scope trace format (`main/comm/rf/rf_trace.h`)
   is one byte layout for the halves (UART0) and the dongle (CDC): a KR reply
   of command 0xBA (`KS_CMD_RF_TRACE`) carrying version, kind, 1..16 fixed-size
-  little-endian records (TX 13 B, RX 13 B, periodic 26 B — format version 2,
-  2026-10-20: the periodic record carries the trace `session` and the
-  `stress` frame count; a version-1 frame is refused) and `ks_crc8`. The
+  little-endian records (TX 13 B, RX 13 B, periodic 33 B — format version 3,
+  2026-10-21: the periodic record also carries the dongle's RX health under
+  the per-radio settle — `ovf` FIFO width flushes, `gap_max_ms` of the
+  fusion engine, `settle_ms` waited — and `bench`, the RF_BENCH_* bits of
+  an nRF24 knob off its shipped value, on both ends; version 2, 2026-10-20,
+  had added `session` and `stress`; a version-1 or -2 frame is refused) and `ks_crc8`. The
   decoder refuses, each with its own code, a short, trailing, wrong-magic,
   wrong-command, wrong-status, wrong-version, unknown-kind, out-of-bound
   count, inconsistent length or bad-CRC frame; the scanner finds every frame
@@ -166,7 +169,10 @@ means a test, or a line.
   ring drops of both ends, the dongle's stress counter; 10-min windows for a
   soak).
 - [smoke:RF stress] Every board ships the nRF24 with SETUP_RETR 0x1F (ARD 500 µs, 15 retries); `KASE_RF_SETUP_RETR` exists only for rf-scope bench experiments and its default must not change without an `rf_scope stress` measurement (2026-10-21).
-- [smoke:RF stress] The dongle waits `KASE_RF_RX_SETTLE_US` (500 µs) after an RX IRQ before touching the nRF24 over SPI, so the auto-ACK leaves first: on the clone modules an immediate read made ~90 % of first ACKs miss (retries/frame 1.00) and a 200 µs wait lost 6 % of acked frames; at 500 µs `rf_scope stress` shows first-attempt success ≥ 97 % up to 300 frames/s and no loss (2026-10-21). Re-measure with `rf_scope stress --scenario held` after any change of the dongle's RX path.
+- [smoke:RF stress] The dongle lets a radio's auto-ACK leave before touching that radio over SPI: `KASE_RF_RX_SETTLE_US` (500 µs, dongle only) after ITS last RX IRQ. On the clone modules an immediate read made ~90 % of first ACKs miss (retries/frame 1.00) and a 200 µs wait lost 6 % of acked frames; at 500 µs `rf_scope stress` shows first-attempt success ≥ 97 % up to 300 frames/s and no loss (2026-10-21). Re-measure with `rf_scope stress --scenario held` after any change of the dongle's RX path (smoke "RX settle — first attempt under load", ≥ 95 %).
+- [test:test_rf_settle] The settle is per radio and per SPI access sequence (`rf_settle.h`, pure; review of 88d49728, which waited 500 µs unconditionally on every pass of both radios — half of core 0 at rest, the engine starved under a 1 kHz mouse): the GPIO ISR stamps the IRQ time in THAT radio's struct; before each access sequence (each frame read of a drain, the ACK-payload load, the oob_tx re-emission, each pairing read and its ACK, the watchdog re-arm) the rx task waits only what remains of the settle since that radio's last IRQ — nothing when it is older, nothing on a pass the 1 ms timer woke with no recent IRQ, never the other radio's IRQ; wrap-safe on the 32-bit µs clock; a wait computed once (no chasing: forward progress at any rate). A drain clears RX_DR as soon as it finds data so a frame landing mid-pass raises its own edge and stamp. The wait sleeps on an esp_timer one-shot above 100 µs and spins below (re-measured: never shorter). Residual risk, documented in `rf_rx_task.c`: a frame whose IRQ rises during one SPI sequence, or that lands while RX_DR is still latched by the frame that woke the pass (two frames on one radio within ~0.5 ms).
+- [smoke:RX settle — dongle core 0 not burnt] At rest the dongle waits nothing: its rf-scope periodic records show `settle_ms` ≈ 0 per second and `gap_max_ms` ≤ 12 ms (the engine's 10 ms round, not starved by the rx task), also with the Conchodytes mouse moving at 1 kHz; `ovf` stays 0.
+- [test:test_rf_settle] The three nRF24 bench knobs (`KASE_RF_FEATURE`, `KASE_RF_SETUP_RETR`, `KASE_RF_RX_SETTLE_US`) have their shipped values in `rf_bench.h`, pinned against the Kconfig defaults; `KASE_RF_FEATURE` cannot drop EN_DPL (range 0x04..0x07 + static assert) and `KASE_RF_RX_SETTLE_US` exists on the dongle only. A build_<board>/sdkconfig keeps a menuconfig value, so a non-shipped one is flagged: ESP_LOGW once at boot (rf_driver.c), ` BENCH-RF(...)` in the halves' HB, `bench` in every rf-scope periodic record (the dongle has no console) and a `BENCH` line in the rf_scope report; `scripts/build_release.sh` refuses to package a board whose sdkconfig carries one, naming the knob and the shipped value.
 - [smoke:RF trace (half)] A half traces over its console UART0 without a
   UART driver, without a wake veto and without a new cadence: tracing off,
   its sleep current and `HB … slept=` are those of a build without the trace

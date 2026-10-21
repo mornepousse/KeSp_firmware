@@ -39,9 +39,11 @@ static void rec_json(FILE *o, const rf_trace_rec_t *r)
         const rf_trace_periodic_t *x = &r->u.periodic;
         fprintf(o, "{\"t_us\": %u, \"uptime_s\": %u, \"source\": %u, \"state\": %u, \"batt_dV\": %u, "
                    "\"channel\": %u, \"frames\": %u, \"fails\": %u, \"dups\": %u, \"drops\": %u, "
-                   "\"session\": %u, \"stress\": %u}",
+                   "\"session\": %u, \"stress\": %u, \"ovf\": %u, \"gap_max_ms\": %u, "
+                   "\"settle_ms\": %u, \"bench\": %u}",
                 (unsigned)x->t_us, (unsigned)x->uptime_s, x->source, x->state, x->batt_dV,
-                x->channel, x->frames, x->fails, x->dups, x->drops, (unsigned)x->session, x->stress);
+                x->channel, x->frames, x->fails, x->dups, x->drops, (unsigned)x->session, x->stress,
+                x->ovf, x->gap_max_ms, x->settle_ms, x->bench);
         break; }
     }
 }
@@ -69,10 +71,12 @@ static rf_trace_rec_t rx(uint32_t t, uint8_t em, uint8_t seq, uint8_t pk, uint8_
 
 static rf_trace_rec_t per(uint32_t t, uint32_t up, uint8_t src, uint8_t st, uint8_t batt,
                           uint8_t ch, uint16_t frames, uint16_t fails, uint16_t dups, uint16_t drops,
-                          uint32_t session, uint16_t stress)
+                          uint32_t session, uint16_t stress,
+                          uint16_t ovf, uint16_t gap_max_ms, uint16_t settle_ms, uint8_t bench)
 {
     rf_trace_rec_t r = { .kind = RF_TRACE_KIND_PERIODIC };
-    r.u.periodic = (rf_trace_periodic_t){ t, up, src, st, batt, ch, frames, fails, dups, drops, session, stress };
+    r.u.periodic = (rf_trace_periodic_t){ t, up, src, st, batt, ch, frames, fails, dups, drops, session, stress,
+                                          ovf, gap_max_ms, settle_ms, bench };
     return r;
 }
 
@@ -133,10 +137,13 @@ void rf_trace_vectors_write(FILE *o)
         rx(5900u, RF_TRACE_EMIT_RIGHT, 200, 0x6, 8, 1, 1, 0x52, 1, 0),
         rx(6100u, RF_TRACE_EMIT_MOUSE, 3, 0x5, 6, 2, 1, 0x53, 3, RF_TRACE_RXF_DELIVERED) };
     const rf_trace_rec_t per1[] = {
-        per(42000000u, 42u, RF_TRACE_EMIT_LEFT, RF_TRACE_ST_SLEEPING, 39, 0x52, 120, 3, 0, 0, 1u, 0) };
+        per(42000000u, 42u, RF_TRACE_EMIT_LEFT, RF_TRACE_ST_SLEEPING, 39, 0x52, 120, 3, 0, 0, 1u, 0, 0, 0, 0, 0) };
     const rf_trace_rec_t per2[] = {
-        per(0xFFFFFFFFu, 4295u, RF_TRACE_EMIT_DONGLE, RF_TRACE_ST_AWAKE, 0, 0x52, 65535, 0, 17, 9, 0xFFFFFFFFu, 480),
-        per(0x000F4240u, 4296u, RF_TRACE_EMIT_RIGHT,  RF_TRACE_ST_WOKE, 41, 0x4F, 1, 1, 0, 65535, 7u, 65535) };
+        per(0xFFFFFFFFu, 4295u, RF_TRACE_EMIT_DONGLE, RF_TRACE_ST_AWAKE, 0, 0x52, 65535, 0, 17, 9, 0xFFFFFFFFu, 480, 3, 12, 41, 0),
+        per(0x000F4240u, 4296u, RF_TRACE_EMIT_RIGHT,  RF_TRACE_ST_WOKE, 41, 0x4F, 1, 1, 0, 65535, 7u, 65535, 0, 0, 0, 0x01) };
+    const rf_trace_rec_t per3[] = {   /* v3: a starved, bench-configured dongle (every new field at its edge) */
+        per(1234567u, 1u, RF_TRACE_EMIT_DONGLE, RF_TRACE_ST_AWAKE, 0, 0x52, 300, 0, 0, 0, 2u, 0,
+            65535, 65535, 1000, 0x07) };
     const rf_trace_rec_t rx_noseq[] = {
         rx(7000u, RF_TRACE_EMIT_LEFT,  0, 0x5, 9, 0, 1, 0x52, 1, RF_TRACE_RXF_DELIVERED | RF_TRACE_RXF_NOSEQ),
         rx(7400u, RF_TRACE_EMIT_RIGHT, 0x2A, 0xA, 6, 0, 1, 0x52, 1, 0) };
@@ -161,6 +168,7 @@ void rf_trace_vectors_write(FILE *o)
     frame_vec(o, false, "rx_noseq_hidreport_and_stress", RF_TRACE_KIND_RX, rx_noseq, 2);
     frame_vec(o, false, "periodic_left_going_to_sleep",  RF_TRACE_KIND_PERIODIC, per1, 1);
     frame_vec(o, false, "periodic_dongle_and_right_woke", RF_TRACE_KIND_PERIODIC, per2, 2);
+    frame_vec(o, false, "periodic_dongle_v3_health_and_bench", RF_TRACE_KIND_PERIODIC, per3, 1);
     fputs("\n  ],\n", o);
 
     /* Refused: each one wrong in exactly one way (the others re-sealed). */
@@ -186,6 +194,8 @@ void rf_trace_vectors_write(FILE *o)
     refused_vec(o, false, "version_next_sealed", b, n);
     memcpy(b, good, gn); b[6] = 1; n = reseal(b, gn - 7);
     refused_vec(o, false, "version_1_sealed", b, n);
+    memcpy(b, good, gn); b[6] = 2; n = reseal(b, gn - 7);
+    refused_vec(o, false, "version_2_sealed", b, n);
     memcpy(b, good, gn); b[7] = 0; n = reseal(b, gn - 7);
     refused_vec(o, false, "kind_0_sealed", b, n);
     memcpy(b, good, gn); b[8] = 2; n = reseal(b, gn - 7);

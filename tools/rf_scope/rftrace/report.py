@@ -4,7 +4,7 @@ when there is no terminal)."""
 from __future__ import annotations
 
 from . import stress as stress_mod
-from .analyzer import Analyzer, name_of
+from .analyzer import Analyzer, bench_names, name_of
 from .offset import MIN_PAIRS
 from .stats import NS
 
@@ -71,6 +71,13 @@ def render(an: Analyzer, title: str = "", win_s: int = 60) -> str:
     d = an.stats.dongle_window(0, end_s)
     add("DONGLE")
     add(f"  frames read (periodic counters) {d.frames}   duplicates {d.dups}   trace ring drops {d.drops}   channel {_f(d.channel, 'd')}")
+    h = getattr(an, "dongle_health", None)
+    if h and h["periodic"]:
+        span_ms = 1000 * h["periodic"]
+        add(f"  RX health: FIFO width flushes {h['ovf']}   engine gap max {h['gap_max_ms']} ms (10 nominal)   "
+            f"settle wait {h['settle_ms']} ms ({100 * h['settle_ms'] / span_ms:.1f} % of ~{h['periodic']} s)")
+    for src, bits in sorted(getattr(an, "bench", {}).items()):
+        add(f"  BENCH: {src} runs non-shipped nRF24 knobs ({bench_names(bits)}) — rf_bench.h; build_release.sh refuses it")
     add("")
     bad = [ev for ev in an.events if ev["kind"] in ("lost", "gap", "reboot", "ring_drop", "giveup", "max_rt")]
     add(f"notable events: {len(bad)}" + (" (first 20)" if len(bad) > 20 else ""))

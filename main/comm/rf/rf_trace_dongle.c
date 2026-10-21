@@ -6,6 +6,11 @@
 #include "cdc_binary_protocol.h"   /* ks_respond, KS_CMD_RF_TRACE */
 #include "cdc_acm_com.h"           /* cdc_set_unsolicited_pump, cdc_wake */
 #include "rf_packet.h"             /* PKT_TYPE_STRESS */
+#include "rf_rx_task.h"            /* rf_rx_health: v3 periodic counters */
+#include "rf_driver.h"             /* rf_driver_bench_flags */
+#if CONFIG_KASE_DONGLE_FUSION
+#include "dongle_engine.h"         /* dongle_engine_gap_max_trace_ms */
+#endif
 #include "esp_timer.h"
 #include "sdkconfig.h"
 
@@ -18,7 +23,7 @@ static uint32_t s_session_next;            /* CDC task only: the numbering of th
 static uint32_t s_session;                 /* rx task writes (atomic): the running session, 0 = off */
 static bool    s_ready;                    /* init done: the rx task exists */
 
-#define RING_CAP 128u                      /* 4 KB (32-byte slots); 8 frames of 16 records */
+#define RING_CAP 128u                      /* 5 KB (40-byte slots since the v3 periodic record); 8 frames of 16 records */
 static rf_trace_rec_t  s_slots[RING_CAP];
 static rf_trace_ring_t s_ring;
 
@@ -27,6 +32,24 @@ static rf_trace_timer_t s_timer;
 static rf_trace_dup_t   s_dup;
 static uint32_t s_last_periodic_ms;
 static uint16_t s_frames, s_dups, s_stress; /* since the previous periodic record */
+static uint32_t s_ovf_prev, s_settle_prev;  /* v3: totals at the previous periodic record */
+
+static uint16_t take_gap_ms(void)
+{
+#if CONFIG_KASE_DONGLE_FUSION
+    uint32_t g = dongle_engine_gap_max_trace_ms();
+    return g > 0xFFFFu ? 0xFFFFu : (uint16_t)g;
+#else
+    return 0;                                /* no engine on this dongle */
+#endif
+}
+
+/* A new run starts its v3 counters from now: nothing of the idle time before. */
+static void health_sync(void)
+{
+    rf_rx_health(&s_ovf_prev, &s_settle_prev);
+    (void)take_gap_ms();
+}
 
 static uint32_t now_us32(void) { return (uint32_t)esp_timer_get_time(); }
 
@@ -123,6 +146,8 @@ bool rf_trace_dongle_request(const rf_trace_ctl_cmd_t *cmd, uint32_t *session, u
 static void push_periodic(uint32_t now_ms, uint8_t channel)
 {
     rf_trace_rec_t rec = { .kind = RF_TRACE_KIND_PERIODIC };
+    uint32_t ovf_total, settle_total;
+    rf_rx_health(&ovf_total, &settle_total);
     rec.u.periodic = (rf_trace_periodic_t){
         .t_us = now_us32(),
         .uptime_s = now_ms / 1000u,
@@ -138,6 +163,11 @@ static void push_periodic(uint32_t now_ms, uint8_t channel)
         .drops = (uint16_t)rf_trace_ring_drops_take(&s_ring),
         .session = __atomic_load_n(&s_session, __ATOMIC_RELAXED),
         .stress = s_stress,                /* stress frames received and DROPPED */
+        /* v3: the RX health under the per-radio settle (rf_settle.h). */
+        .ovf = rf_trace_delta_u16(ovf_total, &s_ovf_prev),
+        .gap_max_ms = take_gap_ms(),
+        .settle_ms = rf_trace_delta_u16(settle_total, &s_settle_prev),
+        .bench = rf_driver_bench_flags(),
     };
     rf_trace_ring_push(&s_ring, &rec);
     s_frames = s_dups = s_stress = 0;
@@ -158,6 +188,7 @@ void rf_trace_dongle_service(uint32_t now_ms, uint8_t channel)
         rf_trace_timer_start(&s_timer, now_ms, (uint16_t)req);
         rf_trace_dup_reset(&s_dup);
         s_frames = s_dups = s_stress = 0;
+        health_sync();
         (void)rf_trace_ring_drops_take(&s_ring);  /* drops of a previous run are not this one's */
         __atomic_store_n(&s_session, __atomic_load_n(&s_req_session, __ATOMIC_ACQUIRE), __ATOMIC_RELEASE);
         __atomic_store_n(&g_rf_trace_dongle_on, true, __ATOMIC_RELAXED);

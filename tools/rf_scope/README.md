@@ -109,6 +109,14 @@ At `max` a half sends far more frames than its 115200-baud trace can carry
 (~800 TX records/s): expect half ring drops, and read loss on the frames that
 were recorded.
 
+The DONGLE section also prints the dongle's **RX health** (trace format v3,
+summed over its periodic records): `FIFO width flushes` (frames thrown away
+on a corrupt payload width), `engine gap max` (the fusion engine's longest
+round gap — 10 ms nominal; a starved core 0 shows here first) and `settle
+wait` (time the rx task waited for auto-ACKs, per-radio settle). A
+`BENCH` line names any end whose nRF24 knobs (FEATURE, SETUP_RETR, RX settle)
+are off their shipped values (`main/comm/rf/rf_bench.h`).
+
 ### Port safety
 
 * Only the ports named on the command line are ever opened.
@@ -144,7 +152,7 @@ One JSON object per line, self-contained:
 | `type` | fields |
 |---|---|
 | `meta` | `version`, `sources` (role -> port), `started`, `duration_s`; a stress run adds `scenario` (`name`, `params`) |
-| `rec` | `src` (`dongle`/`left`/`right`), `port`, `host_ns`, `kind` (`tx`/`rx`/`periodic`) and the record's fields exactly as in `main/comm/rf/rf_trace.h` |
+| `rec` | `src` (`dongle`/`left`/`right`), `port`, `host_ns`, `kind` (`tx`/`rx`/`periodic`) and the record's fields exactly as in `main/comm/rf/rf_trace.h` (format v3: the periodic record adds `ovf`, `gap_max_ms`, `settle_ms`, `bench`; a run file written before v3 lacks them and still analyzes) |
 | `text` | `src`, `host_ns`, `text`: a console line of a half (kept so the run explains itself) |
 | `ctl` | `src`, `host_ns`, `event`: `start_sent`, `ack` (`attempts`, `session`, `remaining_s`), `refused` (`status`), `giveup` (`message`), `stop_sent`, `stop_ack` (`session`), `closed`; stress runs: `stress_start_sent` (`scenario`, `params`), `stress_ack` (`attempts`, `session`, `remaining_s`), `stress_refused` (`status`, `message`), `stress_giveup`, `stress_stop_sent`, `stress_stop_ack` |
 

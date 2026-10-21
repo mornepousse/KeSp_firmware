@@ -39,6 +39,41 @@ export IDF_COMPONENT_CHECK_NEW_VERSION=0
 mkdir -p "$RELEASE_DIR"
 cd "$PROJECT_DIR"
 
+# ── nRF24 bench knobs (review I4, 2026-10-21) ───────────────────────────────
+# KASE_RF_FEATURE, KASE_RF_SETUP_RETR and KASE_RF_RX_SETTLE_US (dongle) exist
+# for rf-scope bench experiments. A build_<board>/sdkconfig KEEPS a value set
+# by menuconfig — `reconfigure` does not bring it back to the default — so a
+# bench value would ship silently. The shipped values are read from
+# main/comm/rf/rf_bench.h (one source, pinned against the Kconfig defaults by
+# test_rf_bench_shipped_match_kconfig). A symbol absent from the sdkconfig
+# (KASE_RF_RX_SETTLE_US outside the dongle) is not checked; neither is the
+# settle of a non-dongle sdkconfig that predates its `depends on`.
+shipped() { sed -n "s/^#define $1 *\([0-9xXa-fA-F]*\).*/\1/p" main/comm/rf/rf_bench.h; }
+SHIP_FEATURE="$(shipped RF_SHIPPED_FEATURE)"
+SHIP_RETR="$(shipped RF_SHIPPED_SETUP_RETR)"
+SHIP_SETTLE="$(shipped RF_SHIPPED_RX_SETTLE_US)"
+if [ -z "$SHIP_FEATURE" ] || [ -z "$SHIP_RETR" ] || [ -z "$SHIP_SETTLE" ]; then
+    echo "ERROR: cannot read the shipped nRF24 values from main/comm/rf/rf_bench.h" >&2
+    exit 1
+fi
+# check_bench_knobs <sdkconfig>: non-zero, with one line per knob, when a
+# value differs (compared as numbers: 0x1F == 0x1f == 31).
+check_bench_knobs() {
+    local cfg="$1" bad=0 sym want got
+    for pair in "KASE_RF_FEATURE:$SHIP_FEATURE" "KASE_RF_SETUP_RETR:$SHIP_RETR" "KASE_RF_RX_SETTLE_US:$SHIP_SETTLE"; do
+        sym="${pair%%:*}"; want="${pair#*:}"
+        got="$(sed -n "s/^CONFIG_${sym}=//p" "$cfg")"
+        [ -z "$got" ] && continue
+        # the settle is a dongle knob (M2): a stale line elsewhere is not shipped code
+        [ "$sym" = KASE_RF_RX_SETTLE_US ] && ! grep -q '^CONFIG_KASE_DEVICE_ROLE_DONGLE=y' "$cfg" && continue
+        if [ $((got)) -ne $((want)) ]; then
+            echo "  CONFIG_${sym}=${got} (shipped: ${want})" >&2
+            bad=1
+        fi
+    done
+    return $bad
+}
+
 for i in "${!BOARDS[@]}"; do
     board="${BOARDS[$i]}"
     hw="${HW_NAMES[$i]}"
@@ -50,6 +85,13 @@ for i in "${!BOARDS[@]}"; do
     # configure time — an incremental build after `git tag` keeps the old one.
     idf.py -B "$bdir" -DBOARD="$board" -DSDKCONFIG="$bdir/sdkconfig" reconfigure > /dev/null 2>&1
     idf.py -B "$bdir" -DBOARD="$board" -DSDKCONFIG="$bdir/sdkconfig" build 2>&1 | tail -3
+
+    if ! check_bench_knobs "$bdir/sdkconfig"; then
+        echo "ERROR: $board carries nRF24 bench values (above) — refusing to package it." >&2
+        echo "       Reset them in menuconfig (idf.py -B $bdir -DBOARD=$board -DSDKCONFIG=$bdir/sdkconfig menuconfig)" >&2
+        echo "       or delete $bdir/sdkconfig to regenerate it from the defaults, then rerun." >&2
+        exit 1
+    fi
 
     cp "$bdir/KeSp.bin" "$RELEASE_DIR/KaSe_${VERSION_TAG}_${hw}.bin"
 

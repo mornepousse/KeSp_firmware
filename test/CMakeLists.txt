@@ -37,6 +37,9 @@ add_executable(test_runner
     ../scripts/gen/rf_trace_vectors.c
     test_rf_trace_ctl.c
     ../main/comm/rf/rf_trace_ctl.c
+    test_rf_settle.c
+    ../main/comm/rf/rf_settle.c
+    ../main/comm/rf/rf_bench.c
     test_rf_stress.c
     ../main/comm/rf/rf_stress.c
     test_heartbeat.c
@@ -141,6 +144,9 @@ target_compile_definitions(test_runner PRIVATE SEC_CONFIRM_LOCAL_COLS=4)
 # test_rf_trace compares its output with the committed JSON.
 set_source_files_properties(../scripts/gen/rf_trace_vectors.c PROPERTIES
     COMPILE_DEFINITIONS "RF_TRACE_VECTORS_NO_MAIN")
+# test_rf_settle pins rf_bench.h's shipped values against the Kconfig defaults.
+set_source_files_properties(test_rf_settle.c PROPERTIES
+    COMPILE_DEFINITIONS "KCONFIG_PROJBUILD=\"${CMAKE_CURRENT_SOURCE_DIR}/../main/Kconfig.projbuild\"")
 set_source_files_properties(test_rf_trace.c PROPERTIES
     COMPILE_DEFINITIONS "RF_TRACE_VECTORS_JSON=\"${CMAKE_CURRENT_SOURCE_DIR}/../docs/contracts/rf_trace_vectors.json\"")
 

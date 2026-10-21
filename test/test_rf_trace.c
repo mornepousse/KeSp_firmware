@@ -37,7 +37,8 @@ static rf_trace_rec_t mk_per(uint32_t t)
     r.u.periodic = (rf_trace_periodic_t){ .t_us = t, .uptime_s = 0x00012345,
         .source = RF_TRACE_EMIT_DONGLE, .state = RF_TRACE_ST_WOKE, .batt_dV = 41,
         .channel = 0x4F, .frames = 0x1234, .fails = 0x0102, .dups = 0xBEEF, .drops = 0xFFFF,
-        .session = 0xCAFE0102, .stress = 0x0A0B };
+        .session = 0xCAFE0102, .stress = 0x0A0B,
+        .ovf = 0x0D0C, .gap_max_ms = 0x0F0E, .settle_ms = 0x1110, .bench = 0x05 };
     return r;
 }
 
@@ -82,12 +83,14 @@ static void test_rf_trace_periodic_layout_and_roundtrip(void)
     static const uint8_t exp[RF_TRACE_PERIODIC_SIZE] = {
         0x04, 0x03, 0x02, 0x01, 0x45, 0x23, 0x01, 0x00, 0x02, 0x02, 41, 0x4F,
         0x34, 0x12, 0x02, 0x01, 0xEF, 0xBE, 0xFF, 0xFF,
-        0x02, 0x01, 0xFE, 0xCA, 0x0B, 0x0A };
-    TEST_ASSERT_EQ(RF_TRACE_VERSION, 2, "format version 2: the periodic record grew (session, stress)");
-    TEST_ASSERT_EQ(rf_trace_rec_size(RF_TRACE_KIND_PERIODIC), 26, "periodic record is 26 bytes");
+        0x02, 0x01, 0xFE, 0xCA, 0x0B, 0x0A,
+        0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x05 };
+    TEST_ASSERT_EQ(RF_TRACE_VERSION, 3, "format version 3: the periodic record grew (ovf, gap_max_ms, settle_ms, bench)");
+    TEST_ASSERT_EQ(rf_trace_rec_size(RF_TRACE_KIND_PERIODIC), 33, "periodic record is 33 bytes");
     TEST_ASSERT(memcmp(b, exp, sizeof exp) == 0,
-                "periodic: t_us, uptime_s, source, state, batt, ch, 4 × u16 LE, session u32, stress u16");
-    TEST_ASSERT_EQ(b[RF_TRACE_PERIODIC_SIZE], 0xEE, "periodic encode writes exactly 26 bytes");
+                "periodic: t_us, uptime_s, source, state, batt, ch, 4 × u16 LE, session u32, stress u16, "
+                "ovf u16, gap_max_ms u16, settle_ms u16, bench u8");
+    TEST_ASSERT_EQ(b[RF_TRACE_PERIODIC_SIZE], 0xEE, "periodic encode writes exactly 33 bytes");
     rf_trace_periodic_t d; memset(&d, 0, sizeof d);
     rf_trace_periodic_decode(b, &d);
     TEST_ASSERT(memcmp(&d, &r.u.periodic, sizeof d) == 0, "periodic round trip");
@@ -255,6 +258,8 @@ static void test_rf_trace_field_refusals(void)
     TEST_ASSERT_EQ(rf_trace_frame_decode(buf, n, &f), RF_TRACE_ERR_VERSION, "next version (sealed) → ERR_VERSION");
     n = build(buf, RF_TRACE_KIND_TX, 2); buf[6] = 1; n = reseal(buf, n - 7);
     TEST_ASSERT_EQ(rf_trace_frame_decode(buf, n, &f), RF_TRACE_ERR_VERSION, "version 1 (a pre-stress firmware, sealed) → ERR_VERSION");
+    n = build(buf, RF_TRACE_KIND_TX, 2); buf[6] = 2; n = reseal(buf, n - 7);
+    TEST_ASSERT_EQ(rf_trace_frame_decode(buf, n, &f), RF_TRACE_ERR_VERSION, "version 2 (a pre-settle firmware, sealed) → ERR_VERSION");
     n = build(buf, RF_TRACE_KIND_TX, 2); buf[7] = 7; n = reseal(buf, n - 7);
     TEST_ASSERT_EQ(rf_trace_frame_decode(buf, n, &f), RF_TRACE_ERR_KIND, "kind 7 (sealed) → ERR_KIND");
     /* TX and RX records have the same size: a kind swap is caught by nothing

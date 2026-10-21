@@ -25,6 +25,7 @@ extern void test_mouse_slot_vectors(void);
 extern void test_rf_trace(void);
 extern void test_rf_trace_ctl(void);
 extern void test_rf_trace_half(void);
+extern void test_rf_settle(void);
 extern void test_rf_stress(void);
 extern void test_rf_slot(void);
 extern void test_heartbeat(void);
@@ -118,6 +119,7 @@ int main(void) {
     test_rf_trace();
     test_rf_trace_ctl();
     test_rf_trace_half();
+    test_rf_settle();
     test_rf_stress();
     test_rf_slot();
     test_heartbeat();

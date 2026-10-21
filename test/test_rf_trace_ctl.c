@@ -433,8 +433,8 @@ static void test_rf_trace_ctl_batch_fit(void)
     TEST_ASSERT_EQ(rf_trace_batch_fit(9 + 13 + 1, RF_TRACE_KIND_TX), 1, "exactly one TX record");
     TEST_ASSERT_EQ(rf_trace_batch_fit(128, RF_TRACE_KIND_TX), 9, "the S3's 128-byte UART FIFO: 9 TX records (127 B)");
     TEST_ASSERT_EQ(rf_trace_batch_fit(128, RF_TRACE_KIND_RX), 9, "same for RX (13 B)");
-    TEST_ASSERT_EQ(rf_trace_batch_fit(128, RF_TRACE_KIND_PERIODIC), 4, "4 periodic records (114 B)");
-    TEST_ASSERT_EQ(rf_trace_batch_fit(9 + 4 * 26 + 1 - 1, RF_TRACE_KIND_PERIODIC), 3, "one byte short of 4 periodic");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(128, RF_TRACE_KIND_PERIODIC), 3, "3 periodic records (109 B, v3: 33 B each)");
+    TEST_ASSERT_EQ(rf_trace_batch_fit(9 + 3 * 33 + 1 - 1, RF_TRACE_KIND_PERIODIC), 2, "one byte short of 3 periodic");
     TEST_ASSERT_EQ(rf_trace_batch_fit(100000, RF_TRACE_KIND_TX), RF_TRACE_BATCH_MAX, "capped at a full batch");
     TEST_ASSERT_EQ(rf_trace_batch_fit(RF_TRACE_FRAME_MAX, RF_TRACE_KIND_PERIODIC), RF_TRACE_BATCH_MAX,
                    "RF_TRACE_FRAME_MAX holds a full batch of the largest record");
@@ -501,6 +501,22 @@ static void test_rf_trace_ctl_pump_plan(void)
     TEST_ASSERT_EQ(n, RF_TRACE_BATCH_MAX, "batch bound (the ring pop stops at the kind boundary)");
 }
 
+
+/* v3 periodic counters (fifo_ovf of both radios, settle wait): the producers
+ * keep CUMULATIVE totals, the periodic record carries the delta since the
+ * previous record, saturated to its u16 field. */
+static void test_rf_trace_ctl_delta_u16(void)
+{
+    uint32_t prev = 0;
+    TEST_ASSERT_EQ(rf_trace_delta_u16(5, &prev), 5, "first delta");
+    TEST_ASSERT_EQ(prev, 5, "prev follows the total");
+    TEST_ASSERT_EQ(rf_trace_delta_u16(5, &prev), 0, "nothing new: 0");
+    TEST_ASSERT_EQ(rf_trace_delta_u16(5 + 70000, &prev), 0xFFFF, "a delta above 65535 saturates");
+    TEST_ASSERT_EQ(prev, 70005, "and still consumes the whole delta");
+    prev = 0xFFFFFFF0u;
+    TEST_ASSERT_EQ(rf_trace_delta_u16(0x10u, &prev), 0x20, "the u32 total wraps: delta modulo 2^32");
+}
+
 void test_rf_trace_ctl(void)
 {
     TEST_SUITE("rf_trace_ctl");
@@ -516,5 +532,6 @@ void test_rf_trace_ctl(void)
     TEST_RUN(test_rf_trace_ctl_ack_payload);
     TEST_RUN(test_rf_trace_ctl_timer_remaining);
     TEST_RUN(test_rf_trace_ctl_rx_flags);
+    TEST_RUN(test_rf_trace_ctl_delta_u16);
     TEST_RUN(test_rf_rx_dispatch_never_hands_a_stress_frame_to_a_handler);
 }

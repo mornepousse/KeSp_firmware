@@ -86,6 +86,33 @@ def test_sleeping_then_woke_records_make_an_asleep_interval():
     assert abs(an.stats.window(0, 0, 100).asleep_s - 30.0) < 1e-6
 
 
+def test_v3_dongle_health_is_summed_and_bench_knobs_are_surfaced():
+    """Format v3: the dongle's periodic record carries its RX health under the
+    per-radio settle (FIFO width flushes, the engine's longest gap, the
+    settle wait) and every end says when an nRF24 knob is off its shipped
+    value — the report shows both; a run without them says nothing new."""
+    from rftrace import report
+    an = Analyzer()
+    an.feed(periodic("dongle", 0, 1_000_000, 1, 2, ovf=2, gap_max_ms=11, settle_ms=5))
+    an.feed(periodic("dongle", 1, 2_000_000, 2, 2, ovf=1, gap_max_ms=37, settle_ms=7))
+    an.feed(periodic("left", 1, 2_000_000, 2, 0, bench=0x01))
+    an.feed(periodic("left", 2, 3_000_000, 3, 0, bench=0x01))
+    h = an.dongle_health
+    assert (h["ovf"], h["gap_max_ms"], h["settle_ms"], h["periodic"]) == (3, 37, 12, 2)
+    benches = [e for e in an.events if e["kind"] == "bench"]
+    assert len(benches) == 1 and "LEFT" in benches[0]["text"] and "feature" in benches[0]["text"]
+    an.finish()
+    txt = report.render(an)
+    assert "FIFO width flushes 3" in txt and "engine gap max 37 ms" in txt and "settle wait 12 ms" in txt
+    assert "BENCH" in txt
+
+
+def test_v2_style_records_without_the_v3_fields_still_analyze():
+    an = Analyzer()
+    an.feed(periodic("dongle", 0, 1_000_000, 1, 2))
+    assert an.dongle_health["ovf"] == 0 and not [e for e in an.events if e["kind"] == "bench"]
+
+
 # ---- renderer ----------------------------------------------------------------
 
 def test_render_wide_has_both_halves_dongle_and_status(sample):

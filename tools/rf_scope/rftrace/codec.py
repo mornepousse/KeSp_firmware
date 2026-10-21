@@ -19,7 +19,7 @@ import struct
 MAGIC = b"KR"
 CMD = 0xBA
 STATUS_OK = 0x00
-VERSION = 2          # v2: the periodic record carries `session` and `stress` (26 B)
+VERSION = 3          # v3: the periodic record adds ovf, gap_max_ms, settle_ms, bench (33 B); v2 added session, stress
 BATCH_MAX = 16
 KR_HDR = 6
 PAYLOAD_HDR = 3
@@ -36,9 +36,10 @@ _RECORDS = {
     KIND_RX: (struct.Struct("<IBBBBBBBBB"),
               ("t_us", "emitter", "seq", "pkt_kind", "payload_len",
                "pipe", "rpd", "channel", "fifo_depth", "flags")),
-    KIND_PERIODIC: (struct.Struct("<IIBBBBHHHHIH"),
+    KIND_PERIODIC: (struct.Struct("<IIBBBBHHHHIHHHHB"),
                     ("t_us", "uptime_s", "source", "state", "batt_dV",
-                     "channel", "frames", "fails", "dups", "drops", "session", "stress")),
+                     "channel", "frames", "fails", "dups", "drops", "session", "stress",
+                     "ovf", "gap_max_ms", "settle_ms", "bench")),
 }
 REC_SIZE = {k: s.size for k, (s, _) in _RECORDS.items()}
 REC_SIZE_MAX = max(REC_SIZE.values())
@@ -52,6 +53,8 @@ TXF_EXCURSION, TXF_NOSEQ = 0x01, 0x02
 RXF_DELIVERED, RXF_DUP, RXF_NOSEQ = 0x01, 0x02, 0x04
 PKT_STRESS = 0xA     # PKT_TYPE_STRESS: synthetic frames of the stress generator
 ST_AWAKE, ST_SLEEPING, ST_WOKE = 0, 1, 2
+# periodic `bench` bits (main/comm/rf/rf_bench.h): an nRF24 knob off its shipped value
+BENCH_FEATURE, BENCH_RETR, BENCH_SETTLE = 0x01, 0x02, 0x04
 
 
 class TraceError(ValueError):

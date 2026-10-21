@@ -193,6 +193,13 @@ uint32_t dongle_engine_transitions_ecrasees(void) { return fusion_file_ecrasees(
  * blocking it, not just that it happened. Reset to zero on read. */
 static uint32_t s_gap_max_ms, s_gap_dernier_ms;
 uint32_t dongle_engine_gap_max_ms(void) { uint32_t g = s_gap_max_ms; s_gap_max_ms = 0; return g; }
+/* The same peak for the rf-scope periodic record (v3 `gap_max_ms`), kept
+ * apart: both readers reset on read, and the CDC RF_STATUS poll must not eat
+ * the trace's peak (nor the reverse). Written by the engine task, taken by
+ * the rf_rx task: atomic exchange, a lost update only moves a peak to the
+ * next period. A core 0 starved by the rx task shows here first. */
+static uint32_t s_gap_max_tr_ms;
+uint32_t dongle_engine_gap_max_trace_ms(void) { return __atomic_exchange_n(&s_gap_max_tr_ms, 0, __ATOMIC_RELAXED); }
 
 /* RE-PRESS detector: a key released then pressed again in less than
  * DONGLE_REAPPUI_MS. Two known causes, both invisible before the transition
@@ -270,8 +277,10 @@ static void dongle_engine_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(10));
         {
             uint32_t t = now_ms();
-            if (s_gap_dernier_ms && (uint32_t)(t - s_gap_dernier_ms) > s_gap_max_ms)
-                s_gap_max_ms = (uint32_t)(t - s_gap_dernier_ms);
+            uint32_t gap = s_gap_dernier_ms ? (uint32_t)(t - s_gap_dernier_ms) : 0;
+            if (gap > s_gap_max_ms) s_gap_max_ms = gap;
+            if (gap > __atomic_load_n(&s_gap_max_tr_ms, __ATOMIC_RELAXED))
+                __atomic_store_n(&s_gap_max_tr_ms, gap, __ATOMIC_RELAXED);
             s_gap_dernier_ms = t ? t : 1;
         }
         tap_hold_tick();

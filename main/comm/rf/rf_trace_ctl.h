@@ -199,4 +199,10 @@ typedef enum {
 rf_trace_pump_t rf_trace_pump_plan(bool connected, bool tracing, uint8_t next_kind,
                                    uint32_t tx_free, uint32_t reserve, size_t *n);
 
+/* Delta of a cumulative u32 counter since *prev (modulo 2^32), saturated to
+ * a u16 periodic field; *prev takes the new total. The rf-scope v3 periodic
+ * counters (dongle: fifo_ovf of both radios, settle wait) are cumulative at
+ * their producer and reported per period through this. */
+uint16_t rf_trace_delta_u16(uint32_t total, uint32_t *prev);
+
 #endif /* RF_TRACE_CTL_H */

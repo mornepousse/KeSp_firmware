@@ -89,6 +89,8 @@ void rf_trace_periodic_encode(uint8_t *o, const rf_trace_periodic_t *r)
     put_u16(o + 12, r->frames); put_u16(o + 14, r->fails);
     put_u16(o + 16, r->dups);   put_u16(o + 18, r->drops);
     put_u32(o + 20, r->session); put_u16(o + 24, r->stress);
+    put_u16(o + 26, r->ovf); put_u16(o + 28, r->gap_max_ms); put_u16(o + 30, r->settle_ms);
+    o[32] = r->bench;
 }
 
 void rf_trace_periodic_decode(const uint8_t *i, rf_trace_periodic_t *r)
@@ -99,6 +101,8 @@ void rf_trace_periodic_decode(const uint8_t *i, rf_trace_periodic_t *r)
     r->frames = get_u16(i + 12); r->fails = get_u16(i + 14);
     r->dups = get_u16(i + 16);   r->drops = get_u16(i + 18);
     r->session = get_u32(i + 20); r->stress = get_u16(i + 24);
+    r->ovf = get_u16(i + 26); r->gap_max_ms = get_u16(i + 28); r->settle_ms = get_u16(i + 30);
+    r->bench = i[32];
 }
 
 static void rec_encode(uint8_t *o, const rf_trace_rec_t *r)

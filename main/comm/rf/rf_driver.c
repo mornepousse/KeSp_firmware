@@ -3,7 +3,8 @@
  * One instance per physical radio; both share an SPI bus (manual CSN).
  */
 #include "rf_driver.h"
-#include "sdkconfig.h"   /* CONFIG_KASE_RF_SETUP_RETR */
+#include "rf_bench.h"    /* shipped values of the bench knobs (I4 guard) */
+#include "sdkconfig.h"   /* CONFIG_KASE_RF_SETUP_RETR, CONFIG_KASE_RF_FEATURE */
 #include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
@@ -12,6 +13,55 @@
 #include <string.h>
 
 static const char *TAG = "rf_drv";
+
+/* M1: every frame of the protocol has a dynamic length — rf_driver_read_rx
+ * reads R_RX_PL_WID and a PTX sends W_TX_PAYLOAD of any width. Without
+ * EN_DPL (FEATURE bit 2) the width read is meaningless and every frame is
+ * flushed as corrupt. The Kconfig range (0x04..0x07) already keeps it. */
+_Static_assert((CONFIG_KASE_RF_FEATURE & 0x04) != 0,
+               "KASE_RF_FEATURE must keep EN_DPL (bit 2): the driver only speaks dynamic payload lengths");
+
+/* ── Bench-knob guard (rf_bench.h, review I4) ─────────────────────────────
+ * A build_<board>/sdkconfig keeps a value set by menuconfig: a bench FEATURE,
+ * SETUP_RETR or RX settle can ship silently. Flagged once at boot here, in
+ * the halves' HB suffix and in every rf-scope periodic record (`bench`). */
+#if CONFIG_KASE_DEVICE_ROLE_DONGLE
+#define RF_SETTLE_CFG     ((uint32_t)CONFIG_KASE_RF_RX_SETTLE_US)
+#define RF_SETTLE_SHIPPED ((uint32_t)RF_SHIPPED_RX_SETTLE_US)
+#else
+#define RF_SETTLE_CFG     0u      /* no settle knob outside the dongle (M2) */
+#define RF_SETTLE_SHIPPED 0u
+#endif
+
+uint8_t rf_driver_bench_flags(void)
+{
+    return rf_bench_flags(CONFIG_KASE_RF_FEATURE, CONFIG_KASE_RF_SETUP_RETR,
+                          RF_SETTLE_CFG, RF_SETTLE_SHIPPED);
+}
+
+const char *rf_driver_bench_str(void)
+{
+    static char s_buf[48];
+    static bool s_done;
+    if (!s_done) {   /* compile-time inputs: built once, then read-only */
+        rf_bench_describe(rf_driver_bench_flags(), CONFIG_KASE_RF_FEATURE,
+                          CONFIG_KASE_RF_SETUP_RETR, RF_SETTLE_CFG, s_buf, sizeof s_buf);
+        s_done = true;
+    }
+    return s_buf;
+}
+
+static void rf_bench_warn_once(void)
+{
+    static bool s_warned;
+    if (s_warned) return;
+    s_warned = true;
+    if (rf_driver_bench_flags() == 0) return;
+    ESP_LOGW(TAG, "nRF24 bench knobs ON:%s — shipped: feature=0x%02X retr=0x%02X settle=%luus. "
+                  "Not a release configuration (build_release.sh refuses it); reset them in menuconfig.",
+             rf_driver_bench_str(), RF_SHIPPED_FEATURE, RF_SHIPPED_SETUP_RETR,
+             (unsigned long)RF_SETTLE_SHIPPED);
+}
 
 /* NRF24L01+ commands */
 #define CMD_R_REGISTER(r)  (0x00 | ((r) & 0x1F))
@@ -421,10 +471,10 @@ esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_EN_AA, 0x01);           /* auto-ack pipe 0 */
     rf_driver_write_reg(r, REG_EN_RXADDR, 0x01);       /* enable pipe 0 */
     rf_driver_write_reg(r, REG_SETUP_AW, 0x03);        /* 5-byte address */
-    rf_driver_write_reg(r, REG_SETUP_RETR, CONFIG_KASE_RF_SETUP_RETR);      /* ARD=500us, ARC=15 */
+    rf_driver_write_reg(r, REG_SETUP_RETR, CONFIG_KASE_RF_SETUP_RETR);      /* bench knob; shipped 0x1F = ARD 500 us, ARC 15 (rf_bench.h) */
     rf_driver_set_channel(r, cfg->channel);
     rf_driver_write_reg(r, REG_RF_SETUP, 0x06);        /* 1 Mbps, 0 dBm (clones don't support 250kbps) */
-    rf_driver_write_reg(r, REG_FEATURE, CONFIG_KASE_RF_FEATURE);         /* EN_DPL|EN_ACK_PAY */
+    rf_driver_write_reg(r, REG_FEATURE, CONFIG_KASE_RF_FEATURE);         /* bench knob; shipped 0x06 = EN_DPL|EN_ACK_PAY, EN_DPL static-asserted */
     rf_driver_write_reg(r, REG_DYNPD, 0x01);           /* dynamic payload pipe 0 */
 
     uint8_t addr[5];
@@ -443,6 +493,7 @@ esp_err_t rf_driver_init(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     ce_high(r);                                        /* start listening */
 
     r->present = true;
+    rf_bench_warn_once();
     ESP_LOGI(TAG, "radio ch=%u addr=KaSe.%02x init OK", cfg->channel, cfg->addr_suffix);
     return ESP_OK;
 }
@@ -469,7 +520,7 @@ void rf_driver_set_ptx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_SETUP_RETR, CONFIG_KASE_RF_SETUP_RETR);
     rf_driver_set_channel(r, cfg->channel);
     rf_driver_write_reg(r, REG_RF_SETUP, 0x06);      /* 1 Mbps, 0 dBm — same as init */
-    rf_driver_write_reg(r, REG_FEATURE, CONFIG_KASE_RF_FEATURE);   /* EN_DPL|EN_ACK_PAY */
+    rf_driver_write_reg(r, REG_FEATURE, CONFIG_KASE_RF_FEATURE);   /* shipped 0x06 = EN_DPL|EN_ACK_PAY (rf_bench.h) */
     rf_driver_write_reg(r, REG_DYNPD, 0x01);
     uint8_t addr[5];
     memcpy(addr, cfg->rx_addr, 4);
@@ -489,8 +540,8 @@ void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_EN_AA, 0x01);
     rf_driver_write_reg(r, REG_EN_RXADDR, 0x01);
     rf_driver_write_reg(r, REG_SETUP_AW, 0x03);
-    rf_driver_write_reg(r, REG_SETUP_RETR, CONFIG_KASE_RF_SETUP_RETR);    /* ARD=500us, ARC=15 — MUST match
-                                                        rf_driver_init (was 0x13) */
+    rf_driver_write_reg(r, REG_SETUP_RETR, CONFIG_KASE_RF_SETUP_RETR);    /* same knob as rf_driver_init —
+                                                        MUST match it (was 0x13); shipped 0x1F */
     rf_driver_set_channel(r, cfg->channel);
     rf_driver_write_reg(r, REG_RF_SETUP, 0x06);      /* 1 Mbps, 0 dBm — MUST match
                                                         rf_driver_init. Was 0x0E (2 Mbps):
@@ -501,7 +552,7 @@ void rf_driver_rearm_rx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
                                                         peers. Dormant for halves (heartbeats
                                                         keep the watchdog from firing) but fatal
                                                         for the heartbeat-less HID relay. */
-    rf_driver_write_reg(r, REG_FEATURE, CONFIG_KASE_RF_FEATURE);   /* EN_DPL|EN_ACK_PAY */
+    rf_driver_write_reg(r, REG_FEATURE, CONFIG_KASE_RF_FEATURE);   /* shipped 0x06 = EN_DPL|EN_ACK_PAY (rf_bench.h) */
     rf_driver_write_reg(r, REG_DYNPD, 0x01);
     uint8_t addr[5];
     memcpy(addr, cfg->rx_addr, 4);
@@ -662,10 +713,10 @@ esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     rf_driver_write_reg(r, REG_EN_AA,      0x01);   /* auto-ack pipe 0 (dongle ACKs our TX) */
     rf_driver_write_reg(r, REG_EN_RXADDR,  0x01);   /* pipe 0 for ACK reception */
     rf_driver_write_reg(r, REG_SETUP_AW,   0x03);   /* 5-byte address */
-    rf_driver_write_reg(r, REG_SETUP_RETR, CONFIG_KASE_RF_SETUP_RETR);   /* ARD=500 µs, ARC=15 — max retransmit */
+    rf_driver_write_reg(r, REG_SETUP_RETR, CONFIG_KASE_RF_SETUP_RETR);   /* bench knob; shipped 0x1F = ARD 500 µs, ARC 15 */
     rf_driver_set_channel(r, cfg->channel);
     rf_driver_write_reg(r, REG_RF_SETUP,   0x06);   /* 1 Mbps, 0 dBm — ~3dB better than 2Mbps; clones lack 250kbps */
-    rf_driver_write_reg(r, REG_FEATURE,    CONFIG_KASE_RF_FEATURE);   /* EN_DPL (bit2) | EN_ACK_PAY (bit1) */
+    rf_driver_write_reg(r, REG_FEATURE,    CONFIG_KASE_RF_FEATURE);   /* bench knob; shipped 0x06 = EN_DPL (bit2) | EN_ACK_PAY (bit1) */
     rf_driver_write_reg(r, REG_DYNPD,      0x01);   /* DPL on pipe 0 */
 
     /* TX_ADDR and RX_ADDR_P0 must be the same 5-byte address for ESB auto-ACK.
@@ -699,6 +750,7 @@ esp_err_t rf_driver_init_tx(rf_radio_t *r, const rf_radio_cfg_t *cfg)
     /* CE stays LOW in PTX; it is pulsed only during rf_driver_send() */
 
     r->present = true;
+    rf_bench_warn_once();
     ESP_LOGI(TAG, "radio PTX ch=0x%02x addr=KaSe.%02x init OK", cfg->channel, cfg->addr_suffix);
     return ESP_OK;
 }
@@ -825,6 +877,11 @@ uint16_t rf_driver_pair_listen(rf_radio_t *r, uint8_t ch, const uint8_t addr[5],
 }
 
 #endif /* CONFIG_KASE_HAS_RF_TX || CONFIG_KASE_KBD_WIRELESS */
+
+void rf_driver_clear_rx_dr(rf_radio_t *r)
+{
+    rf_driver_write_reg(r, REG_STATUS, 0x40);
+}
 
 bool rf_driver_rx_available(rf_radio_t *r)
 {

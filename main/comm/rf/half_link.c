@@ -535,7 +535,7 @@ static void half_link_apres_reveil(void) { s_dernier_status_ms = 0; }   /* STATU
  * TRRS link is active and its voltage. */
 const char *veille_hb_suffixe(void)
 {
-    static char buf[32];
+    static char buf[80];
     int lien = 0;
 #if CONFIG_KASE_LINK_WIRE
     lien = link_uart_active();
@@ -544,7 +544,8 @@ const char *veille_hb_suffixe(void)
 #if CONFIG_KASE_BATT_SENSE
     batt = batt_sense_dv();
 #endif
-    snprintf(buf, sizeof buf, " link=%d batt=%u dV", lien, batt);
+    snprintf(buf, sizeof buf, " link=%d batt=%u dV%s", lien, batt,
+             rf_driver_bench_str());   /* " BENCH-RF(...)" when an nRF24 knob is off its shipped value */
     return buf;
 }
 #endif

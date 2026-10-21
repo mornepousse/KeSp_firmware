@@ -6,6 +6,7 @@
 #include "esp_err.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
+#include "rf_settle.h"
 
 typedef struct {
     spi_host_device_t spi_host;
@@ -33,6 +34,9 @@ typedef struct {
     uint8_t tx_status;
     uint8_t tx_observe;
     bool    trace_obs;
+    /* Dongle RX settle (rf_settle.h): the time of THIS radio's last IRQ,
+     * stamped by the GPIO ISR (arg = the radio). Unused by the halves. */
+    rf_settle_t settle;
 } rf_radio_t;
 
 /* Initialize SPI (if shares_bus_first), the chip, RX mode (PRX), channel,
@@ -47,6 +51,18 @@ void rf_radio_set_irq_sem(rf_radio_t *radio, void *sem);
 
 /* Read one RX payload (DPL). Returns length (0 if FIFO empty). Clears RX_DR. */
 uint16_t rf_driver_read_rx(rf_radio_t *radio, uint8_t *buf, uint16_t maxlen);
+
+/* Clears RX_DR (STATUS bit 6) alone. The dongle calls it at the start of a
+ * pass that found the FIFO non-empty: a frame landing later in the pass then
+ * raises a NEW IRQ edge — hence a new settle stamp — instead of hiding behind
+ * the RX_DR still latched by the frame that woke the pass. */
+void rf_driver_clear_rx_dr(rf_radio_t *radio);
+
+/* Bench-knob guard (rf_bench.h): RF_BENCH_* bits of the knobs this build
+ * carries off their shipped value, and the HB suffix naming them ("" when
+ * none). Compile-time inputs; the boot warning is logged once by the inits. */
+uint8_t     rf_driver_bench_flags(void);
+const char *rf_driver_bench_str(void);
 
 /* True if RX FIFO has data pending (FIFO_STATUS). */
 bool rf_driver_rx_available(rf_radio_t *radio);

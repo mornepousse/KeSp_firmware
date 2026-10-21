@@ -213,3 +213,10 @@ rf_trace_pump_t rf_trace_pump_plan(bool connected, bool tracing, uint8_t next_ki
     *n = tx_free > reserve ? rf_trace_batch_fit(tx_free - reserve, next_kind) : 0;
     return *n ? RF_TRACE_PUMP_SEND : RF_TRACE_PUMP_HOLD;
 }
+
+uint16_t rf_trace_delta_u16(uint32_t total, uint32_t *prev)
+{
+    uint32_t d = total - *prev;    /* modulo 2^32 */
+    *prev = total;
+    return d > 0xFFFFu ? 0xFFFFu : (uint16_t)d;
+}

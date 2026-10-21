@@ -62,6 +62,7 @@
 #include "rf_trace_uart.h"
 #include "rf_trace_half.h"
 #include "radio_owner.h"
+#include "rf_driver.h"              /* rf_driver_bench_flags */
 #include "cdc_binary_protocol.h"   /* KS_CMD_RF_TRACE, KS_STATUS_* */
 #include "rf_packet.h"             /* PKT_TYPE_STRESS */
 #include "rf_stress_half.h"        /* KS_CMD_RF_STRESS rides this reader */
@@ -98,7 +99,7 @@ static const char *TAG = "rftrace";
 #define EMITTER RF_TRACE_EMIT_LEFT
 #endif
 
-#define RING_CAP   128u          /* 4 KB (32-byte slots); a full batch of 16 TX records is 23 + 15×13 B */
+#define RING_CAP   128u          /* 5 KB (40-byte slots, v3); a full batch of 16 TX records is 23 + 15×13 B */
 #define RXB_CAP    64u
 #define NOTE_DATA  0x1u
 #define NOTE_RX    0x2u
@@ -167,6 +168,7 @@ static void periodic(uint8_t state)   /* s_out held: drops_take is the consumer'
     uint32_t d = rf_trace_ring_drops_take(&s_ring);
     p->drops = d > 0xFFFFu ? 0xFFFFu : (uint16_t)d;
     p->session = g_rf_trace_session;       /* 0 once a stop or the auto-off closed the run */
+    p->bench = rf_driver_bench_flags();    /* v3: an nRF24 knob off its shipped value (rf_bench.h) */
     portENTER_CRITICAL(&s_push_mux);
     p->frames = s_frames; p->fails = s_fails; p->stress = s_stress;
     s_frames = s_fails = s_stress = 0;

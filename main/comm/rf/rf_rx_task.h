@@ -41,6 +41,11 @@ void rf_rx_get_status(rf_link_status_t *out);
  * NVS cache. An all-zero MAC = this slot is not paired. */
 void rf_rx_copy_peer_macs(uint8_t mac_kbd[6], uint8_t mac_mouse[6]);
 
+/* rf_rx task only (the rf-scope periodic record, v3): CUMULATIVE totals since
+ * boot — RX FIFO flushes on a corrupt width (fifo_ovf, both radios) and the
+ * time spent waiting for auto-ACKs (rf_settle), in ms. */
+void rf_rx_health(uint32_t *ovf_total, uint32_t *settle_ms_total);
+
 /* Signal quality derivation — pure function, host-testable.
  * Returns 0..255 link quality (255 = best, 0 = link down/timed out).
  * See rf_rx_task.c for the age/retry mapping. */

@@ -26,6 +26,13 @@ def name_of(e) -> str:
     return NAMES.get(e, f"E{e}")
 
 
+def bench_names(bits: int) -> str:
+    """The knobs named by a periodic `bench` byte (rf_bench.h RF_BENCH_*)."""
+    names = [n for b, n in ((codec.BENCH_FEATURE, "feature"), (codec.BENCH_RETR, "retr"),
+                            (codec.BENCH_SETTLE, "settle")) if bits & b]
+    return " ".join(names) or f"0x{bits:02x}"
+
+
 class Analyzer:
     def __init__(self, cfg: MatcherConfig | None = None, expect: tuple = (), only_pkt_kind: int | None = None) -> None:
         """`only_pkt_kind`: keep only the TX/RX records of that frame kind (the
@@ -57,6 +64,9 @@ class Analyzer:
         self.tx_span: dict[int, list[int]] = {}       # emitter -> [first, last] host_ns of its TX records
         self.stress_counter: dict = {}                # "dongle" / emitter -> sum of the periodic `stress`
         self.stress: dict[str, dict] = {}             # src -> {"state", "session", "params"}
+        # format v3: the dongle's RX health (sums / max over its periodic records)
+        self.dongle_health: dict = {"ovf": 0, "gap_max_ms": 0, "settle_ms": 0, "periodic": 0}
+        self.bench: dict = {}                         # src -> last non-zero `bench` bits (rf_bench.h)
 
     # -- helpers ----------------------------------------------------------------
 
@@ -181,11 +191,21 @@ class Analyzer:
         u.anchor(it["t_us"], up)
         key = "dongle" if it["source"] == codec.EMIT_DONGLE else it["source"]
         self.stress_counter[key] = self.stress_counter.get(key, 0) + it.get("stress", 0)
+        bench = it.get("bench", 0)
+        if bench and self.bench.get(src) != bench:
+            self.bench[src] = bench
+            self._event(ns, "bad", it["source"], "bench",
+                        f"{src.upper()} runs nRF24 bench knobs ({bench_names(bench)}) — not a shipped configuration")
         if it["source"] == codec.EMIT_DONGLE:
             self.dongle.update(seen_ns=ns, channel=it["channel"])
             self.matcher.dongle_channel(it["channel"])
             self._apply(self.matcher.dongle_alive(ns), ns)
             self.stats.dongle_periodic(ns, it["frames"], it["dups"], it["drops"], it["channel"])
+            h = self.dongle_health
+            h["ovf"] += it.get("ovf", 0)
+            h["gap_max_ms"] = max(h["gap_max_ms"], it.get("gap_max_ms", 0))
+            h["settle_ms"] += it.get("settle_ms", 0)
+            h["periodic"] += 1
             if it["drops"]:
                 self._event(ns, "bad", 2, "ring_drop", f"DONGLE trace ring dropped {it['drops']} record(s)")
             return

@@ -50,7 +50,8 @@ uint8_t rf_signal_q255(bool link_up, uint32_t hb_age_ms, uint8_t link_q)
 #include "rf_trace_dongle.h" /* rf-scope: RX records, stress drop */
 #include "batt_calc.h"      /* batt_soc_pct — SoC derived from voltage, dongle side */
 #include "board_rf.h"
-#include "esp_rom_sys.h"   /* esp_rom_delay_us (E8 bench knob) */
+#include "esp_rom_sys.h"   /* esp_rom_delay_us: the short end of the settle wait */
+#include "rf_settle.h"     /* per-radio RX settle (pure, host-tested) */
 #include "rf_pairing.h"   /* rf_pairing_load_set_id_dongle, rf_apply_set_id */
 #if CONFIG_KASE_NRF_LINE_TEST
 #include "rf_line_test.h"
@@ -102,9 +103,115 @@ static uint8_t  s_pair_mac_right[6] = {0};
 #define RF_PAIR_WINDOW_MS 120000   /* 2 min — relaxed envelope for the manual BOOT-hold dance */
 
 /* ── IRQ ISR (shared sem; task polls both radios) ── */
-static void IRAM_ATTR nrf_irq_isr(void *arg)
+/* ── RX settle: let the auto-ACK leave before touching a radio ──────────────
+ *
+ * See rf_settle.h for the why (clone modules miss their ACK when the PRX is
+ * read over SPI meanwhile) and the rule. What this file adds:
+ *
+ * The stamp. The ISR (arg = the radio) stores esp_timer_get_time() truncated
+ * to 32 bits in THAT radio's rf_settle_t, before giving the semaphore — the
+ * task always sees the stamp of the edge that woke it. esp_timer_get_time()
+ * is in IRAM here (CONFIG_ESP_TIMER_IN_IRAM=y, the default; it is an alias of
+ * esp_timer_impl_get_time, ESP_TIMER_IRAM_ATTR) and the GPIO ISR service is
+ * installed without ESP_INTR_FLAG_IRAM anyway: the ISR never runs with the
+ * cache off. A per-core cycle counter would not do: the task and the ISR
+ * must read one clock.
+ *
+ * The gate. Before EACH SPI access sequence on a radio — every frame read of
+ * drain_radio, the ACK-payload load, the oob_tx re-emission, each pairing
+ * read and its ACK, the watchdog re-arm — settle_gate() waits what remains of
+ * CONFIG_KASE_RF_RX_SETTLE_US since that radio's last IRQ: nothing for a pass
+ * the 1 ms timer woke with no recent IRQ (the review's C1: 88d49728 burnt
+ * 2 × 500 us per ms on core 0 at rest), never the other radio's (I3).
+ *
+ * The wait (settle_wait). Up to RF_SETTLE_SPIN_MAX_US it spins
+ * (esp_rom_delay_us): a context switch round trip costs tens of us. Above it,
+ * the task SLEEPS on an esp_timer one-shot of exactly the remaining time (a
+ * task notification), then spins whatever is left — the remainder is
+ * re-measured, so a stale or early notification can never shorten the wait.
+ * vTaskDelay was rejected: at 1 kHz it ends at the next tick, anywhere in
+ * 0..1000 us — it cannot guarantee the minimum, so a spin would follow
+ * anyway, and it may add up to 1 ms per frame; with a 1 kHz mouse in phase
+ * with the tick it could land in the settle window every time. The cost per
+ * received frame is then ~2 context switches instead of ~480 us of core 0:
+ * at rest nothing (no IRQ), under a 1 kHz mouse a few % instead of ~50 %.
+ * The wait is computed ONCE per gate from the stamp read: a frame arriving
+ * meanwhile is not chased (forward progress at any frame rate).
+ *
+ * New frames during a pass (I1). A frame landing while RX_DR is still
+ * latched raises no edge, hence no stamp. drain_radio therefore clears RX_DR
+ * right after its first FIFO check finds data (rf_driver_clear_rx_dr): from
+ * then on every arrival raises its own edge, stamps its own time, and the
+ * next gate waits for ITS ACK.
+ *
+ * Residual risk (documented, not closed):
+ *  - a frame whose RX_DR rises DURING an SPI sequence, or between the gate's
+ *    clock read and the access: its turnaround/ACK may overlap that one
+ *    sequence (a FIFO check, a read: tens of us). Probability per frame at
+ *    most the SPI duty of that radio — at rest one FIFO_STATUS read per ms
+ *    from the timer pass, a few % at most. Gating the timer pass on the IRQ
+ *    pin level would remove it, but the timer pass is also the fallback for
+ *    a dead IRQ line: kept;
+ *  - a frame arriving while RX_DR is still latched by the frame that woke the
+ *    pass (within settle_us of it, before the clear): it raises no edge, so
+ *    its ACK may meet the pass's next SPI access. It takes two frames on ONE
+ *    radio within ~0.5 ms: both halves on the keyboard slot at once, or a
+ *    retransmission (the symptom itself; its duplicate is dropped);
+ *  - a stamp older than 71.6 min aliases once per wrap: one wait of at most
+ *    settle_us on a silent radio.
+ * The settle is NOT applied by rf_rx_pair_start/apply on the CDC task path
+ * (one-off reconfiguration, not a hot path). */
+#define RX_SETTLE_US           ((uint32_t)CONFIG_KASE_RF_RX_SETTLE_US)
+#define RF_SETTLE_SPIN_MAX_US  100u
+
+static TaskHandle_t       s_rx_task;
+static esp_timer_handle_t s_settle_timer;
+static uint32_t           s_settle_ms_total, s_settle_us_frac;   /* rf_rx task only */
+
+static uint32_t settle_clock(void *ctx) { (void)ctx; return (uint32_t)esp_timer_get_time(); }
+
+static void settle_timer_cb(void *arg)
 {
     (void)arg;
+    if (s_rx_task) xTaskNotifyGive(s_rx_task);
+}
+
+static void settle_wait(void *ctx, uint32_t us)
+{
+    (void)ctx;
+    const int64_t t0 = esp_timer_get_time();
+    if (us > RF_SETTLE_SPIN_MAX_US && s_settle_timer &&
+        xTaskGetCurrentTaskHandle() == s_rx_task) {
+        (void)ulTaskNotifyTake(pdTRUE, 0);          /* drop a stale wake-up */
+        (void)esp_timer_stop(s_settle_timer);       /* not running: harmless error */
+        if (esp_timer_start_once(s_settle_timer, us) == ESP_OK)
+            (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2) + 1);   /* bounded: a lost callback only costs a spin */
+    }
+    int64_t left;
+    while ((left = (int64_t)us - (esp_timer_get_time() - t0)) > 0)
+        esp_rom_delay_us((uint32_t)left);
+    /* rf-scope v3 `settle_ms`: what the waits really took. */
+    s_settle_us_frac += (uint32_t)(esp_timer_get_time() - t0);
+    s_settle_ms_total += s_settle_us_frac / 1000u;
+    s_settle_us_frac %= 1000u;
+}
+
+/* Before an SPI access sequence on `r`: only ITS last IRQ counts. */
+static inline void settle_gate(rf_radio_t *r)
+{
+    (void)rf_settle_gate(&r->settle, RX_SETTLE_US, settle_clock, settle_wait, NULL);
+}
+
+void rf_rx_health(uint32_t *ovf_total, uint32_t *settle_ms_total)
+{
+    *ovf_total = s_kbd.fifo_ovf + s_mouse.fifo_ovf;
+    *settle_ms_total = s_settle_ms_total;
+}
+
+static void IRAM_ATTR nrf_irq_isr(void *arg)
+{
+    rf_radio_t *r = (rf_radio_t *)arg;
+    rf_settle_note_irq(&r->settle, (uint32_t)esp_timer_get_time());   /* THIS radio's IRQ, before the give */
     BaseType_t hpw = pdFALSE;
     xSemaphoreGiveFromISR(s_evt_sem, &hpw);
     if (hpw) portYIELD_FROM_ISR();
@@ -167,10 +274,19 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
     const uint8_t tr_ch = (slot == RF_SLOT_KBD) ? s_kbd_cfg.channel : s_mouse_cfg.channel;
     rf_trace_pass_t tr_pass;
     tr_pass.n = 0;
-#if CONFIG_KASE_RF_RX_SETTLE_US > 0
-    esp_rom_delay_us(CONFIG_KASE_RF_RX_SETTLE_US);   /* E8: let the auto-ACK leave before any SPI */
-#endif
-    while (rf_driver_rx_available(radio)) {
+    bool rx_dr_cleared = false;
+    for (;;) {
+        /* Settle (see the block above): before EACH access sequence, only
+         * what remains since THIS radio's last IRQ — zero on a timer pass. */
+        settle_gate(radio);
+        if (!rf_driver_rx_available(radio)) break;
+        if (!rx_dr_cleared) {
+            /* Re-arm the edge: a frame landing from now on in this pass
+             * raises its own IRQ — its own stamp — instead of hiding behind
+             * the RX_DR latched by the frame that woke us. */
+            rf_driver_clear_rx_dr(radio);
+            rx_dr_cleared = true;
+        }
         uint8_t tr_pipe = 0, tr_rpd = 0;
         if (tr) {
             tr_pipe = (uint8_t)((rf_driver_read_reg(radio, RF_REG_STATUS) >> 1) & 0x07);
@@ -322,6 +438,7 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
                         uint8_t restore_addr[5] = { s_kbd_cfg.rx_addr[0], s_kbd_cfg.rx_addr[1],
                                                     s_kbd_cfg.rx_addr[2], s_kbd_cfg.rx_addr[3],
                                                     s_kbd_cfg.addr_suffix };
+                        settle_gate(&s_kbd);   /* a frame that landed during the dispatch */
                         rf_driver_oob_tx(&s_kbd, RF_CH_HALF_LINK, left_addr, hb, (uint8_t)hn,
                                          s_kbd_cfg.channel, restore_addr);
                         memcpy(s_reemit_last, m.bitmap, RF_HALF_BITMAP_BYTES);
@@ -332,7 +449,10 @@ static void drain_radio(rf_radio_t *radio, uint8_t slot)
         }
         /* After any excursion: the ACK payload (sync) for the NEXT frame from
          * the left half, see above. */
-        if (apl) rf_driver_load_ack_payload(radio, 0, ap, (uint8_t)apl);
+        if (apl) {
+            settle_gate(radio);
+            rf_driver_load_ack_payload(radio, 0, ap, (uint8_t)apl);
+        }
 #endif
         if (d.trace) {
             rf_trace_rx_t rec;
@@ -383,9 +503,11 @@ static void rf_rx_apply_paired_config(void)
                          kcfg.rx_addr[3], kcfg.addr_suffix };
     uint8_t maddr[5] = { mcfg.rx_addr[0], mcfg.rx_addr[1], mcfg.rx_addr[2],
                          mcfg.rx_addr[3], mcfg.addr_suffix };
+    settle_gate(&s_kbd);
     rf_driver_set_channel(&s_kbd,  kcfg.channel);
     rf_driver_set_rx_address(&s_kbd, kaddr);
     if (s_mouse.present) {
+        settle_gate(&s_mouse);
         rf_driver_set_channel(&s_mouse,  mcfg.channel);
         rf_driver_set_rx_address(&s_mouse, maddr);
     }
@@ -406,9 +528,14 @@ static bool rf_rx_pairing_service(void)
         return false;
     }
 
-    /* Drain any PKT_PAIR_REQ on radio 1. */
+    /* Drain any PKT_PAIR_REQ on radio 1. Same settle as drain_radio (M4):
+     * the REQ is acked by the chip like any frame. */
     uint8_t buf[32];
-    while (rf_driver_rx_available(&s_kbd)) {
+    bool rx_dr_cleared = false;
+    for (;;) {
+        settle_gate(&s_kbd);
+        if (!rf_driver_rx_available(&s_kbd)) break;
+        if (!rx_dr_cleared) { rf_driver_clear_rx_dr(&s_kbd); rx_dr_cleared = true; }
         uint16_t n = rf_driver_read_rx(&s_kbd, buf, sizeof(buf));
         if (n == 0) break;
         uint8_t mac[6];
@@ -460,6 +587,7 @@ static bool rf_rx_pairing_service(void)
         rf_encode_pair_ack(ackbuf, &ack);
 
         static const uint8_t pair_addr[5] = RF_PAIR_ADDR;
+        settle_gate(&s_kbd);
         rf_driver_oob_tx(&s_kbd, RF_PAIR_CHANNEL, pair_addr, ackbuf, 10,
                          RF_PAIR_CHANNEL, pair_addr);   /* restore to PAIR PRX */
         ESP_LOGI(TAG, "ACK sent slot=0x%02X (dup=%d, paired_count=%u)",
@@ -486,6 +614,7 @@ static void rearm_if_silent(rf_radio_t *radio, const rf_radio_cfg_t *cfg,
     if (!radio->present) return;
     if ((uint32_t)(now - s_link[slot].last_rx_ms) <= RF_REARM_SILENCE_MS) return;
     if ((uint32_t)(now - *last_rearm_ms) <= RF_REARM_SILENCE_MS) return;
+    settle_gate(radio);   /* silent radio: nothing to wait, kept for the rule */
     rf_driver_rearm_rx(radio, cfg);
     *last_rearm_ms = now;
     ESP_LOGW(TAG, "watchdog: radio %s rearmed (nothing received in %lu ms)",
@@ -624,8 +753,16 @@ bool rf_rx_start(void)
         rf_radio_set_irq_sem(&s_mouse, s_evt_sem);
     }
 
+    /* The settle's sleep: a one-shot that wakes the rx task (settle_wait). Its
+     * failure only turns every wait into a spin. */
+    const esp_timer_create_args_t st = { .callback = settle_timer_cb, .name = "rf_settle" };
+    if (esp_timer_create(&st, &s_settle_timer) != ESP_OK) {
+        s_settle_timer = NULL;
+        ESP_LOGW(TAG, "settle timer unavailable: the RX settle will spin");
+    }
+
     rf_trace_dongle_init();   /* rf-scope: ring + CDC pump, before the producer task */
-    xTaskCreatePinnedToCore(rf_rx_task, "rf_rx", 8192, NULL, 10, NULL, 0);
+    xTaskCreatePinnedToCore(rf_rx_task, "rf_rx", 8192, NULL, 10, &s_rx_task, 0);
     ESP_LOGI(TAG, "RF RX started (keyboard=%d mouse=%d)", s_kbd.present, s_mouse.present);
 
 #if CONFIG_KASE_DONGLE_FUSION

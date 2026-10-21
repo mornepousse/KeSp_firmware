@@ -74,6 +74,26 @@ in the PR/release.
       close the port, reopen 5 s later → the first bytes read are the reply
       to the first command sent, no stale trace frame; no trace frame at all
       until a new start.
+- [ ] **RX settle — dongle core 0 not burnt** (2026-10-21, per-radio settle):
+      dongle on its CDC, `rf_scope capture --dongle /dev/ttyACM0 --duration
+      60`, nothing typed for the first 30 s, then type for 30 s. The report's
+      DONGLE section prints `RX health: FIFO width flushes N   engine gap max
+      G ms   settle wait S ms`. Expected: at rest `settle wait` ≈ 0 ms per
+      second (timer passes wait nothing; 88d49728 burnt ~500 ms/s), `engine
+      gap max` ≤ 12 ms (the engine ticks every 10 ms; a starved core 0
+      shows up here first), `FIFO width flushes` 0 — a growing count is the
+      path that lost 6 % of acked frames at a 200 µs settle. While typing,
+      `settle wait` stays a few ms per second (≤ 0.5 ms per frame), the gap
+      still ≤ 12 ms. With the Conchodytes mouse moving (1 kHz): gap still ≤ 12
+      ms, keys typed during the motion arrive once, tap-hold still resolves.
+      No `BENCH` line in the report (a non-shipped nRF24 knob would print
+      one; a half's HB would end with ` BENCH-RF(...)`).
+- [ ] **RX settle — first attempt under load**: `rf_scope stress --dongle
+      /dev/ttyACM0 --left /dev/ttyUSB0 --scenario held --duration 30` →
+      first-attempt success ≥ 95 % (2026-10-21 reference with the
+      unconditional 500 µs: 97-99.9 %), retries/frame ≤ 0.05, no loss, and
+      the editor stays empty. Same on the right half. A drop below 95 % after
+      a change of the dongle's RX path is a regression of the settle.
 - [ ] RF link establishes with a half (pairing < 120s)
 - [ ] NRF doesn't wedge after 5 min (watchdog OK)
 - [ ] Idle wake (DFS): console at boot "DFS actif : 160 MHz en travail,

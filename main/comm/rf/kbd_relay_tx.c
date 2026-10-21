@@ -614,10 +614,11 @@ void kbd_relay_init(void)
  * route and the relay's state — the USB -> RF switch reads there. */
 const char *veille_hb_suffixe(void)
 {
-    static char buf[32];
-    snprintf(buf, sizeof buf, " route=%s relay=%s",
+    static char buf[80];
+    snprintf(buf, sizeof buf, " route=%s relay=%s%s",
              (kbd_active_route() == KBD_OUT_RF) ? "RF" : "USB",
-             kbd_relay_active() ? "active" : "inactive");
+             kbd_relay_active() ? "active" : "inactive",
+             rf_driver_bench_str());   /* " BENCH-RF(...)" when an nRF24 knob is off its shipped value */
     return buf;
 }
 #endif
